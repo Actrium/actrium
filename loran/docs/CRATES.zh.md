@@ -13,7 +13,7 @@ Loran 位于 Actr workspace 内，crate 版本与 workspace 同步。本文只�
 | `crates/loran-stun` | `loran-stun` | RFC 5389 Binding 与 NAT 地址发现 |
 | `crates/loran-turn` | `loran-turn` | scoped long-term credential、allocation、permission、relay 与配额 |
 | `crates/loran-publisher-registry` | `loran-publisher-registry` | Publisher Registry：publisher 身份、Publisher 签名公钥与密钥撤销 |
-| `crates/loran-packages` | `loran-packages` | `.actr` 包托管（Realm Profile 的 `package.href` 可指向它）：按 SHA-256 内容寻址的静态下载，不解析 Target |
+| `crates/loran-packages` | `loran-packages` | `.actr` 包托管（Realm Profile 的 `packages[ref].href` 可指向它）：按 SHA-256 内容寻址的静态下载，不解析 Target |
 | `crates/loran-proto` | `loran-proto` | 管理/控制面的 protobuf 契约 |
 | `crates/loran-control` | `loran-admin` | 管理控制服务实现 |
 | `crates/loran-sdk` | `loran-sdk` | Loran 组件的内部聚合导出 |

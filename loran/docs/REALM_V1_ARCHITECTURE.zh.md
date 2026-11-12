@@ -122,10 +122,10 @@ Service 的 ACL；无 ACL 时默认拒绝发现/中继。
 创建 Realm 不需要按 Realm 或按域名做 challenge 验证；授权来自 Realm 签名 key 持有方：
 
 1. 调用方（Realm 签名 key 持有方的签名工具、实例运营者或 supervisor）以 3.2 的 Realm 管理
-   请求提交 `create_realm`，其中携带该实例要运行的包 `package`（下载地址、SHA-256 与 Actor 类型）；
+   请求提交 `create_realm`，其中携带两个包引用和完整 `packages`；
 2. Loran 获取该域名的 authority descriptor（见 5.1）并验证 `realm_signing_keys`，再用
    其中的 key 验证请求签名；通过后创建 `pending` Realm，在 Issuer Signer 中生成该 Realm
-   的 Realm issuer key，在响应中返回待签 Realm Profile payload（`package`、Realm issuer
+   的 Realm issuer key，在响应中返回待签 Realm Profile payload（包选择、Realm issuer
    key、端点、`provider.id`）；
 3. 调用方用 Realm 签名 key 签名 Realm Profile，**总是**以 `publish_profile` 请求（同一格式，
    携带签名 Realm Profile）提交给 Loran；
@@ -184,8 +184,12 @@ Actr 管理信封（Actr management envelope），只有 `op` 与操作字段不
 {
   "op": "create_realm",
   "realm": "k7m2q9xh@acme.com",
-  "package": { "href": "https://cdn.notes.example/team-notes-1.4.2.actr", "sha256": "<64 hex>",
-               "type": "notes.example/team-notes@1.4.2" },
+  "primary_package": "notes",
+  "front_package": "ui",
+  "packages": {
+    "notes": {"href": "https://cdn.notes.example/service.actr", "sha256": "<64 hex>", "type": "notes.example/team-notes@1.4.2"},
+    "ui": {"href": "https://cdn.notes.example/front.actr", "sha256": "<64 hex>", "type": "notes.example/team-notes-front@1.4.2"}
+  },
   "requester": "<可选，持有方的成员标识>",
   "provider_id": "provider.example",
   "nonce": "<random>",
@@ -290,7 +294,7 @@ Worker ID 为显式配置的 0..31 值，不再由 PID/hostname 的 5-bit hash �
 默认 0；未来并发 Issuer 必须由部署租约分配不同 worker ID。SQLite 的
 `issued_actor_identity` 永久登记本实例已签发的 `(Realm, serial)`；进程重启或时钟
 回拨导致 Snowflake 候选碰撞时只会继续分配，绝不覆盖原身份。跨 package version
-升级视为新 Actor：持有方发布 `package` 已更新、sequence 更高的 Realm Profile，新的
+升级视为新 Actor：持有方发布主包已更新、sequence 更高的 Realm Profile，新的
 Service 仍在同一 Realm 内，Realm 链接不变。
 
 Service 可用 renewal possession proof 在重启后保持 ActorId；Tab Actor 的新建策略属于
@@ -315,7 +319,7 @@ Signaling 的发现在本 Realm 内按该类型找到它；Actor Registry 不另
 - 申请 Actor credential：`/issuer/register`、`/issuer/reissue`、`/issuer/renew` 都须带
   `x-actr-client-proof`（`op` 为对应入口、含请求体 SHA-256 的 Actr 管理信封）。Issuer 只对已登记、
   未撤销、属于 active 成员的 key 签发；续期须用该 Actor 当前绑定的 key，重签可用同一成员的任一未撤销
-  key 并把 Actor 改绑过去；注册时，Actor 类型的 publisher 与程序名等于 Realm Profile `package.type` 的
+  key 并把 Actor 改绑过去；注册时，Actor 类型的 publisher 与程序名等于 Realm Profile `packages[primary_package].type` 的
   （即 Service 及其升级版本）只接受 owner 的客户端；提交事务内重查 key 与成员状态，续期另查 Actor 仍绑定
   这把 key（同成员的重签可能已把它改绑）。
   `issued_actor_identity` 记录每个 Actor 的成员与当前绑定的 key。
@@ -330,7 +334,7 @@ Signaling 的发现在本 Realm 内按该类型找到它；Actor Registry 不另
   必须重建并经过上述检查，因此无需重做。已签发 credential 在 Loran 之外到期失效（`token_ttl_secs`，
   默认 3600）；改绑前旧 key 取得的 TURN credential 与已建立的连接同样以此为界。
 - 改角色只改记录；角色在下一份 credential 中生效。
-- `update_realm` 只用于 Actr Facility Provider 域名下的 Realm：owner 更新 `package`、`display_name` 或退役，
+- `update_realm` 只用于 Actr Facility Provider 域名下的 Realm：owner 更新完整包选择、`display_name` 或退役，
   Loran 走与运营者 `UpdateRealm`、`…/retire` 相同的自签路径。其他 Realm 一律 `forbidden`。
 
 ## 5. Realm 签名 key 与 Realm Profile
@@ -437,7 +441,7 @@ Provider 主密钥经 HKDF 以 Realm 名和 Actr Facility Provider ID 派生。�
 | 缓存串 Realm | signaling presence、Actor Registry、TURN authenticator cache、renewal token、连接 ACL 的 key 均包含 Realm；禁止仅以 Actor serial 或类型做 key |
 | Discovery 越界 | Discovery 与 RouteCandidates 只返回同 Realm 的 Actor；v1 不做跨 Realm 发现 |
 | 管理越权 | Realm 管理请求只作用于签名 key 所属 Realm 域名；membership 请求的签名 key 只在其所属 Realm 内查找，角色逐请求检查；列表接口只返回作用域内的 Realm |
-| 成员越权 | 该实例程序（`package.type` 的 publisher 与程序名）的 Actor 只接受 owner 客户端注册；注册携带的 ACL 只作用于所注册 Actor 自己的类型；角色检查先于目标查找；owner 身份只经 owner 邀请或转让产生 |
+| 成员越权 | 该实例程序（`packages[primary_package].type` 的 publisher 与程序名）的 Actor 只接受 owner 客户端注册；注册携带的 ACL 只作用于所注册 Actor 自己的类型；角色检查先于目标查找；owner 身份只经 owner 邀请或转让产生 |
 | 未激活或已挂起的 Realm 被使用 | 只有 `active` Realm 签发 Actor credential、接受连接与分配 TURN |
 | 删除后残留 | 退役在单一事务中撤销 Actor credential、renewal token 与续期/重签 attempt 记录、未用的 Realm 邀请、presence、Actor Registry 记录与连接 ACL，退役 Realm issuer key，并写入以 Realm 名为键的 Actr Facility Provider tombstone |
 | 资源挤占 | 按 Realm 域名与按 Realm 配额 |
@@ -473,17 +477,17 @@ Publisher Profile 签名 key 签名，同样绑定 `provider_id`、5 分钟有�
 也可由实例运营者显式 revoke。Loran 不周期刷新 Publisher Profile，key 轮换由 publisher 再次
 发送 `register_publisher` 完成（见第 9 节）。
 
-程序身份写作 `publisher/program@version`。实例运行哪个包由 Realm Profile 的 `package`
+程序身份写作 `publisher/program@version`。实例的 Service、Front 由 Realm Profile 的 `primary_package`、`front_package` 指向 `packages` 条目
 （下载地址、SHA-256 与 Actor 类型）给出，包可以放在任何 HTTPS 位置；消费端必须核对 SHA-256，并验证
 manifest、publisher key 签名和 key revocation 状态。
 
 包托管：`loran-packages` 只是按内容寻址托管 `.actr` 文件的静态下载服务，
-`package.href` 可以指向它，也可以指向 Publisher 自己的 CDN。它不把 Target 解析为包：
+`packages[ref].href` 可以指向它，也可以指向 Publisher 自己的 CDN。它不把 Target 解析为包：
 Package Resolution、`packages` relation 与 `program_resolver` 已从协议和代码中删除。
 
 ## 8. 数据与升级
 
-当前 schema v10 使用 SQLite `PRAGMA user_version = 10`。Loran 遇到旧版或未知 schema
+当前 schema v11 使用 SQLite `PRAGMA user_version = 11`，从 v10 打开时在事务内添加选包记录表。Loran 遇到其他不支持的 schema
 直接拒绝启动，不在启动路径中执行「尝试 ALTER 后忽略错误」。v2 → v3（新增
 `issuer_control_attempt`）、v3 → v4（以 Realm 名取代数值 Realm id）与 v4 → v5（去掉单
 Realm 约束，`realm.status` 改为 `pending | active | retired`，新增 `realm_domain`、
@@ -559,7 +563,7 @@ Actor Registry 的持久元数据在 Signaling 自己的缓存库 `signaling_cac
   Realm Profile 只在同样验证通过时使用，两份都有效时取 sequence 高者（须为合法后继）；`--issuer` 留给没有
   Realm Profile 的 Realm。脚本以 stdin（`-`）传邀请。Admin Web 有每个 Realm 的只读成员列表。
   e2e `package-runtime-echo` 走 owner 邀请 → 邀请 editor → 移除后拒签的全流程。尚未实现：Web（sw-host）
-  客户端的 Realm 客户端 key；Actr Host 下载 Realm 包后核对 `package.type`；Service 侧即时得知成员变化
+  客户端的 Realm 客户端 key；Service 侧即时得知成员变化
   （现以 credential 到期为界）；
 - 已实现运行时分区：Actor credential 由该 Realm 的当前 issuer key 签发（首把为 Signer 中的
   `issuer:<realm>`，随首份 Realm Profile 草稿或运营者创建 `active` Realm 时生成，缺失时签发前

@@ -611,24 +611,30 @@ pub(crate) fn verify_actor_package_bounded(
     max_payload_bytes: usize,
 ) -> Result<InspectedActorPackage, PackError> {
     let inspected = inspect_actor_package_bounded(bytes, max_payload_bytes, max_payload_bytes)?;
-    let signature_bytes: [u8; 64] = inspected.signature_raw.clone().try_into().map_err(|_| {
-        PackError::SignatureVerificationFailed("manifest.sig has invalid length".to_string())
-    })?;
-    public_key
-        .verify_strict(
-            &inspected.manifest_raw,
-            &Signature::from_bytes(&signature_bytes),
-        )
-        .map_err(|error| {
-            PackError::SignatureVerificationFailed(format!("Ed25519 verification failed: {error}"))
-        })?;
-    let actual_key_id = crate::compute_key_id(&public_key.to_bytes());
-    if inspected.manifest.signature.key_id != actual_key_id {
-        return Err(PackError::SignatureVerificationFailed(format!(
-            "signature.key-id does not match verifying key: expected `{actual_key_id}`"
-        )));
-    }
+    inspected.verify_signature(public_key)?;
     Ok(inspected)
+}
+
+impl InspectedActorPackage {
+    pub(crate) fn verify_signature(&self, public_key: &VerifyingKey) -> Result<(), PackError> {
+        let signature_bytes: [u8; 64] = self.signature_raw.as_slice().try_into().map_err(|_| {
+            PackError::SignatureVerificationFailed("manifest.sig has invalid length".to_string())
+        })?;
+        public_key
+            .verify_strict(&self.manifest_raw, &Signature::from_bytes(&signature_bytes))
+            .map_err(|error| {
+                PackError::SignatureVerificationFailed(format!(
+                    "Ed25519 verification failed: {error}"
+                ))
+            })?;
+        let actual_key_id = crate::compute_key_id(&public_key.to_bytes());
+        if self.manifest.signature.key_id != actual_key_id {
+            return Err(PackError::SignatureVerificationFailed(format!(
+                "signature.key-id does not match verifying key: expected `{actual_key_id}`"
+            )));
+        }
+        Ok(())
+    }
 }
 
 pub fn read_actor_package_file(

@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const LORAN_SCHEMA_VERSION: i64 = 10;
+const LORAN_SCHEMA_VERSION: i64 = 11;
 
 /// Database manager
 #[derive(Clone)]
@@ -53,7 +53,8 @@ impl Database {
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
             .fetch_one(&self.pool)
             .await?;
-        if version == LORAN_SCHEMA_VERSION {
+        // v11 adds the creation-selection and digest tables in initialize_schema’s transaction.
+        if version == LORAN_SCHEMA_VERSION || version == 10 {
             return Ok(());
         }
 
@@ -107,6 +108,24 @@ impl Database {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER
             )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Keep the first package selection for idempotent external-domain creation retries.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_creation_selection (
+            realm TEXT PRIMARY KEY REFERENCES realm(name) ON DELETE CASCADE, selection TEXT NOT NULL
+        )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_package_digest (
+            realm TEXT NOT NULL REFERENCES realm(name) ON DELETE CASCADE, actor_type TEXT NOT NULL,
+            sha256 TEXT NOT NULL, PRIMARY KEY (realm, actor_type)
+        )",
         )
         .execute(&mut *tx)
         .await?;
@@ -684,11 +703,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn previous_schema_version_is_rejected() {
+    async fn upgrades_v10_without_changing_existing_profile_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::new(dir.path()).await.unwrap();
+        for sql in [
+            "DROP TABLE realm_creation_selection",
+            "DROP TABLE realm_package_digest",
+            "PRAGMA user_version = 10",
+        ] {
+            sqlx::query(sql).execute(db.get_pool()).await.unwrap();
+        }
+        sqlx::query("INSERT INTO realm(name,created_at) VALUES ('sample@example.com',1)")
+            .execute(db.get_pool())
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO realm_profile (realm,sequence,digest,document,accepted_at) VALUES ('sample@example.com',9,'test','signed bytes',1)").execute(db.get_pool()).await.unwrap();
+        db.get_pool().close().await;
+        let upgraded = Database::new(dir.path()).await.unwrap();
+        let doc: String = sqlx::query_scalar(
+            "SELECT document FROM realm_profile WHERE realm='sample@example.com'",
+        )
+        .fetch_one(upgraded.get_pool())
+        .await
+        .unwrap();
+        assert_eq!(doc, "signed bytes");
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM realm_creation_selection")
+            .fetch_one(upgraded.get_pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn unsupported_schema_version_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::new(dir.path()).await.unwrap();
         sqlx::QueryBuilder::<sqlx::Sqlite>::new("PRAGMA user_version = ")
-            .push(LORAN_SCHEMA_VERSION - 1)
+            .push(LORAN_SCHEMA_VERSION - 2)
             .build()
             .execute(db.get_pool())
             .await
@@ -700,7 +751,7 @@ mod tests {
             .err()
             .expect("previous schema version must be rejected");
         let message = error.to_string();
-        assert!(message.contains(&format!("schema version {}", LORAN_SCHEMA_VERSION - 1)));
+        assert!(message.contains(&format!("schema version {}", LORAN_SCHEMA_VERSION - 2)));
         assert!(message.contains("rebuild the database"));
     }
 }

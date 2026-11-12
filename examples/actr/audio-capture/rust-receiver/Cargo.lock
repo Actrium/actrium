@@ -47,6 +47,7 @@ dependencies = [
  "prost",
  "prost-build",
  "prost-types",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

@@ -11,7 +11,7 @@
 //! by their owner with membership requests (`update_realm`).
 
 use actr_protocol::realm_management::{ManagementOp, ManagementRequest};
-use actr_protocol::realm_profile::{RealmPackage, RealmProfile, RealmStatus as ProfileStatus};
+use actr_protocol::realm_profile::{RealmProfile, RealmStatus as ProfileStatus};
 use actr_protocol::uri::ActrUri;
 use actr_protocol::{AuthorityDescriptor, PublisherProfile};
 use axum::http::StatusCode;
@@ -209,7 +209,7 @@ async fn draft_profile(
             name,
             accepted.sequence + 1,
             &accepted.realm.display_name,
-            accepted.package.clone(),
+            accepted.selection.clone(),
             false,
         )
         .await?;
@@ -316,11 +316,11 @@ async fn create_realm(
     request: &ManagementRequest,
 ) -> Result<Value, ManagementError> {
     let name = request.realm.as_str();
-    let package = request
-        .package
-        .clone()
-        .ok_or_else(|| ManagementError::Invalid("create_realm needs package".to_string()))?;
-    check_package(&package)?;
+    let selection = request.selection.as_ref().ok_or_else(|| {
+        ManagementError::Invalid(
+            "create_realm requires primary_package, front_package and packages".into(),
+        )
+    })?;
     let requester = request.requester.clone().unwrap_or_default();
 
     let created = Realm {
@@ -330,11 +330,10 @@ async fn create_realm(
         pending_expires_at: Some(Utc::now().timestamp() as u64 + config.pending_ttl_secs()),
         ..Default::default()
     }
-    .insert_requested(config)
+    .insert_requested_with_selection(config, Some(selection))
     .await;
-    let realm = match created {
-        Ok(realm) => realm,
-        // Idempotent on (realm, requester).
+    let (realm, selection) = match created {
+        Ok(realm) => (realm, selection.clone()),
         Err(RealmError::AlreadyExists) => {
             let existing = Realm::get(name).await?.ok_or_else(|| {
                 ManagementError::Conflict(format!("Realm {name} changed concurrently"))
@@ -347,23 +346,15 @@ async fn create_realm(
             if existing.status == RealmStatus::Active {
                 return Ok(json!({ "realm": name, "status": "active" }));
             }
-            existing
+            let original = existing.pending_selection(selection).await?;
+            (existing, original)
         }
         Err(error) => return Err(error.into()),
     };
 
-    let draft = match profiles
-        .draft(name, 1, realm_id(name), Some(package), false)
-        .await
-    {
-        Ok(draft) => draft,
-        Err(error) => {
-            if let Err(discard) = Realm::discard_pending(name).await {
-                platform::recording::warn!("Pending realm {name} not discarded: {discard}");
-            }
-            return Err(error.into());
-        }
-    };
+    let draft = profiles
+        .draft(name, 1, realm_id(name), Some(selection), false)
+        .await?;
     Ok(json!({
         "realm": name,
         "status": "pending",
@@ -415,7 +406,9 @@ async fn publish_profile(
 
     // A Profile the domain's current keys no longer verify is no baseline.
     let record = RealmProfileRecord::get(name).await?;
-    let previous = record.as_ref().and_then(|record| record.verify(keys).ok());
+    let previous = record
+        .as_ref()
+        .and_then(|record| record.verify_for_update(keys).ok());
     if let Some(previous) = &previous {
         previous
             .check_successor(&profile)
@@ -448,8 +441,4 @@ async fn publish_profile(
         reply["owner_invite_expires_at"] = json!(membership::rfc3339(invite.expires_at));
     }
     Ok(reply)
-}
-
-fn check_package(package: &RealmPackage) -> Result<(), ManagementError> {
-    package.check().map_err(ManagementError::Invalid)
 }

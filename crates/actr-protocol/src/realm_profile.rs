@@ -1,6 +1,6 @@
 //! Realm Profile (`actr/protocols/realm-profile.md`).
 //!
-//! A Realm Profile is a signed public document naming the package a Realm
+//! A Realm Profile is a signed public document naming the packages a Realm
 //! runs and the Issuer and Actr Facility Provider that serve it. It is signed by a
 //! Realm signing key listed in the domain's `realm_signing_keys` member.
 
@@ -15,7 +15,12 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use fluent_uri::{Uri, UriRef};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use thiserror::Error;
+
+mod selection;
+pub use selection::RealmPackageSelection;
+pub const MAX_REALM_PROFILE_BYTES: usize = 64 * 1024;
 
 pub const REALM_PROFILE_SCHEMA: &str = "actr.realm/v1";
 pub const REALM_PROFILE_PROTOCOL: &str = "actr-realm-profile/1";
@@ -44,8 +49,11 @@ pub struct RealmProfile {
     pub sequence: u64,
     pub realm: RealmInfo,
     /// Required when `realm.status` is `active`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub package: Option<RealmPackage>,
+    #[serde(
+        flatten,
+        deserialize_with = "RealmPackageSelection::deserialize_optional"
+    )]
+    pub selection: Option<RealmPackageSelection>,
     pub issuer: RealmIssuer,
     pub provider: ActrFacilityProvider,
     pub policy: RealmPolicy,
@@ -56,6 +64,10 @@ pub struct RealmProfile {
     /// included; compares content at an equal sequence.
     #[serde(skip)]
     signed_payload: String,
+    #[serde(skip)]
+    document: Vec<u8>,
+    #[serde(skip)]
+    stored_primary: Option<RealmPackage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +92,9 @@ pub struct RealmPackage {
     pub sha256: String,
     /// Actor type of the package manifest, `publisher/program@version`.
     pub r#type: String,
+    /// Preserve extension members when the accepted package map is copied to a draft.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 impl RealmPackage {
@@ -95,7 +110,18 @@ impl RealmPackage {
         {
             return Err("package.sha256 is not lowercase hex SHA-256".into());
         }
-        self.actr_type()?;
+        let actor = self.actr_type()?;
+        semver::Version::parse(&actor.version)
+            .map_err(|e| format!("package.type needs an exact version: {e}"))?;
+        Ok(())
+    }
+
+    pub(super) fn check_primary_successor(&self, next: &Self) -> Result<(), String> {
+        let old = self.actr_type()?;
+        let new = next.actr_type()?;
+        if old.publisher != new.publisher || old.name != new.name {
+            return Err("the primary package belongs to another program".into());
+        }
         Ok(())
     }
 
@@ -276,15 +302,47 @@ impl RealmProfile {
         realm_name: &str,
         keys: &RealmSigningKeys,
     ) -> Result<Self, RealmProfileError> {
+        Self::verify_document(document, realm_name, keys, false)
+    }
+
+    /// Authenticate an already accepted database record as an update baseline only.
+    /// A single-package record cannot supply a Front for a new active Profile.
+    pub fn verify_stored_baseline(
+        document: &[u8],
+        realm_name: &str,
+        keys: &RealmSigningKeys,
+    ) -> Result<Self, RealmProfileError> {
+        Self::verify_document(document, realm_name, keys, true)
+    }
+
+    fn verify_document(
+        document: &[u8],
+        realm_name: &str,
+        keys: &RealmSigningKeys,
+        stored: bool,
+    ) -> Result<Self, RealmProfileError> {
         let invalid = RealmProfileError::Invalid;
         keys.validate()
             .map_err(|error| RealmProfileError::KeysInvalid(error.to_string()))?;
 
-        let mut value: Value = serde_json::from_slice(document)
+        if document.len() > MAX_REALM_PROFILE_BYTES {
+            return Err(invalid("Realm Profile exceeds 64 KiB".into()));
+        }
+        let mut value = crate::signed_json::parse(document)
             .map_err(|error| invalid(format!("not valid JSON: {error}")))?;
-        let profile: Self = serde_json::from_value(value.clone())
+        let mut profile: Self = serde_json::from_value(value.clone())
             .map_err(|error| invalid(format!("malformed document: {error}")))?;
-        profile.check(realm_name).map_err(invalid)?;
+        if stored
+            && profile.selection.is_none()
+            && profile.realm.status == RealmStatus::Active
+            && let Some(archive) = value.get("package")
+        {
+            let package: RealmPackage =
+                serde_json::from_value(archive.clone()).map_err(|e| invalid(e.to_string()))?;
+            package.check().map_err(invalid)?;
+            profile.stored_primary = Some(package);
+        }
+        profile.validate_fields(realm_name).map_err(invalid)?;
 
         if let Value::Object(members) = &mut value {
             members.remove("signature");
@@ -293,8 +351,14 @@ impl RealmProfile {
         verify_signature(&keys.keys, &profile.signature, signed_payload.as_bytes())?;
         Ok(Self {
             signed_payload,
+            document: document.to_vec(),
             ..profile
         })
+    }
+
+    /// Original verified bytes, including unknown signed members.
+    pub fn document(&self) -> &[u8] {
+        &self.document
     }
 
     /// The Realm issuer key that verifies credentials with header `key_id`
@@ -309,6 +373,11 @@ impl RealmProfile {
     /// Checks a verified `candidate` against the accepted Realm Profile of the
     /// same Realm (section 5, check 3). Both must come from [`Self::verify`].
     pub fn check_successor(&self, candidate: &Self) -> Result<(), RealmProfileError> {
+        if self.realm.name != candidate.realm.name {
+            return Err(RealmProfileError::Invalid(
+                "successor belongs to another Realm".into(),
+            ));
+        }
         if candidate.sequence < self.sequence
             || (candidate.sequence == self.sequence
                 && candidate.signed_payload != self.signed_payload)
@@ -327,10 +396,31 @@ impl RealmProfile {
         if self.realm.status == RealmStatus::Retired {
             return Err(RealmProfileError::Retired(self.realm.name.clone()));
         }
+        if let (Some(previous), Some(next)) = (&self.selection, &candidate.selection) {
+            previous
+                .check_successor(next)
+                .map_err(RealmProfileError::Invalid)?;
+        }
+        if let (Some(previous), Some(next)) = (&self.stored_primary, &candidate.selection) {
+            let primary = next.selected().map_err(RealmProfileError::Invalid)?.0;
+            previous
+                .check_primary_successor(primary)
+                .map_err(RealmProfileError::Invalid)?;
+            if next
+                .packages
+                .values()
+                .any(|p| p.r#type == previous.r#type && p.sha256 != previous.sha256)
+            {
+                return Err(RealmProfileError::Invalid(
+                    "changed digest of accepted package".into(),
+                ));
+            }
+        }
         Ok(())
     }
 
-    fn check(&self, realm_name: &str) -> Result<(), String> {
+    /// Check structure and name binding. Use `verify` to authenticate the original bytes.
+    pub fn validate_fields(&self, realm_name: &str) -> Result<(), String> {
         if self.schema != REALM_PROFILE_SCHEMA {
             return Err(format!("unsupported schema '{}'", self.schema));
         }
@@ -345,10 +435,11 @@ impl RealmProfile {
                 self.realm.name
             ));
         }
-        match (&self.package, self.realm.status) {
-            (None, RealmStatus::Active) => return Err("active Realm has no package".into()),
-            (Some(package), _) => package.check()?,
-            (None, RealmStatus::Retired) => {}
+        if self.selection.is_none()
+            && self.stored_primary.is_none()
+            && self.realm.status == RealmStatus::Active
+        {
+            return Err("active Realm needs primary_package, front_package and packages".into());
         }
         check_endpoint_url(&self.issuer.url, "https")
             .map_err(|error| format!("issuer.url: {error}"))?;
@@ -585,10 +676,15 @@ mod tests {
             "schema": "actr.realm/v1",
             "sequence": sequence,
             "realm": { "name": NAME, "display_name": "Acme Notes", "status": "active" },
-            "package": {
+            "primary_package": "service",
+            "front_package": "ui",
+            "packages": {
+                "service": {
                 "href": "https://cdn.notes.example/team-notes-1.4.2.actr",
                 "sha256": "ab".repeat(32),
                 "type": "notes.example/team-notes@1.4.2"
+            },
+                "ui": {"href":"https://cdn.example/front.actr", "sha256":"cd".repeat(32), "type":"acme.com/ui@1.0.0"}
             },
             "issuer": {
                 "url": "https://identity.provider.example/realms/acme.com/k7m2q9xh",
@@ -652,7 +748,7 @@ mod tests {
         let mut document: Value = serde_json::from_slice(&sign(unsigned(1), "rs-1", &key)).unwrap();
 
         let tampers: [fn(&mut Value); 3] = [
-            |d: &mut Value| d["package"]["href"] = json!("https://evil.example/x.actr"),
+            |d: &mut Value| d["packages"]["service"]["href"] = json!("https://evil.example/x.actr"),
             |d: &mut Value| d["sequence"] = json!(99),
             |d: &mut Value| d["x-extension"]["b"] = json!(2),
         ];
@@ -696,17 +792,19 @@ mod tests {
                 p["realm"]["name"] = json!("k7m2q9xh@ACME.com")
             }),
             ("package", |p| {
-                p.as_object_mut().unwrap().remove("package");
+                p.as_object_mut().unwrap().remove("packages");
             }),
             ("sha256", |p| {
-                p["package"]["sha256"] = json!("AB".repeat(32))
+                p["packages"]["service"]["sha256"] = json!("AB".repeat(32))
             }),
             ("href", |p| {
-                p["package"]["href"] = json!("http://cdn.example/x")
+                p["packages"]["service"]["href"] = json!("http://cdn.example/x")
             }),
-            ("type", |p| p["package"]["type"] = json!("team-notes@1.4.2")),
+            ("type", |p| {
+                p["packages"]["service"]["type"] = json!("team-notes@1.4.2")
+            }),
             ("type publisher", |p| {
-                p["package"]["type"] = json!("local/team-notes@1.4.2")
+                p["packages"]["service"]["type"] = json!("local/team-notes@1.4.2")
             }),
             ("provider", |p| {
                 p["provider"]["id"] = json!("Provider.example")
@@ -770,12 +868,14 @@ mod tests {
     }
 
     #[test]
-    fn retired_profile_needs_no_package() {
+    fn retired_profile_may_omit_the_selection() {
         let key = signing_key();
         let keys = keys(&[("rs-1", &key, KeyStatus::Active)]);
         let mut profile = unsigned(2);
         profile["realm"]["status"] = json!("retired");
-        profile.as_object_mut().unwrap().remove("package");
+        for field in ["primary_package", "front_package", "packages"] {
+            profile.as_object_mut().unwrap().remove(field);
+        }
         let profile = RealmProfile::verify(&sign(profile, "rs-1", &key), NAME, &keys).unwrap();
         assert_eq!(profile.realm.status, RealmStatus::Retired);
     }
@@ -845,6 +945,63 @@ mod tests {
         assert!(accepted.check_successor(&retired).is_ok());
         let error = retired.check_successor(&verify(unsigned(34))).unwrap_err();
         assert_eq!(error.code(), "REALM_RETIRED");
+    }
+
+    #[test]
+    fn selection_validation_and_successors() {
+        let key = signing_key();
+        let keys = keys(&[("rs-1", &key, KeyStatus::Active)]);
+        let verify = |v: Value| RealmProfile::verify(&sign(v, "rs-1", &key), NAME, &keys);
+        let previous = verify(unsigned(1)).unwrap();
+        for (field, bad) in [
+            ("front_package", json!("absent")),
+            ("front_package", json!("service")),
+            ("primary_package", Value::Null),
+        ] {
+            let mut v = unsigned(2);
+            v[field] = bad;
+            assert!(verify(v).is_err());
+        }
+        let mut partial = unsigned(2);
+        partial["realm"]["status"] = "retired".into();
+        partial.as_object_mut().unwrap().remove("front_package");
+        assert!(verify(partial).is_err());
+        let mut changed = unsigned(2);
+        changed["packages"]["ui"]["type"] = "acme.com/other-ui@2.0.0".into();
+        previous.check_successor(&verify(changed).unwrap()).unwrap();
+        for (field, value) in [
+            ("type", json!("acme.com/different@1.0.0")),
+            ("sha256", json!("00".repeat(32))),
+        ] {
+            let mut v = unsigned(2);
+            v["packages"]["service"][field] = value;
+            assert!(previous.check_successor(&verify(v).unwrap()).is_err());
+        }
+        let mut v = unsigned(2);
+        v["packages"]["another"] = v["packages"]["ui"].clone();
+        v["packages"]["another"]["sha256"] = "ef".repeat(32).into();
+        assert!(verify(v).is_err());
+    }
+
+    #[test]
+    fn stored_single_archive_requires_an_explicit_replacement() {
+        let key = signing_key();
+        let keys = keys(&[("rs-1", &key, KeyStatus::Active)]);
+        let mut old = unsigned(10);
+        old["package"] = old["packages"]["service"].clone();
+        for f in ["packages", "primary_package", "front_package"] {
+            old.as_object_mut().unwrap().remove(f);
+        }
+        let old = sign(old, "rs-1", &key);
+        assert!(RealmProfile::verify(&old, NAME, &keys).is_err());
+        let baseline = RealmProfile::verify_stored_baseline(&old, NAME, &keys).unwrap();
+        assert!(baseline.selection.is_none());
+        let verify = |v: Value| RealmProfile::verify(&sign(v, "rs-1", &key), NAME, &keys).unwrap();
+        baseline.check_successor(&verify(unsigned(11))).unwrap();
+        assert!(baseline.check_successor(&verify(unsigned(9))).is_err());
+        let mut wrong = unsigned(11);
+        wrong["packages"]["service"]["type"] = "acme.com/other@1.0.0".into();
+        assert!(baseline.check_successor(&verify(wrong)).is_err());
     }
 
     #[test]

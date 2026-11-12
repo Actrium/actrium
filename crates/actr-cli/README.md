@@ -61,6 +61,21 @@ actr realm register-publisher --key publisher-profile-key.json \
 
 ---
 
+## Realm package selection
+
+Use a JSON file with `primary_package`, `front_package` and the complete `packages` map. The [signed Echo example](../../actr/protocols/examples/realm-profile.json) shows the two references and archive fields. Replace its example addresses and digests with the ones supplied by your Publishers.
+
+```sh
+actr realm create-request --key realm-key.json --realm echo@realm.example \
+  --provider afp.example --selection selection.json > create-request.json
+# POST the request to the AFP's realm-management endpoint and save the reply.
+actr realm sign-profile --key realm-key.json --selection selection.json draft-reply.json > publish-request.json
+# POST publish-request.json to the same endpoint.
+actr realm fetch-packages --realm echo@realm.example --output ./echo-cache
+```
+
+`fetch-packages` verifies the signed Profile, both archives and their RPC contract. Its JSON output gives the local Service and Front paths. Reuse the same directory to retain trust and version pins. Add `--package <reference>` for a selected auxiliary. For Provider-domain Realms, an owner can replace the complete selection with `actr realm update --key client.json --selection selection.json`.
+
 ## Browser Host Realm client key
 
 Run `actr run --web -c actr.toml`, open its local page, choose the authorized

@@ -44,6 +44,18 @@ use tower::ServiceExt;
 const TEST_REALM: &str = "test@example.com";
 mod device_membership;
 mod v2_package;
+
+fn package_selection(service_type: &str) -> serde_json::Value {
+    serde_json::json!({
+        "primary_package": "service",
+        "front_package": "ui",
+        "packages": {
+            "service": {"href":"https://cdn.example/service.actr", "sha256":"ab".repeat(32), "type":service_type},
+            "ui": {"href":"https://cdn.example/front.actr", "sha256":"cd".repeat(32), "type":"acme.com/ui@1.0.0"}
+        }
+    })
+}
+
 const ROUTE_KEY_LABEL: &str = "test-route-realm-client-key";
 const PROVIDER_ID: &str = "provider.example";
 /// Label of the owner key a Realm is seeded with when a test names none.
@@ -2250,9 +2262,7 @@ async fn test_trusted_package_registers_without_publisher_private_key() {
          VALUES (?, 1, 'd', ?, 1)",
     )
     .bind(realm)
-    .bind(
-        serde_json::json!({ "package": { "type": "publisher-a.example/notes@1.0.0" } }).to_string(),
-    )
+    .bind(package_selection("publisher-a.example/notes@1.0.0").to_string())
     .execute(pool)
     .await
     .unwrap();
@@ -4202,7 +4212,7 @@ async fn test_only_the_owner_registers_the_service() {
          VALUES (?, 1, 'd', ?, 1)",
     )
     .bind(TEST_REALM)
-    .bind(serde_json::json!({ "package": { "type": "svc.example.com/notes@0.9.0" } }).to_string())
+    .bind(package_selection("svc.example.com/notes@0.9.0").to_string())
     .execute(platform::storage::db::get_database().get_pool())
     .await
     .unwrap();

@@ -11,7 +11,7 @@
 //! fragment belong to the application and carry no protocol meaning.
 
 use std::fmt::{Display, Formatter, Write as _};
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 use thiserror::Error;
 
@@ -316,6 +316,42 @@ pub fn parse_realm_name(name: &str) -> Result<ActrUri, ActrUriError> {
         return Err(invalid());
     }
     Ok(uri)
+}
+
+/// Addresses a fetch must never reach: loopback, private, link-local,
+/// shared, multicast and reserved ranges, including their IPv6 mappings.
+pub fn is_forbidden_address(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, _, _] = ip.octets();
+            ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_private()
+                || ip.is_link_local()
+                || ip.is_multicast()
+                || ip.is_broadcast()
+                || a == 0
+                || a >= 224
+                || (a == 100 && (64..=127).contains(&b))
+                || (a == 198 && (18..=19).contains(&b))
+        }
+        IpAddr::V6(ip) => {
+            // IPv4-mapped/compatible addresses connect to IPv4 destinations at
+            // the socket layer, so they must be judged by the IPv4 rules;
+            // otherwise ::ffff:169.254.169.254 etc. would bypass the blacklist.
+            if let Some(v4) = ip.to_ipv4_mapped().or_else(|| ip.to_ipv4()) {
+                return is_forbidden_address(IpAddr::V4(v4));
+            }
+            let seg = ip.segments();
+            ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_multicast()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+                || seg[0] == 0x2002 // 6to4 (2002::/16)
+                || (seg[0] == 0x0064 && seg[1] == 0xff9b) // NAT64 well-known 64:ff9b::/96
+        }
+    }
 }
 
 /// RealmId: 1 to 63 lowercase letters, digits, or `-`, not starting or ending with `-`.

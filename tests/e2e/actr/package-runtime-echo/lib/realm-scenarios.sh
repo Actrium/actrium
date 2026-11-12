@@ -101,12 +101,58 @@ realm_fixture_join() {
     local request="$RUN_DIR/join-${label}-request.json"
     jq -n --arg invite "$invite_file" --arg key "$key_file" --arg client_label "$label" \
         --arg result "$result_file" --arg package "$RUN_DIR/downloads/${label}.actr" \
-        --argjson https "${REALM_HTTPS:-0}" \
+        --argjson https "${REALM_HTTPS:-0}" --arg backend "$BACKEND" \
         '{invite_file:$invite,key_file:$key,"label":$client_label,result_file:$result}
-         + (if $https == 1 then {package_file:$package} else {} end)' >"$request" || return
+         + (if $https == 1 then {package_file:$package,verify_pair:($backend=="v2-component")} else {} end)' >"$request" || return
     ACTR_REALM_E2E_REQUEST="$request" "$REALM_CLI_FIXTURE" \
         --exact commands::realm_members::tests::realm_runtime_join_fixture \
         --ignored --nocapture >"$LOG_DIR/join-${label}.log" 2>&1
+}
+
+# A real, signed Keel Front for the Realm's second selection.
+build_realm_front() {
+    local payload="$RUN_DIR/front-payload"
+    mkdir -p "$payload/workload" "$payload/contracts"
+    printf 'export default {};\n' >"$payload/workload/guest.js"
+    cp "$SCRIPT_DIR/proto/echo.proto" "$payload/contracts/echo.proto"
+    cat >"$payload/manifest.toml" <<EOF
+format = "actr-package/2"
+[actor]
+publisher = "$PUBLISHER"
+name = "EchoFront"
+version = "1.0.0"
+[workload]
+profile = "keel.guest/1"
+entry = "workload/guest.js"
+[workload.keel]
+runtime = "js"
+guest-api = "keel.guest/1"
+[host]
+profile = "actr.host/1"
+api = "^1.0.0"
+[dependencies.service]
+actor = "$PUBLISHER/EchoService"
+version = "=$SERVICE_VERSION"
+contract = "contracts/echo.proto"
+required = true
+[signature]
+algorithm = "ed25519"
+key-id = "computed-at-pack-time"
+[[files]]
+path = "workload/guest.js"
+role = "workload"
+media-type = "text/javascript"
+size = 0
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+[[files]]
+path = "contracts/echo.proto"
+role = "contract"
+media-type = "text/plain"
+size = 0
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+EOF
+    run_actr pkg pack --manifest-path "$payload/manifest.toml" --payload-root "$payload" \
+        --key "$SERVICE_KEYCHAIN" --output "$DIST_DIR/realm-front.actr"
 }
 
 create_profile_realm() {
@@ -121,10 +167,15 @@ PY
 )"
     package_type="${PUBLISHER}/EchoService@${SERVICE_VERSION}"
     package_href="https://packages.realm-e2e.test/${package_hash}.actr"
+    build_realm_front
+    local front_hash front_href selection="$RUN_DIR/selection.json"
+    front_hash="$(shasum -a 256 "$DIST_DIR/realm-front.actr" | cut -d' ' -f1)"
+    front_href="https://packages.realm-e2e.test/${front_hash}.actr"
+    jq -n --arg href "$package_href" --arg sha "$package_hash" --arg type "$package_type" \
+        --arg fh "$front_href" --arg fs "$front_hash" --arg ft "$PUBLISHER/EchoFront@1.0.0" \
+        '{primary_package:"service",front_package:"front",packages:{service:{href:$href,sha256:$sha,type:$type},front:{href:$fh,sha256:$fs,type:$ft}}}' >"$selection"
     if [ "$REALM_MODE" = provider ]; then
-        jq -n --arg realm "$REALM" --arg href "$package_href" --arg sha "$package_hash" \
-            --arg type "$package_type" \
-            '{realm:$realm,package:{href:$href,sha256:$sha,type:$type}}' >"$RUN_DIR/create-body.json"
+        jq --arg realm "$REALM" '. + {realm:$realm}' "$selection" >"$RUN_DIR/create-body.json"
         realm_curl --fail-with-body -sS -X POST "$base/admin/api/realms" \
             -H "Authorization: Bearer ${ADMIN_TOKEN}" -H 'Content-Type: application/json' \
             --data-binary "@$RUN_DIR/create-body.json" >"$create"
@@ -143,8 +194,7 @@ PY
             '{version:1,authority:"actr://tenant.realm-e2e.test",realm_signing_keys:$keys[0],services:[{rel:"realms",href:"https://tenant.realm-e2e.test/realms",protocol:"actr-realm-profile/1"}]}' >"$descriptor"
         publish_realm_document "https://$REALM_DOMAIN/.well-known/actr" "$descriptor"
         run_actr realm create-request --key "$RUN_DIR/domain-key.json" --realm "$REALM" \
-            --provider localhost --package-href "$package_href" --package-sha256 "$package_hash" \
-            --package-type "$package_type" >"$RUN_DIR/create-request.json"
+            --provider localhost --selection "$selection" >"$RUN_DIR/create-request.json"
         jq '.nonce += "-tampered"' "$RUN_DIR/create-request.json" >"$RUN_DIR/bad-signature-request.json"
         local status
         status="$(realm_curl -sS -o "$RUN_DIR/bad-signature.json" -w '%{http_code}' -X POST \
@@ -158,7 +208,7 @@ PY
             "$base/actr/realm-management" -H 'Content-Type: application/json' \
             --data-binary "@$RUN_DIR/create-request.json")"
         [ "$status" = 400 ] || fail "Replayed creation was accepted: $status"
-        run_actr realm sign-profile --key "$RUN_DIR/domain-key.json" "$create" \
+        run_actr realm sign-profile --key "$RUN_DIR/domain-key.json" --selection "$selection" "$create" \
             >"$RUN_DIR/publish-request.json"
         jq '.profile' "$RUN_DIR/publish-request.json" >"$profile"
         publish_realm_document "https://$REALM_DOMAIN/realms/${REALM%@*}" "$profile"
@@ -169,7 +219,7 @@ PY
     publish_realm_document "https://$REALM_DOMAIN/.well-known/actr" "$descriptor"
     publish_realm_document "https://$REALM_DOMAIN/realms/${REALM%@*}" "$profile"
     jq -e --arg realm "$REALM" --arg hash "$package_hash" --arg type "$package_type" \
-        '.realm.name == $realm and .package.sha256 == $hash and .package.type == $type and .provider.id == "localhost"' "$profile" >/dev/null
+        '.realm.name == $realm and .packages[.primary_package].sha256 == $hash and .packages[.primary_package].type == $type and .provider.id == "localhost"' "$profile" >/dev/null
     jq -r '.owner_invite' "$create" >"$RUN_DIR/owner-invite.txt"
     REALM_OWNER_KEY="$RUN_DIR/keys/owner.json"
     REALM_CLIENT_KEY="$RUN_DIR/keys/client.json"
@@ -185,7 +235,7 @@ PY
             '{version:1,authority:("actr://"+$domain),services:[{rel:"contracts",href:("https://"+$domain+"/contracts")}],publisher:$publisher[0]}' \
             >"$RUN_DIR/publisher-descriptor.json"
         publish_realm_document "https://$PUBLISHER/.well-known/actr" "$RUN_DIR/publisher-descriptor.json"
-        jq -n --arg url "$package_href" --arg file "$SERVICE_PACKAGE" '{($url):$file}' >"$RUN_DIR/https-artifacts.json"
+        jq -n --arg url "$package_href" --arg file "$SERVICE_PACKAGE" --arg front "$front_href" --arg ui "$DIST_DIR/realm-front.actr" '{($url):$file,($front):$ui}' >"$RUN_DIR/https-artifacts.json"
 
         openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=Untrusted E2E CA' \
             -addext 'basicConstraints=critical,CA:TRUE' -addext 'keyUsage=critical,keyCertSign,cRLSign' \
@@ -207,7 +257,7 @@ PY
         printf 'corrupted' >>"$RUN_DIR/corrupted.actr"
         jq -n --arg url "$package_href" --arg file "$RUN_DIR/corrupted.actr" '{($url):$file}' >"$RUN_DIR/https-artifacts.json"
         expect_https_join_rejected digest "$RUN_DIR/owner-invite.txt" 'PACKAGE_DIGEST_MISMATCH'
-        jq -n --arg url "$package_href" --arg file "$SERVICE_PACKAGE" '{($url):$file}' >"$RUN_DIR/https-artifacts.json"
+        jq -n --arg url "$package_href" --arg file "$SERVICE_PACKAGE" --arg front "$front_href" --arg ui "$DIST_DIR/realm-front.actr" '{($url):$file,($front):$ui}' >"$RUN_DIR/https-artifacts.json"
 
         jq '.publisher.signature.value = "invalid"' "$RUN_DIR/publisher-descriptor.json" >"$RUN_DIR/bad-publisher.json"
         publish_realm_document "https://$PUBLISHER/.well-known/actr" "$RUN_DIR/bad-publisher.json"
@@ -217,7 +267,7 @@ PY
         if [ "$REALM_MODE" = external ]; then
             # The domain owner legitimately signs these higher-sequence
             # Profiles; rejection must happen at package verification.
-            jq '.package.type = "e2e.actrium.example/WrongService@1.0.0"' "$profile" >"$RUN_DIR/wrong-type-input.json"
+            jq '.packages[.primary_package].type = "e2e.actrium.example/WrongService@1.0.0"' "$profile" >"$RUN_DIR/wrong-type-input.json"
             run_actr realm sign-profile --key "$RUN_DIR/domain-key.json" "$RUN_DIR/wrong-type-input.json" \
                 >"$RUN_DIR/wrong-type-request.json"
             jq '.profile' "$RUN_DIR/wrong-type-request.json" >"$RUN_DIR/wrong-type-profile.json"
@@ -236,7 +286,7 @@ with zipfile.ZipFile(sys.argv[1]) as source, zipfile.ZipFile(sys.argv[2], 'w', c
 PY
             local bad_hash
             bad_hash="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$RUN_DIR/bad-signature.actr")"
-            jq --arg hash "$bad_hash" '.package.sha256 = $hash' "$profile" >"$RUN_DIR/bad-signature-input.json"
+            jq --arg hash "$bad_hash" '.packages[.primary_package].sha256 = $hash' "$profile" >"$RUN_DIR/bad-signature-input.json"
             run_actr realm sign-profile --key "$RUN_DIR/domain-key.json" "$RUN_DIR/bad-signature-input.json" \
                 >"$RUN_DIR/bad-signature-request.json"
             jq '.profile' "$RUN_DIR/bad-signature-request.json" >"$RUN_DIR/bad-signature-profile.json"
@@ -244,7 +294,7 @@ PY
             jq -n --arg url "$package_href" --arg file "$RUN_DIR/bad-signature.actr" '{($url):$file}' >"$RUN_DIR/https-artifacts.json"
             expect_https_join_rejected signature "$RUN_DIR/owner-invite.txt" 'signature'
             publish_realm_document "https://$REALM_DOMAIN/realms/${REALM%@*}" "$profile"
-            jq -n --arg url "$package_href" --arg file "$SERVICE_PACKAGE" '{($url):$file}' >"$RUN_DIR/https-artifacts.json"
+            jq -n --arg url "$package_href" --arg file "$SERVICE_PACKAGE" --arg front "$front_href" --arg ui "$DIST_DIR/realm-front.actr" '{($url):$file,($front):$ui}' >"$RUN_DIR/https-artifacts.json"
         fi
     fi
 
