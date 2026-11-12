@@ -92,6 +92,8 @@ pub mod verify;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod actr_ref;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod actrium;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod issuer_client;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod key_cache;
@@ -1157,6 +1159,36 @@ impl Node<Attached> {
             .node
             .session_registry = Some(registry);
         self
+    }
+
+    /// Configure this node as an Actrium Front. Installs the response-proof
+    /// guard; after `start()`, [`crate::actr_ref::ActrRef::attach_actrium`]
+    /// connects and Attaches to Services. The Front is a pure caller in v1:
+    /// Service-originated business calls and streams are rejected.
+    pub fn with_actrium_front(mut self) -> Self {
+        let shared = Arc::new(crate::actrium::front::FrontShared::default());
+        let node = &mut self
+            .attachment
+            .as_mut()
+            .expect("Node<Attached> without attachment")
+            .node;
+        node.actrium_front = Some(shared.clone());
+        node.set_incoming_guard(Some(Arc::new(
+            crate::actrium::front::ActriumFrontGuard::new(shared),
+        )));
+        self
+    }
+
+    /// Install the complete Actrium Front–Service session protocol on this
+    /// Service node: the registry owns the exact `actrium.session.v1` system
+    /// routes, and the guard authorizes business requests, tells, and stream
+    /// chunks against current session policy and signs actual responses.
+    /// Session traffic requires the verified Actor channel; legacy transports
+    /// are rejected rather than implicitly trusted.
+    pub fn with_actrium_service(self, service: actrium_runtime::InMemorySessionService) -> Self {
+        let (registry, guard) = crate::actrium::ActriumServiceRegistry::new(service);
+        self.with_session_registry(Arc::new(registry))
+            .with_incoming_guard(Arc::new(guard))
     }
 
     /// Register with Issuer, obtain an AId credential, and inject it into this

@@ -124,6 +124,7 @@ fn response_canonical(response: &AttachResponse) -> Vec<u8> {
     bytes(&mut output, &response.privacy.application_state_digest);
     bytes(&mut output, &response.privacy.assurance_digest);
     u64_value(&mut output, response.privacy.expires_at_epoch_secs);
+    bytes(&mut output, &response.session_secret);
     output
 }
 
@@ -270,6 +271,11 @@ pub fn request_signing_bytes(request: &BusinessRequest) -> Vec<u8> {
 
 pub fn request_proof(secret: &[u8; 32], request: &BusinessRequest) -> Vec<u8> {
     hmac(secret, &request_signing_bytes(request))
+}
+
+/// Constant-time verification of a business request/response/chunk proof.
+pub fn verify_request_proof(secret: &[u8; 32], request: &BusinessRequest, proof: &[u8]) -> bool {
+    verify_hmac(secret, &request_signing_bytes(request), proof)
 }
 
 pub(crate) fn request_fingerprint(request: &BusinessRequest) -> Vec<u8> {

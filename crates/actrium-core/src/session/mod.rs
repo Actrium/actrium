@@ -223,6 +223,11 @@ pub struct AttachResponse {
     pub session_capability_ceiling: Vec<String>,
     pub privacy: PrivacyState,
     pub service_challenge: Vec<u8>,
+    /// Host-to-Host session secret for business request proofs. It travels
+    /// only inside the authenticated, encrypted Actor channel of an Attach,
+    /// Resume, or Takeover exchange and is covered by `service_challenge`.
+    /// The Guest MUST never see this value; it stays in Host memory.
+    pub session_secret: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -377,4 +382,11 @@ pub struct SessionStatus {
     pub lease_epoch: u64,
     pub expires_at_epoch_secs: u64,
     pub occupant: Option<String>,
+}
+
+/// Status query for one session. Unknown or pruned ids return an empty
+/// (`Idle`) status rather than an error.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetStatusRequest {
+    pub session_id: String,
 }

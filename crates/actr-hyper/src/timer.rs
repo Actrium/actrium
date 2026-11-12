@@ -158,6 +158,12 @@ timer_inventory! {
         success: "next protocol tick", interrupt: "shutdown or actor-id update",
         expiry: "send heartbeat", reset: "configured interval only", external: false
     },
+    ACTRIUM_SESSION_HEARTBEAT => {
+        id: "actrium.front.session_heartbeat", owner: "actrium_front", category: ProtocolSchedule,
+        duration: "Service-granted lease heartbeat_interval_ms", arm: "Actrium Front session attaches or resumes",
+        success: "next protocol tick", interrupt: "detach, session expiry, or last session handle drop",
+        expiry: "send session Heartbeat to renew the lease", reset: "Service-granted interval only", external: false
+    },
     RECOVERY_CLEANUP_TEARDOWN => {
         id: "lifecycle.recovery.cleanup_teardown", owner: "recovery_supervisor", category: FailureDeadline,
         duration: "remaining cleanup obligation deadline", arm: "cleanup effect starts",

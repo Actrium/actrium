@@ -63,6 +63,10 @@ message AttachResponse {
   repeated string session_capability_ceiling = 5;
   PrivacyState  privacy                      = 6;
   bytes         service_challenge            = 7;   // Service proof binding response to channel
+  // Host-to-Host business-proof secret. Sent only inside the authenticated,
+  // encrypted Actor channel and covered by service_challenge. Never exposed
+  // to the Guest, logs, URIs, or crash reports.
+  bytes         session_secret               = 8;
 }
 
 // ---------------------------------------------------------------------------

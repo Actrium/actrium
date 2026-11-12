@@ -478,6 +478,10 @@ impl WireHandle for WebSocketConnection {
         ConnType::WebSocket
     }
 
+    fn verified_peer_context(&self) -> Option<Arc<crate::transport::VerifiedPeerContext>> {
+        self.secure.verified_peer()
+    }
+
     fn priority(&self) -> u8 {
         0
     }

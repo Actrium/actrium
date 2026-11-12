@@ -48,6 +48,7 @@ actr-protocol.workspace = true
 actr-runtime.workspace = true
 actr-framework.workspace = true
 actr-platform-traits.workspace = true
+actrium-runtime = { path = "../actrium-runtime" }
 # actr-config is optional here for wasm32 compat; non-optional on native (see target deps)
 actr-config = { workspace = true, optional = true }
 
@@ -178,7 +179,6 @@ name = "recovery_latency"
 harness = false
 
 [dev-dependencies]
-actrium-runtime = { path = "../actrium-runtime" }
 rcgen = "0.14.8"
 tokio = { workspace = true }
 rand.workspace = true

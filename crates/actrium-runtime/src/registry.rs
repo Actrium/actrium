@@ -51,7 +51,7 @@ pub struct AttachOutcome {
     pub session_secret: SessionSecret,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HeartbeatOutcome {
     pub lease_epoch: u64,
     pub lease_expires_at_epoch_secs: u64,
@@ -583,6 +583,7 @@ impl InMemorySessionRegistry {
         Ok((decision.state, capabilities))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn response(
         &self,
         session_id: String,
@@ -591,6 +592,7 @@ impl InMemorySessionRegistry {
         capabilities: BTreeSet<String>,
         privacy: PrivacyState,
         request_digest: &[u8],
+        secret: &SessionSecret,
     ) -> AttachResponse {
         let mut response = AttachResponse {
             session_id,
@@ -605,6 +607,7 @@ impl InMemorySessionRegistry {
             session_capability_ceiling: capabilities.into_iter().collect(),
             privacy,
             service_challenge: Vec::new(),
+            session_secret: secret.as_bytes().to_vec(),
         };
         sign_attach_response(
             &mut response,
@@ -899,6 +902,7 @@ impl InMemorySessionRegistry {
             ceiling,
             privacy.clone(),
             &request_digest,
+            &secret,
         );
         state.sessions.insert(
             session_id.clone(),
@@ -1222,6 +1226,7 @@ impl InMemorySessionRegistry {
             ceiling.clone(),
             privacy.clone(),
             &resume_digest(&request),
+            &old.secret,
         );
         let entry = state
             .sessions

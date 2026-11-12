@@ -1061,6 +1061,10 @@ pub(crate) struct Inner {
     /// routes fail closed when this is absent; they never enter the workload.
     pub(crate) session_registry: Option<Arc<dyn SessionRegistry>>,
 
+    /// Actrium Front guard state installed before registration. `start()`
+    /// promotes it into the `ActrRef` runtime once the PeerGate exists.
+    pub(crate) actrium_front: Option<Arc<crate::actrium::front::FrontShared>>,
+
     /// Handle to the per-actor serial command runner.
     ///
     /// `handle_incoming` dispatches through this handle. The runner owns the
@@ -2938,6 +2942,7 @@ impl Inner {
             peer_types: PeerTypes::default(),
             incoming_guard: None,
             session_registry: None,
+            actrium_front: None,
             workload_dispatch: Arc::new(workload_dispatch),
             linked_handle,
             package_uses_explicit_reply_boundary,
@@ -5075,6 +5080,16 @@ impl Inner {
         }
 
         // Create ActrRefShared
+        let actrium = match (
+            node_ref.actrium_front.clone(),
+            node_ref.peer_transport.clone(),
+            node_ref.outproc_gate.as_ref(),
+        ) {
+            (Some(front), Some(transport), Some(Gate::Peer(gate))) => Some(Arc::new(
+                crate::actrium::front::FrontRuntime::new(gate.clone(), transport, front),
+            )),
+            _ => None,
+        };
         let shared = Arc::new(ActrRefShared {
             actor_id,
             bootstrap_ctx_builder,
@@ -5083,6 +5098,7 @@ impl Inner {
             shutdown_token,
             task_handles: Mutex::new(task_handles),
             rtc_manager: rtc_manager.clone(),
+            actrium,
         });
 
         // Create ActrRef

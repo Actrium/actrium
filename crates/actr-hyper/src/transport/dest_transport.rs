@@ -824,6 +824,18 @@ impl DestTransport {
         self.conn_mgr.watch_ready()
     }
 
+    /// The verified Actrium context of the current reliable wire, if Actor
+    /// mutual authentication has completed on it.
+    pub(crate) async fn verified_peer_context(
+        &self,
+    ) -> Option<Arc<crate::transport::VerifiedPeerContext>> {
+        let route = self.reliable.lock().await;
+        route
+            .current
+            .as_ref()
+            .and_then(|wire| wire.verified_peer_context())
+    }
+
     pub(crate) async fn adopt_ready(&self, connection: Arc<dyn WireHandle>) {
         self.conn_mgr.adopt_ready(connection).await;
     }

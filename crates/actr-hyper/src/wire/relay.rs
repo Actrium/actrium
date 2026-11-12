@@ -1125,6 +1125,13 @@ impl WireHandle for RelayWire {
     fn priority(&self) -> u8 {
         1
     }
+    fn verified_peer_context(&self) -> Option<Arc<VerifiedPeerContext>> {
+        self.connection
+            .read()
+            .unwrap()
+            .as_ref()
+            .and_then(|connection| connection.secure_cell().verified_peer())
+    }
     async fn connect(&self) -> NetworkResult<()> {
         let (_, connection) = self.client.connect_peer(self.peer.clone()).await?;
         *self.connection.write().unwrap() = Some(connection);

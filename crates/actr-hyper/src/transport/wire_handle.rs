@@ -6,7 +6,7 @@
 
 use super::error::NetworkResult;
 use super::lane::DataLane;
-use super::secure_channel::SecureChannelState;
+use super::secure_channel::{SecureChannelState, VerifiedPeerContext};
 use super::wire_pool::ConnType;
 use actr_protocol::{ActrId, PayloadType};
 use async_trait::async_trait;
@@ -65,6 +65,12 @@ pub trait WireHandle: Send + Sync + std::fmt::Debug {
     /// `LegacyBypass` (transport ready, no crypto); phase 3 will drive
     /// `New → Handshaking → Verified` here once the real handshake lands.
     async fn connect(&self) -> NetworkResult<()>;
+
+    /// The verified Actrium peer context once Actor mutual authentication
+    /// has completed on this wire. Legacy wires always return `None`.
+    fn verified_peer_context(&self) -> Option<Arc<VerifiedPeerContext>> {
+        None
+    }
 
     /// Check if connected
     #[allow(dead_code)]

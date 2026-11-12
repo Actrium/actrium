@@ -18,7 +18,7 @@ pub use crypto::{
     attach_request_digest, attach_request_signing_bytes, attach_response_signing_bytes,
     request_proof, request_signing_bytes, resume_digest, resume_proof, resume_signing_bytes,
     sign_attach_request, sign_attach_response, takeover_signing_bytes, verify_attach_request,
-    verify_attach_response,
+    verify_attach_response, verify_request_proof,
 };
 pub use error::{ConfigError, SessionError};
 pub use guard::{BusinessRequest, GuardedRequest, MessageKind, SessionGuard};
@@ -41,7 +41,7 @@ pub use service::InMemorySessionService;
 
 pub use actrium_core::session::{
     AttachErrorCode, AttachRequest, AttachResponse, AuthorizeAttach as AttachAuthorization,
-    AuthorizeAttachDecision, DetachRequest, FrontServiceSession, HeartbeatRequest, Lease,
-    LeaseMode, MemberRole, PrivacyState, ProgramRelease, ResumeRequest, Runtime, ServiceInfo,
-    SessionState, SessionStatus, TakeoverRequest, VerifiedChannel,
+    AuthorizeAttachDecision, DetachRequest, FrontServiceSession, GetStatusRequest,
+    HeartbeatRequest, Lease, LeaseMode, MemberRole, PrivacyState, ProgramRelease, ResumeRequest,
+    Runtime, ServiceInfo, SessionState, SessionStatus, TakeoverRequest, VerifiedChannel,
 };
