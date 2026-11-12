@@ -38,6 +38,7 @@ pub mod name;
 pub mod realm_management;
 pub mod realm_membership;
 pub mod realm_profile;
+pub mod signed_json;
 pub mod transport_control;
 pub mod turn;
 pub mod uri;

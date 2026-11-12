@@ -1,4 +1,4 @@
-use actr_protocol::realm_profile::RealmPackage;
+use actr_protocol::realm_profile::RealmPackageSelection;
 use axum::{
     Json, Router,
     extract::{ConnectInfo, Path, Query, State},
@@ -260,8 +260,11 @@ struct CreateRealmBody {
     expires_at: u64,
     /// Package and display name of the first Realm Profile; the package is
     /// required for Realms under the Provider domain.
-    #[serde(default)]
-    package: Option<RealmPackage>,
+    #[serde(
+        flatten,
+        deserialize_with = "RealmPackageSelection::deserialize_optional"
+    )]
+    selection: Option<RealmPackageSelection>,
     #[serde(default)]
     display_name: Option<String>,
 }
@@ -286,7 +289,7 @@ async fn create_realm(
     };
 
     let profile = ProfileChange {
-        package: body.package,
+        selection: body.selection,
         display_name: body.display_name,
         ..Default::default()
     };

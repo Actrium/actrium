@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   classifyServiceCapability,
   isValidServiceCapability,
+  validateServiceCapabilities,
 } from './service-capabilities';
 
 describe('service capability grammar', () => {
@@ -67,5 +68,30 @@ describe('service capability grammar', () => {
     expect(isValidServiceCapability('workspace:read-write')).toBe(true);
     expect(isValidServiceCapability('net:ftp://example.com')).toBe(false);
     expect(isValidServiceCapability('')).toBe(false);
+  });
+
+  test('reports invalid declarations instead of dropping them silently', () => {
+    const result = validateServiceCapabilities([
+      'workspace:read-write',
+      'workspace:write',
+      'net:http://insecure.example',
+      'actor:call:notes.example:index-worker',
+      'shell:unknown',
+      'mystery:capability',
+    ]);
+
+    expect(result.valid).toEqual(['workspace:read-write']);
+    expect(result.invalid.map((entry) => entry.capability)).toEqual([
+      'workspace:write',
+      'net:http://insecure.example',
+      'actor:call:notes.example:index-worker',
+      'shell:unknown',
+      'mystery:capability',
+    ]);
+    expect(result.invalid[0].reason).toContain('workspace:read-only');
+    expect(result.invalid[1].reason).toContain('net:https://');
+    expect(result.invalid[2].reason).toContain('actor:call:');
+    expect(result.invalid[3].reason).toContain('shell:bookmarks');
+    expect(result.invalid[4].reason).toContain('unknown service capability');
   });
 });

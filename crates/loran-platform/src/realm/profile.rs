@@ -39,6 +39,13 @@ impl RealmProfileRecord {
         RealmProfile::verify(self.document.as_bytes(), &self.realm, keys)
     }
 
+    pub fn verify_for_update(
+        &self,
+        keys: &RealmSigningKeys,
+    ) -> Result<RealmProfile, RealmProfileError> {
+        RealmProfile::verify_stored_baseline(self.document.as_bytes(), &self.realm, keys)
+    }
+
     /// Store `profile`, verified from `document`, as the accepted Realm
     /// Profile of its Realm. The caller has checked it against the previous
     /// one with [`RealmProfile::check_successor`]; `previous_digest` is that
@@ -133,6 +140,44 @@ impl RealmProfileRecord {
             }
         }
 
+        if status.as_deref() == Some("pending") && profile.realm.status == RealmStatus::Active {
+            let expected: Option<String> =
+                sqlx::query_scalar("SELECT selection FROM realm_creation_selection WHERE realm=?")
+                    .bind(name)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if let Some(expected) = expected {
+                let expected = serde_json::from_str(&expected).map_err(|e| {
+                    RealmError::DatabaseError(format!("invalid stored selection: {e}"))
+                })?;
+                if profile.selection.as_ref() != Some(&expected) {
+                    return Err(RealmError::Conflict(
+                        "first Profile differs from the create_realm selection".into(),
+                    ));
+                }
+            }
+        }
+        if let Some(selection) = &profile.selection {
+            for package in selection.packages.values() {
+                let count = sqlx::query(
+                    "INSERT INTO realm_package_digest (realm, actor_type, sha256) VALUES (?, ?, ?)
+                     ON CONFLICT(realm, actor_type) DO UPDATE SET sha256 = excluded.sha256
+                     WHERE realm_package_digest.sha256 = excluded.sha256",
+                )
+                .bind(name)
+                .bind(&package.r#type)
+                .bind(&package.sha256)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+                if count == 0 {
+                    return Err(RealmError::Conflict(format!(
+                        "immutable package {} changed digest",
+                        package.r#type
+                    )));
+                }
+            }
+        }
         let digest = digest(document.as_bytes());
         let written = match previous_digest {
             Some(previous) => sqlx::query(
@@ -233,10 +278,12 @@ mod tests {
             "issued_at": "2026-09-25T00:00:00Z",
         });
         if status == "active" {
-            profile["package"] = json!({
+            profile["primary_package"] = json!("service");
+            profile["front_package"] = json!("ui");
+            profile["packages"] = json!({"ui":{"href":"https://cdn.example/front.actr","sha256":"cd".repeat(32),"type":"acme.com/ui@1.0.0"},"service":{
                 "href": "https://cdn.example/notes.actr", "sha256": "ab".repeat(32),
                 "type": "acme.com/notes@1.0.0",
-            });
+            }});
         }
         let signature = key.sign(jcs(&profile).as_bytes());
         profile["signature"] = json!({

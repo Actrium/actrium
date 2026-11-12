@@ -216,10 +216,10 @@ async fn update_realm(
     }
     let change = match request.status.as_deref() {
         Some("retired") => {
-            if request.package.is_some() || request.display_name.is_some() {
+            if request.selection.is_some() || request.display_name.is_some() {
                 return fail(
                     Code::InvalidRequest,
-                    "status retired excludes package and display_name",
+                    "status retired excludes package selection and display_name",
                 );
             }
             ProfileChange {
@@ -234,14 +234,14 @@ async fn update_realm(
                 format!("status may only be retired, not {status}"),
             );
         }
-        None if request.package.is_none() && request.display_name.is_none() => {
+        None if request.selection.is_none() && request.display_name.is_none() => {
             return fail(
                 Code::InvalidRequest,
-                "update_realm needs package, display_name or status",
+                "update_realm needs a package selection, display_name or status",
             );
         }
         None => ProfileChange {
-            package: request.package.clone(),
+            selection: request.selection.clone(),
             display_name: request.display_name.clone(),
             retire: false,
             owner: Some(signer.clone()),

@@ -12,6 +12,7 @@ description = "ACTR package format: ZIP STORE-based .actr file reading, writing,
 workspace = true
 
 [dependencies]
+semver = "1"
 zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
 sha2.workspace = true
 ed25519-dalek.workspace = true

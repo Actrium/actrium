@@ -44,3 +44,51 @@ export function classifyServiceCapability(
 export function isValidServiceCapability(name: string): boolean {
   return classifyServiceCapability(name) !== undefined;
 }
+
+export type InvalidServiceCapability = {
+  capability: string;
+  reason: string;
+};
+
+const SERVICE_CAPABILITY_HINT =
+  'expected workspace:read-only|read-write, net:https://<domain>[:port][/path], ' +
+  'actor:call:<publisher>:<name>:<version>, or shell:bookmarks|history|settings';
+
+function invalidReason(name: string): string {
+  if (name.startsWith('workspace:')) {
+    return 'workspace capability must be workspace:read-only or workspace:read-write';
+  }
+  if (name.startsWith('net:')) {
+    return 'net capability must be net:https://... without userinfo, whitespace or fragment';
+  }
+  if (name.startsWith('actor:')) {
+    return 'actor capability must be actor:call:<publisher>:<name>:<version>';
+  }
+  if (name.startsWith('shell:')) {
+    return 'shell capability must be shell:bookmarks, shell:history or shell:settings';
+  }
+  return `unknown service capability; ${SERVICE_CAPABILITY_HINT}`;
+}
+
+/**
+ * Validate declared Service capabilities without dropping information.
+ * The effective set still fails closed, but manifest parsing / installation
+ * verification can report `invalid` entries instead of silently ignoring them.
+ */
+export function validateServiceCapabilities(declared: readonly string[]): {
+  valid: string[];
+  invalid: InvalidServiceCapability[];
+} {
+  const valid: string[] = [];
+  const invalid: InvalidServiceCapability[] = [];
+
+  for (const capability of declared) {
+    if (isValidServiceCapability(capability)) {
+      valid.push(capability);
+    } else {
+      invalid.push({ capability, reason: invalidReason(capability) });
+    }
+  }
+
+  return { valid, invalid };
+}
