@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import importlib.util
 import re
 import sqlite3
 import subprocess
@@ -61,6 +62,16 @@ def test_gate_enforces_anonymous_commit_identities() -> None:
     assert '"identity": os.environ["IDENTITY_RESULT"]' in gate
 
 
+def test_gate_aggregates_kotlin_native_domain() -> None:
+    workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
+    gate = workflow[workflow.index("  gate:\n"):]
+    assert "      - kotlin_native\n" in gate
+    assert '"kotlin_native": os.environ["KOTLIN_NATIVE_RESULT"]' in gate
+    kotlin = (ROOT / ".github/workflows/ci-kotlin.yml").read_text(encoding="utf-8")
+    assert "ACTR_ANDROID_TARGETS: ${{ matrix.target }}" in kotlin
+    assert "abi: arm64-v8a" in kotlin and "abi: x86_64" in kotlin
+
+
 def test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm() -> None:
     workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
     rust_job = _job(workflow, "rust", "test")
@@ -78,18 +89,33 @@ def test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm() -> None:
     assert "- name: Build release" not in rust_job
     assert "cargo build --release --verbose --all-features" not in rust_job
 
-    # The separate test job (not inside rust) runs the Rust suite via
-    # cargo-nextest (integration retries live in .config/nextest.toml), plus
-    # doctests on the libtest harness (nextest skips them). The job shards
-    # into realtime (real-PC suites) and rest legs; both run nextest and the
-    # rest leg keeps the doctests.
+    # The separate job runs the same full workspace inventory in four
+    # disjoint shards, including the original realtime and doctest coverage.
     assert "  test:" in workflow
     test_job = _job(workflow, "test", "rust_msrv")
-    assert "shard: [realtime, rest]" in test_job
+    assert "shard: [build-heavy, network, rest-1, rest-2]" in test_job
     assert "- name: Run tests (nextest, ${{ matrix.shard }} shard)" in test_job
-    assert "cargo nextest run --workspace" in test_job
+    assert "cargo nextest list --workspace --all-features" in test_job
+    assert "assert-ci-test-partitions.py" in test_job
+    assert "assert-ci-timer.py" in test_job
     assert "cargo test --doc --workspace" in test_job
-    assert 'if: matrix.shard == \'rest\'' in test_job
+    assert "if: matrix.shard == 'rest-2'" in test_job
+
+
+def test_test_partition_guard_rejects_missing_and_overlapping_tests() -> None:
+    path = ROOT / ".github/scripts/assert-ci-test-partitions.py"
+    spec = importlib.util.spec_from_file_location("ci_test_partitions", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    first = {("binary-a", "test-a")}
+    second = {("binary-b", "test-b")}
+    module.verify(first | second, first, second)
+    for parts in ((first, first | second), (first, {("binary-c", "extra")}), (first, set())):
+        try:
+            module.verify(first | second, *parts)
+        except ValueError:
+            continue
+        raise AssertionError(f"Invalid partition accepted: {parts}")
 
 
 def test_rust_test_gate_restores_cache_before_installing_tools() -> None:
@@ -228,6 +254,9 @@ def test_pr_gate_runs_package_runtime_scenario_when_targeted() -> None:
     gate = workflow[workflow.index("  gate:\n"):]
     assert "e2e_package_runtime" in gate
     assert "E2E_PACKAGE_RUNTIME_RESULT" in gate
+    assert "scenario: [echo, realms, rotation]" in package_job
+    for scenario in ("echo", "realms", "rotation"):
+        assert f"if: matrix.scenario == '{scenario}'" in package_job
 
 
 def test_native_workload_gate_builds_c_and_go_with_pinned_tools() -> None:
@@ -1050,7 +1079,9 @@ def test_service_readiness_waits_for_exact_registration() -> None:
 if __name__ == "__main__":
     test_gate_aggregates_webrtc_domain()
     test_gate_enforces_anonymous_commit_identities()
+    test_gate_aggregates_kotlin_native_domain()
     test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm()
+    test_test_partition_guard_rejects_missing_and_overlapping_tests()
     test_rust_test_gate_restores_cache_before_installing_tools()
     test_msrv_gate_builds_full_workspace_on_pinned_toolchain()
     test_pr_gate_excludes_heavy_root_e2e_jobs()
