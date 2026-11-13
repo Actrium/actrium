@@ -1,0 +1,30 @@
+edition = 1
+
+[package]
+path = "echo-service.actr"
+
+[deployment]
+realm = "echo-0-1-4@realm.develenv.com"
+realm_client_key = "service-owner-client.json"
+
+[signaling]
+url = "wss://afp.develenv.com/signaling/ws"
+
+[issuer_endpoint]
+url = "https://afp.develenv.com/issuer"
+
+[[trust]]
+kind = "static"
+pubkey_b64 = "4l8PpJY7vajcHyASC8uD6Hj29I5zVtmPchn2+MHY0rE="
+
+[discovery]
+visible = true
+
+[webrtc]
+stun_urls = ["stun:afp.develenv.com:3478"]
+turn_urls = ["turn:afp.develenv.com:3478"]
+
+[[acl.rules]]
+permission = "allow"
+type = "publisher.develenv.com/echo-front@0.1.7"
+realm = "self"
