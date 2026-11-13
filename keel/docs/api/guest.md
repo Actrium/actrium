@@ -94,6 +94,8 @@ A text input field. Maps to React Native's `TextInput`.
 | `multiline` | `boolean` | `false` | Whether the input supports multiple lines. |
 | `maxLength` | `number` | `undefined` | Maximum number of characters allowed. |
 
+For controlled inputs that round-trip through the Guest, initialize `valueEventCount` to `0`. In `onChange`, store `nativeEvent.text` and `nativeEvent.eventCount` together and pass them back as `value` and `valueEventCount`. To clear or replace the value, keep the revision of the edit the change is based on. The host preserves newer input when a write arrives for an older revision.
+
 ### Button
 
 A basic button. Maps to React Native's `Button`.
