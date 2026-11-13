@@ -42,10 +42,10 @@ pub mod metadata {
     pub const PROOF: &str = "actrium.request.proof";
 }
 
-pub mod front;
+pub mod peer;
 pub mod service;
 
-pub use front::{ActriumAttachParams, ActriumPeerSession};
+pub use peer::{ActriumAttachParams, ActriumPeerSession};
 pub use service::{ActriumServiceGuard, ActriumServiceRegistry};
 
 #[cfg(test)]

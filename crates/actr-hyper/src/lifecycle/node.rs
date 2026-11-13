@@ -5087,7 +5087,7 @@ impl Inner {
             node_ref.outproc_gate.as_ref(),
         ) {
             (Some(peer), Some(transport), Some(Gate::Peer(gate))) => Some(Arc::new(
-                crate::actrium::front::PeerRuntime::new(gate.clone(), transport, peer),
+                crate::actrium::peer::PeerRuntime::new(gate.clone(), transport, peer),
             )),
             _ => None,
         };

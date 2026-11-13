@@ -19,8 +19,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use ed25519_dalek::SigningKey;
 
-use super::front::business_metadata;
 use super::metadata;
+use super::peer::business_metadata;
 use super::service::{ActriumServiceRegistry, Shared as PeerShared};
 use crate::lifecycle::{
     IncomingDispatchRequest, IncomingGuard, IncomingStreamChunk, SessionRegistry,
