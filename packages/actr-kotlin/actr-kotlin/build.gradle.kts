@@ -92,6 +92,9 @@ dependencies {
     // Testing
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0")
+    // JVM binding acceptance uses real JSON and the desktop JNA dispatcher.
+    testImplementation("org.json:json:20240303")
+    testRuntimeOnly("net.java.dev.jna:jna:5.14.0")
 }
 
 // For publishing to local maven

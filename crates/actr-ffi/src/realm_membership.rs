@@ -11,10 +11,27 @@ pub enum RealmMembershipError {
     InvalidInput { reason: String },
     #[error("membership refused ({status}): {code}")]
     Rejected { status: u16, code: String },
-    #[error("result unknown; keep the key and retry the same invite")]
+    #[error("result unknown; retain the key and check membership before retrying")]
     Uncertain,
     #[error("Realm client key unavailable")]
     KeyUnavailable,
+}
+
+/// Roles assignable by member governance. Ownership is transferred atomically
+/// with `transfer_owner`; recovery uses an operator/domain-issued invite.
+#[derive(Clone, Copy, Debug, uniffi::Enum)]
+pub enum RealmMemberRole {
+    Editor,
+    Viewer,
+}
+
+impl From<RealmMemberRole> for actr_protocol::realm_membership::Role {
+    fn from(role: RealmMemberRole) -> Self {
+        match role {
+            RealmMemberRole::Editor => Self::Editor,
+            RealmMemberRole::Viewer => Self::Viewer,
+        }
+    }
 }
 
 impl From<MembershipClientError> for RealmMembershipError {
@@ -139,6 +156,52 @@ impl RealmMembership {
     }
     pub async fn members(&self) -> Result<String, RealmMembershipError> {
         Ok(self.inner.members().await?.to_string())
+    }
+    /// Create a new editor/viewer invitation. Each successful call creates a
+    /// distinct invitation, including a retry after an uncertain response.
+    pub async fn invite_member(
+        &self,
+        role: RealmMemberRole,
+        expires_at: String,
+    ) -> Result<String, RealmMembershipError> {
+        Ok(self
+            .inner
+            .invite_member(role.into(), &expires_at)
+            .await?
+            .to_string())
+    }
+    /// Acknowledges Provider-side removal, not immediate closure of all peers.
+    pub async fn remove_member(&self, member_id: String) -> Result<String, RealmMembershipError> {
+        Ok(self.inner.remove_member(&member_id).await?.to_string())
+    }
+    /// The updated role takes effect through the next Actor credential.
+    pub async fn set_role(
+        &self,
+        member_id: String,
+        role: RealmMemberRole,
+    ) -> Result<String, RealmMembershipError> {
+        Ok(self
+            .inner
+            .set_role(&member_id, role.into())
+            .await?
+            .to_string())
+    }
+    /// Reconcile membership after an uncertain result: the previous owner may
+    /// already lack permission to repeat a completed transfer.
+    pub async fn transfer_owner(
+        &self,
+        member_id: String,
+        previous_owner_role: RealmMemberRole,
+    ) -> Result<String, RealmMembershipError> {
+        Ok(self
+            .inner
+            .transfer_owner(&member_id, previous_owner_role.into())
+            .await?
+            .to_string())
+    }
+    /// A committed leave invalidates this member's signer, including for retries.
+    pub async fn leave(&self) -> Result<String, RealmMembershipError> {
+        Ok(self.inner.leave().await?.to_string())
     }
     pub async fn invite_client(
         &self,

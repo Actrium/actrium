@@ -6,6 +6,8 @@ use actr_hyper::realm_membership::{
 };
 use std::sync::Arc;
 
+mod governance;
+
 struct DeviceSigner(ed25519_dalek::SigningKey);
 impl RealmKeySigner for DeviceSigner {
     fn public_key(&self) -> [u8; 32] {

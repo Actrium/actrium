@@ -4,7 +4,7 @@
 
 use crate::error::{HyperError, HyperResult};
 use crate::issuer_client::RealmClientKey;
-use actr_protocol::realm_membership::{MembershipOp, MembershipRequest, RealmInvite};
+use actr_protocol::realm_membership::{MembershipOp, MembershipRequest, RealmInvite, Role};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde_json::Value;
 use std::time::Duration;
@@ -15,9 +15,10 @@ pub enum MembershipClientError {
     InvalidInput(String),
     #[error("membership refused ({status}): {code}")]
     Rejected { status: u16, code: String },
-    /// Keep the same key and retry the same invite. The server may already
-    /// have consumed it; a new key would lose the idempotent redemption.
-    #[error("membership result unknown; retain the key and retry the same invite")]
+    /// The operation may have committed. Retain the key and reconcile with
+    /// `members` before retrying governance operations. For `join`, retry the
+    /// same invitation with the same key to recover its idempotent result.
+    #[error("membership result unknown; retain the key and check membership before retrying")]
     Uncertain,
     #[error("the Realm client key is unavailable")]
     KeyUnavailable,
@@ -108,6 +109,41 @@ mod tests {
             client.members().await,
             Err(MembershipClientError::KeyUnavailable)
         ));
+        for result in [
+            client
+                .invite_member(Role::Editor, "2030-01-01T00:00:00Z")
+                .await,
+            client.remove_member("member").await,
+            client.set_role("member", Role::Viewer).await,
+            client.transfer_owner("member", Role::Editor).await,
+            client.leave().await,
+        ] {
+            assert!(matches!(result, Err(MembershipClientError::KeyUnavailable)));
+        }
+        no_request.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn governance_cannot_create_or_assign_an_owner_role() {
+        let mut server = mockito::Server::new_async().await;
+        let no_request = server
+            .mock("POST", "/membership")
+            .expect(0)
+            .create_async()
+            .await;
+        let client = client(&server.url(), true).unwrap();
+        for result in [
+            client
+                .invite_member(Role::Owner, "2030-01-01T00:00:00Z")
+                .await,
+            client.set_role("member", Role::Owner).await,
+            client.transfer_owner("member", Role::Owner).await,
+        ] {
+            assert!(matches!(
+                result,
+                Err(MembershipClientError::InvalidInput(_))
+            ));
+        }
         no_request.assert_async().await;
     }
 }
@@ -223,6 +259,64 @@ impl RealmMembershipClient {
         self.send(self.request(MembershipOp::ListMembers)).await
     }
 
+    /// Invite a new editor or viewer. Only the Issuer can authorize the caller.
+    /// Owner recovery consumes an operator/domain-issued invitation via `join`.
+    /// Repeating this call creates another invitation, not the first one's result.
+    pub async fn invite_member(
+        &self,
+        role: Role,
+        expires_at: &str,
+    ) -> Result<Value, MembershipClientError> {
+        require_non_owner_role(role)?;
+        let mut request = self.request(MembershipOp::CreateInvite);
+        request.role = Some(role);
+        request.invite_expires_at = Some(expires_at.to_string());
+        self.send(request).await
+    }
+
+    /// Remove a member through the Issuer's existing revocation transaction.
+    /// This acknowledges the Provider action, not closure of every peer session.
+    pub async fn remove_member(&self, member_id: &str) -> Result<Value, MembershipClientError> {
+        let mut request = self.request(MembershipOp::RemoveMember);
+        request.member_id = Some(member_id.to_string());
+        self.send(request).await
+    }
+
+    /// Assign editor/viewer. Existing Actor credentials keep their signed role;
+    /// the updated role takes effect on the next credential issuance.
+    pub async fn set_role(
+        &self,
+        member_id: &str,
+        role: Role,
+    ) -> Result<Value, MembershipClientError> {
+        require_non_owner_role(role)?;
+        let mut request = self.request(MembershipOp::SetRole);
+        request.member_id = Some(member_id.to_string());
+        request.role = Some(role);
+        self.send(request).await
+    }
+
+    /// Atomically transfer ownership and assign the previous owner editor/viewer.
+    /// If the response is lost, inspect membership: the old owner may already
+    /// lack permission to repeat the transfer.
+    pub async fn transfer_owner(
+        &self,
+        member_id: &str,
+        previous_owner_role: Role,
+    ) -> Result<Value, MembershipClientError> {
+        require_non_owner_role(previous_owner_role)?;
+        let mut request = self.request(MembershipOp::TransferOwner);
+        request.member_id = Some(member_id.to_string());
+        request.previous_owner_role = Some(previous_owner_role);
+        self.send(request).await
+    }
+
+    /// Leave through the Issuer, invalidating this member's clients and invites.
+    /// A committed leave also revokes this signer, so a retry can be refused.
+    pub async fn leave(&self) -> Result<Value, MembershipClientError> {
+        self.send(self.request(MembershipOp::Leave)).await
+    }
+
     /// Ask the Issuer for a one-time invitation to add a client of this member.
     pub async fn invite_client(
         &self,
@@ -317,4 +411,14 @@ impl RealmMembershipClient {
             Err(MembershipClientError::Uncertain)
         }
     }
+}
+
+fn require_non_owner_role(role: Role) -> Result<(), MembershipClientError> {
+    if role == Role::Owner {
+        return Err(MembershipClientError::InvalidInput(
+            "role must be editor or viewer; ownership requires transfer or an authorized recovery invitation"
+                .into(),
+        ));
+    }
+    Ok(())
 }
