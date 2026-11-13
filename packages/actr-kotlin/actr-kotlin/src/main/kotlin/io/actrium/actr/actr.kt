@@ -362,7 +362,7 @@ private fun findLibraryName(componentName: String): String {
     if (libOverride != null) {
         return libOverride
     }
-    return "actr"
+    return "actrium-issue377-libactr"
 }
 
 // Define FFI callback types
@@ -1033,15 +1033,25 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_actr_checksum_method_realmmembership_invite_client(
     ): Short
+    external fun uniffi_actr_checksum_method_realmmembership_invite_member(
+    ): Short
     external fun uniffi_actr_checksum_method_realmmembership_join(
     ): Short
     external fun uniffi_actr_checksum_method_realmmembership_key_id(
     ): Short
+    external fun uniffi_actr_checksum_method_realmmembership_leave(
+    ): Short
     external fun uniffi_actr_checksum_method_realmmembership_members(
+    ): Short
+    external fun uniffi_actr_checksum_method_realmmembership_remove_member(
     ): Short
     external fun uniffi_actr_checksum_method_realmmembership_revoke_client(
     ): Short
     external fun uniffi_actr_checksum_method_realmmembership_revoke_invite(
+    ): Short
+    external fun uniffi_actr_checksum_method_realmmembership_set_role(
+    ): Short
+    external fun uniffi_actr_checksum_method_realmmembership_transfer_owner(
     ): Short
     external fun uniffi_actr_checksum_method_actrnode_create_network_event_handle(
     ): Short
@@ -1232,15 +1242,25 @@ external fun uniffi_actr_fn_constructor_realmmembership_new(`realm`: RustBuffer.
 ): Long
 external fun uniffi_actr_fn_method_realmmembership_invite_client(`ptr`: Long,`memberId`: RustBuffer.ByValue,`expiresAt`: RustBuffer.ByValue,
 ): Long
+external fun uniffi_actr_fn_method_realmmembership_invite_member(`ptr`: Long,`role`: RustBuffer.ByValue,`expiresAt`: RustBuffer.ByValue,
+): Long
 external fun uniffi_actr_fn_method_realmmembership_join(`ptr`: Long,`invite`: RustBuffer.ByValue,`label`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_actr_fn_method_realmmembership_key_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+external fun uniffi_actr_fn_method_realmmembership_leave(`ptr`: Long,
+): Long
 external fun uniffi_actr_fn_method_realmmembership_members(`ptr`: Long,
+): Long
+external fun uniffi_actr_fn_method_realmmembership_remove_member(`ptr`: Long,`memberId`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_actr_fn_method_realmmembership_revoke_client(`ptr`: Long,`keyId`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_actr_fn_method_realmmembership_revoke_invite(`ptr`: Long,`inviteId`: RustBuffer.ByValue,
+): Long
+external fun uniffi_actr_fn_method_realmmembership_set_role(`ptr`: Long,`memberId`: RustBuffer.ByValue,`role`: RustBuffer.ByValue,
+): Long
+external fun uniffi_actr_fn_method_realmmembership_transfer_owner(`ptr`: Long,`memberId`: RustBuffer.ByValue,`previousOwnerRole`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_actr_fn_clone_actrnode(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
@@ -1586,19 +1606,34 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_realmmembership_invite_client() != 11104.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actr_checksum_method_realmmembership_invite_member() != 14689.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actr_checksum_method_realmmembership_join() != 21424.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_realmmembership_key_id() != 15245.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actr_checksum_method_realmmembership_leave() != 30159.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actr_checksum_method_realmmembership_members() != 26733.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_realmmembership_remove_member() != 35943.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_realmmembership_revoke_client() != 20506.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_realmmembership_revoke_invite() != 17822.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_realmmembership_set_role() != 47374.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_realmmembership_transfer_owner() != 60568.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_actrnode_create_network_event_handle() != 40057.toShort()) {
@@ -5100,6 +5135,12 @@ public interface RealmMembershipInterface {
     suspend fun `inviteClient`(`memberId`: kotlin.String, `expiresAt`: kotlin.String): kotlin.String
 
     /**
+     * Create a new editor/viewer invitation. Each successful call creates a
+     * distinct invitation, including a retry after an uncertain response.
+     */
+    suspend fun `inviteMember`(`role`: RealmMemberRole, `expiresAt`: kotlin.String): kotlin.String
+
+    /**
      * JSON uses the existing membership wire format. Errors retain its
      * stable codes without exposing a server/gateway response body.
      */
@@ -5107,12 +5148,33 @@ public interface RealmMembershipInterface {
 
     fun `keyId`(): kotlin.String
 
+    /**
+     * A committed leave invalidates this member's signer, including for retries.
+     */
+    suspend fun `leave`(): kotlin.String
+
     suspend fun `members`(): kotlin.String
+
+    /**
+     * Acknowledges Provider-side removal, not immediate closure of all peers.
+     */
+    suspend fun `removeMember`(`memberId`: kotlin.String): kotlin.String
 
     suspend fun `revokeClient`(`keyId`: kotlin.String): kotlin.String
 
     suspend fun `revokeInvite`(`inviteId`: kotlin.String): kotlin.String
     
+    /**
+     * The updated role takes effect through the next Actor credential.
+     */
+    suspend fun `setRole`(`memberId`: kotlin.String, `role`: RealmMemberRole): kotlin.String
+
+    /**
+     * Reconcile membership after an uncertain result: the previous owner may
+     * already lack permission to repeat a completed transfer.
+     */
+    suspend fun `transferOwner`(`memberId`: kotlin.String, `previousOwnerRole`: RealmMemberRole): kotlin.String
+
     companion object
 }
 
@@ -5247,6 +5309,31 @@ open class RealmMembership: Disposable, AutoCloseable, RealmMembershipInterface
 
 
     /**
+     * Create a new editor/viewer invitation. Each successful call creates a
+     * distinct invitation, including a retry after an uncertain response.
+     */
+    @Throws(RealmMembershipException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `inviteMember`(`role`: RealmMemberRole, `expiresAt`: kotlin.String) : kotlin.String {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_realmmembership_invite_member(
+                uniffiHandle,
+                FfiConverterTypeRealmMemberRole.lower(`role`),FfiConverterString.lower(`expiresAt`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterString.lift(it) },
+        // Error FFI converter
+        RealmMembershipException.ErrorHandler,
+    )
+    }
+
+
+    /**
      * JSON uses the existing membership wire format. Errors retain its
      * stable codes without exposing a server/gateway response body.
      */
@@ -5284,6 +5371,30 @@ open class RealmMembership: Disposable, AutoCloseable, RealmMembershipInterface
 
 
 
+    /**
+     * A committed leave invalidates this member's signer, including for retries.
+     */
+    @Throws(RealmMembershipException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `leave`() : kotlin.String {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_realmmembership_leave(
+                uniffiHandle,
+
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterString.lift(it) },
+        // Error FFI converter
+        RealmMembershipException.ErrorHandler,
+    )
+    }
+
+
     @Throws(RealmMembershipException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
     override suspend fun `members`() : kotlin.String {
@@ -5292,6 +5403,30 @@ open class RealmMembership: Disposable, AutoCloseable, RealmMembershipInterface
             UniffiLib.uniffi_actr_fn_method_realmmembership_members(
                 uniffiHandle,
 
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterString.lift(it) },
+        // Error FFI converter
+        RealmMembershipException.ErrorHandler,
+    )
+    }
+
+
+    /**
+     * Acknowledges Provider-side removal, not immediate closure of all peers.
+     */
+    @Throws(RealmMembershipException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `removeMember`(`memberId`: kotlin.String) : kotlin.String {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_realmmembership_remove_member(
+                uniffiHandle,
+                FfiConverterString.lower(`memberId`),
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
@@ -5334,6 +5469,55 @@ open class RealmMembership: Disposable, AutoCloseable, RealmMembershipInterface
             UniffiLib.uniffi_actr_fn_method_realmmembership_revoke_invite(
                 uniffiHandle,
                 FfiConverterString.lower(`inviteId`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterString.lift(it) },
+        // Error FFI converter
+        RealmMembershipException.ErrorHandler,
+    )
+    }
+
+
+    /**
+     * The updated role takes effect through the next Actor credential.
+     */
+    @Throws(RealmMembershipException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `setRole`(`memberId`: kotlin.String, `role`: RealmMemberRole) : kotlin.String {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_realmmembership_set_role(
+                uniffiHandle,
+                FfiConverterString.lower(`memberId`),FfiConverterTypeRealmMemberRole.lower(`role`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterString.lift(it) },
+        // Error FFI converter
+        RealmMembershipException.ErrorHandler,
+    )
+    }
+
+
+    /**
+     * Reconcile membership after an uncertain result: the previous owner may
+     * already lack permission to repeat a completed transfer.
+     */
+    @Throws(RealmMembershipException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `transferOwner`(`memberId`: kotlin.String, `previousOwnerRole`: RealmMemberRole) : kotlin.String {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_realmmembership_transfer_owner(
+                uniffiHandle,
+                FfiConverterString.lower(`memberId`),FfiConverterTypeRealmMemberRole.lower(`previousOwnerRole`),
             )
         },
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
@@ -7609,6 +7793,44 @@ public object FfiConverterTypePayloadType: FfiConverterRustBuffer<PayloadType> {
     override fun allocationSize(value: PayloadType) = 4UL
 
     override fun write(value: PayloadType, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * Roles assignable by member governance. Ownership is transferred atomically
+ * with `transfer_owner`; recovery uses an operator/domain-issued invite.
+ */
+
+enum class RealmMemberRole {
+
+    EDITOR,
+    VIEWER;
+
+
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRealmMemberRole: FfiConverterRustBuffer<RealmMemberRole> {
+    override fun read(buf: ByteBuffer) = try {
+        RealmMemberRole.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: RealmMemberRole) = 4UL
+
+    override fun write(value: RealmMemberRole, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
