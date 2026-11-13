@@ -343,6 +343,7 @@ pub async fn relay_identity_handler(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
+    let actor_certificate = issue_actor_certificate(&state, &request, &actor, &actor_type, now);
     let claims = serde_json::to_vec(&IdentityClaims {
         domain: CERTIFICATE_DOMAIN.into(),
         endpoint: request.endpoint,
@@ -369,8 +370,67 @@ pub async fn relay_identity_handler(
             public_key: *state.issuer_signing_key().verifying_key().as_bytes(),
             expires_at: now + CERTIFICATE_TTL,
         },
-        actor_certificate: None,
+        actor_certificate,
     }))
+}
+
+/// Mint an Actor channel certificate when the test enabled them and the
+/// enrollment carries a decodable Actor credential. Missing or malformed
+/// material degrades to the legacy response instead of failing enrollment.
+fn issue_actor_certificate(
+    state: &MockState,
+    request: &actr_relay_security::IdentityRequest,
+    actor: &actr_protocol::ActrId,
+    actor_type: &str,
+    now: u64,
+) -> Option<actr_relay_security::ActorChannelCertificate> {
+    use actr_protocol::prost::Message as _;
+    use actr_relay_security::*;
+    if !state
+        .actor_certificates_enabled
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return None;
+    }
+    let enrollment = request.actor.as_ref()?;
+    let credential =
+        actr_protocol::AIdCredential::decode(enrollment.actor_credential.as_slice()).ok()?;
+    let credential_claims =
+        actr_protocol::IdentityClaims::decode(credential.claims.as_ref()).ok()?;
+    let actor_public_key: [u8; 32] = credential_claims
+        .actor_public_key
+        .as_deref()?
+        .try_into()
+        .ok()?;
+    let role = actr_protocol::MemberRole::try_from(credential_claims.role).ok()?;
+    let claims = ActorChannelClaims {
+        realm: actor.realm.clone(),
+        actor_id: request.endpoint.clone(),
+        actor_type: actor_type.to_string(),
+        member: credential_claims.member,
+        client_key: credential_claims.client_key,
+        role: format!("{role:?}").to_lowercase(),
+        actor_public_key,
+        noise_public_key: request.public_key,
+        actor_credential_digest: enrollment.actor_credential_digest,
+        policy_digest: enrollment.policy_digest,
+        actor_state_digest: enrollment.actor_state_digest,
+        issuer: actor.realm.clone(),
+        provider: "mock-provider".into(),
+        audience: ACTOR_CHANNEL_AUDIENCE.into(),
+        expires_at: now + CERTIFICATE_TTL,
+        runtime_instance_id: enrollment.runtime_instance_id.clone(),
+    };
+    let certificate = ActorChannelCertificate::issue(
+        &claims,
+        state.issuer_signing_key_id(),
+        state.issuer_signing_key(),
+    )
+    .ok();
+    if certificate.is_none() {
+        tracing::warn!("mock-loran: Actor channel certificate issuance failed");
+    }
+    certificate
 }
 
 pub async fn relay_key_handler(

@@ -136,6 +136,22 @@ pub fn make_actor_type() -> actr_protocol::ActrType {
     }
 }
 
+/// Derive the same Actor signing key a node uses for a scoped identity.
+/// Integration tests use it to build Actrium Service configs and Front
+/// attach params that match the node's relay identity. Test-only export;
+/// production code keeps the key inside the signer.
+pub fn actor_signing_key_for_scoped(
+    storage_root: &std::path::Path,
+    realm: &str,
+    actor_type: &actr_protocol::ActrType,
+    namespace: Option<&str>,
+) -> ed25519_dalek::SigningKey {
+    let signer =
+        crate::issuer_client::actor_signer_for_scoped(storage_root, realm, actor_type, namespace)
+            .expect("Actor signer derivation");
+    ed25519_dalek::SigningKey::from_bytes(&signer.signing_key_bytes())
+}
+
 /// Create a dummy credential for testing.
 pub fn dummy_credential() -> AIdCredential {
     AIdCredential {

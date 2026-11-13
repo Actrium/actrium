@@ -212,6 +212,10 @@ impl FileActorKeySigner {
     pub(crate) fn actor_identity_key(&self) -> actr_relay_security::ActorIdentityKey {
         actr_relay_security::ActorIdentityKey::from_bytes(self.key.to_bytes())
     }
+
+    pub(crate) fn signing_key_bytes(&self) -> [u8; 32] {
+        self.key.to_bytes()
+    }
 }
 
 /// Resolve an instance-scoped signer. Service identities may default to the

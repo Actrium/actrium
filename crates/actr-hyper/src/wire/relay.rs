@@ -50,7 +50,7 @@ const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_DESIRED_PEERS: usize = 1024;
 
-fn runtime_instance_id() -> &'static str {
+pub(crate) fn runtime_instance_id() -> &'static str {
     static RUNTIME_INSTANCE_ID: OnceLock<String> = OnceLock::new();
     RUNTIME_INSTANCE_ID
         .get_or_init(|| uuid::Uuid::new_v4().to_string())
@@ -1427,7 +1427,12 @@ impl RelayClient {
                     )
                     .map_err(secure_error)?,
                 )),
-                (None, _) => None,
+                (None, _) => {
+                    tracing::debug!(
+                        "relay enrollment without Actor material (no storage root or credential)"
+                    );
+                    None
+                }
                 (Some(_), None) => {
                     // The Issuer does not issue Actor channel certificates (a
                     // mock or a deployment predating Actor channels). Degrade

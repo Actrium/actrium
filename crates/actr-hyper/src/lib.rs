@@ -248,6 +248,16 @@ pub use wire::{
     SignalingConfig, SignalingEvent, SignalingStats, WebRtcConfig,
 };
 
+/// Process-wide relay runtime instance identifier, generated on first use.
+///
+/// Every relay connection in this process shares it. Actrium Service hosts
+/// pass it as `ServiceConfig::runtime_instance_id` so the session registry can
+/// match the channel's local runtime view.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn process_runtime_instance_id() -> &'static str {
+    wire::relay::runtime_instance_id()
+}
+
 // Mailbox (from actr-runtime-mailbox crate)
 #[cfg(not(target_arch = "wasm32"))]
 pub use actr_runtime_mailbox::{
@@ -1161,36 +1171,6 @@ impl Node<Attached> {
         self
     }
 
-    /// Configure this node as an Actrium Front. Installs the response-proof
-    /// guard; after `start()`, [`crate::actr_ref::ActrRef::attach_actrium`]
-    /// connects and Attaches to Services. The Front is a pure caller in v1:
-    /// Service-originated business calls and streams are rejected.
-    pub fn with_actrium_front(mut self) -> Self {
-        let shared = Arc::new(crate::actrium::front::FrontShared::default());
-        let node = &mut self
-            .attachment
-            .as_mut()
-            .expect("Node<Attached> without attachment")
-            .node;
-        node.actrium_front = Some(shared.clone());
-        node.set_incoming_guard(Some(Arc::new(
-            crate::actrium::front::ActriumFrontGuard::new(shared),
-        )));
-        self
-    }
-
-    /// Install the complete Actrium Front–Service session protocol on this
-    /// Service node: the registry owns the exact `actrium.session.v1` system
-    /// routes, and the guard authorizes business requests, tells, and stream
-    /// chunks against current session policy and signs actual responses.
-    /// Session traffic requires the verified Actor channel; legacy transports
-    /// are rejected rather than implicitly trusted.
-    pub fn with_actrium_service(self, service: actrium_runtime::InMemorySessionService) -> Self {
-        let (registry, guard) = crate::actrium::ActriumServiceRegistry::new(service);
-        self.with_session_registry(Arc::new(registry))
-            .with_incoming_guard(Arc::new(guard))
-    }
-
     /// Register with Issuer, obtain an AId credential, and inject it into this
     /// attached node. Consumes `Node<Attached>` and returns `Node<Registered>`.
     ///
@@ -1439,6 +1419,49 @@ impl Node<Registered> {
             .node
             .session_registry = Some(registry);
         self
+    }
+
+    /// The Actor identity assigned by the Issuer at registration.
+    pub fn actor_id(&self) -> actr_protocol::ActrId {
+        self.attachment
+            .as_ref()
+            .expect("Node<Registered> without attachment")
+            .node
+            .preregistered_credential
+            .as_ref()
+            .expect("a registered node holds its issued credential")
+            .actr_id
+            .clone()
+    }
+
+    /// Configure this node as an Actrium Front. Installs the response-proof
+    /// guard; after `start()`, [`crate::actr_ref::ActrRef::attach_actrium`]
+    /// connects and Attaches to Services. The Front is a pure caller in v1:
+    /// Service-originated business calls and streams are rejected.
+    pub fn with_actrium_front(mut self) -> Self {
+        let shared = Arc::new(crate::actrium::front::FrontShared::default());
+        let node = &mut self
+            .attachment
+            .as_mut()
+            .expect("Node<Registered> without attachment")
+            .node;
+        node.actrium_front = Some(shared.clone());
+        node.set_incoming_guard(Some(Arc::new(
+            crate::actrium::front::ActriumFrontGuard::new(shared),
+        )));
+        self
+    }
+
+    /// Install the complete Actrium Front–Service session protocol on this
+    /// Service node: the registry owns the exact `actrium.session.v1` system
+    /// routes, and the guard authorizes business requests, tells, and stream
+    /// chunks against current session policy and signs actual responses.
+    /// Session traffic requires the verified Actor channel; legacy transports
+    /// are rejected rather than implicitly trusted.
+    pub fn with_actrium_service(self, service: actrium_runtime::InMemorySessionService) -> Self {
+        let (registry, guard) = crate::actrium::ActriumServiceRegistry::new(service);
+        self.with_session_registry(Arc::new(registry))
+            .with_incoming_guard(Arc::new(guard))
     }
 
     /// Start the attached, registered node and return the live [`ActrRef`].
