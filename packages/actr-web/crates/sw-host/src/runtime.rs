@@ -844,7 +844,7 @@ impl SwRuntime {
             actr_id: actor_id.clone(),
             registration,
             renewal_proof: Some(renewal_token.into()),
-            attempt_id: js_sys::Date::now().to_be_bytes().to_vec().into(),
+            attempt_id: uuid::Uuid::new_v4().as_bytes().to_vec().into(),
         };
         log::info!("[SW] reissuing credential to bind the Actor key (relay enrollment rejected)");
         let response = self

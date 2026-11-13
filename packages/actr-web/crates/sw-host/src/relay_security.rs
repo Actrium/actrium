@@ -370,6 +370,7 @@ pub async fn prepare_relay_connection(
     endpoint: String,
     channel: String,
     send: Function,
+    initiator: bool,
 ) -> Result<String, JsValue> {
     let peer = relay_peer_identity(client_id.clone(), endpoint).await?;
     let ctx = context(&client_id)?;
@@ -382,9 +383,16 @@ pub async fn prepare_relay_connection(
     let session = {
         let actor = ctx.relay_security.actor_identity.borrow().clone();
         match actor.as_deref() {
-            Some(actor) => ActorChannelSession::new_front(actor, &peer, &number.to_string(), now())
-                .map_err(error)?
-                .into_inner(),
+            Some(actor) if initiator => {
+                ActorChannelSession::new_front(actor, &peer, &number.to_string(), now())
+                    .map_err(error)?
+                    .into_inner()
+            }
+            Some(actor) => {
+                ActorChannelSession::new_service(actor, &peer, &number.to_string(), now())
+                    .map_err(error)?
+                    .into_inner()
+            }
             None => {
                 let identity = ctx.relay_security.identity.borrow();
                 SecureSession::new(

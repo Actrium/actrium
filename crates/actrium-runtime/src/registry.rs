@@ -305,15 +305,15 @@ impl InMemorySessionRegistry {
         retain_unexpired(&mut state.idempotency_keys, now, |entry| entry.timing);
 
         for entry in state.sessions.values_mut() {
-            let current_channel = entry.record.channel_id.clone();
-            entry.used_channel_ids.retain(|channel_id, used| {
-                *channel_id == current_channel || used.timing.deadline > now
-            });
+            // Channel IDs are single-use for the lifetime of the session. They
+            // are not TTL-evicted with replay metadata: a Resume that presents
+            // an old generation must still be rejected after the replay window
+            // has passed. The per-session capacity bound still limits memory.
             while entry.used_channel_ids.len() > self.config.max_channel_generations {
                 let oldest = entry
                     .used_channel_ids
                     .iter()
-                    .filter(|(channel_id, _)| **channel_id != current_channel)
+                    .filter(|(channel_id, _)| **channel_id != entry.record.channel_id)
                     .min_by_key(|(_, used)| used.timing.issued_at)
                     .map(|(channel_id, _)| channel_id.clone());
                 match oldest {
