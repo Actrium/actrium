@@ -1873,26 +1873,24 @@ private func setupReactNativeContent(for entry: TabViewControllerEntry) {
     // Root view will be created when tab config is received (event-driven)
 }
 
-/// Read the manifest entry from a verified extraction when one is provided.
-///
-/// The renderer prefers the digest-addressed extraction directory, but falls
-/// back to the inline `unifiedScript` when the bytes are unavailable — for
-/// example when the sandboxed renderer cannot read the Host's package cache.
+/// Prefer the verified extraction and use the host's inline script when it is unreadable.
 private func resolvedGuestScript(fromConfig config: [String: Any]) -> String? {
     let inlineScript = config["unifiedScript"] as? String
     guard let extractedPath = config["guestExtractedPath"] as? String else {
         return inlineScript
     }
     guard let entry = config["guestEntry"] as? String, !entry.isEmpty, !entry.hasPrefix("/") else {
-        return inlineScript
+        return nil
     }
 
     let root = URL(fileURLWithPath: extractedPath, isDirectory: true)
         .resolvingSymlinksInPath().standardizedFileURL
     let candidate = root.appendingPathComponent(entry)
         .resolvingSymlinksInPath().standardizedFileURL
-    guard candidate.path.hasPrefix(root.path + "/"),
-          let script = try? String(contentsOf: candidate, encoding: .utf8),
+    guard candidate.path.hasPrefix(root.path + "/") else {
+        return nil
+    }
+    guard let script = try? String(contentsOf: candidate, encoding: .utf8),
           !script.isEmpty else {
         return inlineScript
     }
