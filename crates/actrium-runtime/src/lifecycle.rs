@@ -984,16 +984,6 @@ impl LifecycleService {
         Ok(sessions.status(session_id).await?)
     }
 
-    /// Invalidate every active or grace session managed by the integrated
-    /// session service. Returns an error if no session service is linked.
-    pub async fn invalidate_all(&self) -> Result<(), LifecycleError> {
-        let sessions = self.inner.sessions.as_ref().ok_or_else(|| {
-            LifecycleError::InvalidRequest("no InMemorySessionService is integrated".into())
-        })?;
-        sessions.invalidate_all().await;
-        Ok(())
-    }
-
     /// Converges durable transient states after a host/process crash. Running
     /// and Suspended cannot survive a process restart, so they become Stopped.
     /// Incomplete creation intents remain resumable by their idempotency key.

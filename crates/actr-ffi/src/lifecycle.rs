@@ -628,15 +628,6 @@ impl ActrLifecycleService {
         run_on_tokio_runtime("lifecycle recover", async move { inner.recover().await }).await
     }
 
-    /// Invalidate every active or grace session for this service instance.
-    pub async fn invalidate_all(self: Arc<Self>) -> ActrResult<()> {
-        let inner = self.inner.clone();
-        run_on_tokio_runtime("lifecycle invalidate_all", async move {
-            inner.invalidate_all().await
-        })
-        .await
-    }
-
     /// Read the current persisted instance record, if any.
     pub fn instance(&self, actor_id: String) -> ActrResult<ServiceInstance> {
         self.inner
