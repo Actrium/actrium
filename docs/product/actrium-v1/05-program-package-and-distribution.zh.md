@@ -90,7 +90,7 @@ Publisher 分别签署并分发各包。创建 Realm 时，从 Program Catalog�
   Product v1 的 Front 清单保留 `service` 依赖别名，并必须声明 `required = true`。
   `actor` 和 `version` 约束必须与 Realm 选定的 Service 匹配。
 
-每个包的入口使用角色 `workload`。Guest 能力清单使用 `profile`，Keel 和 Proto 契约使用 `contract`，
+每份 Product v1 清单在 `[[files]]` 中恰好列出一个角色为 `workload` 的入口。Guest 能力清单使用 `profile`，Keel 和 Proto 契约使用 `contract`，
 图标和静态资源使用 `resource`。
 
 ### 4.2 推荐目录
@@ -192,13 +192,30 @@ Actr 基础清单提供以下表。
 - Service manifest 的 `[workspace]` 声明静态的 `requirement`、`access` 和 `providers`。
 
 Front 按 `dependencies.service.contract` 读取自己包内的 RPC Proto，Service 按自身清单选取导出的 Proto。
-两个文件的角色必须为 `contract`，SHA-256 必须一致，包内路径和文件名可以不同。Attach 指纹见[第 06 章 §2.2](06-runtime-and-protocol.zh.md#22-front-actor-类型)。
+两个文件的角色必须为 `contract`，SHA-256 必须一致，包内路径和文件名可以不同。
+RPC Proto 必须在一个文件内定义所有引用的消息和枚举类型，不得包含 `import`。
+Attach 指纹见[第 06 章 §2.2](06-runtime-and-protocol.zh.md#22-front-actor-类型)。
 
 Service 节点使用现有 Actr `actr.toml` 格式配置 Realm、信令和信任等部署参数。字段见
 [节点配置定义](../../../crates/actr-config/src/actr_raw.rs)。Workspace 要求来自签名 Service manifest 的
 `[workspace]`。部署或创建流程选择 `provisioning`，Host 按实例保存绑定和实际授权。
 
 两份完整清单见[参考协议](12-reference-spec.zh.md#4-actr-manifest)。
+
+### 6.1 CLI 打包与验包
+
+`actr pkg pack` 读取已构建的载荷和完整的 `actr-package/2` 包清单。输入需提供
+`[signature]` 表及 `[[files]]` 的大小和 SHA-256。打包时重新计算大小、哈希和
+`signature.key-id`。`actr pkg sign` 读取含 `[package]` 的 Workload 项目清单，写出签名的扁平清单。
+
+每次 `actr pkg pack` 或 `actr pkg verify` 校验一个归档。CLI 校验 `actr.component/1` 的导出接口。
+对于 JS `keel.guest/1`，CLI 检查入口是否为非空 UTF-8，并校验清单引用的能力清单字段。
+声明 `[dependencies.service]` 时，CLI 检查该声明和选定的自包含 RPC Proto。
+当前 CLI 支持的 Service 清单省略 `[workspace]`。跨包兼容性和运行时 Workspace 约束由 Host 检查。
+
+如果 Keel 版本支持 `--v1-capability-manifest`，使用该选项并提供 `--contract` 生成 V1 能力清单。
+生成的 `guestEntry` 必须匹配 `workload.entry`。V1 格式示例见
+[第 12 章 §5](12-reference-spec.zh.md#5-keel-capability-manifest)。
 
 ## 7. 能力声明与运行时策略
 
@@ -237,18 +254,13 @@ Privacy Declaration 是静态 allowlist 和安装说明，不是运行时隐私�
 
 ## 8. 下载与验证流水线
 
-```text
-Realm Profile 包选择 / 本机选包
-  → 验证 Service 包
-  → 验证 Front 包及其 Service 依赖
-  → policy + permission review
-  → content-addressed cache
-  → Service Runtime / verified Guest bytes
-```
-
 ### 8.1 检查顺序
 
-先验 Realm Profile，再逐包执行以下检查。精确类型和整包 SHA-256 须与对应条目一致。Front 的 `dependencies.service` 须匹配已验证的 Service。
+打开已有 Realm 时，客户端验证 Realm Profile，再获取并验证选定的 Front 归档。
+按签名的 Service 引用检查 Front 的 `dependencies.service`，在 Attach 时与通过身份验证的
+Service 核对 RPC 契约。部署 Service 或导入本地包时，验证所选归档及其兼容性。
+
+对获取的每份归档执行以下检查。已提供引用时，精确类型和整包 SHA-256 须与对应条目一致。
 
 1. 校验 Publisher DNS/IDNA；
 2. TLS 和 hostname；

@@ -279,7 +279,7 @@ higher-sequence Profile. The primary entry identifies the upgraded Service archi
 
 ### 6.2 Open instance
 
-To open a Realm link, verify its Profile and both selected packages. Find the Service in the Realm by its Actor type and Attach from the selected Front.
+To open a Realm link, verify its Profile and fetch and verify the selected Front archive. Find the Service in the Realm by the Actor type in the signed Service reference and Attach from the Front.
 
 - no load balancing, no switching to another Realm;
 - never creates a new instance because of offline;

@@ -70,19 +70,21 @@ notes.example/team-notes-front@1.4.2
 During Attach, the Service checks the peer Front type against `packages[front_package].type` in its accepted selection.
 The Actr Host supplies these values during Attach.
 
-- the Program Release;
-- the Service package digest;
+- the Service Actor type and archive digest from the accepted Realm selection;
 - the Guest entry's digest from the verified Front manifest;
 - the Front Host API;
 - the Keel API;
 - the protocol fingerprint;
 - a local tab session nonce.
 
-The Actrium Host alone constructs these values from the verified packages and local session state.
+The Actrium Host alone constructs these values from the accepted Realm selection, the verified
+Front archive and local session state.
 The Service treats them as client declarations for compatibility negotiation.
 
 Each Host reads the matching RPC Proto from its own verified archive. Both use the basename of the
-Service's exported Proto, including `.proto`, as `ProtoFile.name` for `Fingerprint::calculate_service_semantic_fingerprint`.
+Service's exported Proto, including `.proto`, as `ProtoFile.name` for
+`Fingerprint::calculate_service_semantic_fingerprint`. The Proto must resolve all referenced
+messages and enums without imports.
 
 The algorithm obtains each file's semantic fingerprint from `proto_fingerprint::Spec`,
 sorts files by `name`, and joins the `name:semantic-fingerprint` entries with LF, without a trailing LF.
@@ -421,7 +423,7 @@ The Service checks, in order:
 3. the Front Actor type; if policy requires a trusted runtime, it also verifies a separate platform/runtime attestation;
 4. the challenge/nonce, against replay;
 5. the target Service ActorId;
-6. the Program Release (a compatibility declaration);
+6. the Service Actor type declared by the client against its accepted Realm selection;
 7. the Service package digest as a compatibility declaration. Verifying the remote code requires separate evidence.
 8. the protocol fingerprint;
 9. Application permissions: the member id, Realm client key id and role (owner/editor/viewer) in the Front credential, plus the Workspace scope;

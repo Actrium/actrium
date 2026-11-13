@@ -279,7 +279,7 @@ ActorId 按迁移规则变化。确认切换后，Realm 在更高 `sequence` 的
 
 ### 6.2 打开实例
 
-打开 Realm 链接时，验证 Profile 和选定的两个包，按 Service 的 Actor 类型在该 Realm 内找到实例，由选定的 Front Attach。
+打开 Realm 链接时，验证 Profile，获取并验证选定的 Front 归档。按已签名的 Service 引用中的 Actor 类型在该 Realm 内找到实例，由 Front Attach。
 
 - 不做 LB，不换到其他 Realm；
 - 不因为 offline 而创建新实例；

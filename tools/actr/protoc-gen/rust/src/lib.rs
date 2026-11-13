@@ -31,3 +31,8 @@ pub use payload_type_extractor::{
     ExplicitPayloadTypeMap, MethodKey, PayloadType, build_explicit_payload_types,
 };
 pub use unified_dispatch::UnifiedDispatcherGenerator;
+
+/// Return the Rust module path that Prost uses for a Protobuf package.
+pub fn proto_module_path(package: &str) -> String {
+    prost_build::Module::from_protobuf_package_name(package).to_string()
+}

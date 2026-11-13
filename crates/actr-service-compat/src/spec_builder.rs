@@ -119,6 +119,13 @@ fn self_contained_proto_hash(source: &str) -> anyhow::Result<String> {
     Ok(format!("{:x}", Sha256::digest(encoded)))
 }
 
+/// Verify that a standalone RPC Proto resolves all its types without imports.
+pub fn validate_self_contained_rpc_proto(source: &str) -> Result<()> {
+    self_contained_proto_hash(source)
+        .map(|_| ())
+        .map_err(CompatibilityError::ProtoSignError)
+}
+
 fn make_protobuf(proto: &ProtoFile, fingerprint: String) -> Protobuf {
     Protobuf {
         package: proto.name.trim_end_matches(".proto").to_string(),

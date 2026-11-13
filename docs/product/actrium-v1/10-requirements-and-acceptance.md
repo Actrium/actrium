@@ -20,7 +20,7 @@
 | ID | Requirement |
 |---|---|
 | FR-URI-001 | Realm links of the form `actr://<Realm domain>/<realm_id>[/<page path>][?…][#…]` MUST be supported; everything after the RealmId is passed to the application as-is. |
-| FR-URI-002 | On Realm entry, Actrium MUST verify the signed Profile and both selected archives, check the Front’s Service dependency, then Attach to the Service in that Realm. |
+| FR-URI-002 | When opening an existing Realm, Actrium MUST verify the signed Profile and fetch only the selected Front archive. It MUST verify that archive, match its required Service dependency to the signed Service reference, and confirm the RPC contract during Attach to the authenticated Service. |
 | FR-URI-003 | An Attach failure MUST NOT trigger load balancing, downgrading to another version, switching Realm, or creating a substitute instance. |
 | FR-URI-004 | The Service Actor type MUST match the primary package's manifest. |
 | FR-URI-005 | A Realm link MUST NOT contain a credential, session secret, Workspace secret or bearer invite. |
@@ -742,4 +742,5 @@ Telemetry defaults to off. Release metrics are obtained primarily through local 
 | Publisher verification | Reject a tampered archive, invalid manifest signature, or incompatible Service dependency or RPC contract before loading. Recheck policy on cache reuse. |
 | Registration | Only an owner client can register any version of the primary program. An unresolved primary fails registration. Archive selection grants no membership or capabilities. |
 | Multiple Actors | An authorized deployment starts the Service and two auxiliary Actors with separate identities and state. They complete an RPC, and rerunning deployment creates no duplicates. |
+| Open an existing Realm | With the Service running and its archive URL unavailable to the client, the client opens the Realm using the verified Front archive and the signed Service reference. A mismatched Service type or RPC contract prevents Guest execution. |
 | Host support | The Host rejects an unsupported archive format or workload before execution. |

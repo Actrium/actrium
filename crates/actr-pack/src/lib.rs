@@ -34,6 +34,9 @@ pub mod verify;
 mod runtime;
 mod util;
 
+#[cfg(feature = "profile-validation")]
+mod profiles;
+
 pub use actor_package::{
     ACTOR_PACKAGE_FORMAT_V2, ActorDependency, ActorDescriptor, ActorPackOptions,
     ActorPackageManifest, ActriumExtension, HostRequirements, InspectedActorPackage,

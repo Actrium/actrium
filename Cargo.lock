@@ -81,6 +81,7 @@ dependencies = [
  "rusqlite",
  "rust-embed",
  "rustls",
+ "same-file",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -176,6 +177,7 @@ dependencies = [
  "hex",
  "proc-macro2",
  "prost",
+ "prost-build",
  "prost-reflect",
  "prost-types",
  "protobuf",
@@ -314,17 +316,23 @@ dependencies = [
 name = "actr-pack"
 version = "0.10.7"
 dependencies = [
+ "actr-framework",
  "actr-protocol",
+ "actr-service-compat",
  "base64",
  "ed25519-dalek",
  "hex",
  "rand 0.8.6",
  "semver",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.18",
  "toml 1.1.2+spec-1.1.0",
  "tracing",
+ "wasmparser 0.254.2",
+ "wit-component 0.254.2",
+ "wit-parser 0.254.2",
  "zip",
 ]
 

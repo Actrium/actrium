@@ -40,7 +40,7 @@ actr = { path = "../actr", version = "0.10.7", features = ["config"] }
 actr-hyper = { path = "../actr-hyper", version = "0.10.7" }
 
 # Package format (.actr ZIP STORE)
-actr-pack.workspace = true
+actr-pack = { workspace = true, features = ["profile-validation"] }
 
 # Platform provider for native execution
 actr-platform-native = { path = "../actr-platform-native", version = "0.10.7" }
@@ -80,6 +80,7 @@ fs_extra = "1.3"
 tempfile = "3.22"
 dirs = "5.0"
 walkdir = "2.5"
+same-file = "1.0.6"
 rusqlite = { workspace = true, optional = true }
 
 # Process management

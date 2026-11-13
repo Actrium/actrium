@@ -433,6 +433,20 @@ EOF
     run_actr pkg pack --manifest-path "$payload/manifest.toml" --payload-root "$payload" \
         --key "$SERVICE_KEYCHAIN" --output "$SERVICE_PACKAGE"
     run_actr pkg verify --pubkey "$PROVISIONED_PUBLIC_KEY" --package "$SERVICE_PACKAGE"
+
+    # Keep the valid Component and replace only its exported RPC contract.
+    local invalid_payload="$RUN_DIR/v2-echo-invalid-payload"
+    local invalid_package="$DIST_DIR/echo-v2-invalid.actr"
+    cp -R "$payload" "$invalid_payload"
+    printf 'syntax = "proto3";\nservice EchoService {\n' >"$invalid_payload/contracts/echo.proto"
+    if run_actr pkg pack --manifest-path "$invalid_payload/manifest.toml" \
+        --payload-root "$invalid_payload" --key "$SERVICE_KEYCHAIN" --output "$invalid_package" \
+        >"$LOG_DIR/invalid-service-proto.log" 2>&1; then
+        fail "Packing a Component with an invalid Service RPC Proto unexpectedly succeeded"
+    fi
+    grep -Fq 'invalid Service Proto `contracts/echo.proto`' "$LOG_DIR/invalid-service-proto.log" ||
+        fail "The invalid Service RPC Proto failed for an unexpected reason"
+    [ ! -e "$invalid_package" ] || fail "Packing an invalid Service RPC Proto published an archive"
 }
 
 client_guest_library_path() {

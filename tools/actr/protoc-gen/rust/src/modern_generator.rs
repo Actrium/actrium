@@ -202,7 +202,7 @@ use async_trait::async_trait;
         let mut packages = Vec::new();
         for method in methods {
             for type_name in [method.input_type(), method.output_type()] {
-                let module = self.resolve_declaring_package(type_name).replace('.', "_");
+                let module = crate::proto_module_path(&self.resolve_declaring_package(type_name));
                 if !module.is_empty() && !packages.contains(&module) {
                     packages.push(module);
                 }
@@ -583,10 +583,7 @@ All remote calls determine the target service and method at compile time — no 
         let Some((short_type, parents)) = message_path.split_last() else {
             return Ok(cleaned.to_string());
         };
-        let module = self
-            .resolve_declaring_package(type_name)
-            .replace('.', "_")
-            .to_snake_case();
+        let module = crate::proto_module_path(&self.resolve_declaring_package(type_name));
         if module.is_empty() {
             Ok(short_type.clone())
         } else {
@@ -726,7 +723,7 @@ mod tests {
 
         let code = result.unwrap();
         // Client code should also contain RpcRequest impl
-        assert!(code.contains("impl RpcRequest for super::test_v1::EchoRequest"));
+        assert!(code.contains("impl RpcRequest for super::test::v1::EchoRequest"));
         assert!(code.contains("fn payload_type() -> PayloadType"));
         assert!(code.contains("timeout_ms : i64"));
         assert!(code.contains("self . ctx . call (& Dest :: from (target) , req , timeout_ms)"));
@@ -805,7 +802,7 @@ mod tests {
         );
         // The business-facing surface is unaffected.
         assert!(code.contains("pub trait TestServiceHandler"));
-        assert!(code.contains("impl RpcRequest for super::test_v1::EchoRequest"));
+        assert!(code.contains("impl RpcRequest for super::test::v1::EchoRequest"));
         assert!(code.contains("fn payload_type() -> PayloadType"));
         // The usage docs point at the unified adapter, never the legacy
         // per-service entry.

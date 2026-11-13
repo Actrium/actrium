@@ -20,7 +20,7 @@
 | ID | 需求 |
 |---|---|
 | FR-URI-001 | 必须支持 Realm 链接 `actr://<Realm 域名>/<realm_id>[/<页面路径>][?…][#…]`；RealmId 之后的部分原样交给应用。 |
-| FR-URI-002 | 打开 Realm 链接时必须验证签名 Profile 和选中的两个包，核对 Front 的 Service 依赖，再 Attach 到该 Realm 的 Service。 |
+| FR-URI-002 | 打开已有 Realm 时，Actrium 必须验证签名 Profile，只获取并验证选定的 Front 归档，按签名的 Service 引用核对 Front 的必需依赖，并在 Attach 时与通过身份验证的 Service 核对 RPC 契约。 |
 | FR-URI-003 | Attach 失败不得 LB、降级版本、换 Realm 或创建替代实例。 |
 | FR-URI-004 | Service 的 Actor 类型必须匹配主包的 manifest。 |
 | FR-URI-005 | Realm 链接不得包含 credential、session secret、Workspace secret 或 bearer invite。 |
@@ -742,4 +742,5 @@ Linux/通用服务器宿主、云端自动调度、浏览器 Web 版和跨 Realm
 | Publisher 验证 | 加载前拒绝被篡改的归档、无效清单签名、不匹配的 Service 依赖或 RPC 契约。复用缓存时复核策略。 |
 | 注册 | 主程序的任意版本仅允许 owner 客户端注册。主引用无效时拒绝注册。成员身份和能力授权单独校验。 |
 | 多 Actor | 按授权配置启动 Service 和两个不同包的辅助 Actor，各自持有独立身份和状态，能完成 RPC。重复部署不产生重复实例。 |
+| 打开已有 Realm | Service 正在运行且客户端无法访问其归档地址时，客户端使用已验证的 Front 归档和已签名的 Service 引用打开 Realm。Service 类型或 RPC 契约不符时不得运行 Guest。 |
 | Host 支持 | Host 在执行前拒绝不支持的包格式或 workload。 |

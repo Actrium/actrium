@@ -68,7 +68,10 @@ pub use actr_protocol::ServiceSpec;
 // Re-export our specific types
 pub use compatibility::{BreakingChange, ServiceCompatibility};
 pub use fingerprint::Fingerprint;
-pub use spec_builder::{ServiceSpecInput, build_self_contained_service_spec, build_service_spec};
+pub use spec_builder::{
+    ServiceSpecInput, build_self_contained_service_spec, build_service_spec,
+    validate_self_contained_rpc_proto,
+};
 pub use types::{CompatibilityLevel, ProtoFile};
 
 /// Detailed compatibility analysis result (Rust-specific, extends proto version)
