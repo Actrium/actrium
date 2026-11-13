@@ -557,3 +557,30 @@ async fn invalidate_all_releases_sessions_but_keeps_bounded_attach_tombstones() 
         fixture.assert_bounded(fixture.service.registry().retention_stats().await);
     }
 }
+
+#[tokio::test]
+async fn resume_rejects_historical_channel_after_retention_expires() {
+    let fixture = Fixture::new();
+    let channel_a = fixture.channel("channel-a");
+    let outcome = fixture
+        .service
+        .attach(fixture.attach_request(&channel_a, "attach-a"), &channel_a)
+        .await
+        .unwrap();
+    let channel_b = fixture.channel("channel-b");
+    let outcome = fixture
+        .service
+        .resume(resume_request(&outcome, &channel_b), &channel_b)
+        .await
+        .unwrap();
+    fixture.clock.advance(21);
+    fixture.heartbeat(&outcome, &channel_b).await;
+    let result = fixture
+        .service
+        .resume(resume_request(&outcome, &channel_a), &channel_a)
+        .await;
+    let Err(error) = result else {
+        panic!("expected resume on a historical channel to fail")
+    };
+    assert_eq!(error.code, AttachErrorCode::ChannelIdentityMismatch);
+}
