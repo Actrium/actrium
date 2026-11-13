@@ -890,8 +890,14 @@ pub fn generate_installation_id() -> String {
 /// Validate an installation id against the `.actr.alt` domain rules.
 pub fn validate_installation_id(id: String) -> Result<(), CoreError> {
     let valid = id.len() == 26
-        && id.bytes().all(|byte| matches!(byte, b'a'..=b'z' | b'2'..=b'7'));
-    if valid { Ok(()) } else { Err(CoreError::InvalidInstallationId) }
+        && id
+            .bytes()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'2'..=b'7'));
+    if valid {
+        Ok(())
+    } else {
+        Err(CoreError::InvalidInstallationId)
+    }
 }
 
 /// Lowercase RFC 4648 base32 without padding. 16 bytes yield exactly 26
@@ -921,10 +927,7 @@ fn encode_base32_lowercase(bytes: &[u8]) -> String {
 /// `realm_link::open_realm_link`, which validates installation ownership
 /// and rejects authority-only URIs, then dispatches a matching local Realm
 /// to `open_local` and a DNS Realm to `discover_remote`.
-pub fn parse_actr_uri(
-    uri: String,
-    installation_id: String,
-) -> Result<ActrUriInfo, CoreError> {
+pub fn parse_actr_uri(uri: String, installation_id: String) -> Result<ActrUriInfo, CoreError> {
     realm_link::open_realm_link::<ActrUriInfo, CoreError>(
         &uri,
         &installation_id,
@@ -972,9 +975,9 @@ pub fn accept_authority_descriptor(
         .href
         .clone();
 
-    let member = value.get("realm_signing_keys").ok_or_else(|| {
-        invalid("descriptor carries no realm_signing_keys".to_string())
-    })?;
+    let member = value
+        .get("realm_signing_keys")
+        .ok_or_else(|| invalid("descriptor carries no realm_signing_keys".to_string()))?;
     let (keys, _outcome) =
         authority::RealmSigningKeys::accept(member, None).map_err(CoreError::from)?;
 
@@ -1012,9 +1015,9 @@ pub fn accept_realm_profile(
     let selection = profile.selection.as_ref().ok_or_else(|| {
         CoreError::RealmProfileInvalid("active Realm has no package selection".to_string())
     })?;
-    let (service, front) = selection.selected().map_err(|error| {
-        CoreError::RealmProfileInvalid(format!("package selection: {error}"))
-    })?;
+    let (service, front) = selection
+        .selected()
+        .map_err(|error| CoreError::RealmProfileInvalid(format!("package selection: {error}")))?;
 
     Ok(RealmProfileInfo {
         realm_name: profile.realm.name.clone(),
