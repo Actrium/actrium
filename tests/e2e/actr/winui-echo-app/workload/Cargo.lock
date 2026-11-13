@@ -229,6 +229,7 @@ dependencies = [
  "actr-protocol",
  "async-trait",
  "ed25519-dalek",
+ "rand 0.8.8",
  "serde",
  "serde_json",
  "sha2",
