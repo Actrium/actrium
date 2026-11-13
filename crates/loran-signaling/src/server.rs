@@ -417,9 +417,8 @@ impl SignalingServer {
 /// retirements are announced. Likewise drop every Actor disabled by a
 /// revoked or replaced Realm client key.
 ///
-/// `cancel` retires this server (a configuration reload builds a new one),
-/// but its connections stay open, so the task keeps following until the
-/// last of them is gone.
+/// `cancel` retires this server on configuration reload. Keep following
+/// state changes until all of its WebSockets have finished closing.
 pub async fn follow_realm_retirements(
     server: SignalingServerHandle,
     cancel: tokio_util::sync::CancellationToken,
@@ -662,6 +661,7 @@ pub async fn handle_websocket_connection(
         url_identity,
         webrtc_role,
         true,
+        tokio_util::sync::CancellationToken::new(),
     )
     .await
 }
@@ -673,6 +673,7 @@ pub(crate) async fn handle_websocket_connection_inner(
     url_identity: Option<(ActrId, ActrType, AIdCredential)>,
     webrtc_role: Option<String>,
     require_client_auth: bool,
+    shutdown: tokio_util::sync::CancellationToken,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client_id = Uuid::new_v4().to_string();
     platform::recording::info!(
@@ -740,7 +741,7 @@ pub(crate) async fn handle_websocket_connection_inner(
                 id: client_id.clone(),
                 actor_id,
                 credential,
-                egress,
+                egress: egress.clone(),
                 client_ip,
                 webrtc_role: webrtc_role.clone(),
             },
@@ -961,8 +962,19 @@ pub(crate) async fn handle_websocket_connection_inner(
     ));
     let mut receive_task = receive_task;
 
-    // Wait for either task to complete
+    // Retired router instances have their own registry. End their WebSockets
+    // so clients reconnect and register with the replacement router.
     tokio::select! {
+        biased;
+        _ = shutdown.cancelled() => {
+            receive_task.abort();
+            let _ = receive_task.await;
+            egress.close(axum::extract::ws::CloseFrame {
+                code: axum::extract::ws::close_code::RESTART,
+                reason: "signaling router replaced".into(),
+            });
+            let _ = send_task.await;
+        },
         result = &mut receive_task => {
             if let Err(e) = result {
                 platform::recording::warn!(
