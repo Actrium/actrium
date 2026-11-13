@@ -19,6 +19,7 @@ mod logger;
 mod opus;
 mod realm_membership;
 mod runtime;
+mod session;
 mod types;
 mod workload;
 
@@ -28,6 +29,7 @@ pub use log_callback::*;
 pub use opus::*;
 pub use realm_membership::*;
 pub use runtime::*;
+pub use session::*;
 pub use types::*;
 pub use workload::*;
 

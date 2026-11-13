@@ -213,6 +213,7 @@ impl FileActorKeySigner {
         actr_relay_security::ActorIdentityKey::from_bytes(self.key.to_bytes())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn signing_key_bytes(&self) -> [u8; 32] {
         self.key.to_bytes()
     }

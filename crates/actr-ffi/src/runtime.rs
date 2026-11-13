@@ -1,6 +1,11 @@
 //! Runtime wrappers for UniFFI export
 
 use crate::error::{ActrError, ActrResult, run_on_tokio_runtime};
+use crate::session::{
+    ActrFrontSessionWrapper, ActriumAttachParams, ActriumServiceConfig, ActriumServicePolicies,
+    actr_ref_attach_actrium, registered_node_with_actrium_front,
+    registered_node_with_actrium_service,
+};
 use crate::types::{
     ActrId, ActrType, AppLifecycleState, CleanupReason, NetworkEventResult, NetworkSnapshot,
     PayloadType, ReconnectReason,
@@ -239,6 +244,36 @@ impl ActrNode {
         );
 
         Ok(Arc::new(NetworkEventHandleWrapper { inner: handle }))
+    }
+
+    /// Configure this node as an Actrium Front. Must be called before `start()`.
+    pub fn with_actrium_front(self: Arc<Self>) -> ActrResult<Arc<Self>> {
+        let this = self.clone();
+        let mut node_guard = this.inner.lock();
+        let node = node_guard.take().ok_or_else(|| ActrError::Internal {
+            msg: "runtime node is no longer available".to_string(),
+        })?;
+        *node_guard = Some(registered_node_with_actrium_front(node));
+        Ok(self)
+    }
+
+    /// Install an Actrium Service registry on this node. Must be called before
+    /// `start()`. The supplied policies are allow-all; future versions can
+    /// expose callback-driven policy dimensions.
+    pub fn with_actrium_service(
+        self: Arc<Self>,
+        config: ActriumServiceConfig,
+        policies: Arc<ActriumServicePolicies>,
+    ) -> ActrResult<Arc<Self>> {
+        let this = self.clone();
+        let mut node_guard = this.inner.lock();
+        let node = node_guard.take().ok_or_else(|| ActrError::Internal {
+            msg: "runtime node is no longer available".to_string(),
+        })?;
+        *node_guard = Some(registered_node_with_actrium_service(
+            node, config, policies,
+        )?);
+        Ok(self)
     }
 }
 
@@ -542,6 +577,15 @@ impl ActrRefWrapper {
                 Err(ActrError::from(e))
             }
         }
+    }
+
+    /// Attach to an Actrium Service over the verified Actor channel.
+    pub async fn attach_actrium(
+        &self,
+        service: ActrId,
+        params: ActriumAttachParams,
+    ) -> ActrResult<Arc<ActrFrontSessionWrapper>> {
+        actr_ref_attach_actrium(&self.inner, service, params).await
     }
 
     /// Trigger shutdown.
