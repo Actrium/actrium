@@ -13,6 +13,7 @@ path = "src/lib.rs"
 
 [dependencies]
 actr-pack.workspace = true
+actr-config.workspace = true
 actr-protocol.workspace = true
 ed25519-dalek.workspace = true
 rand.workspace = true

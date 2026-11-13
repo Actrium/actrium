@@ -1,11 +1,11 @@
 //! Fetch the archives named by a verified Realm Profile. No fetched code executes here.
 use actr_pack::{
     ActorPackageManifest,
-    realm::{check_realm_pair, verify_realm_archive},
+    realm::{check_realm_dependencies, check_realm_pair, verify_realm_archive},
 };
 use actr_protocol::{
     AuthorityDescriptor, KeyPinOutcome, KeyPins, PublisherKeys, RealmSigningKeys,
-    realm_profile::{RealmPackage, RealmProfile, RealmStatus},
+    realm_profile::{RealmPackage, RealmPackageSelection, RealmProfile, RealmStatus},
     uri::{ActrUri, is_forbidden_address},
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -13,7 +13,7 @@ use clap::Args;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fs::File,
     future::Future,
     io::{Read, Write},
@@ -36,6 +36,17 @@ pub struct FetchArgs {
     #[arg(long = "package", value_name = "REF")]
     pub additional: Vec<String>,
     /// Realm-specific directory for verified archives and trust pins
+    #[arg(long, value_name = "DIR")]
+    pub output: PathBuf,
+}
+
+/// Validate manually selected archives before creating or updating a Realm.
+#[derive(Args, Debug)]
+pub struct CheckArgs {
+    /// JSON file with primary_package, front_package and the complete packages map
+    #[arg(long, value_name = "FILE")]
+    pub selection: PathBuf,
+    /// Directory for verified archives and Publisher trust pins
     #[arg(long, value_name = "DIR")]
     pub output: PathBuf,
 }
@@ -264,20 +275,81 @@ where
         .selection
         .as_ref()
         .context("missing active selection")?;
+    let roots = [&selection.primary_package, &selection.front_package]
+        .into_iter()
+        .chain(&args.additional)
+        .cloned()
+        .collect();
+    let mut result =
+        prepare_selection(selection, &args.output, &mut cache, &path, roots, &get).await?;
+    result["realm"] = json!(args.realm);
+    result["sequence"] = json!(profile.sequence);
+    Ok(result)
+}
+
+pub async fn check_selection(args: &CheckArgs) -> Result<Value> {
+    check_selection_with(
+        args,
+        |url, limit| async move { download(&url, limit).await },
+    )
+    .await
+}
+
+pub(super) async fn check_selection_with<F, Fut>(args: &CheckArgs, get: F) -> Result<Value>
+where
+    F: Fn(String, usize) -> Fut,
+    Fut: Future<Output = Result<Vec<u8>>>,
+{
+    let selection = super::realm::read_selection(&args.selection)?;
+    std::fs::create_dir_all(&args.output)?;
+    let lock = File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(args.output.join(".lock"))?;
+    let _lock = tokio::task::spawn_blocking(move || {
+        lock.lock()?;
+        std::io::Result::Ok(lock)
+    })
+    .await??;
+    let path = args.output.join("selection-state.json");
+    let mut cache: Cache = match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Cache::default(),
+        Err(error) => return Err(error.into()),
+    };
+    let roots = selection.packages.keys().cloned().collect();
+    let mut result =
+        prepare_selection(&selection, &args.output, &mut cache, &path, roots, &get).await?;
+    result["selection"] = serde_json::to_value(&selection)?;
+    Ok(result)
+}
+
+async fn prepare_selection<F, Fut>(
+    selection: &RealmPackageSelection,
+    output: &Path,
+    cache: &mut Cache,
+    path: &Path,
+    roots: Vec<String>,
+    get: &F,
+) -> Result<Value>
+where
+    F: Fn(String, usize) -> Fut,
+    Fut: Future<Output = Result<Vec<u8>>>,
+{
     let mut publishers = BTreeMap::new();
     let mut privacy_contract = None;
     let mut manifests = BTreeMap::new();
     let mut files = BTreeMap::new();
-    for name in [&selection.primary_package, &selection.front_package]
-        .into_iter()
-        .chain(&args.additional)
-    {
-        if files.contains_key(name) {
+    let mut locks = BTreeMap::new();
+    let mut queue = VecDeque::from(roots);
+    while let Some(name) = queue.pop_front() {
+        if files.contains_key(&name) {
             continue;
         }
         let entry = selection
             .packages
-            .get(name)
+            .get(&name)
             .with_context(|| format!("unknown package reference {name:?}"))?;
         let domain = entry.actr_type().map_err(anyhow::Error::msg)?.publisher;
         let keys = match publishers.entry(domain.clone()) {
@@ -289,14 +361,14 @@ where
                     DOCUMENT_LIMIT,
                 )
                 .await?;
-                let keys = publisher_keys(&domain, &uri, &document, &mut cache)?;
-                write_atomic(&path, &serde_json::to_vec(&cache)?)?;
+                let keys = publisher_keys(&domain, &uri, &document, cache)?;
+                write_atomic(path, &serde_json::to_vec(&cache)?)?;
                 slot.insert(keys)
             }
         };
-        let destination = args.output.join(format!("{}.actr", entry.sha256));
+        let destination = output.join(format!("{}.actr", entry.sha256));
         let (manifest, bytes) = archive(entry, keys, &destination, &get).await?;
-        if name == &selection.primary_package {
+        if name == selection.primary_package {
             privacy_contract =
                 actr_pack::realm::privacy_contract_digest(&manifest, &bytes, ARCHIVE_LIMIT)?;
         }
@@ -307,7 +379,14 @@ where
         {
             let lock = actr_hyper::verified_package_lock(&bytes, &manifest, ARCHIVE_LIMIT)?
                 .context("missing declared package lock")?;
-            if name == &selection.front_package {
+            locks.insert(
+                name.clone(),
+                lock.dependencies
+                    .iter()
+                    .map(|entry| (entry.alias.clone(), entry.actr_type.clone()))
+                    .collect(),
+            );
+            if name == selection.front_package {
                 let locked = lock
                     .get_dependency_by_alias("service")
                     .context("signed Front lock does not select a Service")?;
@@ -320,15 +399,27 @@ where
         if !destination.exists() {
             write_atomic(&destination, &bytes)?;
         }
+        for target in entry.dependencies.values() {
+            if !files.contains_key(target) {
+                queue.push_back(target.clone());
+            }
+        }
         manifests.insert(name.clone(), manifest);
         files.insert(name.clone(), destination);
     }
+    check_realm_dependencies(selection, &manifests, &locks)?;
     check_realm_pair(
         &manifests[&selection.primary_package],
         &manifests[&selection.front_package],
     )?;
+    let dependencies: Vec<_> = manifests.iter().flat_map(|(source, manifest)| {
+        manifest.dependencies.iter().map(move |(alias, declared)| {
+            let target = selection.packages[source].dependencies.get(alias);
+            json!({"source":source,"alias":alias,"required":declared.required,"target":target,"status":if target.is_some(){"selected"}else{"unspecified"}})
+        })
+    }).collect();
     Ok(
-        json!({"realm":args.realm,"sequence":profile.sequence,"service":files[&selection.primary_package],"front":files[&selection.front_package],"packages":files,"privacy_contract_sha256":privacy_contract}),
+        json!({"primary_package":selection.primary_package,"front_package":selection.front_package,"service":files[&selection.primary_package],"front":files[&selection.front_package],"packages":files,"dependencies":dependencies,"privacy_contract_sha256":privacy_contract}),
     )
 }
 

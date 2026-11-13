@@ -1452,9 +1452,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 let packageBytes = try Data(contentsOf: downloadedURL)
                 let keyFingerprint = trustedKey.prefix(8).map { String(format: "%02x", $0) }.joined()
                 logger.notice("🔐 [navigateCurrentTab] actr-pack verify: archive=\(packageBytes.count)B, trusted key=\(keyFingerprint)…, profile sha256=\(profile.packageSha256.prefix(12))…")
-                let verified = try ActriumCore.verifyActrPackage(
+                let verified = try ActriumCore.verifyRealmFrontPackage(
                     archive: packageBytes,
-                    trustedPublicKey: trustedKey
+                    trustedPublicKey: trustedKey,
+                    profile: profile
                 )
                 logger.notice("🔐 [navigateCurrentTab] actr-pack verified: manifest=\(verified.manifest.name) v\(verified.manifest.version), entry=\(verified.manifest.entry), workload profile=\(verified.workloadProfile), workload bytes=\(verified.workloadBytes.count), capabilities=\(verified.manifest.capabilities ?? "nil")")
 
