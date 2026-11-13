@@ -107,8 +107,6 @@ impl ActriumServiceConfig {
             replay_retention: actrium_runtime::ServiceConfig::DEFAULT_REPLAY_RETENTION,
             max_replay_entries: actrium_runtime::ServiceConfig::DEFAULT_MAX_REPLAY_ENTRIES,
             max_completed_sessions: actrium_runtime::ServiceConfig::DEFAULT_MAX_COMPLETED_SESSIONS,
-            max_channel_generations:
-                actrium_runtime::ServiceConfig::DEFAULT_MAX_CHANNEL_GENERATIONS,
         })
     }
 }

@@ -1208,6 +1208,27 @@ fn read_optional_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, Lif
     }
 }
 
+fn sync_dir(path: &Path) -> Result<(), std::io::Error> {
+    #[cfg(unix)]
+    {
+        std::fs::File::open(path)?.sync_all()
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)?;
+        file.sync_all()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        std::fs::File::open(path)?.sync_all()
+    }
+}
+
 fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), LifecycleError> {
     let parent = path.parent().ok_or_else(|| {
         LifecycleError::InvalidRequest(format!("{} has no parent directory", path.display()))
@@ -1233,7 +1254,7 @@ fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Lifecyc
         file.write_all(&bytes)?;
         file.sync_all()?;
         fs::rename(&temporary, path)?;
-        File::open(parent)?.sync_all()?;
+        sync_dir(parent)?;
         Ok(())
     })();
     if write_result.is_err() {

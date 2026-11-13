@@ -12,7 +12,7 @@ use actrium_runtime::{
     InMemorySessionService, MemberRole, MessageKind, Principal, PrivacyContext, PrivacyDecision,
     PrivacyState, ProgramRelease, QuotaDecision, RequestAuthorizationDecision, RequestContext,
     RequestQuotaContext, ServiceConfig, ServicePolicies, SessionError, SessionSecret,
-    SessionStatus, TakeoverContext, attach_request_digest, sign_attach_request,
+    SessionStatus, TakeoverContext, attach_request_digest, request_proof, sign_attach_request,
     verify_attach_response, verify_request_proof,
 };
 use async_trait::async_trait;
@@ -21,7 +21,7 @@ use ed25519_dalek::SigningKey;
 
 use super::metadata;
 use super::peer::business_metadata;
-use super::service::{ActriumServiceRegistry, Shared as PeerShared};
+use super::service::{ActriumServiceRegistry, PendingCall, Shared as PeerShared};
 use crate::lifecycle::{
     IncomingDispatchRequest, IncomingGuard, IncomingStreamChunk, SessionRegistry,
 };
@@ -214,7 +214,6 @@ fn service() -> InMemorySessionService {
         replay_retention: ServiceConfig::DEFAULT_REPLAY_RETENTION,
         max_replay_entries: ServiceConfig::DEFAULT_MAX_REPLAY_ENTRIES,
         max_completed_sessions: ServiceConfig::DEFAULT_MAX_COMPLETED_SESSIONS,
-        max_channel_generations: ServiceConfig::DEFAULT_MAX_CHANNEL_GENERATIONS,
     };
     let policies = ServicePolicies {
         membership: Arc::new(TestPolicies),
@@ -644,4 +643,193 @@ async fn heartbeat_status_and_stream_chunks_use_the_same_guard() {
         .check_stream(request)
         .await
         .expect("a signed stream chunk is admitted");
+}
+
+fn pending_call(attach: &AttachResponse, secret: &SessionSecret) -> PendingCall {
+    let request = BusinessRequest {
+        session_id: attach.session_id.clone(),
+        lease_epoch: attach.lease_epoch,
+        service_actor_id: service_id().to_string_repr(),
+        channel_id: "channel-1".into(),
+        route: ROUTE.into(),
+        capability: READ.into(),
+        request_id: "call-1".into(),
+        issued_at: now(),
+        deadline: now() + 30,
+        kind: MessageKind::Request,
+        idempotency_key: None,
+        payload: b"read document".to_vec(),
+        proof: Vec::new(),
+    };
+    PendingCall {
+        request,
+        secret: secret.clone(),
+    }
+}
+
+fn signed_response_envelope(
+    request_id: &str,
+    payload: &[u8],
+    attach: &AttachResponse,
+    secret: &SessionSecret,
+) -> RpcEnvelope {
+    let pending = pending_call(attach, secret);
+    let mut input = pending.request;
+    input.kind = MessageKind::Response;
+    input.payload = payload.to_vec();
+    input.proof = request_proof(secret.as_bytes(), &input);
+    RpcEnvelope {
+        request_id: request_id.into(),
+        route_key: ROUTE.into(),
+        direction: Some(Direction::Response as i32),
+        payload: Some(Bytes::copy_from_slice(payload)),
+        timeout_ms: 0,
+        metadata: vec![MetadataEntry {
+            key: metadata::PROOF.into(),
+            value: hex::encode(input.proof),
+        }],
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn inbound_response_without_proof_is_rejected() {
+    let shared = Arc::new(PeerShared::default());
+    let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
+    let (attach, secret) = attach(&registry).await;
+    shared
+        .pending
+        .lock()
+        .await
+        .insert("call-1".into(), pending_call(&attach, &secret));
+
+    let response = RpcEnvelope {
+        request_id: "call-1".into(),
+        route_key: ROUTE.into(),
+        direction: Some(Direction::Response as i32),
+        payload: Some(Bytes::from_static(b"document body")),
+        timeout_ms: 0,
+        metadata: vec![],
+        ..Default::default()
+    };
+    let error = guard
+        .check(dispatch_request(
+            &response,
+            Some(service_context()),
+        ))
+        .await
+        .expect_err("response without proof is rejected");
+    assert_eq!(
+        error.code,
+        crate::lifecycle::IncomingGuardErrorCode::PermissionDenied
+    );
+}
+
+#[tokio::test]
+async fn inbound_response_with_tampered_payload_is_rejected() {
+    let shared = Arc::new(PeerShared::default());
+    let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
+    let (attach, secret) = attach(&registry).await;
+    shared
+        .pending
+        .lock()
+        .await
+        .insert("call-1".into(), pending_call(&attach, &secret));
+
+    let mut response = signed_response_envelope("call-1", b"document body", &attach, &secret);
+    response.payload = Some(Bytes::from_static(b"forged response"));
+
+    let error = guard
+        .check(dispatch_request(
+            &response,
+            Some(service_context()),
+        ))
+        .await
+        .expect_err("tampered response is rejected");
+    assert_eq!(
+        error.code,
+        crate::lifecycle::IncomingGuardErrorCode::PermissionDenied
+    );
+}
+
+#[tokio::test]
+async fn inbound_response_proof_round_trip_consumes_pending() {
+    let shared = Arc::new(PeerShared::default());
+    let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
+    let (attach, secret) = attach(&registry).await;
+    shared
+        .pending
+        .lock()
+        .await
+        .insert("call-1".into(), pending_call(&attach, &secret));
+
+    let response = signed_response_envelope("call-1", b"document body", &attach, &secret);
+    guard
+        .check(dispatch_request(
+            &response,
+            Some(service_context()),
+        ))
+        .await
+        .expect("valid inbound response passes");
+    assert!(
+        shared.pending.lock().await.is_empty(),
+        "pending call is consumed after verification"
+    );
+}
+
+#[tokio::test]
+async fn finish_releases_admitted_request() {
+    let shared = Arc::new(PeerShared::default());
+    let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
+    let (attach, secret) = attach(&registry).await;
+
+    let call = business_call(&attach, &secret);
+    guard
+        .check(dispatch_request(
+            &call,
+            Some(service_context()),
+        ))
+        .await
+        .expect("arrival admission");
+
+    let mut response = RpcEnvelope {
+        request_id: "call-1".into(),
+        route_key: ROUTE.into(),
+        direction: Some(Direction::Response as i32),
+        payload: Some(Bytes::from_static(b"document body")),
+        timeout_ms: 0,
+        metadata: vec![],
+        ..Default::default()
+    };
+    guard
+        .authenticate_response(&mut response)
+        .await
+        .expect("response is signed while admitted");
+    assert!(
+        response.metadata.iter().any(|entry| entry.key == metadata::PROOF),
+        "admitted request allows response signing"
+    );
+
+    guard.finish("call-1").await.expect("finish succeeds");
+
+    let mut response_after_finish = RpcEnvelope {
+        request_id: "call-1".into(),
+        route_key: ROUTE.into(),
+        direction: Some(Direction::Response as i32),
+        payload: Some(Bytes::from_static(b"document body")),
+        timeout_ms: 0,
+        metadata: vec![],
+        ..Default::default()
+    };
+    guard
+        .authenticate_response(&mut response_after_finish)
+        .await
+        .expect("finish is idempotent");
+    assert!(
+        !response_after_finish
+            .metadata
+            .iter()
+            .any(|entry| entry.key == metadata::PROOF),
+        "finished request is no longer admitted"
+    );
 }

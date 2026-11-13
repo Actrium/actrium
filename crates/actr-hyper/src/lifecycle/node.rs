@@ -86,6 +86,21 @@ async fn authenticate_response(
     Ok(())
 }
 
+async fn guard_finish(
+    guard: Option<Arc<dyn IncomingGuard>>,
+    request_id: &str,
+) {
+    if let Some(guard) = guard {
+        if let Err(error) = guard.finish(request_id).await {
+            tracing::warn!(
+                request_id = %request_id,
+                guard_code = error.code.as_str(),
+                "incoming guard finish failed"
+            );
+        }
+    }
+}
+
 /// Verified Actor types of connected peers, keyed by `ActrId`.
 ///
 /// Filled from `ActrRelay.source_type` (written by Signaling from the
@@ -332,6 +347,7 @@ pub(crate) async fn inproc_send_reply(
                         guard_code = error.code.as_str(),
                         "outbound response authentication failed; dropping response"
                     );
+                    guard_finish(incoming_guard, &request_id).await;
                     return;
                 }
                 #[cfg(feature = "opentelemetry")]
@@ -383,6 +399,7 @@ pub(crate) async fn inproc_send_reply(
                         guard_code = error.code.as_str(),
                         "outbound error response authentication failed; dropping response"
                     );
+                    guard_finish(incoming_guard, &request_id).await;
                     return;
                 }
                 #[cfg(feature = "opentelemetry")]
@@ -404,6 +421,7 @@ pub(crate) async fn inproc_send_reply(
             }
         }
     }
+    guard_finish(incoming_guard, &request_id).await;
 }
 
 /// RTC response route, populated when the node's RTC manager is initialized.
@@ -726,6 +744,7 @@ pub(crate) async fn mailbox_send_reply(
                         guard_code = error.code.as_str(),
                         "outbound response authentication failed; dropping response"
                     );
+                    guard_finish(incoming_guard, &request_id).await;
                     return;
                 }
                 #[cfg(feature = "opentelemetry")]
@@ -797,6 +816,7 @@ pub(crate) async fn mailbox_send_reply(
                         guard_code = error.code.as_str(),
                         "outbound error response authentication failed; dropping response"
                     );
+                    guard_finish(incoming_guard, &request_id).await;
                     return;
                 }
                 #[cfg(feature = "opentelemetry")]
@@ -814,6 +834,7 @@ pub(crate) async fn mailbox_send_reply(
             }
         }
     }
+    guard_finish(incoming_guard, &request_id).await;
 }
 
 /// ACK a durable mailbox message. Split out from `mailbox_send_reply` so the

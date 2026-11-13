@@ -310,7 +310,6 @@ fn service_config(service_signing_key: SigningKey) -> ServiceConfig {
         replay_retention: ServiceConfig::DEFAULT_REPLAY_RETENTION,
         max_replay_entries: ServiceConfig::DEFAULT_MAX_REPLAY_ENTRIES,
         max_completed_sessions: ServiceConfig::DEFAULT_MAX_COMPLETED_SESSIONS,
-        max_channel_generations: ServiceConfig::DEFAULT_MAX_CHANNEL_GENERATIONS,
     }
 }
 

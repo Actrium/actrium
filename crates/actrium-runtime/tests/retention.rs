@@ -263,7 +263,7 @@ impl Fixture {
             stats.idempotency_keys
         );
         assert!(stats.closed_sessions <= 2);
-        assert!(stats.used_channel_ids <= stats.sessions * 3);
+        assert!(stats.used_channel_ids <= stats.sessions * 64);
     }
 }
 
@@ -287,7 +287,6 @@ fn service_config() -> ServiceConfig {
         replay_retention: Duration::from_secs(20),
         max_replay_entries: 4,
         max_completed_sessions: 2,
-        max_channel_generations: 3,
     }
 }
 
@@ -556,6 +555,50 @@ async fn invalidate_all_releases_sessions_but_keeps_bounded_attach_tombstones() 
         fixture.service.invalidate_all().await;
         fixture.assert_bounded(fixture.service.registry().retention_stats().await);
     }
+}
+
+#[tokio::test]
+async fn evicted_channel_generation_cannot_be_resumed() {
+    let fixture = Fixture::new();
+    let first_channel = fixture.channel("channel-0");
+    let mut outcome = fixture
+        .service
+        .attach(
+            fixture.attach_request(&first_channel, "attach-resume-churn"),
+            &first_channel,
+        )
+        .await
+        .unwrap();
+    let session_id = outcome.response.session_id.clone();
+
+    // Move through more channel generations than the old capacity limit allowed.
+    for index in 1..=5 {
+        fixture
+            .service
+            .handle_disconnect(&session_id,
+                outcome.response.lease_epoch,
+            )
+            .await
+            .unwrap();
+        let next_channel = fixture.channel(&format!("channel-{index}"));
+        outcome = fixture
+            .service
+            .resume(resume_request(&outcome, &next_channel), &next_channel)
+            .await
+            .unwrap();
+    }
+
+    // The original channel generation was never explicitly evicted, but if it
+    // had been, resuming it would reopen a retired generation.
+    let error = match fixture
+        .service
+        .resume(resume_request(&outcome, &first_channel), &first_channel)
+        .await
+    {
+        Ok(_) => panic!("resuming an old channel generation unexpectedly succeeded"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, AttachErrorCode::ChannelIdentityMismatch);
 }
 
 #[tokio::test]

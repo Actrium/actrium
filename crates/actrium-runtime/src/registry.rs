@@ -86,11 +86,6 @@ impl ReplayTiming {
 }
 
 #[derive(Clone)]
-struct ChannelUse {
-    timing: ReplayTiming,
-}
-
-#[derive(Clone)]
 struct SessionEntry {
     record: FrontServiceSession,
     channel: VerifiedChannel,
@@ -107,7 +102,9 @@ struct SessionEntry {
     replay_floor: Option<u64>,
     /// Channel IDs are single-use within a session. Renewal and Resume must
     /// authenticate a fresh generation rather than reactivate an old channel.
-    used_channel_ids: HashMap<String, ChannelUse>,
+    /// This set is intentionally never evicted: once a generation is used it
+    /// remains unusable for the lifetime of the session.
+    used_channel_ids: HashSet<String>,
 }
 
 impl SessionEntry {
@@ -304,26 +301,10 @@ impl InMemorySessionRegistry {
         retain_unexpired(&mut state.requests, now, |entry| entry.timing);
         retain_unexpired(&mut state.idempotency_keys, now, |entry| entry.timing);
 
-        for entry in state.sessions.values_mut() {
-            // Channel IDs are single-use for the lifetime of the session. They
-            // are not TTL-evicted with replay metadata: a Resume that presents
-            // an old generation must still be rejected after the replay window
-            // has passed. The per-session capacity bound still limits memory.
-            while entry.used_channel_ids.len() > self.config.max_channel_generations {
-                let oldest = entry
-                    .used_channel_ids
-                    .iter()
-                    .filter(|(channel_id, _)| **channel_id != entry.record.channel_id)
-                    .min_by_key(|(_, used)| used.timing.issued_at)
-                    .map(|(channel_id, _)| channel_id.clone());
-                match oldest {
-                    Some(channel_id) => {
-                        entry.used_channel_ids.remove(&channel_id);
-                    }
-                    None => break,
-                }
-            }
-        }
+        // Channel IDs are single-use for the lifetime of the session. They are
+        // intentionally not TTL- or capacity-evicted: a Resume that presents an
+        // old generation must be rejected even after replay metadata has been
+        // pruned.
 
         let expired_closed: HashSet<String> = state
             .sessions
@@ -916,12 +897,7 @@ impl InMemorySessionRegistry {
                 grace_expires_at: None,
                 closed_at: None,
                 replay_floor: None,
-                used_channel_ids: HashMap::from([(
-                    channel.channel_id.clone(),
-                    ChannelUse {
-                        timing: ReplayTiming::new(now, self.retention_secs()),
-                    },
-                )]),
+                used_channel_ids: HashSet::from([channel.channel_id.clone()]),
             },
         );
         state.active = Some(session_id.clone());
@@ -1025,7 +1001,7 @@ impl InMemorySessionRegistry {
                         "credential renewal requires reauthentication on a new channel",
                     ));
                 }
-                if old.used_channel_ids.contains_key(&new_channel.channel_id) {
+                if old.used_channel_ids.contains(&new_channel.channel_id) {
                     return Err(SessionError::new(
                         AttachErrorCode::ChannelIdentityMismatch,
                         "credential renewal cannot reuse an old channel generation",
@@ -1110,12 +1086,7 @@ impl InMemorySessionRegistry {
             entry.record.member = principal.member;
             entry.record.client_key = principal.client_key;
         }
-        entry.used_channel_ids.insert(
-            new_channel.channel_id.clone(),
-            ChannelUse {
-                timing: ReplayTiming::new(now, self.retention_secs()),
-            },
-        );
+        entry.used_channel_ids.insert(new_channel.channel_id.clone());
         entry.channel = new_channel;
         entry.privacy = privacy;
         entry.grace_expires_at = None;
@@ -1159,7 +1130,7 @@ impl InMemorySessionRegistry {
                 "Resume requires a new VerifiedChannel generation",
             ));
         }
-        if old.used_channel_ids.contains_key(&new_channel.channel_id) {
+        if old.used_channel_ids.contains(&new_channel.channel_id) {
             return Err(SessionError::new(
                 AttachErrorCode::ChannelIdentityMismatch,
                 "Resume cannot reuse an old channel generation",
@@ -1242,12 +1213,7 @@ impl InMemorySessionRegistry {
         entry.record.lease = lease;
         entry.record.session_capability_ceiling = ceiling.into_iter().collect();
         entry.record.state = SessionState::Active;
-        entry.used_channel_ids.insert(
-            new_channel.channel_id.clone(),
-            ChannelUse {
-                timing: ReplayTiming::new(now, self.retention_secs()),
-            },
-        );
+        entry.used_channel_ids.insert(new_channel.channel_id.clone());
         entry.channel = new_channel.clone();
         entry.privacy = privacy;
         entry.grace_expires_at = None;

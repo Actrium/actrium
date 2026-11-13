@@ -39,15 +39,12 @@ pub struct ServiceConfig {
     /// Maximum closed sessions retained for status and idempotency checks.
     /// Active and Grace sessions are never counted against this limit.
     pub max_completed_sessions: usize,
-    /// Maximum channel generations retained per session, including the current one.
-    pub max_channel_generations: usize,
 }
 
 impl ServiceConfig {
     pub const DEFAULT_REPLAY_RETENTION: Duration = Duration::from_secs(5 * 60);
     pub const DEFAULT_MAX_REPLAY_ENTRIES: usize = 65_536;
     pub const DEFAULT_MAX_COMPLETED_SESSIONS: usize = 1_024;
-    pub const DEFAULT_MAX_CHANNEL_GENERATIONS: usize = 64;
 
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
         if self.service_actor_id.is_empty() || self.runtime_instance_id.is_empty() {
@@ -109,7 +106,6 @@ impl ServiceConfig {
         if self.replay_retention.as_secs() == 0
             || self.max_replay_entries == 0
             || self.max_completed_sessions == 0
-            || self.max_channel_generations == 0
         {
             return Err(ConfigError(
                 "replay retention and all retention capacities must be positive".into(),

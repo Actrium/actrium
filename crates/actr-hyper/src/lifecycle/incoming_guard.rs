@@ -308,4 +308,11 @@ pub trait IncomingGuard: Send + Sync + 'static {
         &self,
         request: IncomingStreamChunk<'_>,
     ) -> Result<(), IncomingGuardError>;
+
+    /// Release any per-request state kept by the guard after the request has
+    /// been dispatched and its response (if any) has been sent. The default
+    /// no-op keeps optional-state guards from needing an empty implementation.
+    async fn finish(&self, _request_id: &str) -> Result<(), IncomingGuardError> {
+        Ok(())
+    }
 }
