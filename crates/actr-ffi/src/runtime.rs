@@ -2,7 +2,7 @@
 
 use crate::error::{ActrError, ActrResult, run_on_tokio_runtime};
 use crate::session::{
-    ActrFrontSessionWrapper, ActriumAttachParams, ActriumServiceConfig, ActriumServicePolicies,
+    ActrPeerSessionWrapper, ActriumAttachParams, ActriumServiceConfig, ActriumServicePolicies,
     actr_ref_attach_actrium, registered_node_with_actrium_service,
 };
 use crate::types::{
@@ -567,12 +567,12 @@ impl ActrRefWrapper {
         }
     }
 
-    /// Attach to an Actrium Service over the verified Actor channel.
+    /// Attach to a peer Service over the verified Actor channel.
     pub async fn attach_actrium(
         &self,
         service: ActrId,
         params: ActriumAttachParams,
-    ) -> ActrResult<Arc<ActrFrontSessionWrapper>> {
+    ) -> ActrResult<Arc<ActrPeerSessionWrapper>> {
         actr_ref_attach_actrium(&self.inner, service, params).await
     }
 

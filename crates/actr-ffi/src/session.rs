@@ -1,8 +1,8 @@
-//! FFI bridge for the Actrium v1 Front-Service session protocol.
+//! FFI bridge for the Actrium v1 peer-to-peer session protocol.
 //!
-//! Lets Swift / Kotlin hosts act as an Actrium Front: attach to a Service,
-//! make session-signed calls/tells, and detach cleanly on browser lifecycle
-//! events (new tab, close, background, crash, restart).
+//! Lets Swift / Kotlin hosts participate as an Actrium peer: install a Service,
+//! attach to another peer, make session-signed calls/tells, and detach cleanly
+//! on lifecycle events (new tab, close, background, crash, restart).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -238,7 +238,7 @@ impl ActriumServicePolicies {
     }
 }
 
-/// Parameters for a Front to Attach to a Service.
+/// Parameters for a peer to Attach to another peer's Service.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ActriumAttachParams {
     pub program: ProgramRelease,
@@ -247,7 +247,7 @@ pub struct ActriumAttachParams {
     pub protocol_fingerprint: Vec<u8>,
     pub runtime: ActriumRuntime,
     pub requested_capabilities: Vec<String>,
-    /// 32-byte Ed25519 signing key for the Front Actor.
+    /// 32-byte Ed25519 signing key for the attaching peer.
     pub actor_signing_key: Vec<u8>,
 }
 
@@ -271,14 +271,14 @@ impl ActriumAttachParams {
     }
 }
 
-/// FFI wrapper for an Actrium Front session.
+/// FFI wrapper for an Actrium peer session.
 #[derive(uniffi::Object)]
-pub struct ActrFrontSessionWrapper {
-    inner: Arc<actr_hyper::actrium::ActriumFrontSession>,
+pub struct ActrPeerSessionWrapper {
+    inner: Arc<actr_hyper::actrium::ActriumPeerSession>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
-impl ActrFrontSessionWrapper {
+impl ActrPeerSessionWrapper {
     /// Make a session-signed request and verify the Service's response proof.
     pub async fn call(
         &self,
@@ -338,9 +338,9 @@ pub(crate) async fn actr_ref_attach_actrium(
     actr_ref: &actr_hyper::ActrRef,
     service: ActrId,
     params: ActriumAttachParams,
-) -> ActrResult<Arc<ActrFrontSessionWrapper>> {
+) -> ActrResult<Arc<ActrPeerSessionWrapper>> {
     let service: actr_protocol::ActrId = service.into();
     let params = params.into_runtime()?;
     let session = actr_ref.attach_actrium(&service, params).await?;
-    Ok(Arc::new(ActrFrontSessionWrapper { inner: session }))
+    Ok(Arc::new(ActrPeerSessionWrapper { inner: session }))
 }

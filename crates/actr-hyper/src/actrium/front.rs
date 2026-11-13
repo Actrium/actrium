@@ -4,7 +4,7 @@
 //! In the P2P model every node that participates in Actrium sessions also
 //! hosts an `InMemorySessionService`; any such node can initiate an Attach to
 //! another peer and become a caller. [`ActrRef::attach_actrium`] performs the
-//! Attach exchange and returns an [`ActriumFrontSession`] whose calls carry
+//! Attach exchange and returns an [`ActriumPeerSession`] whose calls carry
 //! session metadata and HMAC proofs. Responses are verified by the shared
 //! inbound guard before the pending caller is woken.
 //!
@@ -109,11 +109,11 @@ struct SessionState {
     channel: Arc<VerifiedPeerContext>,
 }
 
-/// One attached Front–Service lease. Clones share the same session state.
+/// One attached peer session. Clones share the same session state.
 /// Dropping the last handle stops the heartbeat; the Service reclaims the
-/// lease when it expires. Call [`ActriumFrontSession::detach`] to release it
+/// lease when it expires. Call [`ActriumPeerSession::detach`] to release it
 /// immediately.
-pub struct ActriumFrontSession {
+pub struct ActriumPeerSession {
     runtime: Arc<PeerRuntime>,
     service: ActrId,
     front_actor_id: String,
@@ -123,7 +123,7 @@ pub struct ActriumFrontSession {
     heartbeat: Mutex<Option<JoinHandle<()>>>,
 }
 
-impl ActriumFrontSession {
+impl ActriumPeerSession {
     pub async fn session_id(&self) -> String {
         self.state.lock().await.session_id.clone()
     }
@@ -300,8 +300,8 @@ impl ActriumFrontSession {
         ))
     }
 
-    /// Call a Service route with a session-signed request. The response proof
-    /// is verified by the Front guard before this future resolves.
+    /// Call a peer Service route with a session-signed request. The response
+    /// proof is verified by the shared inbound guard before this future resolves.
     pub async fn call(
         &self,
         route: &str,
@@ -386,7 +386,7 @@ impl ActriumFrontSession {
         Ok(())
     }
 
-    /// Take over another Front's exclusive lease. The caller must be
+    /// Take over another peer's exclusive lease. The caller must be
     /// authorized by the Service's takeover policy; the proof binds the old
     /// lease to the complete new Attach request.
     pub async fn takeover(self: &Arc<Self>, session_id: &str, lease_epoch: u64) -> ActorResult<()> {
@@ -455,7 +455,7 @@ impl ActrRef {
         &self,
         service: &ActrId,
         params: ActriumAttachParams,
-    ) -> ActorResult<Arc<ActriumFrontSession>> {
+    ) -> ActorResult<Arc<ActriumPeerSession>> {
         let runtime = self.shared.peer_runtime.clone().ok_or_else(|| {
             ActrError::InvalidArgument(
                 "the node is not configured for Actrium sessions; call with_actrium_service before registration"
@@ -463,7 +463,7 @@ impl ActrRef {
             )
         })?;
         let channel = runtime.verified_context(service).await?;
-        let session = Arc::new(ActriumFrontSession {
+        let session = Arc::new(ActriumPeerSession {
             runtime,
             service: service.clone(),
             front_actor_id: self.actor_id().to_string_repr(),

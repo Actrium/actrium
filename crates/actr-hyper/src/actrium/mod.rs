@@ -1,4 +1,4 @@
-//! Actrium Front–Service session wiring for the Hyper host.
+//! Actrium peer-to-peer session wiring for the Hyper host.
 //!
 //! This module connects `actrium-runtime` (Attach, exclusive lease, request
 //! proofs) to the transport's verified channels and inbound delivery:
@@ -45,7 +45,7 @@ pub mod metadata {
 pub mod front;
 pub mod service;
 
-pub use front::{ActriumAttachParams, ActriumFrontSession};
+pub use front::{ActriumAttachParams, ActriumPeerSession};
 pub use service::{ActriumServiceGuard, ActriumServiceRegistry};
 
 #[cfg(test)]
