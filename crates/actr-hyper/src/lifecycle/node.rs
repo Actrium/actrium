@@ -86,10 +86,7 @@ async fn authenticate_response(
     Ok(())
 }
 
-async fn guard_finish(
-    guard: Option<Arc<dyn IncomingGuard>>,
-    request_id: &str,
-) {
+async fn guard_finish(guard: Option<Arc<dyn IncomingGuard>>, request_id: &str) {
     if let Some(guard) = guard {
         if let Err(error) = guard.finish(request_id).await {
             tracing::warn!(

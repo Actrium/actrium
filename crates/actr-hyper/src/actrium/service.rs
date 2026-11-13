@@ -410,16 +410,19 @@ fn verify_inbound_response(
 
 #[async_trait]
 impl IncomingGuard for ActriumServiceGuard {
-    async fn check(&self,
-        request: IncomingDispatchRequest<'_>,
-    ) -> Result<(), IncomingGuardError> {
+    async fn check(&self, request: IncomingDispatchRequest<'_>) -> Result<(), IncomingGuardError> {
         let envelope = request.envelope;
 
         // Inbound responses to our outbound peer calls are verified here, before
         // the pending caller is woken. Non-session responses have no pending entry
         // and pass through unchanged.
         if envelope.direction == Some(Direction::Response as i32) {
-            let pending = self.shared.pending.lock().await.remove(&envelope.request_id);
+            let pending = self
+                .shared
+                .pending
+                .lock()
+                .await
+                .remove(&envelope.request_id);
             if let Some(pending) = pending {
                 verify_inbound_response(envelope, pending)?;
             }

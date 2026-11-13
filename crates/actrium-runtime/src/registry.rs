@@ -1086,7 +1086,9 @@ impl InMemorySessionRegistry {
             entry.record.member = principal.member;
             entry.record.client_key = principal.client_key;
         }
-        entry.used_channel_ids.insert(new_channel.channel_id.clone());
+        entry
+            .used_channel_ids
+            .insert(new_channel.channel_id.clone());
         entry.channel = new_channel;
         entry.privacy = privacy;
         entry.grace_expires_at = None;
@@ -1213,7 +1215,9 @@ impl InMemorySessionRegistry {
         entry.record.lease = lease;
         entry.record.session_capability_ceiling = ceiling.into_iter().collect();
         entry.record.state = SessionState::Active;
-        entry.used_channel_ids.insert(new_channel.channel_id.clone());
+        entry
+            .used_channel_ids
+            .insert(new_channel.channel_id.clone());
         entry.channel = new_channel.clone();
         entry.privacy = privacy;
         entry.grace_expires_at = None;

@@ -713,10 +713,7 @@ async fn inbound_response_without_proof_is_rejected() {
         ..Default::default()
     };
     let error = guard
-        .check(dispatch_request(
-            &response,
-            Some(service_context()),
-        ))
+        .check(dispatch_request(&response, Some(service_context())))
         .await
         .expect_err("response without proof is rejected");
     assert_eq!(
@@ -740,10 +737,7 @@ async fn inbound_response_with_tampered_payload_is_rejected() {
     response.payload = Some(Bytes::from_static(b"forged response"));
 
     let error = guard
-        .check(dispatch_request(
-            &response,
-            Some(service_context()),
-        ))
+        .check(dispatch_request(&response, Some(service_context())))
         .await
         .expect_err("tampered response is rejected");
     assert_eq!(
@@ -765,10 +759,7 @@ async fn inbound_response_proof_round_trip_consumes_pending() {
 
     let response = signed_response_envelope("call-1", b"document body", &attach, &secret);
     guard
-        .check(dispatch_request(
-            &response,
-            Some(service_context()),
-        ))
+        .check(dispatch_request(&response, Some(service_context())))
         .await
         .expect("valid inbound response passes");
     assert!(
@@ -785,10 +776,7 @@ async fn finish_releases_admitted_request() {
 
     let call = business_call(&attach, &secret);
     guard
-        .check(dispatch_request(
-            &call,
-            Some(service_context()),
-        ))
+        .check(dispatch_request(&call, Some(service_context())))
         .await
         .expect("arrival admission");
 
@@ -806,7 +794,10 @@ async fn finish_releases_admitted_request() {
         .await
         .expect("response is signed while admitted");
     assert!(
-        response.metadata.iter().any(|entry| entry.key == metadata::PROOF),
+        response
+            .metadata
+            .iter()
+            .any(|entry| entry.key == metadata::PROOF),
         "admitted request allows response signing"
     );
 

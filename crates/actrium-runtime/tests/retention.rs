@@ -575,9 +575,7 @@ async fn evicted_channel_generation_cannot_be_resumed() {
     for index in 1..=5 {
         fixture
             .service
-            .handle_disconnect(&session_id,
-                outcome.response.lease_epoch,
-            )
+            .handle_disconnect(&session_id, outcome.response.lease_epoch)
             .await
             .unwrap();
         let next_channel = fixture.channel(&format!("channel-{index}"));
