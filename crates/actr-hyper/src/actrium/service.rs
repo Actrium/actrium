@@ -67,7 +67,10 @@ impl ActriumServiceRegistry {
     /// Builds the registry/guard pair over one session service. Install both
     /// on the same node; they share session secrets, admission state, and
     /// outbound pending calls so the guard can verify peer responses.
-    pub(crate) fn new(service: InMemorySessionService, shared: Arc<Shared>) -> (Self, ActriumServiceGuard) {
+    pub(crate) fn new(
+        service: InMemorySessionService,
+        shared: Arc<Shared>,
+    ) -> (Self, ActriumServiceGuard) {
         (
             Self {
                 service: service.clone(),

@@ -1439,9 +1439,13 @@ impl Node<Registered> {
     /// authorizes inbound business requests/tells/streams and signs responses,
     /// and the same shared state enables outbound Attach and response-proof
     /// verification. Session traffic requires the verified Actor channel.
-    pub fn with_actrium_service(mut self, service: actrium_runtime::InMemorySessionService) -> Self {
+    pub fn with_actrium_service(
+        mut self,
+        service: actrium_runtime::InMemorySessionService,
+    ) -> Self {
         let shared = Arc::new(crate::actrium::service::Shared::default());
-        let (registry, guard) = crate::actrium::ActriumServiceRegistry::new(service, shared.clone());
+        let (registry, guard) =
+            crate::actrium::ActriumServiceRegistry::new(service, shared.clone());
         let node = &mut self
             .attachment
             .as_mut()

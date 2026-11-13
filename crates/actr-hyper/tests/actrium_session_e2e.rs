@@ -244,7 +244,10 @@ fn attach_params(actor_signing_key: ed25519_dalek::SigningKey) -> ActriumAttachP
     }
 }
 
-fn make_service_config(service_actor_id: &str, signing_key: ed25519_dalek::SigningKey) -> ServiceConfig {
+fn make_service_config(
+    service_actor_id: &str,
+    signing_key: ed25519_dalek::SigningKey,
+) -> ServiceConfig {
     ServiceConfig {
         service_actor_id: service_actor_id.into(),
         runtime_instance_id: actr_hyper::process_runtime_instance_id().to_owned(),
