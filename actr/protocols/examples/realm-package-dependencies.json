@@ -1,0 +1,27 @@
+{
+  "primary_package": "notes",
+  "front_package": "ui",
+  "packages": {
+    "notes": {
+      "href": "https://publisher.example/releases/notes/1.0.0/notes.actr",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "type": "publisher.example/notes@1.0.0",
+      "dependencies": {
+        "index": "index"
+      }
+    },
+    "ui": {
+      "href": "https://publisher.example/releases/notes-ui/1.0.0/notes-ui.actr",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "type": "publisher.example/notes-ui@1.0.0",
+      "dependencies": {
+        "service": "notes"
+      }
+    },
+    "index": {
+      "href": "https://publisher.example/releases/notes-index/1.0.0/notes-index.actr",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "type": "publisher.example/notes-index@1.0.0"
+    }
+  }
+}

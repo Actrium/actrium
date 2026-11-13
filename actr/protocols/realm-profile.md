@@ -124,6 +124,7 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `packages[ref].href` | HTTPS download address of that archive; it may be anywhere. |
 | `packages[ref].sha256` | SHA-256 of all archive bytes, as 64 lowercase hexadecimal digits. |
 | `packages[ref].type` | Exact Actor type `publisher/program@version` declared by that archive's manifest. |
+| `packages[ref].dependencies` | Optional map from a dependency alias in that package's manifest to a selected key in `packages`. See Section 4.3. |
 | `issuer.url` | Registration and verification endpoint of the Issuer. |
 | `issuer.keys` | Realm issuer public keys used to verify Actor credentials, 1 to 3 entries (Section 6.1). |
 | `provider.id` | Actr Facility Provider ID: the Actr Facility Provider's canonical DNS authority. It never changes during the Realm's life. |
@@ -158,6 +159,31 @@ The Realm selects its Service and Front by naming two entries in `packages`. Oth
 3. When a selection is present, `primary_package` and `front_package` **MUST** exactly match two distinct map keys whose entries have different Actor types.
 4. Each entry **MUST** include an HTTPS `href`, a `sha256` digest of the whole archive (64 lowercase hex digits), and an exact `type` (`publisher/program@version`). One exact type maps to one digest. Receivers **MUST** reject version ranges and `latest`.
 5. The complete signed Profile is at most 64 KiB. Receivers **MUST** reject oversized documents and duplicate JSON members.
+6. If supplied, `packages[ref].dependencies` **MUST** be a JSON object. Keys are nonempty dependency aliases without leading or trailing whitespace; each value **MUST** exactly match a key in `packages`. Reject references to missing packages.
+
+### 4.3 Dependency selections between packages
+
+`packages[ref].dependencies` describes the archive chosen for a package's dependency alias in this Realm release. This package-map excerpt omits the required `href`, `sha256` and `type` of each entry:
+
+```json
+{
+  "packages": {
+    "ui": { "dependencies": { "service": "notes" } },
+    "notes": { "dependencies": { "index": "index" } },
+    "index": {}
+  }
+}
+```
+
+Here `ui` selects the `notes` package for its `service` dependency, and `notes` selects the `index` package for its `index` dependency. See [realm-package-dependencies.json](examples/realm-package-dependencies.json) for a complete package selection.
+
+- Aliases are case-sensitive and **MUST** match dependencies in the source package's verified, signed manifest. Consumers using a binding **MUST** check that the target's exact type satisfies the manifest's `actor` and `version`, and continue to enforce contracts and dependency locks. A Profile cannot override constraints signed by the package Publisher.
+- If the selected Front binds its `service` alias, the target **MUST** be `primary_package`. Reject a conflicting selection before loading the Front.
+- The field may be absent or bind only some aliases. Unlisted aliases continue to use the package's normal dependency resolution. An absent field or empty object does not assert that a package has no dependencies; `required` remains defined by the package manifest.
+- Cycles, including self-references, are allowed. These are package selections, not startup order, Actor instances, replica counts or ActorId route bindings. They grant no authority to create or call instances.
+- Bindings are part of the signed package selection. Changes **MUST** increase the Profile `sequence` and atomically replace both selectors and the complete `packages` map.
+
+Existing Profiles can omit this field. Older consumers that ignore unknown members do not interpret it; deployments cannot assume that a Host implements dependency startup or binding merely because the description is present.
 
 ## 5. Verification
 

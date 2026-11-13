@@ -99,6 +99,7 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `packages[ref].href` | 该归档的 HTTPS 下载地址，可以在任何位置。 |
 | `packages[ref].sha256` | 该归档全部字节的 SHA-256（64 位小写十六进制）。 |
 | `packages[ref].type` | 该归档 manifest 声明的精确 Actor 类型 `publisher/program@version`。 |
+| `packages[ref].dependencies` | 可选映射：该包 manifest 中的依赖 alias → `packages` 中选定的目标包引用。见 §4.3。 |
 | `issuer.url` | Issuer 的注册与验证端点。 |
 | `issuer.keys` | 用于验证 Actor credential 的 Realm issuer 公钥，1 至 3 项（第 6.1 节）。 |
 | `provider.id` | Actr Facility Provider ID：Actr Facility Provider 的规范化 DNS authority，在 Realm 生命周期内不变。 |
@@ -130,6 +131,31 @@ Realm 从 `packages` 中选定本实例的 Service 和 Front。其余条目供�
 3. 提供包选择时，`primary_package` 与 `front_package` **MUST** 精确匹配两个不同的键，且条目的 Actor 类型不同。
 4. 每项 **MUST** 包含 HTTPS `href`、整包 `sha256`（64 位小写十六进制）和精确 `type`（`publisher/program@version`）。同一精确类型只能绑定一个摘要。接收方 **MUST** 拒绝版本范围和 `latest`。
 5. 完整签名 Profile 最多 64 KiB。接收方 **MUST** 拒绝超限文档和重复的 JSON member。
+6. 提供 `packages[ref].dependencies` 时，它 **MUST** 是 JSON 对象；键是非空且首尾无空白的依赖 alias，值 **MUST** 精确匹配 `packages` 中的一个键。不存在的目标引用必须拒绝。
+
+### 4.3 包之间的依赖选择
+
+`packages[ref].dependencies` 描述本次 Realm 发布为某个包的依赖 alias 选用了哪份归档。例如，以下是包表的片段，省略了每项必需的 `href`、`sha256` 和 `type`：
+
+```json
+{
+  "packages": {
+    "ui": { "dependencies": { "service": "notes" } },
+    "notes": { "dependencies": { "index": "index" } },
+    "index": {}
+  }
+}
+```
+
+该片段表示 `ui` 的 `service` 依赖选用 `notes` 包，`notes` 的 `index` 依赖选用 `index` 包。完整包选择示例见 [realm-package-dependencies.json](examples/realm-package-dependencies.json)。
+
+- Alias 区分大小写，**MUST** 与来源包已验签 manifest 中的依赖 alias 一致。使用该映射的消费者 **MUST** 校验目标包精确类型满足 manifest 的 `actor` 和 `version`，并继续校验 contract 与依赖锁；Profile 不能覆盖包发布者签名的约束。
+- 选定 Front 若映射了 `service` alias，目标 **MUST** 是 `primary_package`；加载 Front 前必须拒绝不一致的选择。
+- 字段可省略或只列出部分 alias。省略的 alias 沿用包自身的依赖解析；省略字段或提供空对象不表示该包没有依赖。`required` 仍由包 manifest 定义。
+- 映射可以形成环，包括自引用。它描述包选择关系，不定义启动顺序、Actor 实例、副本数或 ActorId 路由绑定，也不授予创建实例或调用实例的权限。
+- 映射属于签名的包选择配置。更新时 **MUST** 增加 Profile `sequence`，并与两个包引用及完整 `packages` 一起原子替换。
+
+旧 Profile 无需增加该字段；忽略未知 member 的旧消费者不会解释它。部署不能仅凭此描述假定某个 Host 已实现依赖启动或绑定。
 
 ## 5. 验证
 
