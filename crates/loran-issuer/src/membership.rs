@@ -145,8 +145,8 @@ async fn use_nonce(nonce: &str, expires_at: i64) -> Result<(), MembershipError> 
     }
 }
 
-/// `join`: the signature proves the new key; the invite is looked up before
-/// the nonce is recorded, so anonymous requests cannot fill the nonce table.
+/// Verify key possession before invitation redemption or development open admission.
+/// Normal admission looks up the invite before recording a nonce.
 async fn join(
     state: &IssuerState,
     request: &MembershipRequest,
@@ -163,43 +163,66 @@ async fn join(
             format!("label has more than {MAX_LABEL_CHARS} characters"),
         );
     }
-    if request.invite.is_none() && state.dev_join.mode == platform::config::realm::DevJoinMode::Open
-    {
+    let open = state.dev_join.mode == platform::config::realm::DevJoinMode::Open;
+    if open {
         use_nonce(&request.nonce, expires_at).await?;
-        return membership::join_open(
+    }
+    let invited = async {
+        let secret = request
+            .invite
+            .as_deref()
+            .ok_or_else(|| invalid(&"join needs invite"))?;
+        let secret_hash = invite_secret_hash(secret).map_err(|e| invalid(&e))?;
+        match membership::invite_realm(&secret_hash).await? {
+            None => return fail(Code::InviteUnknown, "no such invite"),
+            Some(realm) if realm != request.realm => {
+                return fail(
+                    Code::InviteRealmMismatch,
+                    "the invite belongs to another Realm",
+                );
+            }
+            Some(_) => {}
+        }
+        if !open {
+            use_nonce(&request.nonce, expires_at).await?;
+        }
+        membership::join_with_mode(
             &request.realm,
+            &secret_hash,
             &public_key,
             &label,
-            state.dev_join.default_role,
             state.limits,
+            state.dev_join.mode,
         )
-        .await;
+        .await
     }
-    let secret = request
-        .invite
-        .as_deref()
-        .ok_or_else(|| invalid(&"join needs invite"))?;
-    let secret_hash = invite_secret_hash(secret).map_err(|e| invalid(&e))?;
-    match membership::invite_realm(&secret_hash).await? {
-        None => return fail(Code::InviteUnknown, "no such invite"),
-        Some(realm) if realm != request.realm => {
-            return fail(
-                Code::InviteRealmMismatch,
-                "the invite belongs to another Realm",
-            );
+    .await;
+    match invited {
+        Err(error)
+            if open
+                && matches!(
+                    error.code,
+                    Code::InvalidRequest
+                        | Code::InviteUnknown
+                        | Code::InviteRealmMismatch
+                        | Code::InviteExpired
+                        | Code::InviteUsed
+                        | Code::InviteRevoked
+                        | Code::Conflict
+                        | Code::MemberRemoved
+                ) =>
+        {
+            membership::join_open(
+                &request.realm,
+                &public_key,
+                &label,
+                state.dev_join.default_role,
+                state.limits,
+            )
+            .await
         }
-        Some(_) => {}
+        result => result,
     }
-    use_nonce(&request.nonce, expires_at).await?;
-    membership::join_with_mode(
-        &request.realm,
-        &secret_hash,
-        &public_key,
-        &label,
-        state.limits,
-        state.dev_join.mode,
-    )
-    .await
 }
 
 /// `update_realm`: the owner updates or retires a Realm under this Actr Facility

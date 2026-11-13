@@ -32,20 +32,11 @@ fn parse_role(text: &str) -> std::result::Result<Role, String> {
 
 #[derive(Args, Debug, Clone)]
 pub struct JoinArgs {
-    /// Realm invite text `ri_…` (`-` reads stdin)
-    #[arg(
-        value_name = "INVITE",
-        required_unless_present = "realm",
-        conflicts_with = "realm"
-    )]
+    /// Realm invite text (`-` reads stdin); ignored when --realm is supplied
+    #[arg(value_name = "INVITE", required_unless_present = "realm")]
     pub invite: Option<String>,
-    /// Join without an invite when the AFP enables development open admission
-    #[arg(
-        long,
-        value_name = "NAME",
-        required_unless_present = "invite",
-        conflicts_with = "invite"
-    )]
+    /// Target Realm for development open admission; optional INVITE text is ignored
+    #[arg(long, value_name = "NAME", required_unless_present = "invite")]
     pub realm: Option<String>,
     /// Key file to write the new Realm client key to
     #[arg(long, short = 'o', value_name = "FILE")]
@@ -476,7 +467,7 @@ where
     F: Fn(String) -> Fut,
     Fut: Future<Output = Result<Vec<u8>>>,
 {
-    let invite = match args.invite.as_deref() {
+    let invite = match args.invite.as_deref().filter(|_| args.realm.is_none()) {
         Some("-") => Some(RealmInvite::decode(&std::io::read_to_string(
             std::io::stdin(),
         )?)?),
@@ -812,6 +803,15 @@ mod tests {
         assert_eq!(first["public_key"], retry["public_key"]);
         assert_ne!(first["nonce"], retry["nonce"]);
         assert!(RealmClientKeyFile::read(&args.output).is_ok());
+        for text in ["anything", "ri_invalid"] {
+            let supplied = JoinArgs {
+                invite: Some(text.into()),
+                ..args.clone()
+            };
+            let reply = join(&supplied).await.unwrap();
+            assert!(reply.get("invite").is_none());
+            assert_eq!(reply["public_key"], first["public_key"]);
+        }
     }
 
     #[tokio::test]

@@ -4,9 +4,11 @@ import { api, type ResolvedField } from "../../lib/api";
 
 export function DevelopmentJoinSettings({
   fields,
+  writable,
   onRefresh,
 }: {
   fields: ResolvedField[];
+  writable: boolean;
   onRefresh: () => Promise<void>;
 }) {
   const currentMode = fields.find((f) => f.key === "realm.dev_join.mode")?.effective_value ?? "off";
@@ -20,6 +22,7 @@ export function DevelopmentJoinSettings({
   useEffect(() => { setMode(currentMode); setRole(currentRole); }, [currentMode, currentRole]);
 
   async function save() {
+    if (!writable) return;
     setSaving(true);
     setMessage("");
     setError("");
@@ -53,27 +56,31 @@ export function DevelopmentJoinSettings({
     <section className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
       <h2 className="text-sm font-semibold text-gray-900">Development admission</h2>
       <p className="text-sm text-gray-500">
-        Applies to every active Realm on this AFP. Open mode lets anyone join without an invitation.
+        Applies to every active Realm on this AFP. Open mode lets anyone join. Missing or invalid
+        invitations use the default role; valid invitations retain normal redemption.
       </p>
+      {!writable && <p className="text-sm text-amber-700" role="status">
+        Supervisor-managed AFP: local admission settings are read-only.
+      </p>}
       <div className="flex flex-wrap items-end gap-4">
         <label className="text-sm text-gray-700">
           Mode
-          <select value={mode} onChange={(e) => setMode(e.target.value)} disabled={saving}
+          <select value={mode} onChange={(e) => setMode(e.target.value)} disabled={!writable || saving}
             className="mt-1 block rounded-md border border-gray-300 px-3 py-2">
             <option value="off">Off — one-time invitations</option>
-            <option value="open">Open — no invitation</option>
+            <option value="open">Open — any or no invitation</option>
             <option value="reusable_invite">Reusable invitations</option>
           </select>
         </label>
         <label className="text-sm text-gray-700">
           New member role
-          <select value={role} onChange={(e) => setRole(e.target.value)} disabled={saving || mode !== "open"}
+          <select value={role} onChange={(e) => setRole(e.target.value)} disabled={!writable || saving || mode !== "open"}
             className="mt-1 block rounded-md border border-gray-300 px-3 py-2 disabled:opacity-50">
             <option value="editor">Editor</option>
             <option value="viewer">Viewer</option>
           </select>
         </label>
-        <button onClick={save} disabled={saving || (mode === currentMode && role === currentRole)}
+        <button onClick={save} disabled={!writable || saving || (mode === currentMode && role === currentRole)}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50">
           {saving ? "Applying…" : "Save and apply"}
         </button>

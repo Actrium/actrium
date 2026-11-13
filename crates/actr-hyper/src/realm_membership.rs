@@ -189,35 +189,43 @@ impl RealmMembershipClient {
 
     /// Retries use this same signer and a fresh envelope nonce. The invite
     /// is never logged, included in an error, or persisted by this client.
-    /// An empty invite requests development open admission; the AFP must explicitly enable it.
+    /// Missing, invalid or foreign invitations probe open admission without forwarding their text.
+    /// The AFP must explicitly enable open mode; valid invitations retain normal redemption.
     pub async fn join(&self, invite: &str, label: &str) -> Result<Value, MembershipClientError> {
-        let invite = if invite.trim().is_empty() {
-            None
+        let (invite, rejection) = if invite.trim().is_empty() {
+            (None, None)
         } else {
-            Some(
-                RealmInvite::decode(invite)
-                    .map_err(|_| MembershipClientError::InvalidInput("invalid invite".into()))?,
-            )
+            match RealmInvite::decode(invite) {
+                Ok(invite) if invite.realm == self.endpoint.realm => (Some(invite.secret), None),
+                Ok(_) => (
+                    None,
+                    Some(MembershipClientError::Rejected {
+                        status: 409,
+                        code: "invite_realm_mismatch".into(),
+                    }),
+                ),
+                Err(_) => (
+                    None,
+                    Some(MembershipClientError::InvalidInput("invalid invite".into())),
+                ),
+            }
         };
-        if invite
-            .as_ref()
-            .is_some_and(|invite| invite.realm != self.endpoint.realm)
-        {
-            return Err(MembershipClientError::Rejected {
-                status: 409,
-                code: "invite_realm_mismatch".into(),
-            });
-        }
         if label.chars().count() > actr_protocol::realm_membership::MAX_LABEL_CHARS {
             return Err(MembershipClientError::InvalidInput(
                 "client label is too long".into(),
             ));
         }
         let mut request = self.request(MembershipOp::Join);
-        request.invite = invite.map(|invite| invite.secret);
+        request.invite = invite;
         request.public_key = Some(BASE64.encode(self.key.public_key()));
         request.label = Some(label.to_string());
-        let result = self.send(request).await?;
+        let result = self.send(request).await;
+        if matches!(&result, Err(MembershipClientError::Rejected { status: 400, code }) if code == "invalid_request")
+            && let Some(rejection) = rejection
+        {
+            return Err(rejection);
+        }
+        let result = result?;
         if result["realm"] != self.endpoint.realm
             || result["key_id"] != self.key_id()
             || result["member_id"].as_str().is_none()

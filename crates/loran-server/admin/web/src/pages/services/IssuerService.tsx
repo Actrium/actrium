@@ -149,7 +149,8 @@ export function IssuerService() {
 
       {data.enabled && <ServiceMetrics status={data.status} storageKey="issuer" />}
       {data.enabled && data.config_fields && (
-        <DevelopmentJoinSettings fields={data.config_fields} onRefresh={fetchData} />
+        <DevelopmentJoinSettings fields={data.config_fields}
+          writable={data.config?.dev_join_writable === true} onRefresh={fetchData} />
       )}
 
       {data.config && (
