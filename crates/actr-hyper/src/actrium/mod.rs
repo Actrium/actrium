@@ -45,7 +45,7 @@ pub mod metadata {
 pub mod front;
 pub mod service;
 
-pub use front::{ActriumAttachParams, ActriumFrontGuard, ActriumFrontSession};
+pub use front::{ActriumAttachParams, ActriumFrontSession};
 pub use service::{ActriumServiceGuard, ActriumServiceRegistry};
 
 #[cfg(test)]

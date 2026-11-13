@@ -1061,9 +1061,10 @@ pub(crate) struct Inner {
     /// routes fail closed when this is absent; they never enter the workload.
     pub(crate) session_registry: Option<Arc<dyn SessionRegistry>>,
 
-    /// Actrium Front guard state installed before registration. `start()`
-    /// promotes it into the `ActrRef` runtime once the PeerGate exists.
-    pub(crate) actrium_front: Option<Arc<crate::actrium::front::FrontShared>>,
+    /// Shared peer state installed when the node hosts an Actrium session
+    /// service. `start()` promotes it into the `ActrRef` runtime once the
+    /// PeerGate exists, enabling outbound Attach and response verification.
+    pub(crate) actrium_peer: Option<Arc<crate::actrium::service::Shared>>,
 
     /// Handle to the per-actor serial command runner.
     ///
@@ -2942,7 +2943,7 @@ impl Inner {
             peer_types: PeerTypes::default(),
             incoming_guard: None,
             session_registry: None,
-            actrium_front: None,
+            actrium_peer: None,
             workload_dispatch: Arc::new(workload_dispatch),
             linked_handle,
             package_uses_explicit_reply_boundary,
@@ -5080,13 +5081,13 @@ impl Inner {
         }
 
         // Create ActrRefShared
-        let actrium = match (
-            node_ref.actrium_front.clone(),
+        let peer_runtime = match (
+            node_ref.actrium_peer.clone(),
             node_ref.peer_transport.clone(),
             node_ref.outproc_gate.as_ref(),
         ) {
-            (Some(front), Some(transport), Some(Gate::Peer(gate))) => Some(Arc::new(
-                crate::actrium::front::FrontRuntime::new(gate.clone(), transport, front),
+            (Some(peer), Some(transport), Some(Gate::Peer(gate))) => Some(Arc::new(
+                crate::actrium::front::PeerRuntime::new(gate.clone(), transport, peer),
             )),
             _ => None,
         };
@@ -5098,7 +5099,7 @@ impl Inner {
             shutdown_token,
             task_handles: Mutex::new(task_handles),
             rtc_manager: rtc_manager.clone(),
-            actrium,
+            peer_runtime,
         });
 
         // Create ActrRef

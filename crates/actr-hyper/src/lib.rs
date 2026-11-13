@@ -1434,32 +1434,20 @@ impl Node<Registered> {
             .clone()
     }
 
-    /// Configure this node as an Actrium Front. Installs the response-proof
-    /// guard; after `start()`, [`crate::actr_ref::ActrRef::attach_actrium`]
-    /// connects and Attaches to Services. The Front is a pure caller in v1:
-    /// Service-originated business calls and streams are rejected.
-    pub fn with_actrium_front(mut self) -> Self {
-        let shared = Arc::new(crate::actrium::front::FrontShared::default());
+    /// Install the complete Actrium P2P session protocol on this node: the
+    /// registry owns the exact `actrium.session.v1` system routes, the guard
+    /// authorizes inbound business requests/tells/streams and signs responses,
+    /// and the same shared state enables outbound Attach and response-proof
+    /// verification. Session traffic requires the verified Actor channel.
+    pub fn with_actrium_service(mut self, service: actrium_runtime::InMemorySessionService) -> Self {
+        let shared = Arc::new(crate::actrium::service::Shared::default());
+        let (registry, guard) = crate::actrium::ActriumServiceRegistry::new(service, shared.clone());
         let node = &mut self
             .attachment
             .as_mut()
             .expect("Node<Registered> without attachment")
             .node;
-        node.actrium_front = Some(shared.clone());
-        node.set_incoming_guard(Some(Arc::new(
-            crate::actrium::front::ActriumFrontGuard::new(shared),
-        )));
-        self
-    }
-
-    /// Install the complete Actrium Front–Service session protocol on this
-    /// Service node: the registry owns the exact `actrium.session.v1` system
-    /// routes, and the guard authorizes business requests, tells, and stream
-    /// chunks against current session policy and signs actual responses.
-    /// Session traffic requires the verified Actor channel; legacy transports
-    /// are rejected rather than implicitly trusted.
-    pub fn with_actrium_service(self, service: actrium_runtime::InMemorySessionService) -> Self {
-        let (registry, guard) = crate::actrium::ActriumServiceRegistry::new(service);
+        node.actrium_peer = Some(shared);
         self.with_session_registry(Arc::new(registry))
             .with_incoming_guard(Arc::new(guard))
     }

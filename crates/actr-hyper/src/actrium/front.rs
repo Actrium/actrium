@@ -1,44 +1,39 @@
-//! Front-side Actrium session client: connect over the verified Actor
+//! Peer-side Actrium session client: connect over the verified Actor
 //! channel, Attach, sign business calls, and maintain the lease.
 //!
-//! A Front node opts in with `Node<Attached>::with_actrium_front`, which
-//! installs [`ActriumFrontGuard`]. After `start()`, [`ActrRef::attach_actrium`]
-//! performs the Attach exchange and returns an [`ActriumFrontSession`] whose
-//! calls carry session metadata and HMAC proofs. Responses are verified by
-//! the guard before the pending caller is woken.
+//! In the P2P model every node that participates in Actrium sessions also
+//! hosts an `InMemorySessionService`; any such node can initiate an Attach to
+//! another peer and become a caller. [`ActrRef::attach_actrium`] performs the
+//! Attach exchange and returns an [`ActriumFrontSession`] whose calls carry
+//! session metadata and HMAC proofs. Responses are verified by the shared
+//! inbound guard before the pending caller is woken.
 //!
-//! v1 scope: the Front is a pure caller. Service-originated business calls
-//! and streams toward the Front fail closed, as do responses to
-//! Service-originated calls on the Service side.
+//! v1 scope: a peer is both a Service (it receives Attach and runs a Guard)
+//! and a caller (it can Attach to other peers). Service-originated business
+//! calls and streams toward a caller are handled by the Service side, not
+//! this module.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use actr_framework::Dest;
 use actr_protocol::{
     ActorResult, ActrError, ActrId, Direction, MetadataEntry, PayloadType, RpcEnvelope,
-    prost::Message as _,
 };
 use actrium_runtime::{
     AttachRequest, AttachResponse, BusinessRequest, DetachRequest, HeartbeatOutcome,
     HeartbeatRequest, LeaseMode, MessageKind, ProgramRelease, ResumeRequest, SessionSecret,
     TakeoverRequest, attach_request_digest, resume_digest, resume_proof, sign_attach_request,
-    takeover_signing_bytes, verify_attach_response, verify_request_proof,
+    takeover_signing_bytes, verify_attach_response,
 };
-use async_trait::async_trait;
 use bytes::Bytes;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use super::metadata;
-use super::service::TakeoverPayload;
+use super::service::{PendingCall, Shared as PeerShared, TakeoverPayload};
 use crate::actr_ref::ActrRef;
-use crate::lifecycle::{
-    IncomingDispatchRequest, IncomingGuard, IncomingGuardError, IncomingGuardErrorCode,
-    IncomingStreamChunk, route_requires_incoming_guard,
-};
 use crate::outbound::PeerGate;
 use crate::transport::{PeerTransport, RpcDeadline, VerifiedPeerContext};
 
@@ -51,13 +46,9 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-fn denied(message: impl Into<String>) -> IncomingGuardError {
-    IncomingGuardError::new(IncomingGuardErrorCode::PermissionDenied, message)
-}
-
-/// Everything the Front host declares for one Attach attempt. Authority-bearing
-/// identity fields come from the verified channel and the node's own Actor
-/// key, never from the Guest.
+/// Everything the attaching peer declares for one Attach attempt.
+/// Authority-bearing identity fields come from the verified channel and the
+/// node's own Actor key, never from the Guest.
 #[derive(Clone)]
 pub struct ActriumAttachParams {
     pub program: ProgramRelease,
@@ -66,34 +57,23 @@ pub struct ActriumAttachParams {
     pub protocol_fingerprint: Vec<u8>,
     pub runtime: actrium_runtime::Runtime,
     pub requested_capabilities: Vec<String>,
-    /// The Front Actor's long-term Ed25519 key, matching the key bound at
+    /// The attaching peer's long-term Ed25519 key, matching the key bound at
     /// registration and proven during the relay handshake.
     pub actor_signing_key: ed25519_dalek::SigningKey,
 }
 
-pub(crate) struct PendingCall {
-    pub(crate) request: BusinessRequest,
-    pub(crate) secret: SessionSecret,
-}
-
-/// Shared between the Front guard and every session on one node.
-#[derive(Default)]
-pub(crate) struct FrontShared {
-    pub(crate) pending: Mutex<HashMap<String, PendingCall>>,
-}
-
-/// Handles to the running node's outbound path plus the Front guard state.
-pub(crate) struct FrontRuntime {
+/// Handles to the running node's outbound path plus the shared peer state.
+pub(crate) struct PeerRuntime {
     gate: Arc<PeerGate>,
     transport: Arc<PeerTransport>,
-    shared: Arc<FrontShared>,
+    shared: Arc<PeerShared>,
 }
 
-impl FrontRuntime {
+impl PeerRuntime {
     pub(crate) fn new(
         gate: Arc<PeerGate>,
         transport: Arc<PeerTransport>,
-        shared: Arc<FrontShared>,
+        shared: Arc<PeerShared>,
     ) -> Self {
         Self {
             gate,
@@ -102,106 +82,22 @@ impl FrontRuntime {
         }
     }
 
-    /// Connect to the Service and return the verified channel view. Legacy
-    /// wires never produce a context, so Attach cannot silently downgrade.
+    /// Connect to the peer and return the verified channel view. Legacy wires
+    /// never produce a context, so Attach cannot silently downgrade.
     async fn verified_context(&self, service: &ActrId) -> ActorResult<Arc<VerifiedPeerContext>> {
         let transport = self
             .transport
             .get_or_create_transport(&Dest::Peer(service.clone()))
             .await
             .map_err(|error| {
-                ActrError::Unavailable(format!("Actrium Service connection failed: {error}"))
+                ActrError::Unavailable(format!("Actrium peer connection failed: {error}"))
             })?;
         transport.verified_peer_context().await.ok_or_else(|| {
             ActrError::PermissionDenied(
-                "the Service has no verified Actor channel; Actrium Attach requires mutual authentication"
+                "the peer has no verified Actor channel; Actrium Attach requires mutual authentication"
                     .to_string(),
             )
         })
-    }
-}
-
-/// Verifies response proofs for Front-issued calls and rejects every other
-/// inbound business delivery. Session system-route responses are admitted
-/// without a business proof: Attach/Resume/Takeover responses carry their own
-/// Ed25519 `service_challenge`, which the client verifies directly.
-pub struct ActriumFrontGuard {
-    shared: Arc<FrontShared>,
-}
-
-impl ActriumFrontGuard {
-    pub(crate) fn new(shared: Arc<FrontShared>) -> Self {
-        Self { shared }
-    }
-}
-
-#[async_trait]
-impl IncomingGuard for ActriumFrontGuard {
-    async fn check(&self, request: IncomingDispatchRequest<'_>) -> Result<(), IncomingGuardError> {
-        let envelope = request.envelope;
-        if !route_requires_incoming_guard(&envelope.route_key) {
-            return Ok(());
-        }
-        if envelope.direction != Some(Direction::Response as i32) {
-            return Err(denied(
-                "Service-originated business calls are outside the v1 Actrium Front scope",
-            ));
-        }
-        let Some(pending) = self
-            .shared
-            .pending
-            .lock()
-            .await
-            .remove(&envelope.request_id)
-        else {
-            return Err(denied("response does not match an Actrium Front call"));
-        };
-        let Some(proof) = request.metadata.get(metadata::PROOF) else {
-            // Admission-stage rejections carry the original session error and
-            // no proof; a successful response must always be authenticated.
-            if envelope.error.is_some() {
-                return Ok(());
-            }
-            return Err(denied("successful response is missing its proof"));
-        };
-        let proof = hex::decode(proof)
-            .map_err(|error| super::invalid_metadata(format!("invalid proof encoding: {error}")))?;
-        let payload = match (&envelope.error, &envelope.payload) {
-            (Some(error), None) => error.encode_to_vec(),
-            (None, Some(payload)) => payload.to_vec(),
-            (None, None) => Vec::new(),
-            (Some(_), Some(_)) => {
-                return Err(super::invalid_metadata(
-                    "a response must carry exactly one payload or error",
-                ));
-            }
-        };
-        let mut input = pending.request;
-        input.kind = MessageKind::Response;
-        input.payload = payload;
-        input.proof = Vec::new();
-        if verify_request_proof(pending.secret.as_bytes(), &input, &proof) {
-            Ok(())
-        } else {
-            Err(denied("response proof verification failed"))
-        }
-    }
-
-    async fn authenticate_response(
-        &self,
-        _response: &mut RpcEnvelope,
-    ) -> Result<(), IncomingGuardError> {
-        // The Front is a pure caller in v1 and never produces responses.
-        Ok(())
-    }
-
-    async fn check_stream(
-        &self,
-        _request: IncomingStreamChunk<'_>,
-    ) -> Result<(), IncomingGuardError> {
-        Err(denied(
-            "Service-originated streams are outside the v1 Actrium Front scope",
-        ))
     }
 }
 
@@ -218,7 +114,7 @@ struct SessionState {
 /// lease when it expires. Call [`ActriumFrontSession::detach`] to release it
 /// immediately.
 pub struct ActriumFrontSession {
-    runtime: Arc<FrontRuntime>,
+    runtime: Arc<PeerRuntime>,
     service: ActrId,
     front_actor_id: String,
     service_actor_id: String,
@@ -553,16 +449,16 @@ impl ActriumFrontSession {
 }
 
 impl ActrRef {
-    /// Connect to a Service over the verified Actor channel and Attach.
-    /// Requires `Node<Attached>::with_actrium_front` before registration.
+    /// Connect to a peer Service over the verified Actor channel and Attach.
+    /// Requires `Node<Attached>::with_actrium_service` before registration.
     pub async fn attach_actrium(
         &self,
         service: &ActrId,
         params: ActriumAttachParams,
     ) -> ActorResult<Arc<ActriumFrontSession>> {
-        let runtime = self.shared.actrium.clone().ok_or_else(|| {
+        let runtime = self.shared.peer_runtime.clone().ok_or_else(|| {
             ActrError::InvalidArgument(
-                "the node is not configured as an Actrium Front; call with_actrium_front before registration"
+                "the node is not configured for Actrium sessions; call with_actrium_service before registration"
                     .to_string(),
             )
         })?;

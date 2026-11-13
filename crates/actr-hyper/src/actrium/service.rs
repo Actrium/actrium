@@ -10,7 +10,7 @@ use actr_protocol::{
 use actrium_runtime::{
     AttachRequest, AttachResponse, BusinessRequest, DetachRequest, GetStatusRequest,
     GuardedRequest, HeartbeatRequest, InMemorySessionService, MessageKind, ResumeRequest,
-    SessionSecret, TakeoverRequest, request_proof, request_signing_bytes,
+    SessionSecret, TakeoverRequest, request_proof, request_signing_bytes, verify_request_proof,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -34,9 +34,19 @@ pub struct TakeoverPayload {
 }
 
 #[derive(Default)]
-struct Shared {
+pub(crate) struct Shared {
     secrets: Mutex<HashMap<String, SessionSecret>>,
     admitted: Mutex<HashMap<String, Admitted>>,
+    /// Pending outbound calls waiting for their response proof. Shared with
+    /// outbound peer sessions so the single inbound guard can verify responses.
+    pub(crate) pending: Mutex<HashMap<String, PendingCall>>,
+}
+
+/// An outbound call awaiting its response proof. Kept in the shared inbound
+/// guard so responses from any peer can be verified in one place.
+pub(crate) struct PendingCall {
+    pub(crate) request: BusinessRequest,
+    pub(crate) secret: SessionSecret,
 }
 
 struct Admitted {
@@ -55,9 +65,9 @@ pub struct ActriumServiceRegistry {
 
 impl ActriumServiceRegistry {
     /// Builds the registry/guard pair over one session service. Install both
-    /// on the same node; they share session secrets and admission state.
-    pub fn new(service: InMemorySessionService) -> (Self, ActriumServiceGuard) {
-        let shared = Arc::new(Shared::default());
+    /// on the same node; they share session secrets, admission state, and
+    /// outbound pending calls so the guard can verify peer responses.
+    pub(crate) fn new(service: InMemorySessionService, shared: Arc<Shared>) -> (Self, ActriumServiceGuard) {
         (
             Self {
                 service: service.clone(),
@@ -299,6 +309,13 @@ fn chunk_request(
 #[async_trait]
 impl IncomingGuard for ActriumServiceGuard {
     async fn check(&self, request: IncomingDispatchRequest<'_>) -> Result<(), IncomingGuardError> {
+        let envelope = request.envelope;
+        // Responses to our outbound peer calls are verified in
+        // `authenticate_response`; this check only handles inbound requests
+        // and tells.
+        if envelope.direction == Some(Direction::Response as i32) {
+            return Ok(());
+        }
         let context = request
             .peer_context
             .as_deref()
@@ -351,31 +368,78 @@ impl IncomingGuard for ActriumServiceGuard {
         &self,
         response: &mut RpcEnvelope,
     ) -> Result<(), IncomingGuardError> {
-        // Admission-stage rejections have no admitted request and travel
-        // without a proof; the Front passes those errors through unchanged.
-        let Some(request) = self
+        // First, if this response matches an admitted inbound request, sign it
+        // as the Service before it leaves.
+        let admitted_opt = self
             .shared
             .admitted
             .lock()
             .await
             .get(&response.request_id)
-            .map(|entry| entry.request.clone())
-        else {
+            .map(|entry| entry.request.clone());
+        if let Some(request) = admitted_opt {
+            let secret = self
+                .shared
+                .secrets
+                .lock()
+                .await
+                .get(&request.session_id)
+                .cloned()
+                .ok_or_else(|| {
+                    IncomingGuardError::new(
+                        IncomingGuardErrorCode::Revoked,
+                        "the session secret is no longer available".to_string(),
+                    )
+                })?;
+            let payload = match (&response.error, &response.payload) {
+                (Some(error), None) => error.encode_to_vec(),
+                (None, Some(payload)) => payload.to_vec(),
+                (None, None) => Vec::new(),
+                (Some(_), Some(_)) => {
+                    return Err(invalid_metadata(
+                        "a response must carry exactly one payload or error",
+                    ));
+                }
+            };
+            let mut proof_input = request;
+            proof_input.kind = MessageKind::Response;
+            proof_input.payload = payload;
+            proof_input.proof = Vec::new();
+            let proof = request_proof(secret.as_bytes(), &proof_input);
+            response
+                .metadata
+                .retain(|entry| entry.key != metadata::PROOF);
+            response.metadata.push(MetadataEntry {
+                key: metadata::PROOF.to_string(),
+                value: hex::encode(proof),
+            });
             return Ok(());
-        };
-        let secret = self
+        }
+
+        // Otherwise this is a response to one of our outbound peer calls.
+        // Verify its proof exactly like the old Front guard did.
+        let Some(pending) = self
             .shared
-            .secrets
+            .pending
             .lock()
             .await
-            .get(&request.session_id)
-            .cloned()
-            .ok_or_else(|| {
-                IncomingGuardError::new(
-                    IncomingGuardErrorCode::Revoked,
-                    "the session secret is no longer available".to_string(),
-                )
-            })?;
+            .remove(&response.request_id)
+        else {
+            // Not a session response we are waiting for; leave it to other
+            // guards or to the workload.
+            return Ok(());
+        };
+        let Some(proof) = response.metadata.iter().find(|e| e.key == metadata::PROOF) else {
+            if response.error.is_some() {
+                return Ok(());
+            }
+            return Err(IncomingGuardError::new(
+                IncomingGuardErrorCode::PermissionDenied,
+                "successful response is missing its proof".to_string(),
+            ));
+        };
+        let proof = hex::decode(&proof.value)
+            .map_err(|error| invalid_metadata(format!("invalid proof encoding: {error}")))?;
         let payload = match (&response.error, &response.payload) {
             (Some(error), None) => error.encode_to_vec(),
             (None, Some(payload)) => payload.to_vec(),
@@ -386,19 +450,18 @@ impl IncomingGuard for ActriumServiceGuard {
                 ));
             }
         };
-        let mut proof_input = request;
-        proof_input.kind = MessageKind::Response;
-        proof_input.payload = payload;
-        proof_input.proof = Vec::new();
-        let proof = request_proof(secret.as_bytes(), &proof_input);
-        response
-            .metadata
-            .retain(|entry| entry.key != metadata::PROOF);
-        response.metadata.push(MetadataEntry {
-            key: metadata::PROOF.to_string(),
-            value: hex::encode(proof),
-        });
-        Ok(())
+        let mut input = pending.request;
+        input.kind = MessageKind::Response;
+        input.payload = payload;
+        input.proof = Vec::new();
+        if verify_request_proof(pending.secret.as_bytes(), &input, &proof) {
+            Ok(())
+        } else {
+            Err(IncomingGuardError::new(
+                IncomingGuardErrorCode::PermissionDenied,
+                "response proof verification failed".to_string(),
+            ))
+        }
     }
 
     async fn check_stream(

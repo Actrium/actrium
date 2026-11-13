@@ -1,5 +1,5 @@
 //! End-to-end adapter tests: verified-channel Attach, business admission,
-//! dequeue recheck, response signing, and Front-side response verification.
+//! dequeue recheck, response signing, and caller-side response verification.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -13,15 +13,15 @@ use actrium_runtime::{
     PrivacyState, ProgramRelease, QuotaDecision, RequestAuthorizationDecision, RequestContext,
     RequestQuotaContext, ServiceConfig, ServicePolicies, SessionError, SessionSecret,
     SessionStatus, TakeoverContext, attach_request_digest, sign_attach_request,
-    verify_attach_response,
+    verify_attach_response, verify_request_proof,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
 use ed25519_dalek::SigningKey;
 
-use super::front::{ActriumFrontGuard, FrontShared, PendingCall, business_metadata};
+use super::front::business_metadata;
 use super::metadata;
-use super::service::ActriumServiceRegistry;
+use super::service::{ActriumServiceRegistry, Shared as PeerShared};
 use crate::lifecycle::{
     IncomingDispatchRequest, IncomingGuard, IncomingStreamChunk, SessionRegistry,
 };
@@ -334,7 +334,8 @@ fn business_call(response: &AttachResponse, secret: &SessionSecret) -> RpcEnvelo
 
 #[tokio::test]
 async fn attach_business_call_and_response_proof_round_trip() {
-    let (registry, guard) = ActriumServiceRegistry::new(service());
+    let shared = Arc::new(PeerShared::default());
+    let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
     let (attach, secret) = attach(&registry).await;
     assert!(attach.session_id.len() > 8);
     assert_eq!(attach.session_capability_ceiling, vec![READ.to_string()]);
@@ -350,7 +351,7 @@ async fn attach_business_call_and_response_proof_round_trip() {
         .await
         .expect("identical dequeue recheck");
 
-    // The Service signs the actual response payload; the Front guard accepts it.
+    // The Service signs the actual response payload; the caller verifies it.
     let mut response = RpcEnvelope {
         request_id: "call-1".into(),
         route_key: ROUTE.into(),
@@ -359,15 +360,13 @@ async fn attach_business_call_and_response_proof_round_trip() {
         ..Default::default()
     };
     guard.authenticate_response(&mut response).await.unwrap();
-    assert!(
-        response
-            .metadata
-            .iter()
-            .any(|entry| entry.key == metadata::PROOF)
-    );
-
-    let front_shared = Arc::new(FrontShared::default());
-    let mut pending_request = BusinessRequest {
+    let proof = response
+        .metadata
+        .iter()
+        .find(|entry| entry.key == metadata::PROOF)
+        .expect("response carries a proof");
+    let proof_bytes = hex::decode(&proof.value).unwrap();
+    let input = BusinessRequest {
         session_id: attach.session_id.clone(),
         lease_epoch: attach.lease_epoch,
         service_actor_id: service_id().to_string_repr(),
@@ -377,24 +376,15 @@ async fn attach_business_call_and_response_proof_round_trip() {
         request_id: "call-1".into(),
         issued_at: now(),
         deadline: now() + 30,
-        kind: MessageKind::Request,
+        kind: MessageKind::Response,
         idempotency_key: None,
-        payload: b"read document".to_vec(),
+        payload: b"document body".to_vec(),
         proof: Vec::new(),
     };
-    pending_request.sign(&secret);
-    front_shared.pending.lock().await.insert(
-        "call-1".into(),
-        PendingCall {
-            request: pending_request,
-            secret: secret.clone(),
-        },
+    assert!(
+        verify_request_proof(secret.as_bytes(), &input, &proof_bytes),
+        "caller verifies the response proof"
     );
-    let front_guard = ActriumFrontGuard::new(front_shared);
-    front_guard
-        .check(dispatch_request(&response, Some(front_context())))
-        .await
-        .expect("Front verifies the response proof");
 
     // Detach closes the lease; further business calls are rejected.
     let detach = DetachRequest {
@@ -426,7 +416,8 @@ async fn attach_business_call_and_response_proof_round_trip() {
 
 #[tokio::test]
 async fn session_methods_require_a_verified_channel() {
-    let (registry, guard) = ActriumServiceRegistry::new(service());
+    let shared = Arc::new(PeerShared::default());
+    let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
     let channel = front_context();
     let mut request = attach_request(&channel);
     sign_attach_request(&mut request, &front_key());
@@ -467,7 +458,8 @@ async fn session_methods_require_a_verified_channel() {
 
 #[tokio::test]
 async fn tampered_requests_and_responses_are_rejected() {
-    let (registry, guard) = ActriumServiceRegistry::new(service());
+    let shared = Arc::new(PeerShared::default());
+    let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
     let (attach, secret) = attach(&registry).await;
 
     // A valid request with a mutated payload fails the HMAC check.
@@ -494,7 +486,7 @@ async fn tampered_requests_and_responses_are_rejected() {
         crate::lifecycle::IncomingGuardErrorCode::InvalidMetadata
     );
 
-    // A genuine response with a mutated payload fails Front verification.
+    // A genuine response with a mutated payload fails caller verification.
     let call = business_call(&attach, &secret);
     guard
         .check(dispatch_request(&call, Some(service_context())))
@@ -510,8 +502,13 @@ async fn tampered_requests_and_responses_are_rejected() {
     guard.authenticate_response(&mut response).await.unwrap();
     response.payload = Some(Bytes::from_static(b"forged response"));
 
-    let front_shared = Arc::new(FrontShared::default());
-    let mut pending_request = BusinessRequest {
+    let proof = response
+        .metadata
+        .iter()
+        .find(|entry| entry.key == metadata::PROOF)
+        .expect("response carries a proof");
+    let proof_bytes = hex::decode(&proof.value).unwrap();
+    let input = BusinessRequest {
         session_id: attach.session_id.clone(),
         lease_epoch: attach.lease_epoch,
         service_actor_id: service_id().to_string_repr(),
@@ -521,33 +518,21 @@ async fn tampered_requests_and_responses_are_rejected() {
         request_id: "call-1".into(),
         issued_at: now(),
         deadline: now() + 30,
-        kind: MessageKind::Request,
+        kind: MessageKind::Response,
         idempotency_key: None,
-        payload: b"read document".to_vec(),
+        payload: b"forged response".to_vec(),
         proof: Vec::new(),
     };
-    pending_request.sign(&secret);
-    front_shared.pending.lock().await.insert(
-        "call-1".into(),
-        PendingCall {
-            request: pending_request,
-            secret: secret.clone(),
-        },
-    );
-    let front_guard = ActriumFrontGuard::new(front_shared);
-    let error = front_guard
-        .check(dispatch_request(&response, Some(front_context())))
-        .await
-        .expect_err("response forgery is rejected");
-    assert_eq!(
-        error.code,
-        crate::lifecycle::IncomingGuardErrorCode::PermissionDenied
+    assert!(
+        !verify_request_proof(secret.as_bytes(), &input, &proof_bytes),
+        "response forgery is rejected"
     );
 }
 
 #[tokio::test]
 async fn dequeue_rejects_a_mutated_envelope() {
-    let (registry, guard) = ActriumServiceRegistry::new(service());
+    let shared = Arc::new(PeerShared::default());
+    let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
     let (attach, secret) = attach(&registry).await;
     let call = business_call(&attach, &secret);
     guard
@@ -582,7 +567,8 @@ async fn dequeue_rejects_a_mutated_envelope() {
 
 #[tokio::test]
 async fn heartbeat_status_and_stream_chunks_use_the_same_guard() {
-    let (registry, guard) = ActriumServiceRegistry::new(service());
+    let shared = Arc::new(PeerShared::default());
+    let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
     let (attach, secret) = attach(&registry).await;
 
     let heartbeat = HeartbeatRequest {

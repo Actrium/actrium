@@ -3,8 +3,7 @@
 use crate::error::{ActrError, ActrResult, run_on_tokio_runtime};
 use crate::session::{
     ActrFrontSessionWrapper, ActriumAttachParams, ActriumServiceConfig, ActriumServicePolicies,
-    actr_ref_attach_actrium, registered_node_with_actrium_front,
-    registered_node_with_actrium_service,
+    actr_ref_attach_actrium, registered_node_with_actrium_service,
 };
 use crate::types::{
     ActrId, ActrType, AppLifecycleState, CleanupReason, NetworkEventResult, NetworkSnapshot,
@@ -246,20 +245,9 @@ impl ActrNode {
         Ok(Arc::new(NetworkEventHandleWrapper { inner: handle }))
     }
 
-    /// Configure this node as an Actrium Front. Must be called before `start()`.
-    pub fn with_actrium_front(self: Arc<Self>) -> ActrResult<Arc<Self>> {
-        let this = self.clone();
-        let mut node_guard = this.inner.lock();
-        let node = node_guard.take().ok_or_else(|| ActrError::Internal {
-            msg: "runtime node is no longer available".to_string(),
-        })?;
-        *node_guard = Some(registered_node_with_actrium_front(node));
-        Ok(self)
-    }
-
-    /// Install an Actrium Service registry on this node. Must be called before
-    /// `start()`. The supplied policies are allow-all; future versions can
-    /// expose callback-driven policy dimensions.
+    /// Install an Actrium Service registry on this node. In the P2P model every
+    /// participating node is a Service; the same configuration also enables
+    /// outbound `attachActrium` calls to other peers.
     pub fn with_actrium_service(
         self: Arc<Self>,
         config: ActriumServiceConfig,

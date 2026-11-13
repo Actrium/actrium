@@ -321,12 +321,6 @@ impl ActrFrontSessionWrapper {
 // They are kept here as free-function helpers so the implementation detail does
 // not leak into the larger runtime module.
 
-pub(crate) fn registered_node_with_actrium_front(
-    node: actr_hyper::Node<actr_hyper::Registered>,
-) -> actr_hyper::Node<actr_hyper::Registered> {
-    node.with_actrium_front()
-}
-
 pub(crate) fn registered_node_with_actrium_service(
     node: actr_hyper::Node<actr_hyper::Registered>,
     config: ActriumServiceConfig,

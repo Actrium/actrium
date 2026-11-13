@@ -244,34 +244,15 @@ fn attach_params(actor_signing_key: ed25519_dalek::SigningKey) -> ActriumAttachP
     }
 }
 
-async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (ActrRef, ActrId) {
-    let service_type = service_type();
-    let hyper = Hyper::new(HyperConfig::new(
-        dir.path(),
-        Arc::new(StaticTrust::dev_only()),
-    ))
-    .await
-    .unwrap();
-    let config = runtime_config(dir, server, service_type.clone());
-    let registered = Node::from_hyper(hyper, config)
-        .link(EchoWorkload)
-        .await
-        .unwrap()
-        .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
-        .await
-        .unwrap();
-    let service_actor_id = registered.actor_id();
-
-    let service_config = ServiceConfig {
-        service_actor_id: service_actor_id.to_string_repr(),
+fn make_service_config(service_actor_id: &str, signing_key: ed25519_dalek::SigningKey) -> ServiceConfig {
+    ServiceConfig {
+        service_actor_id: service_actor_id.into(),
         runtime_instance_id: actr_hyper::process_runtime_instance_id().to_owned(),
-        service_signing_key: actor_signing_key_for_scoped(
-            &actor_key_root(dir),
-            REALM,
-            &service_type,
-            None,
-        ),
-        allowed_front_actor_types: BTreeSet::from([front_type().to_string_repr()]),
+        service_signing_key: signing_key,
+        allowed_front_actor_types: BTreeSet::from([
+            front_type().to_string_repr(),
+            service_type().to_string_repr(),
+        ]),
         program: ProgramRelease {
             publisher: "example.com".into(),
             name: "documents".into(),
@@ -295,7 +276,27 @@ async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (Act
         max_replay_entries: ServiceConfig::DEFAULT_MAX_REPLAY_ENTRIES,
         max_completed_sessions: ServiceConfig::DEFAULT_MAX_COMPLETED_SESSIONS,
         max_channel_generations: ServiceConfig::DEFAULT_MAX_CHANNEL_GENERATIONS,
-    };
+    }
+}
+
+async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (ActrRef, ActrId) {
+    let service_type = service_type();
+    let hyper = Hyper::new(HyperConfig::new(
+        dir.path(),
+        Arc::new(StaticTrust::dev_only()),
+    ))
+    .await
+    .unwrap();
+    let config = runtime_config(dir, server, service_type.clone());
+    let registered = Node::from_hyper(hyper, config)
+        .link(EchoWorkload)
+        .await
+        .unwrap()
+        .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
+        .await
+        .unwrap();
+    let service_actor_id = registered.actor_id();
+
     let policies = ServicePolicies {
         membership: Arc::new(AllowPolicies),
         authorize_attach: Arc::new(AllowPolicies),
@@ -304,7 +305,14 @@ async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (Act
         privacy: Arc::new(AllowPolicies),
         quota: Arc::new(AllowPolicies),
     };
-    let service = InMemorySessionService::new(service_config, policies).unwrap();
+    let service = InMemorySessionService::new(
+        make_service_config(
+            &service_actor_id.to_string_repr(),
+            actor_signing_key_for_scoped(&actor_key_root(dir), REALM, &service_type, None),
+        ),
+        policies,
+    )
+    .unwrap();
     let actr = registered
         .with_actrium_service(service)
         .start()
@@ -314,21 +322,41 @@ async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (Act
 }
 
 async fn start_front_node(server: &TestSignalingServer, dir: &TempDir) -> ActrRef {
+    let front_type = front_type();
     let hyper = Hyper::new(HyperConfig::new(
         dir.path(),
         Arc::new(StaticTrust::dev_only()),
     ))
     .await
     .unwrap();
-    let config = runtime_config(dir, server, front_type());
-    Node::from_hyper(hyper, config)
+    let config = runtime_config(dir, server, front_type.clone());
+    let registered = Node::from_hyper(hyper, config)
         .link(EchoWorkload)
         .await
         .unwrap()
         .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
         .await
-        .unwrap()
-        .with_actrium_front()
+        .unwrap();
+    let front_actor_id = registered.actor_id();
+
+    let policies = ServicePolicies {
+        membership: Arc::new(AllowPolicies),
+        authorize_attach: Arc::new(AllowPolicies),
+        authorize_takeover: Arc::new(AllowPolicies),
+        authorize_request: Arc::new(AllowPolicies),
+        privacy: Arc::new(AllowPolicies),
+        quota: Arc::new(AllowPolicies),
+    };
+    let service = InMemorySessionService::new(
+        make_service_config(
+            &front_actor_id.to_string_repr(),
+            actor_signing_key_for_scoped(&actor_key_root(dir), REALM, &front_type, None),
+        ),
+        policies,
+    )
+    .unwrap();
+    registered
+        .with_actrium_service(service)
         .start()
         .await
         .unwrap()
