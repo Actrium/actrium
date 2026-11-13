@@ -130,6 +130,7 @@ async fn revocation_or_rebinding_during_upgrade_closes_connection() {
         server,
         counters: None,
         require_url_auth: true,
+        shutdown: cancel.clone(),
     };
     let app = Router::new()
         .route("/ws", get(websocket_handler))
@@ -425,6 +426,12 @@ async fn revocation_or_rebinding_during_upgrade_closes_connection() {
 }
 
 async fn live_server() -> (String, SignalingServerHandle, tokio::task::JoinHandle<()>) {
+    live_server_with_shutdown(tokio_util::sync::CancellationToken::new()).await
+}
+
+async fn live_server_with_shutdown(
+    shutdown: tokio_util::sync::CancellationToken,
+) -> (String, SignalingServerHandle, tokio::task::JoinHandle<()>) {
     let mut server = SignalingServer::new();
     server.provider_id = "provider.example".into();
     let handle = server.handle();
@@ -434,6 +441,7 @@ async fn live_server() -> (String, SignalingServerHandle, tokio::task::JoinHandl
             server: Arc::new(server),
             counters: None,
             require_url_auth: true,
+            shutdown,
         });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("ws://{}", listener.local_addr().unwrap());
@@ -446,6 +454,48 @@ async fn live_server() -> (String, SignalingServerHandle, tokio::task::JoinHandl
         .unwrap();
     });
     (base, handle, task)
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn router_reload_closes_old_signaling_connections() {
+    let signing = initialize().await;
+    let (actor, credential, _) = fixture(91, &signing).await;
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let (old_base, old, old_task) = live_server_with_shutdown(shutdown.clone()).await;
+    let (mut ws, _) = connect_async(address(&old_base, &actor, &credential, false))
+        .await
+        .unwrap();
+    shutdown.cancel();
+    let frame = timeout(Duration::from_secs(3), ws.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        frame,
+        Message::Close(Some(frame))
+            if frame.code == tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Restart
+    ));
+    let (new_base, new, new_task) = live_server().await;
+    let (mut replacement, _) = connect_async(address(&new_base, &actor, &credential, false))
+        .await
+        .unwrap();
+    timeout(Duration::from_secs(3), async {
+        loop {
+            if !old.actor_id_index.read().await.contains_key(&actor)
+                && new.actor_id_index.read().await.contains_key(&actor)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    replacement.close(None).await.unwrap();
+    old_task.abort();
+    new_task.abort();
 }
 
 async fn rebind(
