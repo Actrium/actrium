@@ -12,6 +12,40 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
+/// Verify the Front before rendering and return the Service type from the accepted Realm Profile.
+#[uniffi::export]
+pub fn verify_realm_front(
+    front_archive: Vec<u8>,
+    trusted_public_key: Vec<u8>,
+    front_type: String,
+    service_type: String,
+) -> ActrResult<ActrType> {
+    let invalid = |msg| ActrError::Config { msg };
+    let key_bytes = trusted_public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| invalid("Invalid Front Publisher public key length".into()))?;
+    let key = ed25519_dalek::VerifyingKey::from_bytes(key_bytes)
+        .map_err(|error| invalid(error.to_string()))?;
+    let verified = actr_pack::verify_actor_package(&front_archive, &key)
+        .map_err(|error| invalid(error.to_string()))?;
+    if verified.manifest.actor_type() != front_type {
+        return Err(invalid(
+            "The Front does not match the Actor type in the Realm profile.".into(),
+        ));
+    }
+    let service_type = actr_protocol::ActrType::from_string_repr(&service_type)
+        .map_err(|error| invalid(error.to_string()))?;
+    actr_hyper::validate_realm_front_dependency(
+        &front_archive,
+        &verified.manifest,
+        &service_type,
+        actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
+    )
+    .map_err(|error| invalid(error.to_string()))?;
+    Ok(service_type.into())
+}
+
 /// Resolve a dependency's ActrType from a manifest.toml file.
 ///
 /// Parses the manifest, looks up the dependency by alias, and returns its
@@ -139,7 +173,7 @@ impl ActrNode {
             .map_err(|e| ActrError::Internal {
                 msg: format!("Failed to link foreign workload: {e}"),
             })?;
-        register_linked_node(attached).await
+        register_node(attached).await
     }
 
     /// Create a package-backed runtime using an OS-managed Realm identity.
@@ -153,6 +187,28 @@ impl ActrNode {
         run_on_tokio_runtime("package membership bootstrap", async move {
             new_from_package_file_inner(config_path, package_path, observers, Some(membership))
                 .await
+        })
+        .await
+    }
+
+    /// Start the network side of a signed Realm Front whose guest runs in the host.
+    #[uniffi::constructor(async_runtime = "tokio")]
+    pub async fn new_from_front_with_membership(
+        config_path: String,
+        front_archive: Vec<u8>,
+        service_type: ActrType,
+        membership: Arc<crate::RealmMembership>,
+    ) -> ActrResult<Arc<Self>> {
+        run_on_tokio_runtime("Front membership bootstrap", async move {
+            let init = Node::from_config_file(&config_path)
+                .await
+                .map_err(|e| ActrError::Config { msg: e.to_string() })?;
+            crate::logger::init_observability(init.runtime_config().observability.clone());
+            let attached = init
+                .attach_front(&WorkloadPackage::new(front_archive), &service_type.into())
+                .await
+                .map_err(|e| ActrError::Config { msg: e.to_string() })?;
+            register_node(membership.bind(attached)?).await
         })
         .await
     }
@@ -178,7 +234,7 @@ impl ActrNode {
                 .map_err(|_| ActrError::Internal {
                     msg: "failed to link foreign workload".into(),
                 })?;
-            register_linked_node(membership.bind(attached)?).await
+            register_node(membership.bind(attached)?).await
         })
         .await
     }
@@ -602,6 +658,29 @@ impl ActrRefWrapper {
         Ok(response_bytes.to_vec())
     }
 
+    /// Call a discovered remote actor using this node's authenticated identity.
+    pub async fn call_peer(
+        &self,
+        target: ActrId,
+        route_key: String,
+        request_payload: Vec<u8>,
+        timeout_ms: i64,
+    ) -> ActrResult<Vec<u8>> {
+        let response = self
+            .inner
+            .app_context()
+            .await
+            .call_raw(
+                &Dest::Peer(target.into()),
+                route_key,
+                actr_protocol::PayloadType::RpcReliable,
+                Bytes::from(request_payload),
+                timeout_ms,
+            )
+            .await?;
+        Ok(response.to_vec())
+    }
+
     /// Send a one-way message to the local guest workload.
     pub async fn tell(
         &self,
@@ -672,7 +751,7 @@ async fn load_linked_init(
     Ok(init)
 }
 
-async fn register_linked_node(attached: Node<actr_hyper::Attached>) -> ActrResult<Arc<ActrNode>> {
+async fn register_node(attached: Node<actr_hyper::Attached>) -> ActrResult<Arc<ActrNode>> {
     let issuer_endpoint = attached.issuer_endpoint().to_string();
     let registered = attached.register(&issuer_endpoint).await.map_err(|e| {
         error!("Issuer registration failed: {}", e);
@@ -814,7 +893,7 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
             .link(workload.as_ref().clone())
             .await
             .expect("link manifest-backed workload");
-        let node = register_linked_node(attached)
+        let node = register_node(attached)
             .await
             .expect("register manifest-backed linked node");
         let actr_ref = node

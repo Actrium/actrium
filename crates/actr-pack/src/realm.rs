@@ -1,6 +1,6 @@
 //! Verify the Service and Front chosen by a signed Realm Profile.
-use actr_protocol::PackageSigningKey;
 use actr_protocol::realm_profile::RealmPackage;
+use actr_protocol::{ActrType, PackageSigningKey};
 use semver::{Version, VersionReq};
 
 use crate::actor_package::{
@@ -49,37 +49,12 @@ pub fn check_realm_pair(
     if !matches!(
         service.workload.profile.as_str(),
         "actr.component/1" | "actr.native/1" | "actr.linked/1"
-    ) || front.workload.profile != KEEL_GUEST_PROFILE_V1
-    {
-        return Err(invalid(
-            "unsupported Realm Service or Front workload profile",
-        ));
+    ) {
+        return Err(invalid("unsupported Realm Service workload profile"));
     }
-    let dep = front
-        .dependencies
-        .get("service")
-        .filter(|d| d.required)
-        .ok_or_else(|| invalid("Front must declare a required service dependency"))?;
-    let expected = format!("{}/{}", service.actor.publisher, service.actor.name);
-    let constraint = VersionReq::parse(&dep.version)
-        .map_err(|_| invalid("invalid Front Service version requirement"))?;
-    let version =
-        Version::parse(&service.actor.version).map_err(|_| invalid("invalid Service version"))?;
-    if dep.actor != expected || !constraint.matches(&version) {
-        return Err(invalid(
-            "Front service dependency does not match selected Service",
-        ));
-    }
-    let front_path = dep
-        .contract
-        .as_deref()
-        .filter(|p| p.ends_with(".proto"))
-        .ok_or_else(|| invalid("Front service dependency needs an RPC Proto contract"))?;
-    let front_contract = front
-        .files
-        .iter()
-        .find(|file| file.role == "contract" && file.path == front_path)
-        .ok_or_else(|| invalid("Front does not declare its service dependency's RPC Proto"))?;
+    let service_type = ActrType::from_string_repr(&service.actor_type())
+        .map_err(|error| PackError::InvalidPackage(error.to_string()))?;
+    let front_contract = check_front_service_dependency(front, &service_type)?;
     let matches_export = if service.workload.profile == "actr.component/1" {
         let export = service
             .component_rpc_contract()?
@@ -97,6 +72,42 @@ pub fn check_realm_pair(
         return Err(invalid("Service and Front RPC contracts differ"));
     }
     Ok(())
+}
+
+/// Check the verified Front against the exact Service type selected by its Realm.
+pub fn check_front_service_dependency<'a>(
+    front: &'a ActorPackageManifest,
+    service: &ActrType,
+) -> Result<&'a crate::PackageFileEntry, PackError> {
+    let invalid = |reason: &str| PackError::InvalidPackage(reason.into());
+    if front.workload.profile != KEEL_GUEST_PROFILE_V1 {
+        return Err(invalid("unsupported Realm Front workload profile"));
+    }
+    let dep = front
+        .dependencies
+        .get("service")
+        .filter(|d| d.required)
+        .ok_or_else(|| invalid("Front must declare a required service dependency"))?;
+    let expected = format!("{}/{}", service.publisher, service.name);
+    let constraint = VersionReq::parse(&dep.version)
+        .map_err(|_| invalid("invalid Front Service version requirement"))?;
+    let version =
+        Version::parse(&service.version).map_err(|_| invalid("invalid Service version"))?;
+    if dep.actor != expected || !constraint.matches(&version) {
+        return Err(invalid(
+            "Front service dependency does not match selected Service",
+        ));
+    }
+    let front_path = dep
+        .contract
+        .as_deref()
+        .filter(|p| p.ends_with(".proto"))
+        .ok_or_else(|| invalid("Front service dependency needs an RPC Proto contract"))?;
+    front
+        .files
+        .iter()
+        .find(|file| file.role == "contract" && file.path == front_path)
+        .ok_or_else(|| invalid("Front does not declare its service dependency's RPC Proto"))
 }
 
 /// Authenticate the optional contract carried by an already verified Service archive.

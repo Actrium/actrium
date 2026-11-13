@@ -9,6 +9,8 @@ use semver::{Version, VersionReq};
 
 use crate::error::{HyperError, HyperResult};
 
+const V2_LOCK_PATH: &str = "manifest.lock.toml";
+
 pub(crate) fn validate_component_host(manifest: &ActorPackageManifest) -> HyperResult<()> {
     if manifest.workload.profile != "actr.component/1" || manifest.host.profile != "actr.host/1" {
         return Err(HyperError::InvalidManifest(format!(
@@ -49,15 +51,14 @@ pub fn read_v2_lock(
     manifest: &ActorPackageManifest,
     max_bytes: usize,
 ) -> HyperResult<Option<LockFile>> {
-    const LOCK_PATH: &str = "manifest.lock.toml";
     let mut lock = None;
     for file in &manifest.files {
-        if file.path == LOCK_PATH && file.role == "lock" {
+        if file.path == V2_LOCK_PATH && file.role == "lock" {
             let raw = manifest
-                .read_declared_file(bytes, LOCK_PATH, max_bytes)
+                .read_declared_file(bytes, V2_LOCK_PATH, max_bytes)
                 .map_err(|e| HyperError::InvalidManifest(e.to_string()))?;
             lock = Some(parse_lock(&raw)?);
-        } else if file.path == LOCK_PATH || file.role == "lock" {
+        } else if file.path == V2_LOCK_PATH || file.role == "lock" {
             return Err(HyperError::InvalidManifest(
                 "v2 dependency lock must be manifest.lock.toml with role `lock`".into(),
             ));
@@ -152,6 +153,37 @@ pub fn read_v2_lock(
         }
     }
     Ok(lock)
+}
+
+/// Validate the Front's declared Service and any signed lock against the Realm selection.
+pub fn validate_realm_front_dependency(
+    bytes: &[u8],
+    front: &ActorPackageManifest,
+    service: &ActrType,
+    max_bytes: usize,
+) -> HyperResult<()> {
+    actr_pack::realm::check_front_service_dependency(front, service)
+        .map_err(|error| HyperError::InvalidManifest(error.to_string()))?;
+    // The signed Realm selection resolves the Service when the Front has no lock.
+    if front
+        .files
+        .iter()
+        .any(|file| file.path == V2_LOCK_PATH || file.role == "lock")
+    {
+        let lock = read_v2_lock(bytes, front, max_bytes)?;
+        let selected = service.to_string_repr();
+        if lock
+            .as_ref()
+            .and_then(|lock| lock.get_dependency_by_alias("service"))
+            .map(|entry| entry.actr_type.as_str())
+            != Some(selected.as_str())
+        {
+            return Err(HyperError::InvalidManifest(format!(
+                "Front's signed dependency lock must select Realm Service {selected}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
