@@ -23,6 +23,7 @@ use sqlx::{Sqlite, SqliteConnection, Transaction};
 use super::changes;
 use super::error::RealmError;
 use super::model::Realm;
+use crate::config::realm::{DevJoinMode, DevJoinRole};
 use crate::storage::db::get_database;
 
 /// Lifetime of an owner invite.
@@ -552,6 +553,26 @@ pub async fn join(
     label: &str,
     limits: Limits,
 ) -> Result<Value, MembershipError> {
+    join_with_mode(
+        realm,
+        secret_hash,
+        public_key,
+        label,
+        limits,
+        DevJoinMode::Off,
+    )
+    .await
+}
+
+/// Development modes still verify client possession and register keys in the membership database.
+pub async fn join_with_mode(
+    realm: &str,
+    secret_hash: &str,
+    public_key: &[u8; 32],
+    label: &str,
+    limits: Limits,
+    mode: DevJoinMode,
+) -> Result<Value, MembershipError> {
     let key_id = actr_protocol::realm_membership::client_key_id(public_key);
     let now = now_secs();
     let mut tx = begin().await?;
@@ -588,6 +609,20 @@ pub async fn join(
         return fail(Code::InviteExpired, "the invite expired");
     }
     check_realm_active(&mut tx, realm).await?;
+    let reusable = mode == DevJoinMode::ReusableInvite && role.as_deref() != Some("owner");
+    if reusable && let Some(key) = client_key_on(&mut tx, realm, &key_id).await? {
+        let signer = signer_of(key)?;
+        if target.as_ref().is_some_and(|id| id != &signer.member_id) {
+            return fail(
+                Code::Conflict,
+                "the Realm client key belongs to another member",
+            );
+        }
+        return Ok(json!({
+            "realm": realm, "member_id": signer.member_id,
+            "role": signer.role.as_str(), "key_id": key_id,
+        }));
+    }
 
     let mut revoked_actors = Vec::new();
     let (member_id, role) = match (role.as_deref().and_then(Role::parse), target) {
@@ -628,13 +663,71 @@ pub async fn join(
         }
     };
 
+    insert_client(&mut tx, realm, &member_id, public_key, label, now, limits).await?;
+    // Reusable development invites remain revocable and expire at their original deadline.
+    if !reusable {
+        sqlx::query(
+            "UPDATE realm_invite SET used_at = ?, used_by_key = ? WHERE realm = ? AND invite_id = ?",
+        )
+        .bind(now)
+        .bind(&key_id)
+        .bind(realm)
+        .bind(&invite_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    announce(&revoked_actors);
+    Ok(json!({
+        "realm": realm, "member_id": member_id, "role": role.as_str(), "key_id": key_id,
+    }))
+}
+
+/// Register an independently signed device without an invite after the Issuer enables open mode.
+pub async fn join_open(
+    realm: &str,
+    public_key: &[u8; 32],
+    label: &str,
+    role: DevJoinRole,
+    limits: Limits,
+) -> Result<Value, MembershipError> {
+    let key_id = actr_protocol::realm_membership::client_key_id(public_key);
+    let mut tx = begin().await?;
+    check_realm_active(&mut tx, realm).await?;
+    if let Some(key) = client_key_on(&mut tx, realm, &key_id).await? {
+        let signer = signer_of(key)?;
+        return Ok(json!({
+            "realm": realm, "member_id": signer.member_id,
+            "role": signer.role.as_str(), "key_id": key_id,
+        }));
+    }
+    let now = now_secs();
+    let role = role.role();
+    let member_id = insert_member(&mut tx, realm, role, now, limits).await?;
+    insert_client(&mut tx, realm, &member_id, public_key, label, now, limits).await?;
+    tx.commit().await?;
+    Ok(json!({
+        "realm": realm, "member_id": member_id, "role": role.as_str(), "key_id": key_id,
+    }))
+}
+
+async fn insert_client(
+    tx: &mut Transaction<'_, Sqlite>,
+    realm: &str,
+    member_id: &str,
+    public_key: &[u8; 32],
+    label: &str,
+    now: i64,
+    limits: Limits,
+) -> Result<(), MembershipError> {
+    let key_id = actr_protocol::realm_membership::client_key_id(public_key);
     let clients: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM realm_client_key
          WHERE realm = ? AND member_id = ? AND revoked_at IS NULL",
     )
     .bind(realm)
-    .bind(&member_id)
-    .fetch_one(&mut *tx)
+    .bind(member_id)
+    .fetch_one(&mut **tx)
     .await?;
     if clients >= i64::from(limits.max_clients_per_member) {
         return fail(Code::Quota, "the member has the most clients allowed");
@@ -646,10 +739,10 @@ pub async fn join(
     .bind(realm)
     .bind(&key_id)
     .bind(public_key.as_slice())
-    .bind(&member_id)
+    .bind(member_id)
     .bind(label)
     .bind(now)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await;
     match inserted {
         Ok(_) => {}
@@ -658,20 +751,7 @@ pub async fn join(
         }
         Err(error) => return Err(error.into()),
     }
-    sqlx::query(
-        "UPDATE realm_invite SET used_at = ?, used_by_key = ? WHERE realm = ? AND invite_id = ?",
-    )
-    .bind(now)
-    .bind(&key_id)
-    .bind(realm)
-    .bind(&invite_id)
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    announce(&revoked_actors);
-    Ok(json!({
-        "realm": realm, "member_id": member_id, "role": role.as_str(), "key_id": key_id,
-    }))
+    Ok(())
 }
 
 async fn insert_member(

@@ -163,6 +163,18 @@ async fn join(
             format!("label has more than {MAX_LABEL_CHARS} characters"),
         );
     }
+    if request.invite.is_none() && state.dev_join.mode == platform::config::realm::DevJoinMode::Open
+    {
+        use_nonce(&request.nonce, expires_at).await?;
+        return membership::join_open(
+            &request.realm,
+            &public_key,
+            &label,
+            state.dev_join.default_role,
+            state.limits,
+        )
+        .await;
+    }
     let secret = request
         .invite
         .as_deref()
@@ -179,12 +191,13 @@ async fn join(
         Some(_) => {}
     }
     use_nonce(&request.nonce, expires_at).await?;
-    membership::join(
+    membership::join_with_mode(
         &request.realm,
         &secret_hash,
         &public_key,
         &label,
         state.limits,
+        state.dev_join.mode,
     )
     .await
 }

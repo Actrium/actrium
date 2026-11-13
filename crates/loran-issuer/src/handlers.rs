@@ -42,6 +42,7 @@ pub struct IssuerState {
     pub counters: Option<Arc<ServiceCounters>>,
     /// Membership limits (`[realm]`).
     pub(crate) limits: Limits,
+    pub(crate) dev_join: platform::config::realm::DevJoinConfig,
     /// Signs Realm Profiles for `update_realm` when this Loran is an Actr Facility
     /// Provider.
     pub(crate) profiles: Option<Arc<crate::realm_profile::RealmProfiles>>,
@@ -63,6 +64,7 @@ impl IssuerState {
             idempotency,
             counters: None,
             limits: Limits::from(&platform::config::RealmConfig::default()),
+            dev_join: Default::default(),
             profiles: None,
         }
     }
@@ -75,6 +77,13 @@ impl IssuerState {
         profiles: Option<Arc<crate::realm_profile::RealmProfiles>>,
     ) -> Self {
         self.limits = Limits::from(config);
+        self.dev_join = config.dev_join;
+        if config.dev_join.mode != platform::config::realm::DevJoinMode::Off {
+            platform::recording::warn!(
+                "Development admission {:?} enabled for every active Realm hosted by this AFP",
+                config.dev_join.mode
+            );
+        }
         self.profiles = profiles;
         self
     }

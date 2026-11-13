@@ -3,6 +3,7 @@ import { api, type ServiceDetail } from "../../lib/api";
 import { ServicePageLayout, ConfigSection, StatusSection } from "../../components/layout/ServicePageLayout";
 import { HowItWorks } from "../../components/ui/HowItWorks";
 import { ServiceMetrics } from "./shared";
+import { DevelopmentJoinSettings } from "./DevelopmentJoinSettings";
 
 function IssuerDiagram({ config }: { config: Record<string, unknown> }) {
   const ttl = String(config.token_ttl_secs ?? "3600");
@@ -147,6 +148,9 @@ export function IssuerService() {
       />
 
       {data.enabled && <ServiceMetrics status={data.status} storageKey="issuer" />}
+      {data.enabled && data.config_fields && (
+        <DevelopmentJoinSettings fields={data.config_fields} onRefresh={fetchData} />
+      )}
 
       {data.config && (
         <HowItWorks storageKey="issuer">

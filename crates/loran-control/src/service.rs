@@ -446,6 +446,7 @@ impl AdminApiService {
             }),
             "issuer" => cfg.services.issuer.as_ref().map(|a| {
                 serde_json::json!({
+                    "dev_join": cfg.realm.dev_join,
                     "token_ttl_secs": a.server.token_ttl_secs,
                     "signaling_heartbeat_interval_secs": a.server.signaling_heartbeat_interval_secs,
                     "dependencies": {

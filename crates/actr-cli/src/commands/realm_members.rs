@@ -33,8 +33,20 @@ fn parse_role(text: &str) -> std::result::Result<Role, String> {
 #[derive(Args, Debug, Clone)]
 pub struct JoinArgs {
     /// Realm invite text `ri_…` (`-` reads stdin)
-    #[arg(value_name = "INVITE")]
-    pub invite: String,
+    #[arg(
+        value_name = "INVITE",
+        required_unless_present = "realm",
+        conflicts_with = "realm"
+    )]
+    pub invite: Option<String>,
+    /// Join without an invite when the AFP enables development open admission
+    #[arg(
+        long,
+        value_name = "NAME",
+        required_unless_present = "invite",
+        conflicts_with = "invite"
+    )]
+    pub realm: Option<String>,
     /// Key file to write the new Realm client key to
     #[arg(long, short = 'o', value_name = "FILE")]
     pub output: PathBuf,
@@ -464,12 +476,19 @@ where
     F: Fn(String) -> Fut,
     Fut: Future<Output = Result<Vec<u8>>>,
 {
-    let text = if args.invite == "-" {
-        std::io::read_to_string(std::io::stdin())?
-    } else {
-        args.invite.clone()
+    let invite = match args.invite.as_deref() {
+        Some("-") => Some(RealmInvite::decode(&std::io::read_to_string(
+            std::io::stdin(),
+        )?)?),
+        Some(text) => Some(RealmInvite::decode(text)?),
+        None => None,
     };
-    let invite = RealmInvite::decode(&text)?;
+    let realm = invite
+        .as_ref()
+        .map(|i| i.realm.as_str())
+        .or(args.realm.as_deref())
+        .context("INVITE or --realm is required")?;
+    parse_realm_name(realm)?;
     // The invite secret goes only to an Issuer the domain's keys vouch for,
     // or to the one given on the command line.
     let (issuer, provider) = match &args.issuer {
@@ -481,13 +500,14 @@ where
             (issuer.clone(), provider)
         }
         None => {
-            let profile = realm_profile(&invite.realm, invite.profile.as_ref(), fetch).await?;
+            let embedded = invite.as_ref().and_then(|invite| invite.profile.as_ref());
+            let profile = realm_profile(realm, embedded, fetch).await?;
             (profile.issuer.url, profile.provider.id)
         }
     };
 
     let reused = if args.output.exists() && !args.force {
-        let key = interrupted_join_key(&args.output, &invite.realm, &issuer, &provider)?;
+        let key = interrupted_join_key(&args.output, realm, &issuer, &provider)?;
         if key.is_none() {
             bail!(
                 "Key file already exists: {}\nUse --force to overwrite.",
@@ -507,7 +527,7 @@ where
                 std::fs::create_dir_all(parent)
                     .with_context(|| format!("Failed to create {}", parent.display()))?;
             }
-            let file = RealmClientKeyFile::new(&invite.realm, &provider, &issuer, &key);
+            let file = RealmClientKeyFile::new(realm, &provider, &issuer, &key);
             write_private(
                 &args.output,
                 serde_json::to_string_pretty(&file)?.as_bytes(),
@@ -517,9 +537,8 @@ where
         }
     };
 
-    let mut request =
-        MembershipRequest::new(MembershipOp::Join, &invite.realm, &provider, &new_nonce());
-    request.invite = Some(invite.secret.clone());
+    let mut request = MembershipRequest::new(MembershipOp::Join, realm, &provider, &new_nonce());
+    request.invite = invite.map(|invite| invite.secret);
     request.public_key = Some(BASE64.encode(key.verifying_key().to_bytes()));
     request.label = args.label.clone();
     match send_with(client, &issuer, &request.sign(&key)).await {
@@ -732,7 +751,8 @@ mod tests {
             }
         }
         let args = JoinArgs {
-            invite: invite_text,
+            invite: Some(invite_text),
+            realm: None,
             output: request["key_file"].as_str().context("key_file")?.into(),
             issuer: None,
             provider: None,
@@ -773,13 +793,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invite_free_join_sends_a_signed_request_and_reuses_the_saved_key() {
+        let issuer = serve().await;
+        let dir = tempfile::tempdir().unwrap();
+        let args = JoinArgs {
+            invite: None,
+            realm: Some("open@acme.com".into()),
+            output: dir.path().join("client.json"),
+            issuer: Some(issuer),
+            provider: None,
+            label: Some("open-test".into()),
+            force: false,
+        };
+        let first = join(&args).await.unwrap();
+        assert!(first.get("invite").is_none());
+        assert_eq!(first["realm"], "open@acme.com");
+        let retry = join(&args).await.unwrap();
+        assert_eq!(first["public_key"], retry["public_key"]);
+        assert_ne!(first["nonce"], retry["nonce"]);
+        assert!(RealmClientKeyFile::read(&args.output).is_ok());
+    }
+
+    #[tokio::test]
     async fn join_writes_a_key_file_the_other_commands_sign_with() {
         let issuer = serve().await;
         let dir = tempfile::tempdir().unwrap();
         let output = dir.path().join("keys/client.json");
         let secret = URL_SAFE_NO_PAD.encode([1u8; 32]);
         let join_args = JoinArgs {
-            invite: RealmInvite::new(REALM, &secret).encode(),
+            invite: Some(RealmInvite::new(REALM, &secret).encode()),
+            realm: None,
             output: output.clone(),
             issuer: Some(issuer.clone()),
             provider: None,
@@ -811,7 +854,8 @@ mod tests {
         );
         assert!(
             join(&JoinArgs {
-                invite: RealmInvite::new("other@acme.com", &secret).encode(),
+                invite: Some(RealmInvite::new("other@acme.com", &secret).encode()),
+                realm: None,
                 ..join_args.clone()
             })
             .await
@@ -896,7 +940,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let output = dir.path().join("client.json");
         let args = JoinArgs {
-            invite: RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([3u8; 32])).encode(),
+            invite: Some(RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([3u8; 32])).encode()),
+            realm: None,
             output: output.clone(),
             issuer: Some(lost),
             provider: Some("p.example".into()),
@@ -963,7 +1008,8 @@ mod tests {
             let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
             let dir = tempfile::tempdir().unwrap();
             let args = JoinArgs {
-                invite: RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([9u8; 32])).encode(),
+                invite: Some(RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([9u8; 32])).encode()),
+                realm: None,
                 output: dir.path().join("client.json"),
                 issuer: Some(format!("http://{address}/issuer")),
                 provider: None,
@@ -996,7 +1042,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let output = dir.path().join("client.json");
         let error = join(&JoinArgs {
-            invite: RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([4u8; 32])).encode(),
+            invite: Some(RealmInvite::new(REALM, &URL_SAFE_NO_PAD.encode([4u8; 32])).encode()),
+            realm: None,
             output: output.clone(),
             issuer: Some(format!("http://{address}/issuer")),
             provider: None,
@@ -1021,7 +1068,8 @@ mod tests {
             "issuer": { "url": "http://127.0.0.1:9/issuer" },
         }));
         let sent = join(&JoinArgs {
-            invite: invite.encode(),
+            invite: Some(invite.encode()),
+            realm: None,
             output: dir.path().join("client.json"),
             issuer: Some(issuer.clone()),
             provider: None,
@@ -1161,7 +1209,8 @@ mod tests {
 
     fn join_args(invite: RealmInvite, output: PathBuf) -> JoinArgs {
         JoinArgs {
-            invite: invite.encode(),
+            invite: Some(invite.encode()),
+            realm: None,
             output,
             issuer: None,
             provider: None,

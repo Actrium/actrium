@@ -52,6 +52,84 @@ fn refused(result: Result<serde_json::Value, MembershipClientError>, expected: &
 
 #[tokio::test]
 #[serial]
+async fn development_open_admission_works_across_realms_and_issues_actor_credentials() {
+    use platform::config::{
+        RealmConfig,
+        realm::{DevJoinConfig, DevJoinMode},
+    };
+    let mut env = setup_test_environment().await;
+    seed_realm(TEST_REALM, None).await;
+    let other = "open-other@acme.com";
+    seed_realm(other, None).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let config = RealmConfig {
+        dev_join: DevJoinConfig {
+            mode: DevJoinMode::Open,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let app = create_router(
+        IssuerState::new(create_test_issuer(&env).await).with_membership(&config, None),
+    );
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    let a = device(&endpoint, TEST_REALM);
+    let b = device(&endpoint, other);
+    let joined = a.join("", "invite-free").await.unwrap();
+    assert_eq!(joined["role"], "editor");
+    assert_eq!(joined, a.join("", "retry").await.unwrap());
+    assert_eq!(b.join("", "another realm").await.unwrap()["role"], "editor");
+    assert!(a.members().await.unwrap()["members"].is_array());
+    let registration = IssuerClient::new(&endpoint)
+        .with_client_key(a.client_key())
+        .register_linked(linked_register_request())
+        .await
+        .unwrap();
+    assert!(matches!(
+        registration.result,
+        Some(register_response::Result::Success(_))
+    ));
+    membership::revoke_client(&owner(TEST_REALM).await, &a.key_id())
+        .await
+        .unwrap();
+    refused(a.join("", "revoked").await, "client_revoked");
+    refused(
+        device(&endpoint, "missing@acme.com")
+            .join("", "missing")
+            .await,
+        "realm_unavailable",
+    );
+    server.abort();
+    // A fresh normal router retains default one-time admission.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let app = create_test_router(&env).await;
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    refused(
+        device(&endpoint, TEST_REALM).join("", "closed").await,
+        "invalid_request",
+    );
+    server.abort();
+    env.shutdown_signer().await;
+}
+
+#[tokio::test]
+#[serial]
 async fn sdk_devices_join_retry_register_renew_reissue_and_revoke() {
     use axum::{middleware, response::IntoResponse};
     use std::sync::atomic::{AtomicBool, Ordering};

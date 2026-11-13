@@ -189,10 +189,20 @@ impl RealmMembershipClient {
 
     /// Retries use this same signer and a fresh envelope nonce. The invite
     /// is never logged, included in an error, or persisted by this client.
+    /// An empty invite requests development open admission; the AFP must explicitly enable it.
     pub async fn join(&self, invite: &str, label: &str) -> Result<Value, MembershipClientError> {
-        let invite = RealmInvite::decode(invite)
-            .map_err(|_| MembershipClientError::InvalidInput("invalid invite".into()))?;
-        if invite.realm != self.endpoint.realm {
+        let invite = if invite.trim().is_empty() {
+            None
+        } else {
+            Some(
+                RealmInvite::decode(invite)
+                    .map_err(|_| MembershipClientError::InvalidInput("invalid invite".into()))?,
+            )
+        };
+        if invite
+            .as_ref()
+            .is_some_and(|invite| invite.realm != self.endpoint.realm)
+        {
             return Err(MembershipClientError::Rejected {
                 status: 409,
                 code: "invite_realm_mismatch".into(),
@@ -204,7 +214,7 @@ impl RealmMembershipClient {
             ));
         }
         let mut request = self.request(MembershipOp::Join);
-        request.invite = Some(invite.secret);
+        request.invite = invite.map(|invite| invite.secret);
         request.public_key = Some(BASE64.encode(self.key.public_key()));
         request.label = Some(label.to_string());
         let result = self.send(request).await?;
