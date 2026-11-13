@@ -77,10 +77,11 @@ Actr Host 打开 `actr://<domain>/<realm_id>[…]`（实例）时：
    [Actr Realm Profile](realm-profile.zh.md) 第 3、5 节取得并验证 `<realm_id>@<domain>` 的
    Realm Profile。
 3. 在 `packages` 中解析 `primary_package` 和 `front_package`。任一引用无效即停止打开。
-4. 按 [Realm Profile §6](realm-profile.zh.md#6-使用-realm) 验证两个包及 Front 的 Service 依赖和 RPC 契约，再将余下的 path、query 和 fragment 交给选定的 Front。
+4. 按 [Realm Profile §6](realm-profile.zh.md#6-使用-realm) 获取并验证 Front 归档，按已签名的 Service
+   引用检查 Front 的必需依赖。Attach 后将余下的 path、query 和 fragment 交给选定的 Front。
 5. 经 Realm Profile 指定的 Actr Facility Provider 连接该实例的 Service：本 Realm 内 Actor 类型与 Service 包
    相同的 Actor 恰好一个；找到零个或多于一个都是错误，Actr Host 不做选择。连接需要 Realm
-   membership；没有时进入加入流程（例如 Realm 邀请）。
+   membership；没有时进入加入流程（例如 Realm 邀请）。运行 Guest 前，在 Attach 时与通过身份验证的 Service 核对 RPC 契约。
 
 打开 `actr://<domain>/<serial>.<realm_id>[…]`（某个 Actor）时流程相同，只是第 5 步直接连接该
 ActorId，不按类型查找；它的 Actor 类型必须与 Service 包相同，否则以 `SERVICE_ACTOR_TYPE_MISMATCH`

@@ -157,8 +157,14 @@ Provider 不是信任根。
 
 ## 6. 使用 Realm
 
-Host 从 `packages[primary_package]` 取得 Service，从 `packages[front_package]` 取得 Front。
-下载时 **MUST** 以不带凭据的 HTTPS GET 获取 `href`。加载任何归档前，须核对整包 `sha256`，并用 `type` 所属 Publisher 的受信公钥验证包内 `manifest.sig` 对原始 `manifest.toml` 的签名。再核对清单中的精确 Actor 类型、载荷、workload、Host 要求、平台策略和依赖锁。加载前，Front 必需的 Service 依赖与 RPC 契约须与选定 Service 匹配。见 [Actor Package](actor-package.zh.md)。
+从 `packages[primary_package]` 解析 Service 引用，从 `packages[front_package]` 解析 Front 引用。
+客户端打开已有 Realm 时只获取 Front 归档。客户端按 Service 引用中的精确 Actor 类型检查 Front
+的必需依赖，并在 Attach 时与通过身份验证的 Service 核对 RPC 契约，通过后才运行 Guest。
+Service Host 验证 Service 归档，并在接受 Front 前核对所选 Front 的依赖和 RPC 契约。
+
+下载时 **MUST** 以不带凭据的 HTTPS GET 获取 `href`。加载任何归档前，须核对整包 `sha256`，并用
+`type` 所属 Publisher 的受信公钥验证包内 `manifest.sig` 对原始 `manifest.toml` 的签名。再核对清单中
+的精确 Actor 类型、签名覆盖的载荷、Workload、Host 要求、平台策略和依赖锁。见 [Actor Package](actor-package.zh.md)。
 
 主包的 Actor 类型标识实例的 Service。Realm 中该类型的 Actor 数量必须恰好为一。
 授权部署配置决定还要运行哪些包、由哪个 Host 启动，以及每个 Actor 的身份和状态。

@@ -434,12 +434,12 @@ fn explicit_method_scaffold_takes_reply_handle() {
     let scaffold = RustGenerator.generate_service_scaffold_content(&service);
     // RETURN method keeps the 0.6 plain-return signature.
     assert!(
-        scaffold.contains(") -> ActorResult<crate::generated::demo_shell::PingResponse>"),
+        scaffold.contains(") -> ActorResult<crate::generated::demo::shell::PingResponse>"),
         "RETURN signature:\n{scaffold}"
     );
     // EXPLICIT method receives a Reply<T> and returns ActorResult<()>.
     assert!(
-        scaffold.contains("reply: Reply<crate::generated::demo_shell::PingResponse>,"),
+        scaffold.contains("reply: Reply<crate::generated::demo::shell::PingResponse>,"),
         "EXPLICIT signature:\n{scaffold}"
     );
     assert!(
@@ -572,7 +572,7 @@ fn pure_helpers_produce_correct_output() {
     let svc = scaffold_service();
     assert_eq!(
         super::rust_scaffold_qualified_type(&svc.methods[0].input_ref, "Fallback"),
-        "crate::generated::demo_shell::PingRequest"
+        "crate::generated::demo::shell::PingRequest"
     );
     // is_default_cargo_lib_rs returns false for non-default lib.rs.
     assert!(!super::is_default_cargo_lib_rs("custom content"));
@@ -603,5 +603,115 @@ fn qualified_scaffold_types_use_nested_parent_modules() {
     assert_eq!(
         super::rust_scaffold_qualified_type(&svc.methods[0].output_ref, "Fallback"),
         "crate::generated::ask::outer::InnerResponse"
+    );
+}
+
+#[test]
+fn dotted_proto_modules_compile_cross_package_references_and_flat_aliases() {
+    let directory = TempDir::new().unwrap();
+    let output = directory.path().join("generated");
+    std::fs::create_dir(&output).unwrap();
+    for (name, source) in [
+        ("demo.rs", "pub struct Root;"),
+        ("common.rs", "pub struct External;"),
+        ("crate.rs", "pub struct RootKeyword;"),
+        ("MixedRoot.rs", "pub struct MixedRoot;"),
+        ("DemoAPI.MixedCase.rs", "pub struct MixedCase;"),
+        (
+            "demo.types.rs",
+            "pub struct Payload { pub root: super::Root }",
+        ),
+        (
+            "demo.api.rs",
+            "pub struct Request {
+                pub payload: super::types::Payload,
+                pub external: super::super::common::External,
+                pub keyword: super::r#type::KeywordPayload,
+                pub keyword_prefix: super::super::r#gen::api::KeywordPrefix,
+                pub path_keyword: super::self_::PathKeyword,
+                pub root_keyword: super::super::crate_::RootKeyword,
+                pub mixed_root: super::super::mixed_root::MixedRoot,
+                pub mixed_case: super::super::demo_api::mixed_case::MixedCase,
+            }",
+        ),
+        ("demo.type.rs", "pub struct KeywordPayload;"),
+        ("gen.api.rs", "pub struct KeywordPrefix;"),
+        ("demo.self.rs", "pub struct PathKeyword;"),
+        ("demo.api.nested.rs", "pub type Request = super::Request;"),
+        (
+            "demo.types_actor.rs",
+            "pub type Payload = super::types::Payload;",
+        ),
+        ("common_client.rs", "pub struct Root;"),
+        ("common_client.nested.rs", "pub type Root = super::Root;"),
+    ] {
+        std::fs::write(output.join(name), source).unwrap();
+    }
+    tokio_test::block_on(RustGenerator.generate_mod_rs(&output)).unwrap();
+    let entry = directory.path().join("lib.rs");
+    std::fs::write(
+        &entry,
+        r#"
+mod generated;
+pub use generated::crate_::RootKeyword;
+pub use generated::demo::api::Request;
+pub use generated::demo_api_nested::Request as NestedRequest;
+pub use generated::demo_self::PathKeyword;
+pub use generated::demo_type::KeywordPayload;
+pub use generated::demo_types::Payload;
+pub use generated::demo_types_actor::Payload as ActorPayload;
+pub use generated::common_client_nested::Root;
+pub use generated::gen_api::KeywordPrefix;
+pub use generated::demo_api_mixed_case::MixedCase;
+"#,
+    )
+    .unwrap();
+    let result = std::process::Command::new("rustc")
+        .args(["--edition=2024", "--crate-type=lib", "--emit=metadata"])
+        .arg(&entry)
+        .arg("--out-dir")
+        .arg(directory.path())
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn dotted_proto_modules_omit_ambiguous_flat_aliases() {
+    let directory = TempDir::new().unwrap();
+    for name in [
+        "demo.api.rs",
+        "demo_api.child.rs",
+        "other.a_b.rs",
+        "other_a.b.rs",
+    ] {
+        std::fs::write(directory.path().join(name), "").unwrap();
+    }
+    tokio_test::block_on(RustGenerator.generate_mod_rs(directory.path())).unwrap();
+    let modules = std::fs::read_to_string(directory.path().join("mod.rs")).unwrap();
+    assert!(modules.contains("pub mod demo_api {"));
+    assert!(modules.contains(r#"include!("demo.api.rs")"#));
+    assert!(modules.contains(r#"include!("other.a_b.rs")"#));
+    assert!(modules.contains(r#"include!("other_a.b.rs")"#));
+    assert!(!modules.contains(" as demo_api;"));
+    assert!(!modules.contains(" as other_a_b;"));
+}
+
+#[test]
+fn dotted_proto_modules_reject_collisions_after_keyword_escaping() {
+    let directory = TempDir::new().unwrap();
+    for name in ["demo.self.rs", "demo.self_.rs"] {
+        std::fs::write(directory.path().join(name), "").unwrap();
+    }
+    let error = tokio_test::block_on(RustGenerator.generate_mod_rs(directory.path())).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("both map to module `demo::self_`"),
+        "{error}"
     );
 }

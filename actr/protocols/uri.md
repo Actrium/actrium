@@ -95,12 +95,15 @@ When an Actr Host opens `actr://<domain>/<realm_id>[…]` (an instance), it:
    `<realm_id>@<domain>` as in [Actr Realm Profile](realm-profile.md),
    Sections 3 and 5.
 3. Resolves `primary_package` and `front_package` in `packages`. A missing or invalid reference stops opening.
-4. Verifies both archives and the Front's Service dependency and RPC contract under [Realm Profile §6](realm-profile.md#6-using-a-realm), then passes the remaining path, query and fragment to the selected Front.
+4. Fetches and verifies the Front archive and checks its required Service dependency against the
+   signed Service reference as in [Realm Profile §6](realm-profile.md#6-using-a-realm).
+   The remaining path, query and fragment are passed to the selected Front after Attach.
 5. Connects to the instance's Service through the Actr Facility Provider named in the
    Realm Profile: there is exactly one Actor in this Realm whose Actor type
    equals the Service package's; finding none or more than one is an error, and the
    Actr Host does not choose. Connecting requires Realm membership; without
-   it, the Actr Host starts a join flow (for example a Realm invitation).
+   it, the Actr Host starts a join flow (for example a Realm invitation). Confirm the RPC contract
+   with the authenticated Service during Attach before running the Guest.
 
 Opening `actr://<domain>/<serial>.<realm_id>[…]` (one Actor) follows the same
 procedure, except that step 5 connects to that ActorId directly instead of
