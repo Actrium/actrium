@@ -96,6 +96,28 @@ describe('keel/host/web thin-DOM components', () => {
     expect(render(React.createElement(C.TextInput, { multiline: true })).type).toBe('textarea');
   });
 
+  it('TextInput keeps newer edits while accepting a clear based on the current edit', () => {
+    const onChange = mock();
+    const input = (value: string, valueEventCount: number) =>
+      React.createElement(C.TextInput, { value, valueEventCount, onChange, multiline: true });
+    let renderer!: import('react-test-renderer').ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(input('', 0));
+    });
+    const field = () => renderer.root.findByType('textarea');
+    act(() => {
+      field().props.onChange({ target: { value: '12' } });
+      field().props.onChange({ target: { value: '123' } });
+    });
+    expect(onChange).toHaveBeenLastCalledWith({ nativeEvent: { text: '123', eventCount: 2 } });
+    act(() => renderer.update(input('12', 1)));
+    expect(field().props.value).toBe('123');
+    act(() => renderer.update(input('', 1)));
+    expect(field().props.value).toBe('123');
+    act(() => renderer.update(input('', 2)));
+    expect(field().props.value).toBe('');
+  });
+
   it('ScrollView → overflow:auto div', () => {
     const t = render(React.createElement(C.ScrollView, { testID: 's' }, 'content'));
     expect(t.type).toBe('div');
