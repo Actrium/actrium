@@ -37,6 +37,8 @@ pub struct SignalingState {
     /// before upgrading the WebSocket connection. Production routers set this
     /// to true; the bare `create_signaling_router()` helper leaves it false.
     pub require_url_auth: bool,
+    /// Cancelled when this router is replaced or the service stops.
+    pub shutdown: tokio_util::sync::CancellationToken,
 }
 
 /// Create a Signaling Axum Router
@@ -50,6 +52,7 @@ pub async fn create_signaling_router() -> Result<Router> {
         server: Arc::new(server),
         counters: None,
         require_url_auth: false,
+        shutdown: tokio_util::sync::CancellationToken::new(),
     };
 
     let router = Router::new()
@@ -244,6 +247,7 @@ pub async fn create_signaling_router_with_config_and_counters(
         server: Arc::new(server),
         counters,
         require_url_auth: true,
+        shutdown: cancel.clone(),
     };
     tokio::spawn(crate::server::follow_realm_retirements(
         state.server.handle(),
@@ -265,6 +269,9 @@ async fn websocket_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
+    if state.shutdown.is_cancelled() {
+        return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     let client_ip = addr.ip();
 
     // Check connection rate limit
@@ -423,6 +430,7 @@ async fn handle_websocket(
         url_identity,
         webrtc_role,
         state.require_url_auth,
+        state.shutdown,
     )
     .await
     {
