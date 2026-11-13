@@ -69,6 +69,15 @@ fn is_v2_manifest(source: &str) -> Result<bool, PackError> {
         Some(format) => Err(PackError::InvalidPackage(format!(
             "unsupported package format {format}; expected `{ACTOR_PACKAGE_FORMAT_V2}`"
         ))),
+        None if table
+            .get("extensions")
+            .and_then(toml::Value::as_table)
+            .is_some_and(|extensions| extensions.contains_key("actrium")) =>
+        {
+            Err(PackError::InvalidPackage(format!(
+                "Actrium Product v1 requires format = \"{ACTOR_PACKAGE_FORMAT_V2}\""
+            )))
+        }
         None if ["actor", "workload", "host", "signature", "files"]
             .iter()
             .any(|key| table.contains_key(*key)) =>

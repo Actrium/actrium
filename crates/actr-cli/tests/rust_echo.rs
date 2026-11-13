@@ -518,6 +518,44 @@ fn set_manifest_exports(dir: &std::path::Path, exports: &[&str]) {
 }
 
 #[test]
+fn rust_gen_mixed_case_dotted_packages_compile() {
+    let tmp = TempDir::new().unwrap();
+    let dir = init_rust_empty_service(tmp.path(), "mixed-case-packages");
+    std::fs::write(
+        dir.join("protos/local/local.proto"),
+        r#"syntax = "proto3";
+package demo.api;
+import "local/types.proto";
+message Request { DemoAPI.MixedCase.Payload payload = 1; }
+service EchoService {
+  rpc Echo(Request) returns (DemoAPI.MixedCase.Payload);
+}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("protos/local/types.proto"),
+        r#"syntax = "proto3";
+package DemoAPI.MixedCase;
+message Payload {}
+"#,
+    )
+    .unwrap();
+    set_manifest_exports(
+        &dir,
+        &["protos/local/local.proto", "protos/local/types.proto"],
+    );
+    append_workspace_patch(&dir);
+
+    let out = run_actr(&["gen", "-l", "rust"], &dir);
+    assert_actr_success(&out, "actr gen (mixed-case dotted packages)");
+    assert_actr_success(
+        &cargo_check(&dir),
+        "cargo check (mixed-case dotted packages)",
+    );
+}
+
+#[test]
 fn rust_gen_empty_only_local_service_uses_unit_workload_and_checks() {
     let tmp = TempDir::new().unwrap();
     let dir = init_rust_empty_service(tmp.path(), "empty-only-service");

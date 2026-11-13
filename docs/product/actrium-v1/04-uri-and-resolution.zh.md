@@ -26,14 +26,14 @@ actr://acme.com/k7m2q9xh/today?view=week#item-3
 
 ## 3. 打开
 
-Actrium 验证已签名的 Realm Profile，从 `packages` 解析 `primary_package` 和 `front_package`，分别验包。核对 Front 的 Service 依赖和 RPC 契约后，创建 Front Actor 并 Attach 到实例的 Service。
+Actrium 验证已签名的 Realm Profile，从 `packages` 解析 `primary_package` 和 `front_package`，只获取并验证 Front 归档。客户端按选定的 Service 类型检查 Front 的必需依赖，在 Attach 时与通过身份验证的 Service 核对 RPC 契约。
 
 产品层面的要求：
 
 - **先确认，后联网**：来自网页、二维码、邮件或其他 App 的链接，先显示 Realm 域名、
   `display_name`，下载验证后再显示程序（Publisher、程序名、版本）；首次信任某个 Realm 域名
   必须确认。Realm 域名等于或属于 Actr Facility Provider ID 时，信任根显示为该 Actr Facility Provider。
-- **失败即停。** Profile 不可用、无效或已退役，或任一包验证失败时，停止打开。
+- **失败即停。** Profile 不可用、无效或已退役，或 Front 包验证失败、Attach 失败时，停止打开。
 - **没有成员身份时**：进入加入流程（例如 Realm 邀请），不静默失败。
 - 用户可以选择「在浏览器中打开」外部 https 链接；在同一域名的网页内跳转时，Actrium 不强制接管。
 - 链接不能预授任何权限；未知的 query 只交给应用，不影响安装或权限页面。

@@ -38,7 +38,8 @@ actr://acme.com/k7m2q9xh/today?view=week#item-3
 ## 3. Opening
 
 Actrium verifies the signed Realm Profile, resolves `primary_package` and `front_package` in `packages`,
-and verifies both archives. It checks the Front's Service dependency and RPC contract, creates the Front Actor and Attaches to the instance's Service.
+and fetches and verifies only the Front archive. It checks the Front's required dependency against
+the selected Service type and confirms the RPC contract with the authenticated Service during Attach.
 
 Product-level requirements:
 
@@ -47,7 +48,7 @@ Product-level requirements:
   program name, version) after download and verification; first-time trust of a Realm domain must
   be confirmed. When the Realm domain equals or belongs to the Actr Facility Provider ID, the trust root
   is displayed as that Actr Facility Provider.
-- **Fail closed.** Stop opening if the Profile is unavailable, invalid or retired, or either package fails verification.
+- **Fail closed.** Stop opening if the Profile is unavailable, invalid or retired, the Front archive fails verification, or Attach fails.
 - **No membership yet**: enter the join flow (e.g., a Realm invitation) instead of failing
   silently.
 - The user may choose "open in browser" for an external https link; when navigating within a page

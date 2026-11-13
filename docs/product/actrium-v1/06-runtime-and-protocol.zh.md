@@ -65,18 +65,19 @@ notes.example/team-notes-front@1.4.2
 
 Attach 时，Service 按已接受的 `packages[front_package].type` 校验对端 Front 类型。Actr Host 提供以下字段。
 
-- Program Release；
-- Service 包的 digest；
+- 已接受的 Realm 选择中的 Service Actor 类型和归档 digest；
 - 已验证 Front 清单中 Guest 入口文件的 digest；
 - Front Host API；
 - Keel API；
 - protocol fingerprint；
 - local tab session nonce。
 
-这些字段统一由 Actrium Host 根据已验证的包和本地会话状态构造。Service 将它们作为客户端声明用于兼容性协商。
+这些字段统一由 Actrium Host 根据已接受的 Realm 选择、已验证的 Front 归档和本地会话状态构造。
+Service 将它们作为客户端声明用于兼容性协商。
 
 两个 Host 各自从已验证的包读取内容匹配的 RPC Proto，并统一用 Service 导出的文件名（含 `.proto` 扩展名）作为
-`ProtoFile.name`，调用 `Fingerprint::calculate_service_semantic_fingerprint`。
+`ProtoFile.name`，调用 `Fingerprint::calculate_service_semantic_fingerprint`。Proto 必须在单文件中定义
+所有引用的消息和枚举类型，并且不含 `import`。
 
 算法通过 `proto_fingerprint::Spec` 取得每个文件的语义指纹，按 `name` 排序，
 将 `name:semantic-fingerprint` 条目用 LF 连接，末尾不加 LF。
@@ -415,7 +416,7 @@ Service 按顺序检查：
 3. Front Actor type；若 policy 要求可信 runtime，再验证独立的 platform/runtime attestation；
 4. challenge/nonce 防重放；
 5. target Service ActorId；
-6. Program Release（兼容性声明）；
+6. 客户端声明的 Service Actor 类型是否与已接受的 Realm 选择一致；
 7. 用于兼容性协商的 Service 包 digest。验证远端代码需要独立证据。
 8. protocol fingerprint；
 9. 应用权限：Front credential 中的成员 id、Realm 客户端 key id 与角色（owner/editor/viewer），以及 Workspace 范围；

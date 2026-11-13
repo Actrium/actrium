@@ -85,7 +85,11 @@ https://notes.example/.well-known/actr
 
 ## 3. 包下载
 
-从已验证的 Realm Profile 解析 `primary_package` 和 `front_package`。逐包以不带凭据的 HTTPS 获取 `href`，核对整包 SHA-256，并用精确 Actor 类型所属 Publisher 的公钥验证 `manifest.sig`。加载前核对 Front 必需的 Service 依赖和 RPC 契约。完整示例见 [§6.2](#62-realm-profile)。
+从已验证的 Realm Profile 解析 `primary_package` 和 `front_package`。客户端打开已有 Realm 时只获取
+Front 归档。部署 Service 时，由 Service Host 验证选定的 Service 归档。下载的每份归档都通过不带
+凭据的 HTTPS GET 获取，核对整包 SHA-256，并用选定 Actor 类型所属 Publisher 的受信公钥验证
+`manifest.sig`。客户端按签名的 Service 引用检查 Front 的依赖，并在 Attach 时与通过身份验证的
+Service 核对 RPC 契约。完整示例见 [§6.2](#62-realm-profile)。
 
 ## 4. `.actr` Manifest
 

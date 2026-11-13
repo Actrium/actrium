@@ -327,7 +327,7 @@ use super::actr_dispatch::ActrDispatchHandler;
             .unwrap_or(cleaned);
         let mut parts: Vec<&str> = relative.split('.').collect();
         let short_type = parts.pop().unwrap_or(cleaned);
-        let module = owner.replace('.', "_").to_snake_case();
+        let module = crate::proto_module_path(&owner);
         if module.is_empty() {
             short_type.to_string()
         } else {

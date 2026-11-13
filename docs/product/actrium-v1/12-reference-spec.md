@@ -107,7 +107,13 @@ Chinese only).
 
 ## 3. Package download
 
-Resolve `primary_package` and `front_package` in the verified Realm Profile. For each selected archive, fetch `href` over HTTPS without credentials, verify its SHA-256, and verify `manifest.sig` with the Publisher key for its exact Actor type. Check the Front's required Service dependency and RPC contract before loading. See [§6.2](#62-realm-profile) for the complete example.
+Resolve `primary_package` and `front_package` in the verified Realm Profile. A client opening an
+existing Realm fetches only the Front archive. The Service Host verifies the selected Service
+archive for deployment. For each archive fetched, use a credential-free HTTPS GET, verify the
+whole-archive SHA-256, and verify `manifest.sig` with the trusted Publisher key for the selected
+Actor type. The client checks the Front's Service dependency against the signed Service reference
+and confirms the RPC contract with the authenticated Service during Attach. See [§6.2](#62-realm-profile)
+for the complete example.
 
 ## 4. `.actr` Manifest
 

@@ -1,7 +1,7 @@
 # Actrium Actor Package Manifest
 
-本文说明 macOS 上的独立 Keel Guest 包。该包使用通用 `actr-package/2` 格式，主 Workload 为
-`keel.guest/1`。Product v1 发布版本配对分发 Front 包和 Service 包，见
+本文说明 macOS 上的独立 Keel Guest 包。该包使用通用 `actr-package/2` 格式，包含一个
+`keel.guest/1` Workload。Product v1 发布版本配对分发 Front 包和 Service 包，见
 [Product v1 参考清单](../../docs/product/actrium-v1/12-reference-spec.zh.md#4-actr-manifest)。
 
 每个包的根目录包含 `manifest.toml`、Ed25519 原始签名 `manifest.sig`，以及所有在

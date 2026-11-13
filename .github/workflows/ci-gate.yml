@@ -157,7 +157,7 @@ jobs:
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
       - name: Prepare Linux build space
         if: steps.web-runtime.outputs.ready != 'true'
-        uses: ./.github/actions/prepare-linux-build
+        uses: ./.github/actions/prepare-linux-build-if-needed
       - name: Setup Rust
         if: steps.web-runtime.outputs.ready != 'true'
         uses: dtolnay/rust-toolchain@1.99.0
@@ -183,13 +183,11 @@ jobs:
           workspaces: packages/actr-web -> ../../target/bindings-web
           cache-bin: false
           shared-key: cli-web-assets
-      - name: Install wasm-pack
+      - name: Install prebuilt wasm-pack
         if: steps.web-runtime.outputs.ready != 'true'
-        run: |
-          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
-            cargo install wasm-pack --version 0.15.0 --locked --force
-          fi
-          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
+        uses: ./.github/actions/install-wasm-tools
+        with:
+          wasm-pack-only: "true"
       - name: Build CLI web runtime assets
         if: steps.web-runtime.outputs.ready != 'true'
         run: bash packages/actr-web/scripts/sync-cli-assets.sh --build
@@ -231,7 +229,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Prepare Linux build space
-        uses: ./.github/actions/prepare-linux-build
+        uses: ./.github/actions/prepare-linux-build-if-needed
+        with:
+          minimum-free-gib: "64"
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.99.0
         with:
@@ -277,17 +277,44 @@ jobs:
         run: cargo check --workspace --locked
 
   e2e_package_runtime:
-    name: E2E Package Runtime
+    name: E2E Package Runtime (${{ matrix.scenario }})
     needs: [determine, cli_web_assets]
     if: needs.determine.outputs.e2e_package_runtime == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [echo, realms, rotation]
     permissions:
       contents: read
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "false"
+      SCCACHE_GHA_VERSION: ""
+      SCCACHE_DIR: /tmp/actr-e2e-sccache
+      SCCACHE_CACHE_SIZE: 3G
+      ACTR_TARGET_DIR: ${{ github.workspace }}/target/e2e-cache/package-runtime-echo/native
+      LORAN_TARGET_DIR: ${{ github.workspace }}/target/e2e-cache/package-runtime-echo/native
+      WORKSPACE_TARGET_DIR: ${{ github.workspace }}/target/e2e-cache/package-runtime-echo/native
     steps:
       - uses: actions/checkout@v5
       - name: Prepare Linux build space
-        uses: ./.github/actions/prepare-linux-build
+        uses: ./.github/actions/prepare-linux-build-if-needed
+        with:
+          minimum-free-gib: "64"
+      - name: Restore E2E compiler cache
+        id: compiler-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/actr-e2e-sccache
+          key: e2e-sccache-v1-rust1.99.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: v0.18.0
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.99.0
         with:
@@ -302,12 +329,10 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ vars.PROTOC_VERSION || '29.3' }}
-      - name: Install wasm-pack
-        run: |
-          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
-            cargo install wasm-pack --version 0.15.0 --locked --force
-          fi
-          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
+      - name: Install prebuilt wasm-pack
+        uses: ./.github/actions/install-wasm-tools
+        with:
+          wasm-pack-only: "true"
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: false
@@ -322,15 +347,43 @@ jobs:
           test -s crates/actr-cli/assets/web-runtime/actr_sw_host.js
           bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
       - name: Verify Publisher signing-key isolation
+        if: matrix.scenario == 'echo'
         run: python3 tests/e2e/actr/package-runtime-echo/test_runtime_isolation.py
       - name: Verify HTTPS transport and certificate rejection
+        if: matrix.scenario == 'echo'
         run: python3 tests/e2e/actr/package-runtime-echo/test_https_documents.py
+      - name: Build the Loran fixture once
+        run: |
+          CARGO_TARGET_DIR="$LORAN_TARGET_DIR" cargo test --no-run --message-format=json \
+            --manifest-path crates/loran-server/Cargo.toml --bin loran \
+            > "$RUNNER_TEMP/loran-fixture.jsonl"
+          fixture=$(jq -r '
+            select(.reason == "compiler-artifact" and .target.name == "loran"
+              and .profile.test == true and .executable != null) | .executable
+          ' "$RUNNER_TEMP/loran-fixture.jsonl" | tail -1)
+          test -x "$fixture"
+          "$fixture" --list | grep -Fx 'package_runtime_fixture: test'
+          printf 'LORAN_BIN=%s\n' "$fixture" >> "$GITHUB_ENV"
       - name: Run signed package runtime echo e2e
+        if: matrix.scenario == 'echo'
         run: bash tests/e2e/actr/package-runtime-echo/run.sh
       - name: Run provider and external domain Realms
+        if: matrix.scenario == 'realms'
         run: bash tests/e2e/actr/package-runtime-echo/realm-matrix.sh
       - name: Verify retired and revoked Publisher signing keys
+        if: matrix.scenario == 'rotation'
         run: MODE=rotation bash tests/e2e/actr/package-runtime-echo/run.sh
+      - name: Record and stop E2E compiler cache
+        if: always()
+        run: |
+          sccache --show-stats || true
+          sccache --stop-server || true
+      - name: Save E2E compiler cache
+        if: success() && matrix.scenario == 'echo' && steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/actr-e2e-sccache
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
 
   audit:
     name: Dependency Audit
@@ -357,6 +410,8 @@ jobs:
       contents: read
       actions: read
     env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
       RUSTUP_TOOLCHAIN: 1.99.0
@@ -370,7 +425,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Prepare Linux build space
-        uses: ./.github/actions/prepare-linux-build
+        uses: ./.github/actions/prepare-linux-build-if-needed
+        with:
+          minimum-free-gib: "64"
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.99.0
         with:
@@ -414,22 +471,8 @@ jobs:
             ~/.cargo/bin/wasm-component-ld
             ~/.cargo/bin/wasm-tools
           key: cargo-tools-v2-${{ runner.os }}-wp0.15.0-wcld0.5.26-wt1.253.0
-      - name: Install wasm-pack
-        run: |
-          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
-            cargo install wasm-pack --version 0.15.0 --locked --force
-          fi
-          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
-      - name: Install wasm Component Model toolchain
-        run: |
-          if ! wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"; then
-            cargo install wasm-component-ld --version 0.5.26 --locked --force
-          fi
-          wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"
-          if ! wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'; then
-            cargo install wasm-tools --version 1.253.0 --locked --force
-          fi
-          wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'
+      - name: Install prebuilt WebAssembly tools
+        uses: ./.github/actions/install-wasm-tools
       - name: Download CLI web runtime assets
         uses: actions/download-artifact@v4
         with:
@@ -444,8 +487,6 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Test Rust protoc plugin well-known types
         run: cargo test -p actr-framework-protoc-codegen --test well_known_type_smoke
-      - name: Verify RFC-0400 timer inventory
-        run: cargo test -p actr-hyper --lib timer::tests::inv24_production_timer_calls_and_inventory_do_not_drift
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -487,15 +528,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Two semantic shards on separate runners:
-        # - realtime: suites driving real PeerConnections / real child
-        #   processes. They are wall-clock sensitive (ICE/DTLS handshakes,
-        #   soft-recovery escalation windows) and flake when they contend with
-        #   ~2.7k unit tests for CPU; isolating them on their own runner cut
-        #   both flake rate and wall time (measured per-binary durations in
-        #   the CI nextest summary drove this list).
-        # - rest: everything else (mostly in-process unit tests).
-        shard: [realtime, rest]
+        # Isolate real-network suites and tests that launch expensive child builds.
+        shard: [build-heavy, network, rest-1, rest-2]
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
@@ -509,12 +543,15 @@ jobs:
       ACTR_REQUIRE_NON_LOOPBACK_IPV4: "1"
       # ~2.7k test binaries with debug info blow the runner's ~14 GB SSD and
       # slow linking; CI failures do not need local-variable debug info.
+      CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
-      # sccache (GitHub Actions cache backend) replaces per-job target
-      # caching, which `cache-targets: false` above cannot provide at this
-      # workspace size. Covers rustc invocations across shards/jobs.
+      # Restore one bounded local compiler cache across the test shards.
       RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_ENABLED: "false"
+      SCCACHE_GHA_VERSION: ""
+      SCCACHE_DIR: /tmp/actr-test-sccache
+      SCCACHE_CACHE_SIZE: 2G
+      BUILD_HEAVY_BINARIES: binary(rust_echo) | binary(dynclib_actor_e2e)
       # nextest filterset selecting the realtime shard's binaries and the
       # in-crate connection-governance suites; the rest shard runs `not(...)`.
       # Keep in sync with the shard rationale above.
@@ -544,7 +581,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Prepare Linux build space
-        uses: ./.github/actions/prepare-linux-build
+        uses: ./.github/actions/prepare-linux-build-if-needed
+        with:
+          minimum-free-gib: "64"
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.99.0
         with:
@@ -566,7 +605,13 @@ jobs:
         with:
           cache-targets: false
           # Both shards read the same dependencies; only one compresses/saves.
-          save-if: ${{ matrix.shard == 'rest' }}
+          save-if: ${{ matrix.shard == 'rest-1' }}
+      - name: Restore test compiler cache
+        id: compiler-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/actr-test-sccache
+          key: test-sccache-v1-rust1.99.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
       - name: Run sccache-cache
         # rustc-level compilation cache backed by the GitHub Actions cache.
         # The workspace's full test-target set exceeds what rust-cache can
@@ -575,45 +620,7 @@ jobs:
         with:
           version: v0.18.0
       - name: Install prebuilt WebAssembly tools
-        env:
-          WASM_PACK_SHA256: c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a
-          WASM_COMPONENT_LD_SHA256: e5cee677052c0eb6b5d0605f85e3bbc46d076050cd3403406f49b3503f22622c
-          WASM_TOOLS_SHA256: 4e2898f7ca3bd0536218ed9b7b36ff7b86954c57ae0e6272fde69728cbe01088
-        run: |
-          install_binary() {
-            local name="$1"
-            local expected="$2"
-            local url="$3"
-            local sha256="$4"
-            if "$HOME/.cargo/bin/$name" --version 2>/dev/null | grep -Eq "$expected"; then
-              echo "Reusing image $name"
-              return
-            fi
-            local archive="$RUNNER_TEMP/$name.tar.gz"
-            local extract_dir
-            extract_dir=$(mktemp -d "$RUNNER_TEMP/$name.XXXXXX")
-
-            curl --fail --location --retry 3 --retry-all-errors --output "$archive" "$url"
-            echo "$sha256  $archive" | sha256sum --check --status
-            tar --extract --gzip --file "$archive" --strip-components=1 --directory "$extract_dir"
-            install --mode=0755 "$extract_dir/$name" "$HOME/.cargo/bin/$name"
-            rm -rf "$archive" "$extract_dir"
-            "$HOME/.cargo/bin/$name" --version | grep -Eq "$expected"
-          }
-
-          install_binary wasm-pack '^wasm-pack 0\.15\.0$' \
-            https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz \
-            "$WASM_PACK_SHA256"
-          install_binary wasm-component-ld '^wasm-component-ld 0\.5\.26$' \
-            https://github.com/bytecodealliance/wasm-component-ld/releases/download/v0.5.26/wasm-component-ld-v0.5.26-x86_64-linux.tar.gz \
-            "$WASM_COMPONENT_LD_SHA256"
-          install_binary wasm-tools '^wasm-tools 1\.253\.0( \(.*\))?$' \
-            https://github.com/bytecodealliance/wasm-tools/releases/download/v1.253.0/wasm-tools-1.253.0-x86_64-linux.tar.gz \
-            "$WASM_TOOLS_SHA256"
-
-          wasm-pack --version
-          wasm-component-ld --version
-          wasm-tools --version
+        uses: ./.github/actions/install-wasm-tools
       - name: Download CLI web runtime assets
         uses: actions/download-artifact@v4
         with:
@@ -629,7 +636,7 @@ jobs:
         # desired via `taiki-e/install-action@v2` with `tool: cargo-nextest@<ver>`.
         uses: taiki-e/install-action@cargo-nextest
       - name: Build rest test inventory and verify RFC-0507 acceptance
-        if: matrix.shard == 'rest'
+        if: startsWith(matrix.shard, 'rest-')
         # Compile one workspace feature graph and reuse its binary metadata.
         # Reuse bypasses a second Cargo build and build-script reruns.
         # The acceptance test executes once with its retry-free override.
@@ -662,28 +669,71 @@ jobs:
               raise SystemExit("RFC-0507 acceptance must be selected exactly once in the rest shard")
           print(f"RFC-0507 acceptance selected in {selected[0]}; the rest suite runs it without retries")
           PY
-      - name: Run tests (nextest, ${{ matrix.shard }} shard)
-        # Integration tests (tests/) get bounded retries via .config/nextest.toml.
-        # --no-fail-fast: run the whole suite even when a test fails. With the
-        # default fail-fast, a single failure (e.g. a retry-free unit test that
-        # flakes) cancels the remaining ~1.9k tests, hiding their results and
-        # wasting the cold build. Surface every failure in one run instead.
+      - name: Verify timer guard and rest partitions
+        if: startsWith(matrix.shard, 'rest-')
         run: |
-          if [ "${{ matrix.shard }}" = realtime ]; then
-            cargo nextest run --workspace --all-features --no-fail-fast -E "$REALTIME_BINARIES"
-          else
-            cargo nextest run \
+          python3 .github/scripts/assert-ci-timer.py "$RUNNER_TEMP/nextest-rest-tests.json"
+          for part in 1 2; do
+            cargo nextest list \
               --cargo-metadata "$RUNNER_TEMP/nextest-rest-cargo.json" \
               --binaries-metadata "$RUNNER_TEMP/nextest-rest-binaries.json" \
-              --no-fail-fast -E "not($REALTIME_BINARIES)"
-          fi
+              -E "not($REALTIME_BINARIES)" --partition "hash:$part/2" --message-format json \
+              > "$RUNNER_TEMP/nextest-rest-$part.json"
+          done
+          python3 .github/scripts/assert-ci-test-partitions.py \
+            "$RUNNER_TEMP/nextest-rest-tests.json" \
+            "$RUNNER_TEMP/nextest-rest-1.json" "$RUNNER_TEMP/nextest-rest-2.json"
+      - name: Verify realtime test partitions
+        if: matrix.shard == 'build-heavy' || matrix.shard == 'network'
+        run: |
+          cargo metadata --format-version 1 --all-features --locked > "$RUNNER_TEMP/realtime-cargo.json"
+          cargo nextest list --workspace --all-features --list-type binaries-only --message-format json > "$RUNNER_TEMP/realtime-binaries.json"
+          for partition in whole build-heavy network; do
+            filter="$REALTIME_BINARIES"
+            if [[ "$partition" == build-heavy ]]; then filter="($REALTIME_BINARIES) and ($BUILD_HEAVY_BINARIES)"; fi
+            if [[ "$partition" == network ]]; then filter="($REALTIME_BINARIES) and !($BUILD_HEAVY_BINARIES)"; fi
+            cargo nextest list --cargo-metadata "$RUNNER_TEMP/realtime-cargo.json" \
+              --binaries-metadata "$RUNNER_TEMP/realtime-binaries.json" \
+              -E "$filter" --message-format json > "$RUNNER_TEMP/realtime-$partition.json"
+          done
+          python3 .github/scripts/assert-ci-test-partitions.py \
+            "$RUNNER_TEMP/realtime-whole.json" "$RUNNER_TEMP/realtime-build-heavy.json" "$RUNNER_TEMP/realtime-network.json"
+      - name: Run tests (nextest, ${{ matrix.shard }} shard)
+        env:
+          NEXTEST_SHARD: ${{ matrix.shard }}
+        run: |
+          case "$NEXTEST_SHARD" in
+            build-heavy|network)
+              filter="($REALTIME_BINARIES) and ($BUILD_HEAVY_BINARIES)"
+              if [[ "$NEXTEST_SHARD" == network ]]; then
+                filter="($REALTIME_BINARIES) and !($BUILD_HEAVY_BINARIES)"
+              fi
+              cargo nextest run --cargo-metadata "$RUNNER_TEMP/realtime-cargo.json" \
+                --binaries-metadata "$RUNNER_TEMP/realtime-binaries.json" --no-fail-fast -E "$filter"
+              ;;
+            rest-1|rest-2)
+              cargo nextest run --cargo-metadata "$RUNNER_TEMP/nextest-rest-cargo.json" \
+                --binaries-metadata "$RUNNER_TEMP/nextest-rest-binaries.json" \
+                --no-fail-fast -E "not($REALTIME_BINARIES)" --partition "hash:${NEXTEST_SHARD#rest-}/2"
+              ;;
+            *) echo "Unexpected nextest shard: $NEXTEST_SHARD" >&2; exit 1 ;;
+          esac
       - name: Run doctests
         # nextest does not run doctests; keep them on the libtest harness.
-        if: matrix.shard == 'rest'
+        if: matrix.shard == 'rest-2'
         run: cargo test --doc --workspace --all-features
       - name: sccache stats
         if: always()
         run: sccache --show-stats || true
+      - name: Stop test compiler cache
+        if: always()
+        run: sccache --stop-server || true
+      - name: Save test compiler cache
+        if: success() && matrix.shard == 'rest-1' && steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/actr-test-sccache
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
 
   rust_msrv:
     name: Rust MSRV (1.95)
@@ -694,6 +744,8 @@ jobs:
       contents: read
       actions: read
     env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
       # Force the wasip2 guest fixture to link under the pinned MSRV toolchain
@@ -703,16 +755,26 @@ jobs:
       # compiler version, so they never collide with the stable-toolchain
       # shards but do accelerate subsequent MSRV runs).
       RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_ENABLED: "false"
+      SCCACHE_GHA_VERSION: ""
+      SCCACHE_DIR: /tmp/actr-msrv-sccache
+      SCCACHE_CACHE_SIZE: 1G
     steps:
       - uses: actions/checkout@v5
       - name: Prepare Linux build space
-        uses: ./.github/actions/prepare-linux-build
+        uses: ./.github/actions/prepare-linux-build-if-needed
+        with:
+          minimum-free-gib: "64"
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
           version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - name: Restore MSRV compiler cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/actr-msrv-sccache
+          key: msrv-sccache-v1-rust1.95.0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
         with:
@@ -738,22 +800,8 @@ jobs:
             ~/.cargo/bin/wasm-component-ld
             ~/.cargo/bin/wasm-tools
           key: cargo-tools-v2-${{ runner.os }}-wp0.15.0-wcld0.5.26-wt1.253.0
-      - name: Install wasm-pack
-        run: |
-          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
-            cargo install wasm-pack --version 0.15.0 --locked --force
-          fi
-          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
-      - name: Install wasm Component Model toolchain
-        run: |
-          if ! wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"; then
-            cargo install wasm-component-ld --version 0.5.26 --locked --force
-          fi
-          wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"
-          if ! wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'; then
-            cargo install wasm-tools --version 1.253.0 --locked --force
-          fi
-          wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'
+      - name: Install prebuilt WebAssembly tools
+        uses: ./.github/actions/install-wasm-tools
       - name: Download CLI web runtime assets
         uses: actions/download-artifact@v4
         with:
@@ -766,6 +814,11 @@ jobs:
           bash packages/actr-web/scripts/sync-cli-assets.sh --skip-sw-host
       - name: Build at MSRV (locked)
         run: cargo build --workspace --all-targets --all-features --locked
+      - name: Stop MSRV compiler cache
+        if: always()
+        run: |
+          sccache --show-stats || true
+          sccache --stop-server || true
 
   typescript:
     name: TypeScript
@@ -971,7 +1024,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Prepare Linux build space
-        uses: ./.github/actions/prepare-linux-build
+        uses: ./.github/actions/prepare-linux-build-if-needed
+        with:
+          minimum-free-gib: "64"
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.99.0
         with:
@@ -1001,18 +1056,8 @@ jobs:
             ~/.cargo/bin/wasm-tools
             ~/.cargo/bin/wasm-pack
           key: cargo-tools-v2-${{ runner.os }}-wt1.253.0-wp0.15.0
-      - name: Install wasm-tools
-        run: |
-          if ! wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'; then
-            cargo install wasm-tools --version 1.253.0 --locked --force
-          fi
-          wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'
-      - name: Install wasm-pack
-        run: |
-          if ! wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"; then
-            cargo install wasm-pack --version 0.15.0 --locked --force
-          fi
-          wasm-pack --version 2>/dev/null | grep -Fxq "wasm-pack 0.15.0"
+      - name: Install prebuilt WebAssembly tools
+        uses: ./.github/actions/install-wasm-tools
       - name: Verify TypeScript workload WIT drift
         run: |
           cmp crates/actr-framework/wit-v2/actr-workload.wit packages/actr-typescript/actr-workload/src/wit-v2/actr-workload.wit
@@ -1053,6 +1098,8 @@ jobs:
     needs: determine
     if: needs.determine.outputs.swift_binding == 'true'
     runs-on: macos-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
     permissions:
       contents: read
     steps:
@@ -1141,6 +1188,14 @@ jobs:
         working-directory: tools/actr/protoc-gen/swift
         run: swift build
 
+  kotlin_native:
+    name: Kotlin Android
+    needs: determine
+    if: needs.determine.outputs.kotlin_binding == 'true'
+    uses: ./.github/workflows/ci-kotlin.yml
+    with:
+      native_only: true
+
   kotlin:
     name: Kotlin
     needs: [determine, cli_web_assets]
@@ -1148,6 +1203,7 @@ jobs:
     uses: ./.github/workflows/ci-kotlin.yml
     with:
       cli_web_runtime_artifact: cli-web-runtime
+      skip_native: true
 
   web:
     name: Web
@@ -1162,7 +1218,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Prepare Linux build space
-        uses: ./.github/actions/prepare-linux-build
+        uses: ./.github/actions/prepare-linux-build-if-needed
+        with:
+          minimum-free-gib: "64"
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.99.0
         with:
@@ -1227,7 +1285,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Prepare Linux build space
-        uses: ./.github/actions/prepare-linux-build
+        uses: ./.github/actions/prepare-linux-build-if-needed
+        with:
+          minimum-free-gib: "64"
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.99.0
         with:
@@ -1339,7 +1399,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Prepare Linux build space
-        uses: ./.github/actions/prepare-linux-build
+        uses: ./.github/actions/prepare-linux-build-if-needed
+        with:
+          minimum-free-gib: "64"
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.99.0
         with:
@@ -1353,21 +1415,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-targets: false
-      - name: Install wasm Component Model toolchain
-        run: |
-          if ! wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"; then
-            cargo install wasm-component-ld --version 0.5.26 --locked --force
-          fi
-          wasm-component-ld --version 2>/dev/null | grep -Fxq "wasm-component-ld 0.5.26"
-          if ! wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'; then
-            cargo install wasm-tools --version 1.253.0 --locked --force
-          fi
-          wasm-tools --version 2>/dev/null | grep -Eq '^wasm-tools 1\.253\.0( \(.*\))?$'
+      - name: Install prebuilt WebAssembly tools
+        uses: ./.github/actions/install-wasm-tools
       - name: Install cargo-nextest
         uses: taiki-e/install-action@cargo-nextest
       # Exercise the native RTC implementation in a dedicated job.
-      - name: Check (WebRTC)
-        run: cargo check -p actr-hyper --all-targets
       - name: Clippy (WebRTC, deny warnings)
         env:
           CARGO_BUILD_WARNINGS: deny
@@ -1424,6 +1476,7 @@ jobs:
       - python_workload
       - swift
       - kotlin
+      - kotlin_native
       - csharp
       - web
       - c_go_workloads
@@ -1443,6 +1496,7 @@ jobs:
       PYTHON_WORKLOAD_RESULT: ${{ needs.python_workload.result }}
       SWIFT_RESULT: ${{ needs.swift.result }}
       KOTLIN_RESULT: ${{ needs.kotlin.result }}
+      KOTLIN_NATIVE_RESULT: ${{ needs.kotlin_native.result }}
       CSHARP_RESULT: ${{ needs.csharp.result }}
       WEB_RESULT: ${{ needs.web.result }}
       C_GO_WORKLOADS_RESULT: ${{ needs.c_go_workloads.result }}
@@ -1470,6 +1524,7 @@ jobs:
               "python_workload": os.environ["PYTHON_WORKLOAD_RESULT"],
               "swift": os.environ["SWIFT_RESULT"],
               "kotlin": os.environ["KOTLIN_RESULT"],
+              "kotlin_native": os.environ["KOTLIN_NATIVE_RESULT"],
               "csharp": os.environ["CSHARP_RESULT"],
               "web": os.environ["WEB_RESULT"],
               "c_go_workloads": os.environ["C_GO_WORKLOADS_RESULT"],

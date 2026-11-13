@@ -1,0 +1,19 @@
+name: Measure Linux build space
+description: Keep the original cleanup as a fallback for builds below the requested free-space threshold.
+inputs:
+  minimum-free-gib:
+    description: Minimum free GiB before a build starts
+    default: '10'
+    required: false
+runs:
+  using: composite
+  steps:
+    - name: Measure current free disk
+      id: space
+      shell: bash
+      env:
+        MINIMUM_FREE_GIB: ${{ inputs.minimum-free-gib }}
+      run: python3 .github/scripts/ci-space-guard.py --minimum-free-gib "$MINIMUM_FREE_GIB"
+    - name: Original low-space cleanup
+      if: steps.space.outputs.cleanup_needed == 'true'
+      uses: ./.github/actions/prepare-linux-build

@@ -33,6 +33,7 @@ program
   .option('--watch', 'Watch mode for development')
   .option('--metafile <path>', 'Output build metadata to file')
   .option('--contract <path>', 'Contract module path exporting `contract` or default contract')
+  .option('--v1-capability-manifest <path>', 'Output the linked Product v1 capability manifest')
   .option('--capability-manifest <path>', 'Output host capability manifest to file')
   .option('--no-strict', 'Disable strict post-build dependency guard (not recommended)')
   .option(
@@ -57,6 +58,10 @@ program
       }
       if (options.contract !== undefined) {
         buildOpts.contractFile = options.contract;
+      }
+      // Pass through the optional Product v1 manifest output path.
+      if (options.v1CapabilityManifest !== undefined) {
+        buildOpts.v1CapabilityManifest = options.v1CapabilityManifest;
       }
       if (options.capabilityManifest !== undefined) {
         buildOpts.capabilityManifest = options.capabilityManifest;
