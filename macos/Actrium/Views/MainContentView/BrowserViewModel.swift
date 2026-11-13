@@ -820,6 +820,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 tabs[index].leftPanelScript = nil
                 tabs[index].rightPanelScript = nil
                 tabs[index].guestScript = nil
+                tabs[index].guestExtractedPath = nil
+                tabs[index].guestEntry = nil
                 tabs[index].htmlContent = nil
                 tabs[index].contractName = nil
                 tabs[index].legacyActorBridge = false
@@ -890,6 +892,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].leftPanelScript = nil
             tabs[index].rightPanelScript = nil
             tabs[index].guestScript = nil
+            tabs[index].guestExtractedPath = nil
+            tabs[index].guestEntry = nil
             tabs[index].systemTabType = nil
             tabs[index].contractName = nil
             tabs[index].legacyActorBridge = false
@@ -1197,11 +1201,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 tabs[tabIndex].leftPanelScript = leftPanelScript
                 tabs[tabIndex].rightPanelScript = rightPanelScript
                 tabs[tabIndex].guestScript = nil
-            } else if let script = guestScript {
+            } else {
                 tabs[tabIndex].unifiedScript = nil
                 tabs[tabIndex].leftPanelScript = nil
                 tabs[tabIndex].rightPanelScript = nil
-                tabs[tabIndex].guestScript = script
+                tabs[tabIndex].guestScript = guestScript
             }
 
             tabs[tabIndex].contractName = manifestInfo.contractName
@@ -1214,8 +1218,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             // Replace any previous package's extracted guest source: the
             // renderer must only execute bytes from the newly loaded package
             // (same shape as the archive/dev-directory branch above).
-            tabs[tabIndex].guestExtractedPath = isDirectory.boolValue ? nil : rootDir.path
-            tabs[tabIndex].guestEntry = manifestInfo.unifiedScript
+            let usesExtractedEntry = !isDirectory.boolValue && unifiedScript != nil
+            tabs[tabIndex].guestExtractedPath = usesExtractedEntry ? rootDir.path : nil
+            tabs[tabIndex].guestEntry = usesExtractedEntry ? manifestInfo.unifiedScript : nil
 
             // Update panel visibility
             leftPanelVisibility[tabs[tabIndex].id] = manifestInfo.leftPanelDefaultVisible
@@ -1293,6 +1298,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         tabs[tabIndex].leftPanelScript = nil
         tabs[tabIndex].rightPanelScript = nil
         tabs[tabIndex].guestScript = nil
+        tabs[tabIndex].guestExtractedPath = nil
+        tabs[tabIndex].guestEntry = nil
         tabs[tabIndex].contractName = nil
         objectWillChange.send()
         persistBrowserPageSession()
@@ -1603,8 +1610,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         if ActriumAppURLScheme.hasSupportedPrefix(input) {
             return false
         }
-        // Same for actr:// realm addresses — they are URIs, not filesystem paths.
-        if input.hasPrefix("actr://") {
+        let scheme = URLComponents(string: input)?.scheme?.lowercased()
+        if scheme == "actr" || scheme == "https" || scheme == "http" {
             return false
         }
         // Here. / The first is the absolute path.
@@ -1631,7 +1638,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// - If it looks like a domain name (includes) . and does not contain spaces) add https:// Prefix
     func parseURL(_ input: String) -> URL? {
         // It's complete. URL (http/https/about/actrium)
-        if input.hasPrefix("http://") || input.hasPrefix("https://") ||
+        let scheme = URLComponents(string: input)?.scheme?.lowercased()
+        if scheme == "http" || scheme == "https" ||
            input.hasPrefix("about:") ||
            ActriumAppURLScheme.hasSupportedPrefix(input) {
             return URL(string: input)
@@ -1933,9 +1941,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     unifiedScript: unified,
                     // 15-B B4: for package archives, hand the renderer the
                     // digest-addressed extraction dir + entry so it can read the
-                    // verified bytes directly (inline text above stays as fallback).
+                    // verified bytes directly.
                     guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
-                    guestEntry: manifestInfo.unifiedScript,
+                    guestEntry: isDirectory.boolValue ? nil : manifestInfo.unifiedScript,
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
