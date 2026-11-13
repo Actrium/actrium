@@ -7,6 +7,9 @@
 build/
 .xcode.env.local
 DerivedData/
+
+# Release artifacts (package-dmg.sh)
+dist/
 *.xcuserstate
 *.xcscmblueprint
 xcuserdata/
