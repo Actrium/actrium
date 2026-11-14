@@ -438,14 +438,6 @@ final class RendererSurfaceMountObserver: NSObject {
     }
 }
 
-/// A background renderer window must look active to native text controls.
-/// NSTextView uses the key-window state to install its insertion indicator;
-/// activating the helper NSApplication itself would steal focus from the Host.
-private final class RendererWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var isKeyWindow: Bool { true }
-}
-
 /// One Tab root and its remotely hosted CoreAnimation context.
 @MainActor
 private final class RendererTabSurface {
@@ -519,9 +511,6 @@ private final class RendererTabSurface {
     }
 
     func commit() {
-        if context.layer !== container.layer {
-            context.layer = container.layer
-        }
         // The first commit happens on an empty view tree, so lay it out once.
         // Later commits rely on AppKit/RN marking the container dirty
         // (addSubview, surface stage change, resize); Fabric sets frames
@@ -532,6 +521,7 @@ private final class RendererTabSurface {
             container.layoutSubtreeIfNeeded()
             hasCommitted = true
         }
+        context.attachWindowLayerTree(for: container)
         publishCaret()
         CATransaction.flush()
     }
@@ -788,81 +778,5 @@ private final class RendererTabSurface {
         if encoded & 8 != 0 { result.insert(.command) }
         if encoded & 16 != 0 { result.insert(.capsLock) }
         return result
-    }
-}
-
-/// Dynamic wrapper for the private CAContext used by Chromium/WebKit style
-/// cross-process layer hosting.
-private final class RendererCAContext {
-    private let object: NSObject
-
-    var contextId: UInt32 {
-        if let number = object.value(forKey: "contextId") as? NSNumber {
-            return number.uint32Value
-        }
-        return object.value(forKey: "contextId") as? UInt32 ?? 0
-    }
-
-    var layer: CALayer? {
-        get {
-            object.value(forKey: "layer") as? CALayer
-        }
-        set {
-            object.setValue(newValue, forKey: "layer")
-        }
-    }
-
-    init?() {
-        guard let contextClass = NSClassFromString("CAContext") else {
-            return nil
-        }
-
-        let options: [String: Any] = [
-            "colorSpace": CGColorSpaceCreateDeviceRGB(),
-            "displayId": CGMainDisplayID()
-        ]
-
-        let connectionSelector = NSSelectorFromString("contextWithCGSConnection:options:")
-        if contextClass.responds(to: connectionSelector),
-           let symbol = dlsym(dlopen(nil, RTLD_LAZY), "CGSMainConnectionID") {
-            typealias ConnectionFunction = @convention(c) () -> UInt32
-            let connection = unsafeBitCast(symbol, to: ConnectionFunction.self)()
-            let implementation = contextClass.method(for: connectionSelector)
-            typealias Factory = @convention(c) (
-                AnyClass,
-                Selector,
-                UInt32,
-                [String: Any]
-            ) -> NSObject?
-            if let created = unsafeBitCast(implementation, to: Factory.self)(
-                contextClass,
-                connectionSelector,
-                connection,
-                options
-            ) {
-                object = created
-                return
-            }
-        }
-
-        let remoteSelector = NSSelectorFromString("remoteContextWithOptions:")
-        if contextClass.responds(to: remoteSelector) {
-            let implementation = contextClass.method(for: remoteSelector)
-            typealias Factory = @convention(c) (
-                AnyClass,
-                Selector,
-                [String: Any]
-            ) -> NSObject?
-            if let created = unsafeBitCast(implementation, to: Factory.self)(
-                contextClass,
-                remoteSelector,
-                options
-            ) {
-                object = created
-                return
-            }
-        }
-
-        return nil
     }
 }

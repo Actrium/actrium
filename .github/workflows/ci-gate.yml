@@ -58,6 +58,7 @@ jobs:
       python_codegen: ${{ steps.targets.outputs.python_codegen }}
       python_workload: ${{ steps.targets.outputs.python_workload }}
       swift_binding: ${{ steps.targets.outputs.swift_binding }}
+      macos_host: ${{ steps.targets.outputs.macos_host }}
       kotlin_binding: ${{ steps.targets.outputs.kotlin_binding }}
       csharp_binding: ${{ steps.targets.outputs.csharp_binding }}
       web_binding: ${{ steps.targets.outputs.web_binding }}
@@ -1188,6 +1189,23 @@ jobs:
         working-directory: tools/actr/protoc-gen/swift
         run: swift build
 
+  macos_host:
+    name: macOS Host
+    needs: determine
+    if: needs.determine.outputs.macos_host == 'true'
+    runs-on: macos-15
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Test renderer hosting and complete bundle signing
+        run: bash macos/scripts/test-host.sh
+
   kotlin_native:
     name: Kotlin Android
     needs: determine
@@ -1475,6 +1493,7 @@ jobs:
       - python_codegen
       - python_workload
       - swift
+      - macos_host
       - kotlin
       - kotlin_native
       - csharp
@@ -1495,6 +1514,7 @@ jobs:
       PYTHON_CODEGEN_RESULT: ${{ needs.python_codegen.result }}
       PYTHON_WORKLOAD_RESULT: ${{ needs.python_workload.result }}
       SWIFT_RESULT: ${{ needs.swift.result }}
+      MACOS_HOST_RESULT: ${{ needs.macos_host.result }}
       KOTLIN_RESULT: ${{ needs.kotlin.result }}
       KOTLIN_NATIVE_RESULT: ${{ needs.kotlin_native.result }}
       CSHARP_RESULT: ${{ needs.csharp.result }}
@@ -1523,6 +1543,7 @@ jobs:
               "python_codegen": os.environ["PYTHON_CODEGEN_RESULT"],
               "python_workload": os.environ["PYTHON_WORKLOAD_RESULT"],
               "swift": os.environ["SWIFT_RESULT"],
+              "macos_host": os.environ["MACOS_HOST_RESULT"],
               "kotlin": os.environ["KOTLIN_RESULT"],
               "kotlin_native": os.environ["KOTLIN_NATIVE_RESULT"],
               "csharp": os.environ["CSHARP_RESULT"],

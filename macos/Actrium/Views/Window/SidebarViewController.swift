@@ -38,11 +38,13 @@ final class SidebarViewController: NSViewController {
 
         // Create hosting view
         hostingView = NSHostingView(rootView: sidebarContent)
+        hostingView.appearance = NSAppearance(named: .aqua)
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
         // Container view
         let container = NSView()
         container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.white.cgColor
         container.addSubview(hostingView)
 
         NSLayoutConstraint.activate([
