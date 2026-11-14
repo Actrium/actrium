@@ -19,6 +19,8 @@ actr-runtime.workspace = true
 actr-hyper = { workspace = true, features = ["opentelemetry"] }
 actr-config = { workspace = true, features = ["opentelemetry"] }
 actr-pack.workspace = true
+actrium-core = { path = "../actrium-core" }
+actrium-runtime = { path = "../actrium-runtime" }
 
 # UniFFI
 uniffi = { version = "0.31.1", features = ["tokio"] }
@@ -34,6 +36,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-android = "0.2"
 tracing-oslog = { version = "0.2", optional = true }
 url = "2.5"
+serde_json = "1.0"
 async-trait = "0.1"
 parking_lot = "0.12"
 futures-util = "0.3.31"

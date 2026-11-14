@@ -251,6 +251,15 @@ impl MockLoranServer {
             .store(true, Ordering::Relaxed);
     }
 
+    /// Mint Actor channel certificates during relay enrollment so peers use
+    /// verified ActorChannelSessions. Off by default: existing tests rely on
+    /// the legacy fallback unless they explicitly opt in.
+    pub fn enable_actor_certificates(&self) {
+        self.state
+            .actor_certificates_enabled
+            .store(true, Ordering::Relaxed);
+    }
+
     /// Deterministic Issuer signing key (`SigningKey::from_bytes(&[42u8; 32])`).
     ///
     /// Used by tests that need to pre-verify credentials issued by the mock.

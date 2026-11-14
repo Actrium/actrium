@@ -19,6 +19,7 @@ members = [
     "crates/keel-native-guest",
     # === Actrium applications ===
     "crates/actrium-core",
+    "crates/actrium-runtime",
     "crates/actrium-sync",
     "crates/actrium-vault",
     # === Developer Tools ===

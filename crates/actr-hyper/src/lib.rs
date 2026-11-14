@@ -92,6 +92,8 @@ pub mod verify;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod actr_ref;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod actrium;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod issuer_client;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod key_cache;
@@ -202,7 +204,9 @@ pub use actr_platform_traits::{
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use issuer_client::{IssuerClient, RealmClientKey, RealmKeySigner};
+pub use issuer_client::{
+    ActorKeySigner, FileActorKeySigner, IssuerClient, RealmClientKey, RealmKeySigner,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub mod realm_membership;
 // Conflict-key dispatch scheduling (B2).
@@ -244,6 +248,16 @@ pub use wire::{
     AuthConfig, AuthType, DisconnectReason, InboundQueueConfig, ReconnectConfig, SignalingClient,
     SignalingConfig, SignalingEvent, SignalingStats, WebRtcConfig,
 };
+
+/// Process-wide relay runtime instance identifier, generated on first use.
+///
+/// Every relay connection in this process shares it. Actrium Service hosts
+/// pass it as `ServiceConfig::runtime_instance_id` so the session registry can
+/// match the channel's local runtime view.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn process_runtime_instance_id() -> &'static str {
+    wire::relay::runtime_instance_id()
+}
 
 // Mailbox (from actr-runtime-mailbox crate)
 #[cfg(not(target_arch = "wasm32"))]
@@ -786,7 +800,11 @@ impl Node {
     /// construction (custom trust chain, injected platform provider, etc.)
     /// and cannot drive the whole flow through
     /// [`Node::from_config_file`].
-    pub fn from_hyper(hyper: Hyper, runtime_config: actr_config::RuntimeConfig) -> Node<Init> {
+    pub fn from_hyper(hyper: Hyper, mut runtime_config: actr_config::RuntimeConfig) -> Node<Init> {
+        // HyperConfig has already resolved defaults and relative paths. Make its
+        // result authoritative everywhere so initial REGISTER, REISSUE and Relay
+        // cannot silently select different Actor keys.
+        runtime_config.storage_root = Some(hyper.inner.config.storage_root.clone());
         Node {
             hyper: hyper.inner,
             attachment: None,
@@ -1142,6 +1160,21 @@ impl Node<Attached> {
         Ok(self)
     }
 
+    /// Set the stable creation-intent namespace used to derive the independent
+    /// Actor key. Required for fixed Actrium Front instances so two Tabs never
+    /// share an Actor private key. Service instances may leave it unset.
+    pub fn with_actor_key_namespace(mut self, namespace: impl Into<String>) -> HyperResult<Self> {
+        let node = &mut self.attachment.as_mut().expect("attached node").node;
+        let namespace = namespace.into();
+        if namespace.is_empty() {
+            return Err(HyperError::Config(
+                "Actor key namespace must not be empty".into(),
+            ));
+        }
+        node.actor_key_namespace = Some(namespace);
+        Ok(self)
+    }
+
     /// Add a host-side observer to an already attached node.
     ///
     /// Package-backed nodes keep their guest hook observer installed; this
@@ -1161,6 +1194,34 @@ impl Node<Attached> {
             attachment.node.hook_observer.take(),
             Some(observer),
         );
+        self
+    }
+
+    /// Install current-policy authorization for inbound delivery.
+    ///
+    /// Requests and tells run after ACL and before dedup, responses run before
+    /// caller completion, and stream chunks run immediately before callback
+    /// delivery. Exact session protocol methods belong to [`Self::with_session_registry`].
+    pub fn with_incoming_guard(mut self, guard: Arc<dyn crate::lifecycle::IncomingGuard>) -> Self {
+        self.attachment
+            .as_mut()
+            .expect("Node<Attached> without attachment")
+            .node
+            .set_incoming_guard(Some(guard));
+        self
+    }
+
+    /// Install the exclusive handler for protocol-defined session methods.
+    /// Without it, exact session routes fail closed instead of entering the workload.
+    pub fn with_session_registry(
+        mut self,
+        registry: Arc<dyn crate::lifecycle::SessionRegistry>,
+    ) -> Self {
+        self.attachment
+            .as_mut()
+            .expect("Node<Attached> without attachment")
+            .node
+            .session_registry = Some(registry);
         self
     }
 
@@ -1235,6 +1296,17 @@ impl Node<Attached> {
             .as_ref()
             .expect("Node<Attached> without attachment");
         let config = &attachment.node.config;
+        let actor_type = attachment
+            .verified
+            .as_ref()
+            .map(|verified| verified.manifest.actor_type())
+            .unwrap_or_else(|| config.actr_type().clone());
+        let signer = crate::issuer_client::actor_signer_for_scoped(
+            &self.hyper.config.storage_root,
+            &config.realm,
+            &actor_type,
+            attachment.node.actor_key_namespace.as_deref(),
+        )?;
         Ok(match attachment.verified.as_ref() {
             Some(verified) => RegistrationContext::Package {
                 request: build_package_register_request(
@@ -1242,10 +1314,13 @@ impl Node<Attached> {
                     &config.realm,
                     service_spec,
                     config.acl.clone(),
-                ),
+                    signer.as_ref(),
+                )?,
+                signer,
             },
             None => RegistrationContext::Linked {
-                request: build_linked_register_request(config, service_spec),
+                request: build_linked_register_request(config, service_spec, signer.as_ref())?,
+                signer,
             },
         })
     }
@@ -1315,6 +1390,7 @@ impl Node<Attached> {
                     service_spec,
                     acl: config.acl.clone(),
                     client_key: attachment.node.resolved_realm_client_key()?,
+                    actor_key_namespace: attachment.node.actor_key_namespace.clone(),
                 },
             )
             .await?
@@ -1324,6 +1400,7 @@ impl Node<Attached> {
                 issuer_endpoint,
                 service_spec,
                 attachment.node.resolved_realm_client_key()?,
+                attachment.node.actor_key_namespace.as_deref(),
             )
             .await?
         };
@@ -1375,6 +1452,64 @@ impl Node<Attached> {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Node<Registered> {
+    /// Install or replace the inbound delivery guard before startup.
+    pub fn with_incoming_guard(mut self, guard: Arc<dyn crate::lifecycle::IncomingGuard>) -> Self {
+        self.attachment
+            .as_mut()
+            .expect("Node<Registered> without attachment")
+            .node
+            .set_incoming_guard(Some(guard));
+        self
+    }
+
+    /// Install or replace the exclusive session protocol dispatcher before startup.
+    pub fn with_session_registry(
+        mut self,
+        registry: Arc<dyn crate::lifecycle::SessionRegistry>,
+    ) -> Self {
+        self.attachment
+            .as_mut()
+            .expect("Node<Registered> without attachment")
+            .node
+            .session_registry = Some(registry);
+        self
+    }
+
+    /// The Actor identity assigned by the Issuer at registration.
+    pub fn actor_id(&self) -> actr_protocol::ActrId {
+        self.attachment
+            .as_ref()
+            .expect("Node<Registered> without attachment")
+            .node
+            .preregistered_credential
+            .as_ref()
+            .expect("a registered node holds its issued credential")
+            .actr_id
+            .clone()
+    }
+
+    /// Install the complete Actrium P2P session protocol on this node: the
+    /// registry owns the exact `actrium.session.v1` system routes, the guard
+    /// authorizes inbound business requests/tells/streams and signs responses,
+    /// and the same shared state enables outbound Attach and response-proof
+    /// verification. Session traffic requires the verified Actor channel.
+    pub fn with_actrium_service(
+        mut self,
+        service: actrium_runtime::InMemorySessionService,
+    ) -> Self {
+        let shared = Arc::new(crate::actrium::service::Shared::default());
+        let (registry, guard) =
+            crate::actrium::ActriumServiceRegistry::new(service, shared.clone());
+        let node = &mut self
+            .attachment
+            .as_mut()
+            .expect("Node<Registered> without attachment")
+            .node;
+        node.actrium_peer = Some(shared);
+        self.with_session_registry(Arc::new(registry))
+            .with_incoming_guard(Arc::new(guard))
+    }
+
     /// Start the attached, registered node and return the live [`ActrRef`].
     pub async fn start(self) -> actr_protocol::ActorResult<crate::actr_ref::ActrRef> {
         let Attachment { node, .. } = self
@@ -1464,6 +1599,7 @@ impl Hyper {
                 service_spec,
                 acl,
                 client_key,
+                actor_key_namespace: None,
             },
         )
         .await
@@ -1733,6 +1869,7 @@ struct CredentialBootstrapRequest<'a> {
     service_spec: Option<ServiceSpec>,
     acl: Option<Acl>,
     client_key: Option<RealmClientKey>,
+    actor_key_namespace: Option<String>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1747,6 +1884,7 @@ async fn bootstrap_credential_inner(
         service_spec,
         acl,
         client_key,
+        actor_key_namespace,
     } = request;
     let manifest = &verified.manifest;
     let actr_type = manifest.actor_type().to_program_identity();
@@ -1776,7 +1914,14 @@ async fn bootstrap_credential_inner(
         "registering with Issuer using publisher manifest"
     );
 
-    let req = build_package_register_request(verified, realm, service_spec, acl);
+    let actor_type = manifest.actor_type();
+    let signer = crate::issuer_client::actor_signer_for_scoped(
+        &inner.config.storage_root,
+        realm,
+        &actor_type,
+        actor_key_namespace.as_deref(),
+    )?;
+    let req = build_package_register_request(verified, realm, service_spec, acl, signer.as_ref())?;
     let response = issuer.register_with_manifest(req).await?;
 
     // 3. Process Issuer response
@@ -1855,13 +2000,24 @@ async fn bootstrap_linked_credential_inner(
     issuer_endpoint: &str,
     service_spec: Option<ServiceSpec>,
     client_key: Option<RealmClientKey>,
+    actor_key_namespace: Option<&str>,
 ) -> HyperResult<register_response::RegisterOk> {
     let mut issuer = IssuerClient::new(issuer_endpoint);
     if let Some(key) = client_key {
         issuer = issuer.with_client_key(key);
     }
 
-    let req = build_linked_register_request(config, service_spec);
+    let storage_root = config
+        .storage_root
+        .clone()
+        .unwrap_or_else(|| config.config_dir.join("storage"));
+    let signer = crate::issuer_client::actor_signer_for_scoped(
+        &storage_root,
+        &config.realm,
+        config.actr_type(),
+        actor_key_namespace,
+    )?;
+    let req = build_linked_register_request(config, service_spec, signer.as_ref())?;
     let response = issuer.register_linked(req).await?;
     match response.result {
         Some(register_response::Result::Success(ok)) => Ok(ok),
@@ -1883,8 +2039,9 @@ fn build_package_register_request(
     realm: &str,
     service_spec: Option<ServiceSpec>,
     acl: Option<Acl>,
-) -> RegisterRequest {
-    RegisterRequest {
+    signer: &dyn crate::issuer_client::ActorKeySigner,
+) -> HyperResult<RegisterRequest> {
+    let request = RegisterRequest {
         actr_type: verified.manifest.actor_type(),
         realm: realm.to_string(),
         service_spec,
@@ -1899,15 +2056,22 @@ fn build_package_register_request(
         },
         auth_mode: Some(RegisterAuthMode::Package as i32),
         signing_public_key: Some(verified.signing_public_key.to_vec().into()),
-    }
+        ..Default::default()
+    };
+    crate::issuer_client::sign_actor_request(
+        request,
+        signer,
+        actr_protocol::actor_key_proof::ActorKeyProofOperation::Register,
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn build_linked_register_request(
     config: &actr_config::RuntimeConfig,
     service_spec: Option<ServiceSpec>,
-) -> RegisterRequest {
-    RegisterRequest {
+    signer: &dyn crate::issuer_client::ActorKeySigner,
+) -> HyperResult<RegisterRequest> {
+    let request = RegisterRequest {
         actr_type: config.actr_type().clone(),
         realm: config.realm.clone(),
         service_spec,
@@ -1916,7 +2080,12 @@ fn build_linked_register_request(
         ws_address: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
         ..Default::default()
-    }
+    };
+    crate::issuer_client::sign_actor_request(
+        request,
+        signer,
+        actr_protocol::actor_key_proof::ActorKeyProofOperation::Register,
+    )
 }
 
 // ─── Helper functions (native-only) ──────────────────────────────────────────
@@ -2181,6 +2350,103 @@ async fn load_or_create_instance_uid_local(data_dir: &std::path::Path) -> HyperR
 #[cfg(all(not(target_arch = "wasm32"), test))]
 #[path = "lib_tests.rs"]
 mod tests;
+
+#[cfg(all(not(target_arch = "wasm32"), test))]
+mod storage_root_resolution_tests {
+    use super::*;
+
+    struct StorageTestWorkload;
+
+    #[async_trait::async_trait]
+    impl crate::workload::LinkedWorkloadHandle for StorageTestWorkload {}
+
+    #[tokio::test]
+    async fn from_hyper_makes_resolved_storage_root_authoritative() {
+        for use_custom_root in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let data_dir = root.path().join("hyper-data");
+            let config_dir = root.path().join("config");
+            let signing_key = ed25519_dalek::SigningKey::from_bytes(&[19; 32]);
+            let trust = Arc::new(
+                crate::verify::StaticTrust::new(signing_key.verifying_key().to_bytes()).unwrap(),
+            );
+            let mut hyper_config = HyperConfig::new(&data_dir, trust);
+            if use_custom_root {
+                hyper_config = hyper_config.with_storage_root(data_dir.join("resolved-storage"));
+            }
+            let expected = hyper_config.storage_root.clone();
+            let hyper = Hyper::new(hyper_config).await.unwrap();
+            let raw: actr_config::RuntimeRawConfig = toml::from_str(
+                r#"
+[signaling]
+url = "ws://localhost:8081/signaling/ws"
+[issuer_endpoint]
+url = "http://localhost:8081/issuer"
+[deployment]
+realm = "test7@example.com"
+"#,
+            )
+            .unwrap();
+            let package = actr_config::PackageInfo {
+                name: "storage-test".into(),
+                actr_type: ActrType {
+                    publisher: "example.com".into(),
+                    name: "storage-test".into(),
+                    version: "1.0.0".into(),
+                },
+                description: None,
+                authors: Vec::new(),
+                license: None,
+            };
+            let mut runtime = actr_config::ConfigParser::parse_runtime(
+                raw,
+                config_dir.join("actr.toml"),
+                package,
+            )
+            .unwrap();
+            if use_custom_root {
+                runtime.storage_root = Some(config_dir.join("wrong-storage"));
+            }
+            assert_ne!(runtime.storage_root.as_deref(), Some(expected.as_path()));
+            let node = Node::from_hyper(hyper, runtime);
+            assert_eq!(
+                node.runtime_config().storage_root.as_deref(),
+                Some(expected.as_path())
+            );
+
+            let node = node
+                .link_handle(Arc::new(StorageTestWorkload))
+                .await
+                .unwrap();
+            let recovery = node.registration_context(None).unwrap();
+            let config = &node.attachment.as_ref().unwrap().node.config;
+            let initial_signer = crate::issuer_client::actor_signer_for_scoped(
+                config.storage_root.as_deref().unwrap(),
+                &config.realm,
+                config.actr_type(),
+                None,
+            )
+            .unwrap();
+            let initial =
+                build_linked_register_request(config, None, initial_signer.as_ref()).unwrap();
+            let crate::lifecycle::credential_manager::RegistrationContext::Linked {
+                request: recovery,
+                ..
+            } = recovery
+            else {
+                panic!("linked node recovered a package registration context");
+            };
+            assert_eq!(initial, recovery);
+            assert!(expected.join("actor-keys").is_dir());
+            let divergent_root = if use_custom_root {
+                config_dir.join("wrong-storage")
+            } else {
+                config_dir.join("storage")
+            };
+            assert!(!divergent_root.join("actor-keys").exists());
+        }
+    }
+}
 
 // The connection-governance suites exercise private production seams (for
 // example, physical-session retirement) and therefore run as in-crate tests.

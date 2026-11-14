@@ -1,0 +1,58 @@
+{
+  "domain_ascii": "actrium.business.request.v1",
+  "domain_suffix_hex": "00",
+  "session_secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "vectors": [
+    {
+      "name": "request",
+      "session_id": "session-1",
+      "service_actor_id": "service:documents",
+      "channel_id": "channel-2",
+      "route_key": "documents/read",
+      "capability": "documents:read",
+      "request_id": "request-1",
+      "issued_at_epoch_secs": 1700000000,
+      "deadline_epoch_secs": 1700000030,
+      "idempotency_key": "idem-1",
+      "lease_epoch": 2,
+      "kind": 1,
+      "payload_hex": "000102ff",
+      "canonical_hex": "6163747269756d2e627573696e6573732e726571756573742e763100000000000000000973657373696f6e2d3100000000000000020000000000000011736572766963653a646f63756d656e747300000000000000096368616e6e656c2d32000000000000000e646f63756d656e74732f72656164000000000000000e646f63756d656e74733a726561640000000000000009726571756573742d31000000006553f100000000006553f11e010100000000000000066964656d2d3100000000000000203d1f57c984978ef98a18378c8166c1cb8ede02c03eeb6aee7e2f121dfeee3e56",
+      "proof_hex": "dc1bf1175dac831fff6b9949e1c31470aaedfdb7c578a240b13a0f05c26cf18c"
+    },
+    {
+      "name": "success_response",
+      "session_id": "session-1",
+      "service_actor_id": "service:documents",
+      "channel_id": "channel-2",
+      "route_key": "documents/read",
+      "capability": "documents:read",
+      "request_id": "request-1",
+      "issued_at_epoch_secs": 1700000000,
+      "deadline_epoch_secs": 1700000030,
+      "idempotency_key": "idem-1",
+      "lease_epoch": 2,
+      "kind": 2,
+      "payload_hex": "6f6b",
+      "canonical_hex": "6163747269756d2e627573696e6573732e726571756573742e763100000000000000000973657373696f6e2d3100000000000000020000000000000011736572766963653a646f63756d656e747300000000000000096368616e6e656c2d32000000000000000e646f63756d656e74732f72656164000000000000000e646f63756d656e74733a726561640000000000000009726571756573742d31000000006553f100000000006553f11e020100000000000000066964656d2d3100000000000000202689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df",
+      "proof_hex": "14b177058bac1c9ffce2fe400aa26c064c1a6870f54fe4c5874d20b39bf0b95a"
+    },
+    {
+      "name": "error_response",
+      "session_id": "session-1",
+      "service_actor_id": "service:documents",
+      "channel_id": "channel-2",
+      "route_key": "documents/read",
+      "capability": "documents:read",
+      "request_id": "request-1",
+      "issued_at_epoch_secs": 1700000000,
+      "deadline_epoch_secs": 1700000030,
+      "idempotency_key": "idem-1",
+      "lease_epoch": 2,
+      "kind": 2,
+      "payload_hex": "0807120664656e696564",
+      "canonical_hex": "6163747269756d2e627573696e6573732e726571756573742e763100000000000000000973657373696f6e2d3100000000000000020000000000000011736572766963653a646f63756d656e747300000000000000096368616e6e656c2d32000000000000000e646f63756d656e74732f72656164000000000000000e646f63756d656e74733a726561640000000000000009726571756573742d31000000006553f100000000006553f11e020100000000000000066964656d2d310000000000000020e2921e9b3fe0aa11f58e161c6d36e045ee31bfe5e68e32135945451189f16057",
+      "proof_hex": "473336aee37a3df970710b5e0e54ad283a6eaaa5dfd7b6e9b30bcf6855ea020a"
+    }
+  ]
+}

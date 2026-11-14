@@ -18,9 +18,9 @@ use crate::key_cache::IssuerKeyCache;
 use crate::lifecycle::CredentialState;
 use crate::lifecycle::node::PeerTypes;
 use crate::transport::WsSink;
-use crate::transport::correlation::PendingRequestsMap;
 use crate::transport::handover::HandoverBook;
 use crate::transport::secure_channel::SecureCell;
+use crate::transport::{VerifiedPeerContext, correlation::PendingRequestsMap};
 use crate::wire::SignalingKeyFetcher;
 use crate::wire::webrtc::SignalingClient;
 use crate::wire::webrtc::{HookCallback, HookEvent};
@@ -249,7 +249,7 @@ impl WebSocketGate {
             }
             return Ok(false);
         }
-        if !state.is_sendable() {
+        if !secure.is_io_sendable() {
             return Ok(false);
         }
 
@@ -276,7 +276,7 @@ impl WebSocketGate {
                 Some(s) => {
                     // The session may have stopped being sendable while the
                     // shared writer was busy. No bytes have been attempted.
-                    if !secure.state().is_sendable() {
+                    if !secure.is_io_sendable() {
                         return Ok(false);
                     }
                     write_started = true;
@@ -314,6 +314,7 @@ impl WebSocketGate {
     /// explicit Request or Tell enqueues into Mailbox (the dispatch loop
     /// suppresses the reply for Tell). Missing, Unspecified, or unknown
     /// direction values are invalid and dropped.
+    #[cfg(test)]
     async fn handle_envelope(
         envelope: RpcEnvelope,
         from_bytes: Vec<u8>,
@@ -323,7 +324,45 @@ impl WebSocketGate {
         pending_requests: PendingRequestsMap,
         mailbox: Arc<dyn Mailbox>,
     ) {
+        Self::handle_envelope_with_context(
+            envelope,
+            from_bytes,
+            from_type,
+            None,
+            data,
+            payload_type,
+            pending_requests,
+            mailbox,
+        )
+        .await;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_envelope_with_context(
+        envelope: RpcEnvelope,
+        from_bytes: Vec<u8>,
+        from_type: Option<ActrType>,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
+        data: Bytes,
+        payload_type: PayloadType,
+        pending_requests: PendingRequestsMap,
+        mailbox: Arc<dyn Mailbox>,
+    ) {
         let request_id = envelope.request_id.clone();
+        let from_type = if let Some(context) = peer_context.as_ref() {
+            match ActrId::decode(&from_bytes[..]) {
+                Ok(peer) if peer == context.peer_actor_id => Some(context.peer_actor_type.clone()),
+                _ => {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        "inbound sender does not match its verified channel context; dropping"
+                    );
+                    return;
+                }
+            }
+        } else {
+            from_type
+        };
 
         let direction = match direction_for_routing(envelope.direction) {
             Ok(direction) => direction,
@@ -351,6 +390,7 @@ impl WebSocketGate {
             Self::enqueue_request(
                 from_bytes,
                 from_type,
+                peer_context,
                 data,
                 payload_type,
                 mailbox,
@@ -360,9 +400,15 @@ impl WebSocketGate {
             return;
         }
 
-        // Direction::Response: complete the waiting caller via the shared
-        // correlation map (orphan late replies warn and drop).
-        pending_requests.complete_from_envelope(envelope, || Self::peer_for_log(&from_bytes));
+        // Direction::Response: authorize current policy before completing the
+        // waiting caller (orphan late replies still warn and drop).
+        let caller_id = ActrId::decode(&from_bytes[..]).ok();
+        let caller = caller_id.as_ref().map(|id| (id, from_type.as_ref()));
+        pending_requests
+            .complete_from_envelope_with_context(envelope, caller, peer_context, || {
+                Self::peer_for_log(&from_bytes)
+            })
+            .await;
     }
     fn peer_for_log(from_bytes: &[u8]) -> String {
         if from_bytes.is_empty() {
@@ -378,6 +424,7 @@ impl WebSocketGate {
     async fn enqueue_request(
         from_bytes: Vec<u8>,
         from_type: Option<ActrType>,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
         data: Bytes,
         payload_type: PayloadType,
         mailbox: Arc<dyn Mailbox>,
@@ -391,8 +438,15 @@ impl WebSocketGate {
         };
 
         let from_type = from_type.map(|actor_type| actor_type.encode_to_vec());
+        let peer_context = match peer_context.as_deref().map(serde_json::to_vec).transpose() {
+            Ok(context) => context,
+            Err(error) => {
+                tracing::error!(%error, "failed to persist verified peer context");
+                return;
+            }
+        };
         match mailbox
-            .enqueue(from_bytes, from_type, data.to_vec(), priority)
+            .enqueue_with_context(from_bytes, from_type, peer_context, data.to_vec(), priority)
             .await
         {
             Ok(msg_id) => {
@@ -635,6 +689,7 @@ impl WebSocketGate {
             let lane_result = conn_clone.get_lane(pt).await;
             let peer_types_for_lane = peer_types.clone();
             let actor_type = actor_type.clone();
+            let secure = conn_clone.secure_cell();
 
             tokio::spawn(async move {
                 // get_lane lazily creates the mpsc channel and registers in router
@@ -650,8 +705,16 @@ impl WebSocketGate {
                     tracing::debug!("📡 WS lane reader started for {:?}", pt);
 
                     loop {
+                        let observed_epoch = secure.epoch();
                         match lane.recv().await {
                             Ok(data) => {
+                                if secure.epoch() != observed_epoch {
+                                    continue;
+                                }
+                                let peer_context = secure.verified_peer();
+                                if secure.epoch() != observed_epoch {
+                                    continue;
+                                }
                                 let data_bytes = data.clone();
 
                                 match pt {
@@ -672,10 +735,11 @@ impl WebSocketGate {
                                                     }
                                                     continue;
                                                 }
-                                                Self::handle_envelope(
+                                                Self::handle_envelope_with_context(
                                                     envelope,
                                                     src.clone(),
                                                     Some(actor_type.clone()),
+                                                    peer_context.clone(),
                                                     data_bytes,
                                                     pt,
                                                     pending.clone(),
@@ -702,6 +766,16 @@ impl WebSocketGate {
                                                 );
                                                 match ActrId::decode(&src[..]) {
                                                     Ok(sender_id) => {
+                                                        if peer_context.as_ref().is_some_and(
+                                                            |context| {
+                                                                context.peer_actor_id != sender_id
+                                                            },
+                                                        ) {
+                                                            tracing::warn!(
+                                                                "stream sender does not match its verified channel context; dropping"
+                                                            );
+                                                            continue;
+                                                        }
                                                         if pt == PayloadType::StreamReliable
                                                             && let Some(nonce) =
                                                                 transport_control::barrier_nonce(
@@ -721,7 +795,12 @@ impl WebSocketGate {
                                                         // the RPC lanes (unlike the WebRTC single
                                                         // receive loop).
                                                         registry
-                                                            .dispatch(chunk, sender_id, pt)
+                                                            .dispatch_with_context(
+                                                                chunk,
+                                                                sender_id,
+                                                                peer_context,
+                                                                pt,
+                                                            )
                                                             .await;
                                                     }
                                                     Err(e) => {

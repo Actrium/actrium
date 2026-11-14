@@ -1,6 +1,10 @@
 //! Runtime wrappers for UniFFI export
 
 use crate::error::{ActrError, ActrResult, run_on_tokio_runtime};
+use crate::session::{
+    ActrPeerSessionWrapper, ActriumAttachParams, ActriumServiceConfig, ActriumServicePolicies,
+    actr_ref_attach_actrium, registered_node_with_actrium_service,
+};
 use crate::types::{
     ActrId, ActrType, AppLifecycleState, CleanupReason, NetworkEventResult, NetworkSnapshot,
     PayloadType, ReconnectReason,
@@ -11,40 +15,6 @@ use actr_hyper::{ActrRef, NetworkEventHandle, Node, Registered, WorkloadPackage}
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
-
-/// Verify the Front before rendering and return the Service type from the accepted Realm Profile.
-#[uniffi::export]
-pub fn verify_realm_front(
-    front_archive: Vec<u8>,
-    trusted_public_key: Vec<u8>,
-    front_type: String,
-    service_type: String,
-) -> ActrResult<ActrType> {
-    let invalid = |msg| ActrError::Config { msg };
-    let key_bytes = trusted_public_key
-        .as_slice()
-        .try_into()
-        .map_err(|_| invalid("Invalid Front Publisher public key length".into()))?;
-    let key = ed25519_dalek::VerifyingKey::from_bytes(key_bytes)
-        .map_err(|error| invalid(error.to_string()))?;
-    let verified = actr_pack::verify_actor_package(&front_archive, &key)
-        .map_err(|error| invalid(error.to_string()))?;
-    if verified.manifest.actor_type() != front_type {
-        return Err(invalid(
-            "The Front does not match the Actor type in the Realm profile.".into(),
-        ));
-    }
-    let service_type = actr_protocol::ActrType::from_string_repr(&service_type)
-        .map_err(|error| invalid(error.to_string()))?;
-    actr_hyper::validate_realm_front_dependency(
-        &front_archive,
-        &verified.manifest,
-        &service_type,
-        actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
-    )
-    .map_err(|error| invalid(error.to_string()))?;
-    Ok(service_type.into())
-}
 
 /// Resolve a dependency's ActrType from a manifest.toml file.
 ///
@@ -143,8 +113,10 @@ impl ActrNode {
     pub async fn new_from_package_file(
         config_path: String,
         package_path: String,
+        actor_key_namespace: Option<String>,
     ) -> ActrResult<Arc<Self>> {
-        new_from_package_file_inner(config_path, package_path, None, None).await
+        new_from_package_file_inner(config_path, package_path, None, None, actor_key_namespace)
+            .await
     }
 
     /// Create a package-backed runtime and install host-side observers.
@@ -153,8 +125,16 @@ impl ActrNode {
         config_path: String,
         package_path: String,
         observers: Arc<RuntimeObservers>,
+        actor_key_namespace: Option<String>,
     ) -> ActrResult<Arc<Self>> {
-        new_from_package_file_inner(config_path, package_path, Some(observers), None).await
+        new_from_package_file_inner(
+            config_path,
+            package_path,
+            Some(observers),
+            None,
+            actor_key_namespace,
+        )
+        .await
     }
 
     /// Create a linked/static runtime from a foreign-language workload.
@@ -163,6 +143,7 @@ impl ActrNode {
         config_path: String,
         actor_type: ActrType,
         workload: Arc<DynamicWorkload>,
+        actor_key_namespace: Option<String>,
     ) -> ActrResult<Arc<Self>> {
         let actor_type: actr_protocol::ActrType = actor_type.into();
         let init = load_linked_init(&config_path, &actor_type).await?;
@@ -173,7 +154,7 @@ impl ActrNode {
             .map_err(|e| ActrError::Internal {
                 msg: format!("Failed to link foreign workload: {e}"),
             })?;
-        register_node(attached).await
+        register_linked_node(attached, actor_key_namespace).await
     }
 
     /// Create a package-backed runtime using an OS-managed Realm identity.
@@ -183,32 +164,17 @@ impl ActrNode {
         package_path: String,
         membership: Arc<crate::RealmMembership>,
         observers: Option<Arc<RuntimeObservers>>,
+        actor_key_namespace: Option<String>,
     ) -> ActrResult<Arc<Self>> {
         run_on_tokio_runtime("package membership bootstrap", async move {
-            new_from_package_file_inner(config_path, package_path, observers, Some(membership))
-                .await
-        })
-        .await
-    }
-
-    /// Start the network side of a signed Realm Front whose guest runs in the host.
-    #[uniffi::constructor(async_runtime = "tokio")]
-    pub async fn new_from_front_with_membership(
-        config_path: String,
-        front_archive: Vec<u8>,
-        service_type: ActrType,
-        membership: Arc<crate::RealmMembership>,
-    ) -> ActrResult<Arc<Self>> {
-        run_on_tokio_runtime("Front membership bootstrap", async move {
-            let init = Node::from_config_file(&config_path)
-                .await
-                .map_err(|e| ActrError::Config { msg: e.to_string() })?;
-            crate::logger::init_observability(init.runtime_config().observability.clone());
-            let attached = init
-                .attach_front(&WorkloadPackage::new(front_archive), &service_type.into())
-                .await
-                .map_err(|e| ActrError::Config { msg: e.to_string() })?;
-            register_node(membership.bind(attached)?).await
+            new_from_package_file_inner(
+                config_path,
+                package_path,
+                observers,
+                Some(membership),
+                actor_key_namespace,
+            )
+            .await
         })
         .await
     }
@@ -220,6 +186,7 @@ impl ActrNode {
         actor_type: ActrType,
         workload: Arc<DynamicWorkload>,
         membership: Arc<crate::RealmMembership>,
+        actor_key_namespace: Option<String>,
     ) -> ActrResult<Arc<Self>> {
         // UniFFI's Tokio compatibility enters the runtime but still polls on
         // the foreign executor. Keep native bootstrap and signing callbacks
@@ -234,7 +201,7 @@ impl ActrNode {
                 .map_err(|_| ActrError::Internal {
                     msg: "failed to link foreign workload".into(),
                 })?;
-            register_node(membership.bind(attached)?).await
+            register_linked_node(membership.bind(attached)?, actor_key_namespace).await
         })
         .await
     }
@@ -277,6 +244,25 @@ impl ActrNode {
 
         Ok(Arc::new(NetworkEventHandleWrapper { inner: handle }))
     }
+
+    /// Install an Actrium Service registry on this node. In the P2P model every
+    /// participating node is a Service; the same configuration also enables
+    /// outbound `attachActrium` calls to other peers.
+    pub fn with_actrium_service(
+        self: Arc<Self>,
+        config: ActriumServiceConfig,
+        policies: Arc<ActriumServicePolicies>,
+    ) -> ActrResult<Arc<Self>> {
+        let this = self.clone();
+        let mut node_guard = this.inner.lock();
+        let node = node_guard.take().ok_or_else(|| ActrError::Internal {
+            msg: "runtime node is no longer available".to_string(),
+        })?;
+        *node_guard = Some(registered_node_with_actrium_service(
+            node, config, policies,
+        )?);
+        Ok(self)
+    }
 }
 
 async fn new_from_package_file_inner(
@@ -284,6 +270,7 @@ async fn new_from_package_file_inner(
     package_path: String,
     observers: Option<Arc<RuntimeObservers>>,
     membership: Option<Arc<crate::RealmMembership>>,
+    actor_key_namespace: Option<String>,
 ) -> ActrResult<Arc<ActrNode>> {
     let package_bytes = std::fs::read(&package_path).map_err(|e| {
         error!("Failed to read package at {}: {}", package_path, e);
@@ -317,6 +304,14 @@ async fn new_from_package_file_inner(
             msg: format!("Failed to attach package-backed node: {e}"),
         }
     })?;
+    if let Some(namespace) = actor_key_namespace {
+        attached =
+            attached
+                .with_actor_key_namespace(namespace)
+                .map_err(|e| ActrError::Internal {
+                    msg: format!("Failed to set Actor key namespace: {e}"),
+                })?;
+    }
     if let Some(observers) = observers {
         attached = attached.with_hook_observer(observers.as_ref().clone());
     }
@@ -572,6 +567,15 @@ impl ActrRefWrapper {
         }
     }
 
+    /// Attach to a peer Service over the verified Actor channel.
+    pub async fn attach_actrium(
+        &self,
+        service: ActrId,
+        params: ActriumAttachParams,
+    ) -> ActrResult<Arc<ActrPeerSessionWrapper>> {
+        actr_ref_attach_actrium(&self.inner, service, params).await
+    }
+
     /// Trigger shutdown.
     pub fn shutdown(&self) {
         self.inner.shutdown();
@@ -658,29 +662,6 @@ impl ActrRefWrapper {
         Ok(response_bytes.to_vec())
     }
 
-    /// Call a discovered remote actor using this node's authenticated identity.
-    pub async fn call_peer(
-        &self,
-        target: ActrId,
-        route_key: String,
-        request_payload: Vec<u8>,
-        timeout_ms: i64,
-    ) -> ActrResult<Vec<u8>> {
-        let response = self
-            .inner
-            .app_context()
-            .await
-            .call_raw(
-                &Dest::Peer(target.into()),
-                route_key,
-                actr_protocol::PayloadType::RpcReliable,
-                Bytes::from(request_payload),
-                timeout_ms,
-            )
-            .await?;
-        Ok(response.to_vec())
-    }
-
     /// Send a one-way message to the local guest workload.
     pub async fn tell(
         &self,
@@ -751,7 +732,19 @@ async fn load_linked_init(
     Ok(init)
 }
 
-async fn register_node(attached: Node<actr_hyper::Attached>) -> ActrResult<Arc<ActrNode>> {
+async fn register_linked_node(
+    attached: Node<actr_hyper::Attached>,
+    actor_key_namespace: Option<String>,
+) -> ActrResult<Arc<ActrNode>> {
+    let mut attached = attached;
+    if let Some(namespace) = actor_key_namespace {
+        attached =
+            attached
+                .with_actor_key_namespace(namespace)
+                .map_err(|e| ActrError::Internal {
+                    msg: format!("Failed to set Actor key namespace: {e}"),
+                })?;
+    }
     let issuer_endpoint = attached.issuer_endpoint().to_string();
     let registered = attached.register(&issuer_endpoint).await.map_err(|e| {
         error!("Issuer registration failed: {}", e);
@@ -893,7 +886,7 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
             .link(workload.as_ref().clone())
             .await
             .expect("link manifest-backed workload");
-        let node = register_node(attached)
+        let node = register_linked_node(attached, None)
             .await
             .expect("register manifest-backed linked node");
         let actr_ref = node
@@ -944,6 +937,7 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
                 version: "0.1.0".to_string(),
             },
             workload,
+            None,
         )
         .await
     }

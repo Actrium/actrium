@@ -238,6 +238,7 @@ mod tests {
             client_key: "0000000000000000".to_string(),
             role: actr_protocol::MemberRole::Owner as i32,
             development: None,
+            actor_public_key: Some(vec![7; 32].into()),
         }
     }
 
@@ -290,6 +291,14 @@ mod tests {
             },
             IdentityClaims {
                 provider: "other.example".to_string(),
+                ..claims()
+            },
+            IdentityClaims {
+                audience: "actr.other".to_string(),
+                ..claims()
+            },
+            IdentityClaims {
+                expires_at: now().saturating_sub(1),
                 ..claims()
             },
         ];

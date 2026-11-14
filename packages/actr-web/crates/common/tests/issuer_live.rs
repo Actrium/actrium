@@ -5,6 +5,7 @@ use actr_protocol::{
     ActrType, RegisterAuthMode, RegisterRequest, RenewCredentialRequest, register_response,
     renew_credential_response,
 };
+use actr_web_common::WebActorKey;
 use actr_web_common::issuer_client::{WebIssuerClient, WebRealmClientKey};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -35,7 +36,8 @@ async fn authorized_web_client_registers_and_renews_with_fresh_proofs() {
     let (file, _) = RealmClientKeyFile::parse(&text).unwrap();
     let signer = WebRealmClientKey::from_key_file(endpoint, &file.realm, &text).unwrap();
     let client = WebIssuerClient::new(endpoint, signer);
-    let request = RegisterRequest {
+    let actor_key = WebActorKey::from_bytes(&[73; 32]).unwrap();
+    let mut request = RegisterRequest {
         actr_type: ActrType::from_string_repr("linked-src/source-workload@1.0.0").unwrap(),
         realm: file.realm.clone(),
         service_spec: None,
@@ -46,13 +48,20 @@ async fn authorized_web_client_registers_and_renews_with_fresh_proofs() {
         publisher_signature: None,
         target: None,
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
         auth_mode: Some(RegisterAuthMode::Linked as i32),
     };
+    actor_key.sign_register_request(&mut request).unwrap();
+    assert!(request.actor_public_key.is_some());
+    assert!(request.actor_key_proof.is_some());
+    assert!(request.signing_public_key.is_none());
     let result = client.register_linked(request).await.unwrap();
     let register_response::Result::Success(registered) = result.result.unwrap() else {
         panic!("registration rejected")
     };
     assert!(client.accepts_credential(&registered.credential));
+    assert!(actor_key.accepts_credential(&registered.credential));
     let renewed = client
         .renew_credential(RenewCredentialRequest {
             actr_id: registered.actr_id.clone(),
@@ -66,6 +75,7 @@ async fn authorized_web_client_registers_and_renews_with_fresh_proofs() {
     };
     assert_eq!(renewed.actr_id, registered.actr_id);
     assert!(client.accepts_credential(&renewed.credential));
+    assert!(actor_key.accepts_credential(&renewed.credential));
     assert!(
         renewed
             .turn_credential

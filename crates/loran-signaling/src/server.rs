@@ -4163,7 +4163,10 @@ mod tests {
 
     mod relay {
         use super::*;
-        use actr_protocol::IdentityClaims;
+        use actr_protocol::actor_key_proof::{
+            ActorKeyProofOperation, sign_actor_key_proof, verify_actor_key_proof,
+        };
+        use actr_protocol::{IdentityClaims, RegisterRequest};
         use ed25519_dalek::{Signer, SigningKey};
         use platform::realm::acl::ActorAcl;
         use serial_test::serial;
@@ -4283,6 +4286,18 @@ mod tests {
         }
 
         fn credential(actor: &ActrId, actor_type: ActrType) -> AIdCredential {
+            let actor_key = SigningKey::from_bytes(&[(actor.serial_number as u8) ^ 0xa5; 32]);
+            let mut registration = RegisterRequest {
+                realm: REALM.to_string(),
+                actr_type: actor_type.clone(),
+                ..Default::default()
+            };
+            sign_actor_key_proof(
+                &mut registration,
+                ActorKeyProofOperation::Register,
+                &actor_key,
+            );
+            verify_actor_key_proof(&registration, ActorKeyProofOperation::Register).unwrap();
             let claims = IdentityClaims {
                 realm: REALM.to_string(),
                 actor_id: actor.to_string_repr(),
@@ -4296,6 +4311,7 @@ mod tests {
                 client_key: "0000000000000000".to_string(),
                 role: actr_protocol::MemberRole::Owner as i32,
                 development: None,
+                actor_public_key: registration.actor_public_key.clone(),
             };
             let bytes = claims.encode_to_vec();
             AIdCredential {

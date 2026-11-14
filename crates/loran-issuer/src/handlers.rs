@@ -1201,18 +1201,79 @@ async fn relay_identity(
     check_binding(&actor, &signer, true)
         .await
         .map_err(|_| StatusCode::FORBIDDEN)?;
-    let actor_type = state
+    let issued_actor = state
         .issuer
-        .relay_actor_type(&actor, &signer)
+        .relay_actor_identity(&actor, &signer)
         .await
         .map_err(|_| StatusCode::FORBIDDEN)?;
+    let actor_type = issued_actor.actor_type.clone();
     let hash = crate::renewal::hash_token(&request.renewal_token);
     let expires = crate::renewal::find_binding_token_expiry(&actor, &hash)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .filter(|expires| *expires > crate::renewal::now_secs())
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    let issued = state
+
+    // Validate the actual Actor credential before performing any certificate
+    // signing. In particular, the digest in the request is only a consistency
+    // check; the digest bound into the certificate is computed by this service.
+    let mut actor_public_key = [0; 32];
+    let mut actor_credential_expires_at = None;
+    let mut verified_credential_digest = None;
+    if let Some(enrollment) = &request.actor {
+        if enrollment.runtime_instance_id.is_empty()
+            || enrollment.policy_digest == [0; 32]
+            || enrollment.actor_state_digest == [0; 32]
+            || enrollment.actor_credential.is_empty()
+            || enrollment.actor_credential_digest == [0; 32]
+        {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        let credential_digest =
+            actr_relay_security::actor_credential_digest(&enrollment.actor_credential);
+        if credential_digest != enrollment.actor_credential_digest {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        let credential =
+            actr_protocol::AIdCredential::decode(enrollment.actor_credential.as_slice())
+                .map_err(|_| StatusCode::BAD_REQUEST)?;
+        platform::aid::credential::AIdCredentialValidator::init(&state.issuer.config.sqlite_path)
+            .await
+            .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+        let (claims, _) = platform::aid::credential::AIdCredentialValidator::check(
+            &credential,
+            &actor.realm,
+            &state.issuer.config.provider_id,
+            "actr.signaling",
+        )
+        .await
+        .map_err(|error| match error {
+            AidError::Expired
+            | AidError::InvalidSignature(_)
+            | AidError::DecodeFailure(_)
+            | AidError::InvalidFormat => StatusCode::UNAUTHORIZED,
+            _ => StatusCode::SERVICE_UNAVAILABLE,
+        })?;
+        actor_public_key = issued_actor
+            .actor_public_key
+            .as_deref()
+            .ok_or(StatusCode::FORBIDDEN)?
+            .try_into()
+            .map_err(|_| StatusCode::FORBIDDEN)?;
+        if claims.actor_id != actor.to_string_repr()
+            || claims.actor_type != actor_type
+            || claims.member != signer.member_id
+            || claims.client_key != signer.key_id
+            || claims.role != actr_protocol::MemberRole::from(signer.role) as i32
+            || claims.actor_public_key.as_deref() != issued_actor.actor_public_key.as_deref()
+        {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        actor_credential_expires_at = Some(claims.expires_at);
+        verified_credential_digest = Some(credential_digest);
+    }
+
+    let mut issued = state
         .issuer
         .mint_relay_identity(
             &actor,
@@ -1224,6 +1285,25 @@ async fn relay_identity(
         )
         .await
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    if let Some(enrollment) = &request.actor {
+        issued.actor_certificate = Some(
+            state
+                .issuer
+                .mint_actor_channel_certificate(
+                    enrollment,
+                    verified_credential_digest.expect("validated Actor credential digest"),
+                    actor_credential_expires_at.expect("validated Actor credential expiry"),
+                    &actor,
+                    &actor_type,
+                    &signer,
+                    actor_public_key,
+                    request.public_key,
+                    expires as u64,
+                )
+                .await
+                .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?,
+        );
+    }
     // Recheck after signer I/O so revocation and proof rotation fail closed.
     check_binding(&actor, &signer, true)
         .await
@@ -1236,10 +1316,30 @@ async fn relay_identity(
     if current_type != actor_type {
         return Err(StatusCode::FORBIDDEN);
     }
+    if request.actor.is_some() {
+        let current_key = state
+            .issuer
+            .relay_actor_identity(&actor, &signer)
+            .await
+            .map_err(|_| StatusCode::FORBIDDEN)?
+            .actor_public_key
+            .as_deref()
+            .map(<[u8; 32]>::try_from)
+            .transpose()
+            .map_err(|_| StatusCode::FORBIDDEN)?;
+        if current_key != Some(actor_public_key) {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
     if crate::renewal::find_binding_token_expiry(&actor, &hash)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .is_none_or(|expires| expires <= crate::renewal::now_secs())
+    {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    if actor_credential_expires_at
+        .is_some_and(|expires_at| expires_at <= crate::renewal::now_secs() as u64)
     {
         return Err(StatusCode::UNAUTHORIZED);
     }
@@ -1297,6 +1397,8 @@ mod tests {
             target: None,
             auth_mode: Some(RegisterAuthMode::Package as i32),
             signing_public_key: None,
+            actor_public_key: None,
+            actor_key_proof: None,
         };
 
         // Encode
@@ -1517,6 +1619,8 @@ mod tests {
             target: None,
             auth_mode: Some(RegisterAuthMode::Package as i32),
             signing_public_key: None,
+            actor_public_key: None,
+            actor_key_proof: None,
         };
 
         // Encode-decode round-trip

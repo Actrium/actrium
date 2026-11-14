@@ -1154,6 +1154,10 @@ fn envelope_is_tell_matches_only_explicit_tell_label() {
 fn build_response_envelope_pins_zero_timeout_per_contract() {
     use actr_protocol::Direction;
 
+    let metadata = vec![actr_protocol::MetadataEntry {
+        key: "actrium.request.proof".to_string(),
+        value: "host-signed-proof".to_string(),
+    }];
     // Success RESPONSE.
     let ok_env = Inner::build_response_envelope(
         "req-ok".to_string(),
@@ -1162,12 +1166,17 @@ fn build_response_envelope_pins_zero_timeout_per_contract() {
         None,
         None,
         None,
+        metadata.clone(),
     );
     assert_eq!(ok_env.direction, Some(Direction::Response as i32));
     assert_eq!(
         ok_env.timeout_ms, 0,
         "RESPONSE envelopes must carry timeout_ms=0 per package.proto contract"
     );
+
+    assert_eq!(ok_env.metadata.len(), 1);
+    assert_eq!(ok_env.metadata[0].key, "actrium.request.proof");
+    assert_eq!(ok_env.metadata[0].value, "host-signed-proof");
 
     // Error RESPONSE also uses 0; payload/error are mutually exclusive.
     let err_env = Inner::build_response_envelope(
@@ -1180,10 +1189,167 @@ fn build_response_envelope_pins_zero_timeout_per_contract() {
         }),
         None,
         None,
+        metadata,
     );
     assert_eq!(err_env.timeout_ms, 0);
     assert!(err_env.payload.is_none());
     assert!(err_env.error.is_some());
+}
+
+fn response_proof_input(
+    request_id: &str,
+    kind: actrium_runtime::MessageKind,
+    payload: Vec<u8>,
+) -> actrium_runtime::BusinessRequest {
+    actrium_runtime::BusinessRequest {
+        session_id: "session-1".into(),
+        lease_epoch: 2,
+        service_actor_id: "service:documents".into(),
+        channel_id: "channel-2".into(),
+        route: "documents/read".into(),
+        capability: "documents:read".into(),
+        request_id: request_id.into(),
+        issued_at: 1_700_000_000,
+        deadline: 1_700_000_030,
+        kind,
+        idempotency_key: Some("idem-1".into()),
+        payload,
+        proof: Vec::new(),
+    }
+}
+
+fn actual_response_proof_input(response: &RpcEnvelope) -> actrium_runtime::BusinessRequest {
+    use actr_protocol::prost::Message as _;
+    let payload = match (&response.error, &response.payload) {
+        (Some(error), None) => error.encode_to_vec(),
+        (None, Some(payload)) => payload.to_vec(),
+        _ => panic!("a response must contain exactly one payload or error"),
+    };
+    response_proof_input(
+        &response.request_id,
+        actrium_runtime::MessageKind::Response,
+        payload,
+    )
+}
+
+struct RealResponseProofGuard;
+
+#[async_trait::async_trait]
+impl crate::lifecycle::IncomingGuard for RealResponseProofGuard {
+    async fn check(
+        &self,
+        _request: crate::lifecycle::IncomingDispatchRequest<'_>,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        Ok(())
+    }
+
+    async fn authenticate_response(
+        &self,
+        response: &mut RpcEnvelope,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        let proof =
+            actrium_runtime::request_proof(&[7; 32], &actual_response_proof_input(response));
+        response
+            .metadata
+            .retain(|entry| entry.key != "actrium.request.proof");
+        response.metadata.push(actr_protocol::MetadataEntry {
+            key: "actrium.request.proof".into(),
+            value: hex::encode(proof),
+        });
+        Ok(())
+    }
+
+    async fn check_stream(
+        &self,
+        _request: crate::lifecycle::IncomingStreamChunk<'_>,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        Ok(())
+    }
+}
+
+async fn send_response_with_real_proof(
+    request_id: &str,
+    inherited_proof: &str,
+    result: ActorResult<Bytes>,
+) -> RpcEnvelope {
+    let transport = Arc::new(HostTransport::new());
+    inproc_send_reply(
+        transport.clone(),
+        "documents/read".into(),
+        request_id.into(),
+        None,
+        None,
+        Some(Arc::new(RealResponseProofGuard)),
+        vec![actr_protocol::MetadataEntry {
+            key: "actrium.request.proof".into(),
+            value: inherited_proof.into(),
+        }],
+        true,
+        result,
+        tracing::Span::none(),
+    )
+    .await;
+    transport
+        .recv_reliable_raw()
+        .await
+        .expect("an authenticated response must be sent")
+}
+
+#[tokio::test]
+async fn response_exit_signs_actual_success_and_error_payloads_with_real_hmac() {
+    let request = response_proof_input(
+        "request-1",
+        actrium_runtime::MessageKind::Request,
+        b"request".to_vec(),
+    );
+    let inherited = hex::encode(actrium_runtime::request_proof(&[7; 32], &request));
+
+    let success = send_response_with_real_proof(
+        "success-response",
+        &inherited,
+        Ok(Bytes::from_static(b"ok")),
+    )
+    .await;
+    let success_proof = success
+        .metadata
+        .iter()
+        .find(|entry| entry.key == "actrium.request.proof")
+        .unwrap();
+    assert_ne!(success_proof.value, inherited);
+    let expected_success = response_proof_input(
+        "success-response",
+        actrium_runtime::MessageKind::Response,
+        b"ok".to_vec(),
+    );
+    assert_eq!(
+        hex::decode(&success_proof.value).unwrap(),
+        actrium_runtime::request_proof(&[7; 32], &expected_success)
+    );
+
+    let error = send_response_with_real_proof(
+        "error-response",
+        &inherited,
+        Err(ActrError::PermissionDenied("denied".into())),
+    )
+    .await;
+    assert!(error.payload.is_none());
+    let error_proof = error
+        .metadata
+        .iter()
+        .find(|entry| entry.key == "actrium.request.proof")
+        .unwrap();
+    assert_ne!(error_proof.value, inherited);
+    assert_ne!(error_proof.value, success_proof.value);
+    use actr_protocol::prost::Message as _;
+    let expected_error = response_proof_input(
+        "error-response",
+        actrium_runtime::MessageKind::Response,
+        error.error.as_ref().unwrap().encode_to_vec(),
+    );
+    assert_eq!(
+        hex::decode(&error_proof.value).unwrap(),
+        actrium_runtime::request_proof(&[7; 32], &expected_error)
+    );
 }
 
 async fn response_route_test_gate(
@@ -1563,7 +1729,7 @@ async fn response_send_timeout_submits_recovery_hint_to_current_peer() {
 
 use crate::lifecycle::node::CredentialState;
 use actr_framework::Bytes as FrameworkBytes;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 /// Linked handle whose dispatch blocks until `release` flips to true,
 /// signalling entry through `entered_tx` for deterministic sequencing.
@@ -2966,6 +3132,16 @@ async fn deliver_tell(
     caller: &ActrId,
     request_id: &str,
 ) {
+    deliver_tell_with_context(mailbox, peer_types, caller, request_id, None).await;
+}
+
+async fn deliver_tell_with_context(
+    mailbox: &Arc<dyn actr_runtime_mailbox::Mailbox>,
+    peer_types: &PeerTypes,
+    caller: &ActrId,
+    request_id: &str,
+    peer_context: Option<Arc<crate::transport::VerifiedPeerContext>>,
+) {
     use actr_protocol::prost::Message as _;
     let dispatcher = crate::inbound::dispatcher::InboundDispatcher::new(
         Arc::new(crate::transport::correlation::RpcCorrelation::new()),
@@ -2973,9 +3149,10 @@ async fn deliver_tell(
         peer_types.clone(),
     );
     dispatcher
-        .dispatch(
+        .dispatch_with_context(
             caller.encode_to_vec(),
             FrameworkBytes::from(tell_envelope(request_id).encode_to_vec()),
+            peer_context,
             PayloadType::RpcReliable,
             mailbox,
         )
@@ -2991,8 +3168,21 @@ async fn admit_dequeued(
     let envelope = RpcEnvelope::decode(&record.payload[..]).expect("stored envelope");
     let caller = ActrId::decode(&record.from[..]).expect("stored caller");
     let caller_type = recorded_caller_type(record);
+    let peer_context = record
+        .peer_context
+        .as_deref()
+        .map(serde_json::from_slice::<crate::transport::VerifiedPeerContext>)
+        .transpose()
+        .expect("stored verified peer context")
+        .map(Arc::new);
     match inner
-        .handle_incoming(envelope, Some((&caller, caller_type.as_ref())), None, None)
+        .handle_incoming_with_context(
+            envelope,
+            Some((&caller, caller_type.as_ref())),
+            peer_context,
+            None,
+            None,
+        )
         .await
     {
         IncomingOutcome::Replied(result) => result,
@@ -3168,4 +3358,410 @@ async fn a_peer_type_lasts_until_its_last_connection_closes() {
     shutdown.cancel();
     follow.await.unwrap();
     manager.close_all().await;
+}
+
+// ── generic incoming guard ordering and mailbox revocation ─────────────
+
+struct SwitchableIncomingGuard {
+    allowed: AtomicBool,
+    calls: AtomicUsize,
+}
+
+impl SwitchableIncomingGuard {
+    fn new(allowed: bool) -> Self {
+        Self {
+            allowed: AtomicBool::new(allowed),
+            calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::lifecycle::IncomingGuard for SwitchableIncomingGuard {
+    async fn check(
+        &self,
+        _request: crate::lifecycle::IncomingDispatchRequest<'_>,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.allowed.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            Err(crate::lifecycle::IncomingGuardError::new(
+                crate::lifecycle::IncomingGuardErrorCode::Revoked,
+                "session revoked",
+            ))
+        }
+    }
+
+    async fn authenticate_response(
+        &self,
+        _response: &mut RpcEnvelope,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        if self.allowed.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            Err(crate::lifecycle::IncomingGuardError::new(
+                crate::lifecycle::IncomingGuardErrorCode::Revoked,
+                "session revoked",
+            ))
+        }
+    }
+
+    async fn check_stream(
+        &self,
+        _request: crate::lifecycle::IncomingStreamChunk<'_>,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.allowed.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            Err(crate::lifecycle::IncomingGuardError::new(
+                crate::lifecycle::IncomingGuardErrorCode::Revoked,
+                "session revoked",
+            ))
+        }
+    }
+}
+
+fn install_incoming_guard(
+    harness: &mut TellDedupHarness,
+    guard: Arc<dyn crate::lifecycle::IncomingGuard>,
+) {
+    Arc::get_mut(&mut harness.inner)
+        .expect("the not-yet-started test node must be uniquely owned")
+        .set_incoming_guard(Some(guard));
+}
+
+async fn admit_test_envelope(inner: &Inner, envelope: RpcEnvelope) -> ActorResult<FrameworkBytes> {
+    match inner.handle_incoming(envelope, None, None, None).await {
+        IncomingOutcome::Replied(result) => result,
+        IncomingOutcome::Deferred => unreachable!("no EXPLICIT in incoming guard tests"),
+    }
+}
+
+#[tokio::test]
+async fn incoming_guard_runs_before_dedup_cache_lookup() {
+    let mut h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"cached"))).await;
+    h.release_tx.send(true).unwrap();
+    let guard = Arc::new(SwitchableIncomingGuard::new(true));
+    install_incoming_guard(&mut h, guard.clone());
+
+    let envelope = tell_envelope("guard-before-dedup");
+    assert_eq!(
+        admit_test_envelope(&h.inner, envelope.clone())
+            .await
+            .expect("the initially authorized call completes"),
+        FrameworkBytes::from_static(b"cached")
+    );
+    assert_eq!(h.runs.load(Ordering::SeqCst), 1);
+
+    // The successful result is now cached. Revocation must still reject the
+    // retry; looking up dedup first would incorrectly return `cached` without
+    // calling the guard.
+    guard.allowed.store(false, Ordering::SeqCst);
+    let error = admit_test_envelope(&h.inner, envelope)
+        .await
+        .expect_err("a cached success must not bypass current policy");
+    assert_eq!(protocol_error_to_code(&error), 10004);
+    assert!(matches!(error, ActrError::PermissionDenied(_)));
+    assert_eq!(guard.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        h.runs.load(Ordering::SeqCst),
+        1,
+        "the rejected retry must not dispatch the workload again"
+    );
+}
+
+#[tokio::test]
+async fn incoming_guard_rechecks_a_message_queued_before_revocation() {
+    let mut h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"ok"))).await;
+    h.release_tx.send(true).unwrap();
+    let guard = Arc::new(SwitchableIncomingGuard::new(true));
+    install_incoming_guard(&mut h, guard.clone());
+
+    let mailbox = h.inner.mailbox.clone();
+    let peer_types = PeerTypes::default();
+    let caller = acl_peer(42);
+    peer_types.record(caller.clone(), acl_client_type());
+    deliver_tell(&mailbox, &peer_types, &caller, "queued-before-revoke").await;
+
+    // Enqueueing is not authorization to execute forever. Revoke before the
+    // real SQLite record is dequeued and admitted by the mailbox path.
+    guard.allowed.store(false, Ordering::SeqCst);
+    let records = dequeue_by_request(&mailbox).await;
+    let error = admit_dequeued(&h.inner, &records["queued-before-revoke"])
+        .await
+        .expect_err("dequeue must re-run the guard after revocation");
+    assert_eq!(protocol_error_to_code(&error), 10004);
+    assert!(matches!(error, ActrError::PermissionDenied(_)));
+    assert_eq!(guard.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        h.runs.load(Ordering::SeqCst),
+        0,
+        "the revoked queued message must never reach the workload"
+    );
+}
+
+fn verified_peer(
+    peer: &ActrId,
+    channel_generation: u64,
+) -> Arc<crate::transport::VerifiedPeerContext> {
+    use sha2::Digest as _;
+    let binding = |label: &str| sha2::Sha256::digest(label.as_bytes()).to_vec();
+    Arc::new(crate::transport::VerifiedPeerContext {
+        local_actor_id: acl_peer(1),
+        peer_actor_id: peer.clone(),
+        peer_actor_type: acl_client_type(),
+        peer_member: "member".to_string(),
+        peer_client_key: "client-key".to_string(),
+        peer_role: "owner".to_string(),
+        peer_actor_public_key: binding("actor-public-key"),
+        channel_id: format!("channel-{channel_generation}"),
+        channel_generation,
+        transcript_digest: binding(&format!("transcript-{channel_generation}")),
+        local_runtime_instance_id: "local-runtime".to_string(),
+        peer_runtime_instance_id: "peer-runtime".to_string(),
+        peer_credential_expires_at_epoch_secs: u64::MAX,
+        current_policy_binding: binding("policy"),
+        current_state_binding: binding("state"),
+    })
+}
+
+fn check_verified_generation(
+    metadata: crate::lifecycle::IncomingMetadata<'_>,
+    peer_context: Option<&Arc<crate::transport::VerifiedPeerContext>>,
+    current: u64,
+) -> Result<(), crate::lifecycle::IncomingGuardError> {
+    let context = peer_context.ok_or_else(|| {
+        crate::lifecycle::IncomingGuardError::new(
+            crate::lifecycle::IncomingGuardErrorCode::PermissionDenied,
+            "missing verified channel context",
+        )
+    })?;
+    if let Some(claimed) = metadata
+        .get_u64("actrium.channel.generation")
+        .map_err(crate::lifecycle::IncomingGuardError::invalid_metadata)?
+        && claimed != context.channel_generation
+    {
+        return Err(crate::lifecycle::IncomingGuardError::new(
+            crate::lifecycle::IncomingGuardErrorCode::StaleChannelGeneration,
+            format!(
+                "metadata generation {claimed}, actual generation {}",
+                context.channel_generation
+            ),
+        ));
+    }
+    let generation = context.channel_generation;
+    if generation != current {
+        return Err(crate::lifecycle::IncomingGuardError::new(
+            crate::lifecycle::IncomingGuardErrorCode::StaleChannelGeneration,
+            format!("message generation {generation}, current generation {current}"),
+        ));
+    }
+    Ok(())
+}
+
+struct ChannelGenerationGuard {
+    current_generation: AtomicU64,
+}
+
+#[async_trait::async_trait]
+impl crate::lifecycle::IncomingGuard for ChannelGenerationGuard {
+    async fn check(
+        &self,
+        request: crate::lifecycle::IncomingDispatchRequest<'_>,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        check_verified_generation(
+            request.metadata,
+            request.peer_context.as_ref(),
+            self.current_generation.load(Ordering::SeqCst),
+        )
+    }
+
+    async fn authenticate_response(
+        &self,
+        _response: &mut RpcEnvelope,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        Ok(())
+    }
+
+    async fn check_stream(
+        &self,
+        request: crate::lifecycle::IncomingStreamChunk<'_>,
+    ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+        check_verified_generation(
+            request.metadata,
+            request.peer_context.as_ref(),
+            self.current_generation.load(Ordering::SeqCst),
+        )
+    }
+}
+
+#[tokio::test]
+async fn mailbox_guard_uses_the_actual_verified_channel_generation() {
+    let mut h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"ok"))).await;
+    h.release_tx.send(true).unwrap();
+    install_incoming_guard(
+        &mut h,
+        Arc::new(ChannelGenerationGuard {
+            current_generation: AtomicU64::new(2),
+        }),
+    );
+
+    let caller = acl_peer(42);
+    let peer_types = PeerTypes::default();
+    peer_types.record(caller.clone(), acl_client_type());
+    for (request_id, generation) in [
+        ("old-channel-generation", 1),
+        ("current-channel-generation", 2),
+    ] {
+        let mut envelope = tell_envelope(request_id);
+        envelope.metadata.push(actr_protocol::MetadataEntry {
+            key: "actrium.channel.generation".to_string(),
+            value: "2".to_string(),
+        });
+        let dispatcher = crate::inbound::dispatcher::InboundDispatcher::new(
+            Arc::new(crate::transport::correlation::RpcCorrelation::new()),
+            Arc::new(crate::inbound::DataChunkRegistry::new()),
+            peer_types.clone(),
+        );
+        dispatcher
+            .dispatch_with_context(
+                caller.encode_to_vec(),
+                FrameworkBytes::from(envelope.encode_to_vec()),
+                Some(verified_peer(&caller, generation)),
+                PayloadType::RpcReliable,
+                &h.inner.mailbox,
+            )
+            .await;
+    }
+
+    let records = dequeue_by_request(&h.inner.mailbox).await;
+    let old_record = &records["old-channel-generation"];
+    let stored: crate::transport::VerifiedPeerContext =
+        serde_json::from_slice(old_record.peer_context.as_deref().unwrap()).unwrap();
+    assert_eq!(stored.channel_generation, 1);
+    let error = admit_dequeued(&h.inner, old_record)
+        .await
+        .expect_err("forged generation metadata must not hide the old verified channel");
+    assert_eq!(protocol_error_to_code(&error), 10004);
+    assert_eq!(
+        error.to_string(),
+        "permission denied: incoming_guard/v1:stale_channel_generation:metadata generation 2, actual generation 1"
+    );
+
+    assert_eq!(
+        admit_dequeued(&h.inner, &records["current-channel-generation"])
+            .await
+            .expect("the current verified generation remains dispatchable"),
+        FrameworkBytes::from_static(b"ok")
+    );
+    assert_eq!(h.runs.load(Ordering::SeqCst), 1);
+}
+
+struct RecordingSessionRegistry {
+    methods: std::sync::Mutex<Vec<crate::lifecycle::SessionMethod>>,
+}
+
+#[async_trait::async_trait]
+impl crate::lifecycle::SessionRegistry for RecordingSessionRegistry {
+    async fn dispatch(
+        &self,
+        method: crate::lifecycle::SessionMethod,
+        _request: crate::lifecycle::IncomingDispatchRequest<'_>,
+    ) -> ActorResult<FrameworkBytes> {
+        self.methods.lock().unwrap().push(method);
+        Ok(FrameworkBytes::from_static(b"session-registry"))
+    }
+}
+
+#[tokio::test]
+async fn exact_session_route_reaches_registry_not_business_guard_or_workload() {
+    let mut h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"workload"))).await;
+    h.release_tx.send(true).unwrap();
+    let guard = Arc::new(SwitchableIncomingGuard::new(false));
+    install_incoming_guard(&mut h, guard.clone());
+    let registry = Arc::new(RecordingSessionRegistry {
+        methods: std::sync::Mutex::new(Vec::new()),
+    });
+    Arc::get_mut(&mut h.inner)
+        .expect("the not-yet-started test node must be uniquely owned")
+        .session_registry = Some(registry.clone());
+
+    let mut envelope = tell_envelope("session-system-route");
+    envelope.direction = Some(actr_protocol::Direction::Request as i32);
+    envelope.route_key = "actrium.session.v1.SessionRegistry.Heartbeat".to_string();
+    assert_eq!(
+        admit_test_envelope(&h.inner, envelope)
+            .await
+            .expect("the exact session route enters its registry"),
+        FrameworkBytes::from_static(b"session-registry")
+    );
+    assert_eq!(guard.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(h.runs.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        registry.methods.lock().unwrap().as_slice(),
+        &[crate::lifecycle::SessionMethod::Heartbeat]
+    );
+}
+
+#[tokio::test]
+async fn session_route_without_registry_never_falls_back_to_workload() {
+    let h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"workload"))).await;
+    h.release_tx.send(true).unwrap();
+    let mut envelope = tell_envelope("session-without-registry");
+    envelope.direction = Some(actr_protocol::Direction::Request as i32);
+    envelope.route_key = "actrium.session.v1.Attach".to_string();
+    assert!(matches!(
+        admit_test_envelope(&h.inner, envelope).await,
+        Err(ActrError::Unavailable(_))
+    ));
+    assert_eq!(h.runs.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn unknown_session_namespace_route_is_guarded_and_never_dispatched() {
+    let mut h = tell_dedup_harness(|| Ok(FrameworkBytes::from_static(b"workload"))).await;
+    h.release_tx.send(true).unwrap();
+    let guard = Arc::new(SwitchableIncomingGuard::new(true));
+    install_incoming_guard(&mut h, guard.clone());
+    let mut envelope = tell_envelope("unknown-session-route");
+    envelope.route_key = "actrium.session.v1.SessionRegistry.HeartbeatExtra".to_string();
+    assert!(matches!(
+        admit_test_envelope(&h.inner, envelope).await,
+        Err(ActrError::NotFound(_))
+    ));
+    assert_eq!(guard.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(h.runs.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn session_route_matcher_is_exact() {
+    use crate::lifecycle::{SessionMethod, actrium_session_v1_method};
+    for (suffix, method) in [
+        ("Attach", SessionMethod::Attach),
+        ("Resume", SessionMethod::Resume),
+        ("Detach", SessionMethod::Detach),
+        ("Heartbeat", SessionMethod::Heartbeat),
+        ("Takeover", SessionMethod::Takeover),
+        ("GetStatus", SessionMethod::GetStatus),
+    ] {
+        assert_eq!(
+            actrium_session_v1_method(&format!("actrium.session.v1.{suffix}")),
+            Some(method)
+        );
+        assert_eq!(
+            actrium_session_v1_method(&format!("actrium.session.v1.SessionRegistry.{suffix}")),
+            Some(method)
+        );
+    }
+    for route in [
+        "actrium.session.v1.",
+        "actrium.session.v1.AttachExtra",
+        "actrium.session.v1.SessionRegistry.Attach.Extra",
+        "actrium.session.v10.Attach",
+        "workload.actrium.session.v1.Attach",
+    ] {
+        assert_eq!(actrium_session_v1_method(route), None, "route: {route}");
+    }
 }

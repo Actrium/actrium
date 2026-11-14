@@ -521,15 +521,22 @@ impl ControlAttemptStore {
         if binding_expires_at != Some(prepared.binding_expires_at) {
             return Err(AttemptError::PossessionNotProven);
         }
-        // Move the Actor to the requesting key of its own member.
+        // Move the Actor to the requesting key of its own member, while
+        // atomically ensuring its long-term Actor key has not changed since
+        // preparation. A schema-10 NULL binding is populated only by this first
+        // explicitly authenticated reissue.
         let rebound = sqlx::query(
-            "UPDATE issued_actor_identity SET client_key_id = ?1
-             WHERE realm = ?2 AND serial_number = ?3 AND member_id = ?4",
+            "UPDATE issued_actor_identity
+             SET client_key_id = ?1, actor_public_key = ?2
+             WHERE realm = ?3 AND serial_number = ?4 AND member_id = ?5
+               AND (actor_public_key = ?6 OR (actor_public_key IS NULL AND ?6 IS NULL))",
         )
         .bind(&prepared.signer.key_id)
+        .bind(&prepared.actor_public_key)
         .bind(&actor_id.realm)
         .bind(actor_id.serial_number as i64)
         .bind(&prepared.signer.member_id)
+        .bind(&prepared.previous_actor_public_key)
         .execute(&mut *tx)
         .await
         .map_err(|error| AttemptError::Store(format!("key rebind failed: {error}")))?;
@@ -882,6 +889,8 @@ pub(crate) mod tests {
             package: false,
             target: None,
             signer: signer.clone(),
+            actor_public_key: vec![9; 32],
+            previous_actor_public_key: None,
         };
 
         platform::realm::Realm::retire(realm).await.unwrap();
@@ -1060,6 +1069,8 @@ pub(crate) mod tests {
                 package: false,
                 target: None,
                 signer: signer.clone(),
+                actor_public_key: vec![9; 32],
+                previous_actor_public_key: None,
             };
 
             // Nothing refuses the actor before the change.

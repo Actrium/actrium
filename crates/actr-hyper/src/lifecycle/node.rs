@@ -15,10 +15,15 @@ use crate::lifecycle::credential_manager::{
     CredentialManager, HardRebindHandles, RegistrationContext,
 };
 use crate::lifecycle::dedup::{DEDUP_TTL, DedupOutcome, DedupState, DedupWaiter};
+pub use crate::lifecycle::incoming_guard::IncomingCaller;
+use crate::lifecycle::incoming_guard::{
+    IncomingDispatchRequest, IncomingGuard, SessionRegistry, actrium_session_v1_method,
+    route_requires_incoming_guard,
+};
 use crate::lifecycle::recovery_policy::translate::LifecycleProfile;
 use crate::lifecycle::session_state::{SessionSnapshot, SessionState};
 use crate::outbound::Gate;
-use crate::transport::HostTransport;
+use crate::transport::{HostTransport, VerifiedPeerContext};
 use crate::wire::webrtc::SignalingClient;
 #[cfg(feature = "opentelemetry")]
 use crate::wire::webrtc::trace::{inject_span_context_to_rpc, set_parent_from_rpc_envelope};
@@ -68,6 +73,28 @@ fn error_response_for_wire(error: &ActrError) -> actr_protocol::ErrorResponse {
     actr_protocol::ErrorResponse {
         code: protocol_error_to_code(error),
         message: encode_delivery_uncertain_for_wire(error),
+    }
+}
+
+async fn authenticate_response(
+    guard: Option<Arc<dyn IncomingGuard>>,
+    response: &mut RpcEnvelope,
+) -> Result<(), crate::lifecycle::IncomingGuardError> {
+    if let Some(guard) = guard {
+        guard.authenticate_response(response).await?;
+    }
+    Ok(())
+}
+
+async fn guard_finish(guard: Option<Arc<dyn IncomingGuard>>, request_id: &str) {
+    if let Some(guard) = guard {
+        if let Err(error) = guard.finish(request_id).await {
+            tracing::warn!(
+                request_id = %request_id,
+                guard_code = error.code.as_str(),
+                "incoming guard finish failed"
+            );
+        }
     }
 }
 
@@ -191,10 +218,6 @@ impl PeerTypes {
     }
 }
 
-/// The caller of an inbound message: its `ActrId` and, when known, the
-/// verified `ActrType` recorded when the message arrived.
-pub type IncomingCaller<'a> = (&'a ActrId, Option<&'a ActrType>);
-
 /// The sender type recorded with a mailbox message; an undecodable one
 /// counts as unknown.
 fn recorded_caller_type(record: &actr_runtime_mailbox::MessageRecord) -> Option<ActrType> {
@@ -293,6 +316,8 @@ pub(crate) async fn inproc_send_reply(
     request_id: String,
     traceparent: Option<String>,
     tracestate: Option<String>,
+    incoming_guard: Option<Arc<dyn IncomingGuard>>,
+    metadata: Vec<actr_protocol::MetadataEntry>,
     expects_response: bool,
     result: ActorResult<Bytes>,
     span: tracing::Span,
@@ -309,7 +334,19 @@ pub(crate) async fn inproc_send_reply(
                     None,
                     None,
                     None,
+                    metadata,
                 );
+                if let Err(error) =
+                    authenticate_response(incoming_guard.clone(), &mut response_envelope).await
+                {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        guard_code = error.code.as_str(),
+                        "outbound response authentication failed; dropping response"
+                    );
+                    guard_finish(incoming_guard, &request_id).await;
+                    return;
+                }
                 #[cfg(feature = "opentelemetry")]
                 inject_span_context_to_rpc(&span, &mut response_envelope);
 
@@ -349,7 +386,19 @@ pub(crate) async fn inproc_send_reply(
                     Some(error_response),
                     traceparent,
                     tracestate,
+                    metadata,
                 );
+                if let Err(error) =
+                    authenticate_response(incoming_guard.clone(), &mut error_envelope).await
+                {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        guard_code = error.code.as_str(),
+                        "outbound error response authentication failed; dropping response"
+                    );
+                    guard_finish(incoming_guard, &request_id).await;
+                    return;
+                }
                 #[cfg(feature = "opentelemetry")]
                 inject_span_context_to_rpc(&span, &mut error_envelope);
 
@@ -369,6 +418,7 @@ pub(crate) async fn inproc_send_reply(
             }
         }
     }
+    guard_finish(incoming_guard, &request_id).await;
 }
 
 /// RTC response route, populated when the node's RTC manager is initialized.
@@ -663,6 +713,8 @@ pub(crate) async fn mailbox_send_reply(
     route_key: String,
     traceparent: Option<String>,
     tracestate: Option<String>,
+    incoming_guard: Option<Arc<dyn IncomingGuard>>,
+    metadata: Vec<actr_protocol::MetadataEntry>,
     expects_response: bool,
     result: ActorResult<Bytes>,
     span: tracing::Span,
@@ -679,7 +731,19 @@ pub(crate) async fn mailbox_send_reply(
                     None,
                     traceparent,
                     tracestate,
+                    metadata,
                 );
+                if let Err(error) =
+                    authenticate_response(incoming_guard.clone(), &mut response_envelope).await
+                {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        guard_code = error.code.as_str(),
+                        "outbound response authentication failed; dropping response"
+                    );
+                    guard_finish(incoming_guard, &request_id).await;
+                    return;
+                }
                 #[cfg(feature = "opentelemetry")]
                 inject_span_context_to_rpc(&span, &mut response_envelope);
 
@@ -739,7 +803,19 @@ pub(crate) async fn mailbox_send_reply(
                     Some(error_response),
                     traceparent,
                     tracestate,
+                    metadata,
                 );
+                if let Err(error) =
+                    authenticate_response(incoming_guard.clone(), &mut error_envelope).await
+                {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        guard_code = error.code.as_str(),
+                        "outbound error response authentication failed; dropping response"
+                    );
+                    guard_finish(incoming_guard, &request_id).await;
+                    return;
+                }
                 #[cfg(feature = "opentelemetry")]
                 inject_span_context_to_rpc(&span, &mut error_envelope);
 
@@ -755,6 +831,7 @@ pub(crate) async fn mailbox_send_reply(
             }
         }
     }
+    guard_finish(incoming_guard, &request_id).await;
 }
 
 /// ACK a durable mailbox message. Split out from `mailbox_send_reply` so the
@@ -786,6 +863,8 @@ pub(crate) async fn mailbox_reply_and_ack(
     route_key: String,
     traceparent: Option<String>,
     tracestate: Option<String>,
+    incoming_guard: Option<Arc<dyn IncomingGuard>>,
+    metadata: Vec<actr_protocol::MetadataEntry>,
     expects_response: bool,
     msg_id: uuid::Uuid,
     result: ActorResult<Bytes>,
@@ -799,6 +878,8 @@ pub(crate) async fn mailbox_reply_and_ack(
         route_key,
         traceparent,
         tracestate,
+        incoming_guard,
+        metadata,
         expects_response,
         result,
         span,
@@ -836,6 +917,7 @@ impl Drop for DataChunkRegistryCleanupGuard {
 /// returned by `Node::start`.
 pub(crate) struct Inner {
     pub(crate) realm_client_key: Option<crate::issuer_client::RealmClientKey>,
+    pub(crate) actor_key_namespace: Option<String>,
     /// Runtime configuration
     pub(crate) config: actr_config::RuntimeConfig,
 
@@ -989,6 +1071,18 @@ pub(crate) struct Inner {
 
     /// Verified Actor types of peers, read by the inbound ACL.
     pub(crate) peer_types: PeerTypes,
+
+    /// Optional current-policy authorization for inbound business RPC.
+    pub(crate) incoming_guard: Option<Arc<dyn IncomingGuard>>,
+
+    /// Exclusive dispatcher for exact Actrium session protocol methods. System
+    /// routes fail closed when this is absent; they never enter the workload.
+    pub(crate) session_registry: Option<Arc<dyn SessionRegistry>>,
+
+    /// Shared peer state installed when the node hosts an Actrium session
+    /// service. `start()` promotes it into the `ActrRef` runtime once the
+    /// PeerGate exists, enabling outbound Attach and response verification.
+    pub(crate) actrium_peer: Option<Arc<crate::actrium::service::Shared>>,
 
     /// Handle to the per-actor serial command runner.
     ///
@@ -1874,6 +1968,17 @@ fn validate_rtc_config(config: &actr_config::WebRtcConfig) -> ActorResult<()> {
 }
 
 impl Inner {
+    pub(crate) fn set_incoming_guard(&mut self, guard: Option<Arc<dyn IncomingGuard>>) {
+        self.data_chunk_registry.set_incoming_guard(guard.clone());
+        if let Some(transport) = &self.shell_to_workload {
+            transport.set_incoming_guard(guard.clone());
+        }
+        if let Some(transport) = &self.workload_to_shell {
+            transport.set_incoming_guard(guard.clone());
+        }
+        self.incoming_guard = guard;
+    }
+
     #[allow(dead_code)]
     pub(crate) fn package_manifest(&self) -> Option<&actr_pack::RuntimePackageManifest> {
         self.package_manifest.as_ref()
@@ -1915,6 +2020,11 @@ impl Inner {
 
     /// Build a RESPONSE envelope for a handled request.
     ///
+    /// Host authorization metadata is inherited only as the response signer's
+    /// session/routing input. Before transmission, `authenticate_response`
+    /// replaces the request proof with a proof of the actual response kind and
+    /// success payload or encoded error.
+    ///
     /// `timeout_ms` is always 0: per the `package.proto` wire contract only
     /// `DIRECTION_REQUEST` carries a positive deadline — RESPONSE (and TELL)
     /// use 0 as documented filler, and receivers MUST ignore it. Centralizing
@@ -1926,6 +2036,7 @@ impl Inner {
         error: Option<actr_protocol::ErrorResponse>,
         traceparent: Option<String>,
         tracestate: Option<String>,
+        metadata: Vec<actr_protocol::MetadataEntry>,
     ) -> RpcEnvelope {
         RpcEnvelope {
             request_id,
@@ -1935,7 +2046,7 @@ impl Inner {
             direction: Some(Direction::Response as i32),
             traceparent,
             tracestate,
-            metadata: Vec::new(),
+            metadata,
             timeout_ms: 0,
         }
     }
@@ -2005,12 +2116,24 @@ impl Inner {
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
         scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingOutcome {
+        self.handle_incoming_with_context(envelope, caller, None, reply_sink, scope)
+            .await
+    }
+
+    pub async fn handle_incoming_with_context(
+        &self,
+        envelope: RpcEnvelope,
+        caller: Option<IncomingCaller<'_>>,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
+        reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
+        scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
+    ) -> IncomingOutcome {
         // Thin wrapper preserving the original flow: run synchronous
         // admission, then await the continuation to completion inline. This is
         // bit-for-bit the pre-B2 path (ACL → dedup → ctx → dispatch → dedup
         // complete), used directly by the mailbox lane and by the in-proc lane
         // when the dispatch gate is off.
-        self.admit_incoming(envelope, caller, reply_sink, scope)
+        self.admit_incoming_with_context(envelope, caller, peer_context, reply_sink, scope)
             .await
             .await
     }
@@ -2054,13 +2177,36 @@ impl Inner {
     /// aside and release the slot first.
     pub(crate) async fn admit_incoming(
         &self,
-        mut envelope: RpcEnvelope,
+        envelope: RpcEnvelope,
         caller: Option<IncomingCaller<'_>>,
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
         scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingContinuation {
+        self.admit_incoming_with_context(envelope, caller, None, reply_sink, scope)
+            .await
+    }
+
+    pub(crate) async fn admit_incoming_with_context(
+        &self,
+        mut envelope: RpcEnvelope,
+        caller: Option<IncomingCaller<'_>>,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
+        reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
+        scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
+    ) -> IncomingContinuation {
         let caller_id = caller.map(|(id, _)| id);
-        let caller_type = caller.and_then(|(_, actor_type)| actor_type);
+        if peer_context
+            .as_ref()
+            .is_some_and(|context| caller_id != Some(&context.peer_actor_id))
+        {
+            return ready_continuation(Err(ActrError::PermissionDenied(
+                "caller identity does not match the verified channel context".to_string(),
+            )));
+        }
+        let caller_type = peer_context
+            .as_ref()
+            .map(|context| &context.peer_actor_type)
+            .or_else(|| caller.and_then(|(_, actor_type)| actor_type));
         // Package-less routes emitted by older generators had one leading
         // dot (`.Service.Method`). Normalize it before every admission-stage
         // consumer (reply-mode lookup, scheduler, and all runner variants)
@@ -2133,7 +2279,68 @@ impl Inner {
             return ready_continuation(Err(denied));
         }
 
-        // 0.2. Deduplication: return cached response for retried request_ids.
+        // 0.2. Exact session protocol methods have one trusted destination.
+        // They do not use business dedup or workload dispatch: the registry
+        // owns their idempotency, channel binding, and session-state checks.
+        if let Some(method) = actrium_session_v1_method(&envelope.route_key) {
+            if envelope.direction != Some(Direction::Request as i32) {
+                return ready_continuation(Err(ActrError::InvalidArgument(
+                    "session registry methods require Request direction".to_string(),
+                )));
+            }
+            let Some(registry) = self.session_registry.as_ref() else {
+                return ready_continuation(Err(ActrError::Unavailable(
+                    "Actrium SessionRegistry is not configured".to_string(),
+                )));
+            };
+            let result = registry
+                .dispatch(
+                    method,
+                    IncomingDispatchRequest::new(&envelope, caller)
+                        .with_peer_context(peer_context.clone()),
+                )
+                .await;
+            return ready_continuation(result);
+        }
+
+        // 0.3. Current-policy business authorization. This deliberately runs
+        // before dedup so a cached success cannot bypass a later revocation.
+        // Both immediate ingress and durable-mailbox dequeue arrive here, so a
+        // message queued before revocation is checked again when dispatched.
+        // Actrium session system routes belong to their registry and are not
+        // business RPC authorization decisions.
+        if route_requires_incoming_guard(&envelope.route_key)
+            && let Some(guard) = self.incoming_guard.as_ref()
+        {
+            let request = IncomingDispatchRequest::new(&envelope, caller)
+                .with_peer_context(peer_context.clone());
+            if let Err(error) = guard.check(request).await {
+                tracing::warn!(
+                    severity = 5,
+                    error_category = "incoming_guard_denied",
+                    guard_code = error.code.as_str(),
+                    request_id = %envelope.request_id,
+                    route_key = %envelope.route_key,
+                    "incoming business RPC rejected by current policy"
+                );
+                return ready_continuation(Err(error.into_actr_error()));
+            }
+        }
+
+        // Unknown methods in the reserved session namespace are protocol
+        // errors, not workload routes. They have still passed the business
+        // guard above, and can never inherit the registry's exemption.
+        if envelope
+            .route_key
+            .starts_with(crate::lifecycle::ACTRIUM_SESSION_V1_ROUTE_PREFIX)
+        {
+            return ready_continuation(Err(ActrError::NotFound(format!(
+                "unknown Actrium session method: {}",
+                envelope.route_key
+            ))));
+        }
+
+        // 0.4. Deduplication: return cached response for retried request_ids.
         //
         // TELL envelopes keep their dedup entry (retry protection for
         // RpcReliable's up-to-5 same-request_id attempts), but their
@@ -2284,6 +2491,8 @@ impl Inner {
                             envelope.route_key.clone(),
                             envelope.traceparent.clone(),
                             envelope.tracestate.clone(),
+                            self.incoming_guard.clone(),
+                            envelope.metadata.clone(),
                             sink,
                             expects_response,
                         );
@@ -2746,9 +2955,13 @@ impl Inner {
             max_pending_replies: 1024,
             package_manifest,
             realm_client_key: None,
+            actor_key_namespace: None,
             preregistered_credential: None,
             preregistered_registration_context: None,
             peer_types: PeerTypes::default(),
+            incoming_guard: None,
+            session_registry: None,
+            actrium_peer: None,
             workload_dispatch: Arc::new(workload_dispatch),
             linked_handle,
             package_uses_explicit_reply_boundary,
@@ -2941,16 +3154,33 @@ impl Inner {
         // through `Hyper::register()`.
         let service_spec = None;
 
-        let register_request = RegisterRequest {
-            actr_type: actr_type.clone(),
-            realm: self.config.realm.clone(),
-            service_spec,
-            acl: self.config.acl.clone(),
-            service: None,
-            ws_address: None,
-            auth_mode: Some(RegisterAuthMode::Linked as i32),
-            ..Default::default()
-        };
+        let actor_storage_root = self
+            .config
+            .storage_root
+            .clone()
+            .unwrap_or_else(|| self.config.config_dir.join("storage"));
+        let actor_signer = crate::issuer_client::actor_signer_for_scoped(
+            &actor_storage_root,
+            &self.config.realm,
+            &actr_type,
+            self.actor_key_namespace.as_deref(),
+        )
+        .map_err(|error| ActrError::InvalidArgument(error.to_string()))?;
+        let register_request = crate::issuer_client::sign_actor_request(
+            RegisterRequest {
+                actr_type: actr_type.clone(),
+                realm: self.config.realm.clone(),
+                service_spec,
+                acl: self.config.acl.clone(),
+                service: None,
+                ws_address: None,
+                auth_mode: Some(RegisterAuthMode::Linked as i32),
+                ..Default::default()
+            },
+            actor_signer.as_ref(),
+            actr_protocol::actor_key_proof::ActorKeyProofOperation::Register,
+        )
+        .map_err(|error| ActrError::InvalidArgument(error.to_string()))?;
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 1. Obtain registration info (Hyper pre-injected or Issuer HTTP)
@@ -3165,6 +3395,7 @@ impl Inner {
                 .take()
                 .unwrap_or_else(|| RegistrationContext::Linked {
                     request: register_request.clone(),
+                    signer: actor_signer.clone(),
                 });
             credential_manager = CredentialManager::new(
                 session_state.clone(),
@@ -3270,6 +3501,7 @@ impl Inner {
             // matching).
             let pending_requests: crate::outbound::PendingRequestsMap =
                 std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
+            pending_requests.set_incoming_guard(self.incoming_guard.clone());
             let handover = Arc::new(crate::transport::handover::HandoverBook::default());
 
             // Construct the RTC manager, controllers, and recovery stack as
@@ -3535,6 +3767,9 @@ impl Inner {
                 session_state.clone(),
                 relay_gate.clone(),
                 self.shutdown_token.clone(),
+                Some(actor_storage_root.clone()),
+                self.actor_key_namespace.clone(),
+                Some(credential_manager.clone()),
             );
             relay_gate.set_handover(handover.clone());
             let wire_builder = Arc::new(
@@ -4165,6 +4400,8 @@ impl Inner {
                                         let route_key = envelope.route_key.clone();
                                         let traceparent = envelope.traceparent.clone();
                                         let tracestate = envelope.tracestate.clone();
+                                        let metadata = envelope.metadata.clone();
+                                        let incoming_guard = node.incoming_guard.clone();
 
                                         if scheduler_on {
                                             // Synchronous admission preserves arrival
@@ -4182,7 +4419,7 @@ impl Inner {
                                                     IncomingOutcome::Replied(result) => {
                                                         inproc_send_reply(
                                                             response_tx, route_key, request_id,
-                                                            traceparent, tracestate, expects_response,
+                                                            traceparent, tracestate, incoming_guard, metadata, expects_response,
                                                             result, span,
                                                         ).await;
                                                     }
@@ -4202,7 +4439,7 @@ impl Inner {
                                                 IncomingOutcome::Replied(result) => {
                                                     inproc_send_reply(
                                                         response_tx.clone(), route_key, request_id,
-                                                        traceparent, tracestate, expects_response,
+                                                        traceparent, tracestate, incoming_guard, metadata, expects_response,
                                                         result, span,
                                                     ).await;
                                                 }
@@ -4264,50 +4501,13 @@ impl Inner {
                                             envelope.request_id
                                         );
 
-                                        // Check if response is success or error
-                                        match (envelope.payload, envelope.error) {
-                                            (Some(payload), None) => {
-                                                // Success response
-                                                if let Err(e) = request_mgr
-                                                    .complete_response(&envelope.request_id, payload)
-                                                    .await
-                                                {
-                                                    tracing::warn!(
-                                                        severity = 4,
-                                                        error_category = "orphan_response",
-                                                        request_id = %envelope.request_id,
-                                                        "⚠️  No pending request found for response: {:?}",
-                                                        e
-                                                    );
-                                                }
-                                            }
-                                            (None, Some(error)) => {
-                                                // Error response — reconstruct the precise ActrError variant
-                                                // from the wire code so binding-visible classification
-                                                // (UnknownRoute / PermissionDenied / TimedOut / …) is preserved
-                                                // instead of collapsing every error into Unavailable.
-                                                let actr_err = wire_code_to_actr_error(error.code, error.message);
-                                                if let Err(e) = request_mgr
-                                                    .complete_error(&envelope.request_id, actr_err)
-                                                    .await
-                                                {
-                                                    tracing::warn!(
-                                                        severity = 4,
-                                                        error_category = "orphan_response",
-                                                        request_id = %envelope.request_id,
-                                                        "⚠️  No pending request found for error response: {:?}",
-                                                        e
-                                                    );
-                                                }
-                                            }
-                                            _ => {
-                                                tracing::error!(
-                                                    severity = 7,
-                                                    error_category = "protocol_error",
-                                                    request_id = %envelope.request_id,
-                                                    "❌ Invalid RpcEnvelope: both payload and error are present or both absent"
-                                                );
-                                            }
+                                        if let Err(e) = request_mgr.complete_envelope(envelope).await {
+                                            tracing::warn!(
+                                                severity = 4,
+                                                error_category = "orphan_response",
+                                                "⚠️  No pending request found for in-proc response: {:?}",
+                                                e
+                                            );
                                         }
                                     }
                                     Err(e) => {
@@ -4678,6 +4878,25 @@ impl Inner {
                                                 // Decode caller_id from MessageRecord.from (transport layer)
                                                 let caller_id_result = ActrId::decode(&msg_record.from[..]);
                                                 let caller_type = recorded_caller_type(&msg_record);
+                                                let peer_context = match msg_record
+                                                    .peer_context
+                                                    .as_deref()
+                                                    .map(serde_json::from_slice::<VerifiedPeerContext>)
+                                                    .transpose()
+                                                {
+                                                    Ok(context) => context.map(Arc::new),
+                                                    Err(error) => {
+                                                        tracing::warn!(
+                                                            request_id = %request_id,
+                                                            %error,
+                                                            "mailbox verified peer context is invalid; dropping"
+                                                        );
+                                                        if let Err(ack_error) = mailbox.ack(msg_record.id).await {
+                                                            tracing::error!(%ack_error, "failed to ACK invalid mailbox context");
+                                                        }
+                                                        continue;
+                                                    }
+                                                };
                                                 let caller_ref = caller_id_result
                                                     .as_ref()
                                                     .ok()
@@ -4693,10 +4912,12 @@ impl Inner {
                                                 let route_key = envelope.route_key.clone();
                                                 let traceparent = envelope.traceparent.clone();
                                                 let tracestate = envelope.tracestate.clone();
+                                                let metadata = envelope.metadata.clone();
                                                 let msg_id = msg_record.id;
                                                 let ws_gate = ws_gate.clone();
                                                 let rtc_route = rtc_route.clone();
                                                 let mailbox_c = mailbox.clone();
+                                                let incoming_guard = node.incoming_guard.clone();
                                                 #[cfg(not(feature = "opentelemetry"))]
                                                 let span = tracing::Span::none();
 
@@ -4714,7 +4935,7 @@ impl Inner {
                                                         span: span.clone(),
                                                     };
                                                     let cont = node
-                                                        .admit_incoming(envelope.clone(), caller_ref, Some(reply_sink), None)
+                                                        .admit_incoming_with_context(envelope.clone(), caller_ref, peer_context.clone(), Some(reply_sink), None)
                                                         .await;
                                                     inflight.push(Box::pin(async move {
                                                         match cont.await {
@@ -4722,7 +4943,7 @@ impl Inner {
                                                                 mailbox_reply_and_ack(
                                                                     ws_gate, rtc_route, mailbox_c,
                                                                     caller_owned, request_id, route_key,
-                                                                    traceparent, tracestate, expects_response,
+                                                                    traceparent, tracestate, incoming_guard, metadata, expects_response,
                                                                     msg_id, result, span,
                                                                 )
                                                                 .await;
@@ -4741,7 +4962,7 @@ impl Inner {
                                                         span: span.clone(),
                                                     };
                                                     let handle_incoming_fut =
-                                                        node.handle_incoming(envelope.clone(), caller_ref, Some(reply_sink), None);
+                                                        node.handle_incoming_with_context(envelope.clone(), caller_ref, peer_context.clone(), Some(reply_sink), None);
                                                     #[cfg(feature = "opentelemetry")]
                                                     let handle_incoming_fut =
                                                         handle_incoming_fut.instrument(span.clone());
@@ -4750,7 +4971,7 @@ impl Inner {
                                                             mailbox_reply_and_ack(
                                                                 ws_gate, rtc_route, mailbox_c,
                                                                 caller_owned, request_id, route_key,
-                                                                traceparent, tracestate, expects_response,
+                                                                traceparent, tracestate, incoming_guard, metadata, expects_response,
                                                                 msg_id, result, span,
                                                             )
                                                             .await;
@@ -4878,6 +5099,16 @@ impl Inner {
         }
 
         // Create ActrRefShared
+        let peer_runtime = match (
+            node_ref.actrium_peer.clone(),
+            node_ref.peer_transport.clone(),
+            node_ref.outproc_gate.as_ref(),
+        ) {
+            (Some(peer), Some(transport), Some(Gate::Peer(gate))) => Some(Arc::new(
+                crate::actrium::peer::PeerRuntime::new(gate.clone(), transport, peer),
+            )),
+            _ => None,
+        };
         let shared = Arc::new(ActrRefShared {
             actor_id,
             bootstrap_ctx_builder,
@@ -4886,6 +5117,7 @@ impl Inner {
             shutdown_token,
             task_handles: Mutex::new(task_handles),
             rtc_manager: rtc_manager.clone(),
+            peer_runtime,
         });
 
         // Create ActrRef

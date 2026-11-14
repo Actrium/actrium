@@ -1603,6 +1603,7 @@ async fn removed_profile_key_cannot_verify_or_be_redistributed_from_cache() {
         client_key: "aaaaaaaaaaaaaaaa".into(),
         role: actr_protocol::MemberRole::Owner as i32,
         development: None,
+        actor_public_key: None,
     }
     .encode_to_vec();
     let credential = actr_protocol::AIdCredential {

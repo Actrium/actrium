@@ -208,6 +208,7 @@ dependencies = [
  "actr-runtime",
  "actr-runtime-mailbox",
  "actr-service-compat",
+ "actrium-runtime",
  "anyhow",
  "async-trait",
  "axum",
@@ -505,6 +506,7 @@ version = "0.0.0"
 dependencies = [
  "actr-pack",
  "actr-protocol",
+ "async-trait",
  "base64 0.22.1",
  "ed25519-dalek",
  "rand 0.8.8",
@@ -514,6 +516,25 @@ dependencies = [
  "thiserror 2.0.21",
  "uniffi 0.29.5",
  "url",
+]
+
+[[package]]
+name = "actrium-runtime"
+version = "0.0.0"
+dependencies = [
+ "actr-relay-security",
+ "actrium-core",
+ "async-trait",
+ "ed25519-dalek",
+ "hmac 0.12.1",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -3437,6 +3458,8 @@ dependencies = [
  "actr-pack",
  "actr-protocol",
  "actr-runtime",
+ "actrium-core",
+ "actrium-runtime",
  "android_logger",
  "async-trait",
  "bytes",
@@ -3447,6 +3470,7 @@ dependencies = [
  "opusic-sys",
  "parking_lot",
  "rand 0.8.8",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -4968,9 +4992,9 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.14.5"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9f016da56b311cff4659f5e7335c4d5fda5ca86cae4f48b8ce1cf3335246a7d"
+checksum = "3ef0b569d1d907ab3a28596aee62cf1f61dacb0529a4bedcd8e7460e2d5228b4"
 dependencies = [
  "bytes",
  "prost-derive",
@@ -4978,9 +5002,9 @@ dependencies = [
 
 [[package]]
 name = "prost-build"
-version = "0.14.5"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f461f69b0cacd7a9c2bcac932e0f3a22cb13c29fc9023092502995a771a10491"
+checksum = "b6e4d69d0fa3e7f6f9cf6b53a0e83e4fc99ba3586f65ce166cff30bd13bb4ad2"
 dependencies = [
  "heck",
  "itertools 0.15.0",
@@ -4999,9 +5023,9 @@ dependencies = [
 
 [[package]]
 name = "prost-derive"
-version = "0.14.5"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9a367f131d93b3395fc6207c11e67098493ab040def4ce3085adbf186687f7e"
+checksum = "1ad9c5423459fa2f729b8d9235fab810aa29628b171467744fc86d21460ad70d"
 dependencies = [
  "anyhow",
  "itertools 0.15.0",
@@ -5034,9 +5058,9 @@ dependencies = [
 
 [[package]]
 name = "prost-types"
-version = "0.14.5"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96e89651c132da91958fd6092a2f7262c2c36c08df4f68af0bb3591caacbbb45"
+checksum = "f29a7c4c7a84cef41a53d338a2d10d4f1b043ea5c3dde26db22ee2c9c1b1c75b"
 dependencies = [
  "prost",
 ]
@@ -6066,9 +6090,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.16"
+version = "0.103.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
+checksum = "e3a0760a887c14823fca5a1c970b01d47c328c696c0c64829d1df50e8f853fd5"
 dependencies = [
  "aws-lc-rs",
  "ring",

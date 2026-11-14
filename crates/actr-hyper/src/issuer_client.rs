@@ -86,6 +86,226 @@ impl RealmKeySigner for ed25519_dalek::SigningKey {
     }
 }
 
+/// Signing boundary for the independent, long-term Actor key.
+///
+/// Unlike the Realm client key and Publisher key, this key identifies the Actor
+/// itself during channel authentication. Platform implementations may keep the
+/// private key in OS secure storage; the registration path needs only signatures.
+pub trait ActorKeySigner: Send + Sync {
+    fn public_key(&self) -> [u8; 32];
+    fn sign_payload(&self, payload: &[u8]) -> Result<[u8; 64], HyperError>;
+}
+
+impl ActorKeySigner for ed25519_dalek::SigningKey {
+    fn public_key(&self) -> [u8; 32] {
+        self.verifying_key().to_bytes()
+    }
+    fn sign_payload(&self, payload: &[u8]) -> Result<[u8; 64], HyperError> {
+        Ok(ed25519_dalek::Signer::sign(self, payload).to_bytes())
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ActorKeyFile {
+    identity: String,
+    public_key: String,
+    private_key: String,
+}
+
+/// File-backed Actor signer for desktop and app-sandboxed Host installations.
+/// The key is generated once per Realm + Actor type and reused across restarts.
+pub struct FileActorKeySigner {
+    key: ed25519_dalek::SigningKey,
+}
+
+#[cfg(test)]
+fn actor_key_crash_test_after_fsync() {
+    if std::env::var_os("ACTR_HYPER_TEST_CRASH_AFTER_ACTOR_KEY_FSYNC").is_some() {
+        std::process::exit(97);
+    }
+}
+
+impl FileActorKeySigner {
+    fn load(path: &Path, identity: &str) -> HyperResult<Self> {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let text = actr_protocol::realm_membership::read_private_key_file(path, "Actor key")
+            .map_err(HyperError::Config)?;
+        let file: ActorKeyFile = serde_json::from_str(&text)
+            .map_err(|error| HyperError::Config(format!("invalid Actor key file: {error}")))?;
+        let private = STANDARD
+            .decode(&file.private_key)
+            .map_err(|_| HyperError::Config("invalid Actor private key encoding".into()))?;
+        let private: [u8; 32] = private
+            .try_into()
+            .map_err(|_| HyperError::Config("Actor private key must be 32 bytes".into()))?;
+        let key = ed25519_dalek::SigningKey::from_bytes(&private);
+        if file.identity != identity
+            || file.public_key != STANDARD.encode(key.verifying_key().to_bytes())
+        {
+            return Err(HyperError::Config(
+                "Actor key identity or public key mismatch".into(),
+            ));
+        }
+        Ok(Self { key })
+    }
+
+    fn create(path: &Path, identity: &str) -> HyperResult<Self> {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        use std::io::Write as _;
+        let key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let file = ActorKeyFile {
+            identity: identity.into(),
+            public_key: STANDARD.encode(key.verifying_key().to_bytes()),
+            private_key: STANDARD.encode(key.to_bytes()),
+        };
+        let bytes = serde_json::to_vec(&file)
+            .map_err(|error| HyperError::Config(format!("cannot encode Actor key: {error}")))?;
+        let parent = path.parent().ok_or_else(|| {
+            HyperError::Config("Actor key path must have a parent directory".into())
+        })?;
+        // NamedTempFile is owner-only on Unix. The final path is never opened
+        // for writing: readers see either no key or a completely fsynced key.
+        let mut output = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|error| HyperError::Config(format!("cannot create Actor key: {error}")))?;
+        output
+            .write_all(&bytes)
+            .and_then(|_| output.as_file().sync_all())
+            .map_err(|error| HyperError::Config(format!("cannot persist Actor key: {error}")))?;
+        #[cfg(test)]
+        actor_key_crash_test_after_fsync();
+        match output.persist_noclobber(path) {
+            Ok(_) => {
+                #[cfg(unix)]
+                std::fs::File::open(parent)
+                    .and_then(|directory| directory.sync_all())
+                    .map_err(|error| {
+                        HyperError::Config(format!("cannot sync Actor key directory: {error}"))
+                    })?;
+                Ok(Self { key })
+            }
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                // A concurrent creator won after publishing a complete file.
+                // Never return the losing, un-published key generated above.
+                Self::load(path, identity)
+            }
+            Err(error) => Err(HyperError::Config(format!(
+                "cannot publish Actor key: {}",
+                error.error
+            ))),
+        }
+    }
+}
+
+impl ActorKeySigner for FileActorKeySigner {
+    fn public_key(&self) -> [u8; 32] {
+        self.key.verifying_key().to_bytes()
+    }
+
+    fn sign_payload(&self, payload: &[u8]) -> Result<[u8; 64], HyperError> {
+        Ok(ed25519_dalek::Signer::sign(&self.key, payload).to_bytes())
+    }
+}
+
+impl FileActorKeySigner {
+    /// Export the Actor signing key to the trusted Host channel implementation.
+    /// The key never crosses into Guest, TypeScript, or Service workload code.
+    pub(crate) fn actor_identity_key(&self) -> actr_relay_security::ActorIdentityKey {
+        actr_relay_security::ActorIdentityKey::from_bytes(self.key.to_bytes())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn signing_key_bytes(&self) -> [u8; 32] {
+        self.key.to_bytes()
+    }
+}
+
+/// Resolve an instance-scoped signer. Service identities may default to the
+/// Realm + Actor type namespace, but every fixed Actrium Front must supply a
+/// stable Tab/creation-intent namespace so separate Fronts never share a key.
+pub(crate) fn actor_signer_for_scoped(
+    storage_root: &Path,
+    realm: &str,
+    actor_type: &actr_protocol::ActrType,
+    namespace: Option<&str>,
+) -> HyperResult<std::sync::Arc<FileActorKeySigner>> {
+    if actor_type.publisher == "actrium"
+        && actor_type.name == "actrium-front"
+        && namespace.is_none()
+    {
+        return Err(HyperError::Config(
+            "Actrium Front requires a stable actor key namespace".into(),
+        ));
+    }
+    let namespace = namespace.map(|value| format!("{realm}\0{value}"));
+    actor_signer_for_namespaced(storage_root, realm, actor_type, namespace.as_deref())
+}
+
+fn actor_signer_for_namespaced(
+    storage_root: &Path,
+    realm: &str,
+    actor_type: &actr_protocol::ActrType,
+    namespace: Option<&str>,
+) -> HyperResult<std::sync::Arc<FileActorKeySigner>> {
+    use sha2::{Digest as _, Sha256};
+    let identity = namespace.map_or_else(
+        || {
+            format!(
+                "{realm}\0{}\0{}\0{}",
+                actor_type.publisher, actor_type.name, actor_type.version
+            )
+        },
+        |value| {
+            format!(
+                "{value}\0{}\0{}\0{}",
+                actor_type.publisher, actor_type.name, actor_type.version
+            )
+        },
+    );
+    let key_id = hex::encode(Sha256::digest(identity.as_bytes()));
+    let directory = storage_root.join("actor-keys");
+    std::fs::create_dir_all(&directory).map_err(|error| {
+        HyperError::Config(format!("cannot create Actor key directory: {error}"))
+    })?;
+    let path = directory.join(format!("{key_id}.json"));
+    if path.exists() {
+        return Ok(std::sync::Arc::new(FileActorKeySigner::load(
+            &path, &identity,
+        )?));
+    }
+    match FileActorKeySigner::create(&path, &identity) {
+        Ok(signer) => Ok(std::sync::Arc::new(signer)),
+        Err(_) if path.exists() => Ok(std::sync::Arc::new(FileActorKeySigner::load(
+            &path, &identity,
+        )?)),
+        Err(error) => Err(error),
+    }
+}
+
+/// Resolve the persistent independent signer for one Realm + Actor type.
+#[cfg(test)]
+pub(crate) fn actor_signer_for(
+    storage_root: &Path,
+    realm: &str,
+    actor_type: &actr_protocol::ActrType,
+) -> HyperResult<std::sync::Arc<FileActorKeySigner>> {
+    actor_signer_for_namespaced(storage_root, realm, actor_type, None)
+}
+
+/// Bind an Actor public key and a fresh operation-specific proof into a
+/// RegisterRequest. REGISTER and REISSUE deliberately produce different proofs.
+pub(crate) fn sign_actor_request(
+    mut request: actr_protocol::RegisterRequest,
+    signer: &dyn ActorKeySigner,
+    operation: actr_protocol::actor_key_proof::ActorKeyProofOperation,
+) -> HyperResult<actr_protocol::RegisterRequest> {
+    request.actor_public_key = Some(signer.public_key().to_vec().into());
+    request.actor_key_proof = None;
+    let message = actr_protocol::actor_key_proof::actor_key_proof_message(&request, operation)
+        .map_err(|error| HyperError::Config(error.to_string()))?;
+    request.actor_key_proof = Some(signer.sign_payload(&message)?.to_vec().into());
+    Ok(request)
+}
+
 /// Mobile wall clocks can lead the Issuer by a few seconds. Backdate the
 /// envelope while preserving the protocol's maximum five-minute lifetime;
 /// this does not relax the Issuer's window or replay checks.
@@ -649,3 +869,97 @@ fn classify_renew_status(status: u16, retry_after: Option<Duration>) -> RenewErr
 #[cfg(test)]
 #[path = "issuer_client_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod actor_key_atomicity_tests {
+    use super::*;
+
+    fn actor_type() -> actr_protocol::ActrType {
+        actr_protocol::ActrType {
+            publisher: "example.com".into(),
+            name: "atomic-key".into(),
+            version: "1.0.0".into(),
+        }
+    }
+
+    fn final_key_files(root: &Path) -> Vec<std::path::PathBuf> {
+        let Ok(entries) = std::fs::read_dir(root.join("actor-keys")) else {
+            return Vec::new();
+        };
+        entries
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn concurrent_actor_key_creation_publishes_one_complete_key() {
+        let root = tempfile::tempdir().unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let workers: Vec<_> = (0..8)
+            .map(|_| {
+                let root = root.path().to_path_buf();
+                let barrier = barrier.clone();
+                let actor_type = actor_type();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    actor_signer_for(&root, "atomic@example.com", &actor_type)
+                })
+            })
+            .collect();
+        let signers: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap().unwrap())
+            .collect();
+        let expected = signers[0].public_key();
+        assert!(
+            signers.iter().all(|signer| signer.public_key() == expected),
+            "a losing creator returned its unpublished private key"
+        );
+        let files = final_key_files(root.path());
+        assert_eq!(files.len(), 1);
+        let reloaded = actor_signer_for(root.path(), "atomic@example.com", &actor_type()).unwrap();
+        assert_eq!(reloaded.public_key(), expected);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                std::fs::metadata(&files[0]).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn crash_after_fsync_leaves_no_partial_final_actor_key() {
+        const CRASH_ENV: &str = "ACTR_HYPER_TEST_CRASH_AFTER_ACTOR_KEY_FSYNC";
+        const ROOT_ENV: &str = "ACTR_HYPER_TEST_ACTOR_KEY_ROOT";
+        if std::env::var_os(CRASH_ENV).is_some() {
+            let root = std::env::var_os(ROOT_ENV).expect("child Actor key root");
+            let _ = actor_signer_for(Path::new(&root), "atomic@example.com", &actor_type());
+            panic!("the test crash point did not terminate the child");
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let test_name = "issuer_client::actor_key_atomicity_tests::crash_after_fsync_leaves_no_partial_final_actor_key";
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test_name, "--nocapture"])
+            .env(CRASH_ENV, "1")
+            .env(ROOT_ENV, root.path())
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(97));
+        assert!(
+            final_key_files(root.path()).is_empty(),
+            "a crashed writer exposed a partial final Actor key"
+        );
+
+        let recovered = actor_signer_for(root.path(), "atomic@example.com", &actor_type()).unwrap();
+        let reloaded = actor_signer_for(root.path(), "atomic@example.com", &actor_type()).unwrap();
+        assert_eq!(recovered.public_key(), reloaded.public_key());
+        assert_eq!(final_key_files(root.path()).len(), 1);
+    }
+}

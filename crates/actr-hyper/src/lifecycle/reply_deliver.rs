@@ -23,6 +23,7 @@ use bytes::Bytes;
 use tokio::sync::Mutex;
 
 use crate::lifecycle::dedup::DedupState;
+use crate::lifecycle::incoming_guard::IncomingGuard;
 use crate::lifecycle::outstanding_replies::{OutstandingReplies, ReplyAttemptId};
 use crate::transport::HostTransport;
 
@@ -60,6 +61,8 @@ struct ReplyShared {
     route_key: String,
     traceparent: Option<String>,
     tracestate: Option<String>,
+    incoming_guard: Option<Arc<dyn IncomingGuard>>,
+    metadata: Vec<actr_protocol::MetadataEntry>,
     emit_response: bool,
     /// Runtime captured at admission so a movable Reply can be completed
     /// from a non-Tokio callback thread without losing its outcome.
@@ -106,6 +109,8 @@ impl ReplyDeliver {
         route_key: String,
         traceparent: Option<String>,
         tracestate: Option<String>,
+        incoming_guard: Option<Arc<dyn IncomingGuard>>,
+        metadata: Vec<actr_protocol::MetadataEntry>,
         sink: ReplySink,
         emit_response: bool,
     ) -> (Self, Arc<AtomicBool>) {
@@ -142,6 +147,8 @@ impl ReplyDeliver {
                     route_key,
                     traceparent,
                     tracestate,
+                    incoming_guard,
+                    metadata,
                     emit_response,
                     runtime_handle,
                 },
@@ -297,6 +304,8 @@ impl ReplyDeliver {
                 self.shared.route_key.clone(),
                 self.shared.traceparent.clone(),
                 self.shared.tracestate.clone(),
+                self.shared.incoming_guard.clone(),
+                self.shared.metadata.clone(),
                 emit_response,
                 result,
                 self.sink.span.clone(),
@@ -310,6 +319,8 @@ impl ReplyDeliver {
                 self.shared.request_id.clone(),
                 self.shared.traceparent.clone(),
                 self.shared.tracestate.clone(),
+                self.shared.incoming_guard.clone(),
+                self.shared.metadata.clone(),
                 emit_response,
                 result,
                 self.sink.span.clone(),

@@ -9,6 +9,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 const LORAN_SCHEMA_VERSION: i64 = 11;
+const LORAN_SCHEMA_VERSION_WITH_REALM_CLIENT_KEYS: i64 = 10;
 
 /// Database manager
 #[derive(Clone)]
@@ -50,7 +51,8 @@ impl Database {
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
             .fetch_one(&mut *connection)
             .await?;
-        if version == LORAN_SCHEMA_VERSION || version == 10 {
+        if version == LORAN_SCHEMA_VERSION || version == LORAN_SCHEMA_VERSION_WITH_REALM_CLIENT_KEYS
+        {
             return Ok(version);
         }
 
@@ -378,6 +380,7 @@ impl Database {
                 development INTEGER NOT NULL DEFAULT 0,
                 member_id TEXT NOT NULL,
                 client_key_id TEXT NOT NULL,
+                actor_public_key BLOB,
                 issued_at INTEGER NOT NULL,
                 PRIMARY KEY(realm, serial_number),
                 FOREIGN KEY(realm) REFERENCES realm(name) ON DELETE CASCADE
@@ -385,6 +388,23 @@ impl Database {
         )
         .execute(&mut *tx)
         .await?;
+
+        // Version 10 databases predate long-term Actor keys. ADD COLUMN is
+        // nullable so existing identities remain readable and renewable; their
+        // first successful reissue explicitly establishes the Actor-key binding.
+        let has_actor_public_key: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                 SELECT 1 FROM pragma_table_info('issued_actor_identity')
+                 WHERE name = 'actor_public_key'
+             )",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        if !has_actor_public_key {
+            sqlx::query("ALTER TABLE issued_actor_identity ADD COLUMN actor_public_key BLOB")
+                .execute(&mut *tx)
+                .await?;
+        }
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_issued_actor_identity_client_key
@@ -705,6 +725,67 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("schema version 0"));
         assert!(message.contains("rebuild the database"));
+    }
+
+    #[tokio::test]
+    async fn actor_key_migration_preserves_existing_rows_across_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::new(dir.path()).await.unwrap();
+        sqlx::query("ALTER TABLE issued_actor_identity DROP COLUMN actor_public_key")
+            .execute(db.get_pool())
+            .await
+            .unwrap();
+        sqlx::QueryBuilder::<sqlx::Sqlite>::new("PRAGMA user_version = ")
+            .push(LORAN_SCHEMA_VERSION_WITH_REALM_CLIENT_KEYS)
+            .build()
+            .execute(db.get_pool())
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO realm (name, created_at) VALUES ('legacy@example.com', 1)")
+            .execute(db.get_pool())
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO issued_actor_identity
+             (realm, serial_number, actor_type, member_id, client_key_id, issued_at)
+             VALUES ('legacy@example.com', 42, 'legacy/echo@1.0.0', 'member', 'client', 1)",
+        )
+        .execute(db.get_pool())
+        .await
+        .unwrap();
+        db.get_pool().close().await;
+
+        let migrated = Database::new(dir.path()).await.unwrap();
+        let version: i64 = sqlx::query_scalar("PRAGMA user_version")
+            .fetch_one(migrated.get_pool())
+            .await
+            .unwrap();
+        assert_eq!(version, LORAN_SCHEMA_VERSION);
+        let key: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT actor_public_key FROM issued_actor_identity WHERE serial_number = 42",
+        )
+        .fetch_one(migrated.get_pool())
+        .await
+        .unwrap();
+        assert_eq!(key, None);
+
+        sqlx::query(
+            "UPDATE issued_actor_identity SET actor_public_key = ? WHERE serial_number = 42",
+        )
+        .bind(vec![9; 32])
+        .execute(migrated.get_pool())
+        .await
+        .unwrap();
+        migrated.get_pool().close().await;
+
+        let reloaded = Database::new(dir.path()).await.unwrap();
+        let key: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT actor_public_key FROM issued_actor_identity WHERE serial_number = 42",
+        )
+        .fetch_one(reloaded.get_pool())
+        .await
+        .unwrap();
+        assert_eq!(key, Some(vec![9; 32]));
     }
 
     #[tokio::test]

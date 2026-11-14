@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Instant;
 
-use actr_protocol::{ActrId, ActrType, ServiceSpec, SignalingEnvelope};
+use actr_protocol::{ActrId, ActrType, RegisterRequest, ServiceSpec, SignalingEnvelope};
 use axum::extract::ws;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use tokio::sync::{Mutex, RwLock, mpsc};
@@ -22,6 +22,8 @@ pub struct RegisteredActor {
     pub client_id: String,
     pub ws_address: Option<String>,
     pub service_spec: Option<ServiceSpec>,
+    /// Normalized registration retained so renewal keeps the same Actor key.
+    pub registration: RegisterRequest,
 }
 
 /// Realm entry (seeded via `POST /admin/realms` or lazily by the signaling
@@ -81,6 +83,9 @@ pub struct MockState {
     pub disconnection_count: Arc<AtomicU32>,
     pub received_messages: Mutex<Vec<SignalingEnvelope>>,
     pub relay_enrollment_unavailable: AtomicBool,
+    /// When enabled, relay enrollment also mints an Actor channel certificate
+    /// so peers establish verified ActorChannelSessions instead of legacy.
+    pub actor_certificates_enabled: AtomicBool,
 }
 
 impl MockState {
@@ -117,6 +122,7 @@ impl MockState {
             disconnection_count: Arc::new(AtomicU32::new(0)),
             received_messages: Mutex::new(Vec::new()),
             relay_enrollment_unavailable: AtomicBool::new(false),
+            actor_certificates_enabled: AtomicBool::new(false),
         }
     }
 

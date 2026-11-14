@@ -50,6 +50,7 @@ fn make_valid_credential(
         client_key: "0000000000000000".to_string(),
         role: actr_protocol::MemberRole::Owner as i32,
         development: None,
+        actor_public_key: None,
     };
     let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
     let signature = sk.sign(&claims_bytes);
@@ -298,6 +299,7 @@ async fn verify_credential_realm_or_issuer_mismatch_returns_none() {
             client_key: "0000000000000000".to_string(),
             role: actr_protocol::MemberRole::Owner as i32,
             development: None,
+            actor_public_key: None,
         };
         let claims_bytes = actr_protocol::prost::Message::encode_to_vec(&claims);
         let credential = AIdCredential {
@@ -391,6 +393,7 @@ struct CapturingMailbox {
     enqueue_count: AtomicUsize,
     last_priority: std::sync::Mutex<Option<MessagePriority>>,
     last_from_type: std::sync::Mutex<Option<Vec<u8>>>,
+    last_peer_context: std::sync::Mutex<Option<Vec<u8>>>,
 }
 
 impl CapturingMailbox {
@@ -399,6 +402,7 @@ impl CapturingMailbox {
             enqueue_count: AtomicUsize::new(0),
             last_priority: std::sync::Mutex::new(None),
             last_from_type: std::sync::Mutex::new(None),
+            last_peer_context: std::sync::Mutex::new(None),
         })
     }
 }
@@ -407,14 +411,27 @@ impl CapturingMailbox {
 impl Mailbox for CapturingMailbox {
     async fn enqueue(
         &self,
+        from: Vec<u8>,
+        from_type: Option<Vec<u8>>,
+        payload: Vec<u8>,
+        priority: MessagePriority,
+    ) -> StorageResult<Uuid> {
+        self.enqueue_with_context(from, from_type, None, payload, priority)
+            .await
+    }
+
+    async fn enqueue_with_context(
+        &self,
         _from: Vec<u8>,
         from_type: Option<Vec<u8>>,
+        peer_context: Option<Vec<u8>>,
         _payload: Vec<u8>,
         priority: MessagePriority,
     ) -> StorageResult<Uuid> {
         self.enqueue_count.fetch_add(1, Ordering::SeqCst);
         *self.last_priority.lock().unwrap() = Some(priority);
         *self.last_from_type.lock().unwrap() = from_type;
+        *self.last_peer_context.lock().unwrap() = peer_context;
         Ok(Uuid::new_v4())
     }
     async fn dequeue(&self) -> StorageResult<Vec<MessageRecord>> {
@@ -587,6 +604,49 @@ async fn spawn_connection_tasks_get_lane_failure_removes_sink_and_fires_disconne
         None,
         "the closed connection no longer holds the peer's type"
     );
+}
+
+#[tokio::test]
+async fn verified_websocket_request_persists_its_actual_channel_context() {
+    let mailbox = CapturingMailbox::new();
+    let peer = test_actor_id(401);
+    let context = Arc::new(VerifiedPeerContext {
+        local_actor_id: test_actor_id(999),
+        peer_actor_id: peer.clone(),
+        peer_actor_type: test_actor_type(),
+        peer_member: "member".into(),
+        peer_client_key: "client-key".into(),
+        peer_role: "owner".into(),
+        peer_actor_public_key: vec![1],
+        channel_id: "channel-2".into(),
+        channel_generation: 2,
+        transcript_digest: vec![2],
+        local_runtime_instance_id: "local-runtime".into(),
+        peer_runtime_instance_id: "peer-runtime".into(),
+        peer_credential_expires_at_epoch_secs: u64::MAX,
+        current_policy_binding: vec![3],
+        current_state_binding: vec![4],
+    });
+    let envelope = make_rpc_envelope("verified-context");
+    let data = bytes::Bytes::from(actr_protocol::prost::Message::encode_to_vec(&envelope));
+
+    WebSocketGate::handle_envelope_with_context(
+        envelope,
+        actr_protocol::prost::Message::encode_to_vec(&peer),
+        None,
+        Some(context.clone()),
+        data,
+        PayloadType::RpcReliable,
+        empty_pending(),
+        mailbox.clone(),
+    )
+    .await;
+
+    assert_eq!(mailbox.enqueue_count.load(Ordering::SeqCst), 1);
+    let stored = mailbox.last_peer_context.lock().unwrap().clone().unwrap();
+    let stored: VerifiedPeerContext = serde_json::from_slice(&stored).unwrap();
+    assert_eq!(&stored, context.as_ref());
+    assert_eq!(stored.channel_generation, 2);
 }
 
 /// RPC request with no pending entry should go to the mailbox with normal priority.
@@ -1445,6 +1505,47 @@ async fn send_response_falls_back_before_sending_when_channel_not_ready() {
     );
     assert_eq!(writes.load(Ordering::SeqCst), 0);
     // Registration is kept: the session is alive and may become sendable.
+    assert!(gate.inbound_sinks.read().await.contains_key(&peer));
+}
+
+#[tokio::test]
+async fn send_response_strict_cell_rejects_legacy_bypass_without_writing() {
+    let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
+    let gate = WebSocketGate::new(
+        rx,
+        empty_pending(),
+        Arc::new(DataChunkRegistry::new()),
+        None,
+    );
+    let peer = test_actor_id(316);
+    let writes = Arc::new(AtomicUsize::new(0));
+    let observed = writes.clone();
+    let sink = futures_util::sink::unfold((), move |(), _: WsMessage| {
+        let observed = observed.clone();
+        async move {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, tokio_tungstenite::tungstenite::Error>(())
+        }
+    });
+    let sink: WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
+    gate.inbound_sinks.write().await.insert(
+        peer.clone(),
+        (
+            sink,
+            SecureCell::new_actrium(SecureChannelState::LegacyBypass),
+        ),
+    );
+
+    let result = gate.send_response(&peer, RpcEnvelope::default()).await;
+    assert!(
+        matches!(result, Ok(false)),
+        "strict LegacyBypass is not Verified and must fall back: {result:?}"
+    );
+    assert_eq!(
+        writes.load(Ordering::SeqCst),
+        0,
+        "no application response may reach the raw WebSocket sink before Verified"
+    );
     assert!(gate.inbound_sinks.read().await.contains_key(&peer));
 }
 

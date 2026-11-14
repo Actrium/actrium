@@ -41,7 +41,8 @@ use actr_protocol::{
 };
 use actr_protocol::{IceCandidate, IceRestartRejected, SessionDescription, ice_restart_rejected};
 use actr_web_common::{
-    ExponentialBackoff, MessageFormat, PayloadType, RenewError, WebIssuerClient,
+    ACTOR_SIGNING_KEY_STORAGE_KEY, ExponentialBackoff, MessageFormat, PayloadType, RenewError,
+    WebActorKey, WebIssuerClient,
 };
 use bytes::Bytes;
 use futures::StreamExt;
@@ -575,6 +576,10 @@ struct SwRuntime {
     signaling: SignalingClient,
     actor_id: Option<ActrId>,
     credential: Option<AIdCredential>,
+    /// Credential digest already tried against the Actor-key-binding heal, so
+    /// a persistent relay enrollment rejection cannot rotate credentials in a
+    /// loop.
+    actor_binding_heal_attempted: Option<[u8; 32]>,
     /// TURN credential from Issuer registration (time-limited HMAC)
     turn_credential: Option<actr_protocol::TurnCredential>,
     /// Platform provider for crypto and KV storage
@@ -683,6 +688,7 @@ impl SwRuntime {
             signaling,
             actor_id: Some(actor_id),
             credential: Some(credential),
+            actor_binding_heal_attempted: None,
             turn_credential,
             platform,
             discovered_targets: HashMap::new(),
@@ -742,6 +748,38 @@ impl SwRuntime {
         Ok(WebIssuerClient::new(&config.issuer_endpoint, key))
     }
 
+    /// Load the installation's long-term Actor key from IndexedDB, generating
+    /// and durably storing it once when absent. Its Realm + Actor-type namespace
+    /// deliberately excludes the random per-tab client ID, so browser reloads
+    /// retain the key. Invalid stored keys fail closed rather than rotating it.
+    async fn load_actor_key(
+        platform: &WebPlatformProvider,
+        client_actr_type: &ActrType,
+        realm: &str,
+    ) -> Result<WebActorKey, JsValue> {
+        let namespace = Self::build_actor_key_namespace(client_actr_type, realm);
+        let kv = platform
+            .secret_store(&namespace)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to open Actor key store: {e}")))?;
+        if let Some(bytes) = kv
+            .get(ACTOR_SIGNING_KEY_STORAGE_KEY)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to load Actor key: {e}")))?
+        {
+            return WebActorKey::from_bytes(&bytes)
+                .map_err(|e| JsValue::from_str(&format!("Invalid persisted Actor key: {e}")));
+        }
+
+        let key = WebActorKey::generate()
+            .map_err(|e| JsValue::from_str(&format!("Failed to generate Actor key: {e}")))?;
+        kv.set(ACTOR_SIGNING_KEY_STORAGE_KEY, &key.private_key_bytes())
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to persist Actor key: {e}")))?;
+        log::info!("[SW] generated and persisted a new independent Actor key in IndexedDB");
+        Ok(key)
+    }
+
     /// Register with Issuer via HTTP and obtain credential.
     ///
     /// Web always uses Linked registration (realm authorization). Credential
@@ -762,6 +800,93 @@ impl SwRuntime {
         Ok(())
     }
 
+    /// Heal an unbound Actor key by reissuing the credential, one attempt per
+    /// credential generation. `/reissue` establishes the Actor-key binding
+    /// Issuer-side for identities registered before Actor keys existed; the
+    /// refreshed credential then carries the key claim the relay Actor-channel
+    /// enrollment requires. Returns whether the credential was replaced.
+    async fn heal_actor_binding(&mut self) -> Result<bool, JsValue> {
+        let Some(credential) = self.credential.clone() else {
+            return Ok(false);
+        };
+        let Some(actor_id) = self.actor_id.clone() else {
+            return Ok(false);
+        };
+        let digest = actr_relay_security::actor_credential_digest(&credential.encode_to_vec());
+        if self.actor_binding_heal_attempted == Some(digest) {
+            return Ok(false);
+        }
+        self.actor_binding_heal_attempted = Some(digest);
+        let actor_key =
+            Self::load_actor_key(&self.platform, &self.client_actr_type, &self.realm).await?;
+        let mut registration = RegisterRequest {
+            actr_type: self.client_actr_type.clone(),
+            realm: self.realm.clone(),
+            acl: self.acl.clone(),
+            auth_mode: Some(RegisterAuthMode::Linked as i32),
+            ..Default::default()
+        };
+        actor_key
+            .sign_reissue_request(&mut registration)
+            .map_err(|e| JsValue::from_str(&format!("Cannot sign Actor reissue proof: {e}")))?;
+        let cred_kv_ns = self.cred_kv_namespace();
+        let kv = self
+            .platform
+            .secret_store(&cred_kv_ns)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to open credential store: {e}")))?;
+        let renewal_token = kv
+            .get("renewal_token")
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to load renewal proof: {e}")))?
+            .ok_or_else(|| JsValue::from_str("Missing private renewal proof"))?;
+        let request = actr_protocol::ReissueCredentialRequest {
+            actr_id: actor_id.clone(),
+            registration,
+            renewal_proof: Some(renewal_token.into()),
+            attempt_id: uuid::Uuid::new_v4().as_bytes().to_vec().into(),
+        };
+        log::info!("[SW] reissuing credential to bind the Actor key (relay enrollment rejected)");
+        let response = self
+            .issuer
+            .reissue_credential(request)
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Issuer reissue failed: {e}")))?;
+        let Some(actr_protocol::register_response::Result::Success(ok)) = response.result else {
+            return Ok(false);
+        };
+        if ok.actr_id != actor_id {
+            return Err(JsValue::from_str("Issuer reissue changed the ActrId"));
+        }
+        if !self.issuer.accepts_credential(&ok.credential)
+            || !actor_key.accepts_credential(&ok.credential)
+        {
+            return Err(JsValue::from_str(
+                "Issuer reissue returned a credential not bound to this Realm client and Actor key",
+            ));
+        }
+        Self::persist_credentials_static(&self.platform, &cred_kv_ns, &ok.actr_id, &ok.credential)
+            .await?;
+        Self::persist_turn_credential_static(&self.platform, &cred_kv_ns, &ok.turn_credential)
+            .await?;
+        if let (Some(token), Some(expires_at)) = (
+            ok.renewal_token.as_ref(),
+            ok.renewal_token_expires_at.as_ref(),
+        ) {
+            Self::persist_renewal_token_static(
+                &self.platform,
+                &cred_kv_ns,
+                token.as_ref(),
+                expires_at.seconds as u64,
+            )
+            .await?;
+        }
+        self.credential = Some(ok.credential);
+        self.turn_credential = Some(ok.turn_credential);
+        log::info!("[SW] credential reissued; Actor key binding established");
+        Ok(true)
+    }
+
     /// Obtain a credential from Issuer via HTTP.
     ///
     /// 1. Perform Linked registration (no manifest for web clients)
@@ -775,9 +900,10 @@ impl SwRuntime {
         platform: &WebPlatformProvider,
         cred_kv_ns: &StorageNamespace,
     ) -> Result<(ActrId, AIdCredential, Option<actr_protocol::TurnCredential>), JsValue> {
+        let actor_key = Self::load_actor_key(platform, client_actr_type, realm).await?;
         // Try to restore persisted credential if still valid
         if let Some((actor_id, credential)) =
-            Self::try_restore_credential_static(platform, cred_kv_ns).await?
+            Self::try_restore_credential_static(platform, cred_kv_ns, &actor_key).await?
         {
             log::info!(
                 "[SW] credentials restored from IndexedDB (actor_id={})",
@@ -792,7 +918,8 @@ impl SwRuntime {
         }
 
         if let Some((actor_id, credential, turn_credential)) =
-            Self::try_renew_persisted_credential_static(issuer, platform, cred_kv_ns).await?
+            Self::try_renew_persisted_credential_static(issuer, platform, cred_kv_ns, &actor_key)
+                .await?
         {
             log::info!(
                 "[SW] credentials renewed from persisted identity lease (actor_id={})",
@@ -804,7 +931,7 @@ impl SwRuntime {
         // Web registration always uses Linked auth (realm authorization).
         // Legacy PSK renewal path removed — credential renewal now goes
         // through the Web Credential Manager via POST /issuer/renew.
-        let request = RegisterRequest {
+        let mut request = RegisterRequest {
             actr_type: client_actr_type.clone(),
             realm: realm.to_string(),
             service_spec: None,
@@ -815,8 +942,13 @@ impl SwRuntime {
             publisher_signature: None,
             target: None,
             signing_public_key: None,
+            actor_public_key: None,
+            actor_key_proof: None,
             auth_mode: Some(RegisterAuthMode::Linked as i32),
         };
+        actor_key
+            .sign_register_request(&mut request)
+            .map_err(|e| JsValue::from_str(&format!("Cannot sign Actor registration: {e}")))?;
 
         log::info!(
             "[SW] register via Issuer HTTP (linked): actr_type={}",
@@ -833,6 +965,14 @@ impl SwRuntime {
                 let actor_id = ok.actr_id.clone();
                 let credential = ok.credential.clone();
                 let turn_credential = Some(ok.turn_credential.clone());
+
+                if !issuer.accepts_credential(&credential)
+                    || !actor_key.accepts_credential(&credential)
+                {
+                    return Err(JsValue::from_str(
+                        "Issuer registration returned a credential not bound to this Realm client and Actor key",
+                    ));
+                }
 
                 log::info!("[SW] Issuer registration success: actr_id={}", actor_id);
 
@@ -996,6 +1136,7 @@ impl SwRuntime {
         issuer: &WebIssuerClient,
         platform: &WebPlatformProvider,
         cred_kv_ns: &StorageNamespace,
+        actor_key: &WebActorKey,
     ) -> Result<Option<(ActrId, AIdCredential, Option<actr_protocol::TurnCredential>)>, JsValue>
     {
         let kv = platform
@@ -1008,8 +1149,9 @@ impl SwRuntime {
             .await
             .map_err(|e| JsValue::from_str(&format!("Failed to read credential: {e}")))?;
         if !credential.as_ref().is_some_and(|bytes| {
-            AIdCredential::decode(bytes.as_slice())
-                .is_ok_and(|credential| issuer.accepts_credential(&credential))
+            AIdCredential::decode(bytes.as_slice()).is_ok_and(|credential| {
+                issuer.accepts_credential(&credential) && actor_key.accepts_credential(&credential)
+            })
         }) {
             Self::clear_persisted_identity_static(platform, cred_kv_ns).await?;
             return Ok(None);
@@ -1156,6 +1298,11 @@ impl SwRuntime {
         }
 
         let credential = ok.credential.clone();
+        if !issuer.accepts_credential(&credential) || !actor_key.accepts_credential(&credential) {
+            return Err(JsValue::from_str(
+                "Issuer renewal returned a credential not bound to this Realm client and Actor key",
+            ));
+        }
         let turn_credential = Some(ok.turn_credential.clone());
         Self::persist_credentials_static(platform, cred_kv_ns, &actor_id, &credential).await?;
         if let Some(ref tc) = turn_credential {
@@ -1260,6 +1407,7 @@ impl SwRuntime {
     async fn try_restore_credential_static(
         platform: &WebPlatformProvider,
         cred_kv_ns: &StorageNamespace,
+        actor_key: &WebActorKey,
     ) -> Result<Option<(ActrId, AIdCredential)>, JsValue> {
         let kv = platform
             .secret_store(cred_kv_ns)
@@ -1288,6 +1436,10 @@ impl SwRuntime {
 
         let claims = actr_protocol::IdentityClaims::decode(&*credential.claims)
             .map_err(|e| JsValue::from_str(&format!("Failed to decode identity claims: {e}")))?;
+        if !actor_key.accepts_credential(&credential) {
+            log::warn!("[SW] persisted credential is not bound to the persisted Actor key");
+            return Ok(None);
+        }
 
         let now_secs = (js_sys::Date::now() / 1000.0) as u64;
         // The issuer TTL is configurable and claims do not carry an issued-at
@@ -1352,6 +1504,24 @@ impl SwRuntime {
         StorageNamespace::actr_v1(digest)
     }
 
+    /// Installation-level Actor key storage is stable across tabs and reloads,
+    /// unlike credentials, which remain partitioned by random per-tab client ID.
+    fn build_actor_key_namespace(client_actr_type: &ActrType, realm: &str) -> StorageNamespace {
+        const DOMAIN: &[u8] = b"actr-web-actor-key-namespace\0v1";
+        fn field(h: &mut Sha256, tag: u8, bytes: &[u8]) {
+            h.update([tag]);
+            h.update((bytes.len() as u32).to_be_bytes());
+            h.update(bytes);
+        }
+        let mut h = Sha256::new();
+        h.update(DOMAIN);
+        field(&mut h, 1, realm.as_bytes());
+        field(&mut h, 2, client_actr_type.publisher.as_bytes());
+        field(&mut h, 3, client_actr_type.name.as_bytes());
+        field(&mut h, 4, client_actr_type.version.as_bytes());
+        StorageNamespace::actr_v1(h.finalize().into())
+    }
+
     /// Reconnect the signaling WebSocket after detecting a dead connection.
     ///
     /// New flow: obtain credential via Issuer HTTP first, then connect signaling
@@ -1371,7 +1541,9 @@ impl SwRuntime {
 
         // 3. Obtain credential: try restore from IndexedDB, else re-register via Issuer HTTP.
         let cred_kv_ns = self.cred_kv_namespace();
-        match Self::try_restore_credential_static(&self.platform, &cred_kv_ns).await {
+        let actor_key =
+            Self::load_actor_key(&self.platform, &self.client_actr_type, &self.realm).await?;
+        match Self::try_restore_credential_static(&self.platform, &cred_kv_ns, &actor_key).await {
             Ok(Some((actor_id, credential))) => {
                 log::info!("[SW] restored credentials from IndexedDB, skipping Issuer re-register");
                 self.actor_id = Some(actor_id);
@@ -1431,10 +1603,17 @@ impl SwRuntime {
 
     async fn renew_current_credential(&mut self) -> Result<(), JsValue> {
         let cred_kv_ns = self.cred_kv_namespace();
+        let actor_key =
+            Self::load_actor_key(&self.platform, &self.client_actr_type, &self.realm).await?;
 
         let Some((actor_id, credential, turn_credential)) =
-            Self::try_renew_persisted_credential_static(&self.issuer, &self.platform, &cred_kv_ns)
-                .await?
+            Self::try_renew_persisted_credential_static(
+                &self.issuer,
+                &self.platform,
+                &cred_kv_ns,
+                &actor_key,
+            )
+            .await?
         else {
             log::warn!("[SW] renewal token unavailable; falling back to Issuer registration");
             self.register_via_issuer().await?;
@@ -4545,6 +4724,59 @@ mod cred_ns_tests {
             SwRuntime::load_issuer_client(&config, &WebPlatformProvider::new(&root))
                 .await
                 .is_err()
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn actor_key_survives_reload_and_never_rotates_after_corruption() {
+        let actor_type = ty("example.com", "browser", "1.0.0");
+        let root = format!("actor-key-test-{}", uuid::Uuid::new_v4());
+        let first = SwRuntime::load_actor_key(
+            &WebPlatformProvider::new(&root),
+            &actor_type,
+            "actors@example.com",
+        )
+        .await
+        .unwrap();
+        let public = first.public_key();
+
+        // A new provider simulates a browser reload; no in-memory key survives.
+        let restored = SwRuntime::load_actor_key(
+            &WebPlatformProvider::new(&root),
+            &actor_type,
+            "actors@example.com",
+        )
+        .await
+        .unwrap();
+        assert_eq!(restored.public_key(), public);
+
+        let other_realm = SwRuntime::load_actor_key(
+            &WebPlatformProvider::new(&root),
+            &actor_type,
+            "other@example.com",
+        )
+        .await
+        .unwrap();
+        assert_ne!(other_realm.public_key(), public);
+
+        let namespace = SwRuntime::build_actor_key_namespace(&actor_type, "actors@example.com");
+        let store = WebPlatformProvider::new(&root)
+            .secret_store(&namespace)
+            .await
+            .unwrap();
+        store
+            .set(ACTOR_SIGNING_KEY_STORAGE_KEY, &[0; 31])
+            .await
+            .unwrap();
+        assert!(
+            SwRuntime::load_actor_key(
+                &WebPlatformProvider::new(&root),
+                &actor_type,
+                "actors@example.com",
+            )
+            .await
+            .is_err()
         );
     }
 

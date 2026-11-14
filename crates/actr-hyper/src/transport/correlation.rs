@@ -10,13 +10,15 @@
 //! failure, timeout, cancellation) cleans up without manual bookkeeping.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use actr_framework::Bytes;
 use actr_protocol::{ActorResult, ActrError, ActrId, ErrorResponse, RpcEnvelope};
 use tokio::sync::oneshot;
 
-use super::wire_handle::WireIdentity;
+use crate::lifecycle::{IncomingCaller, IncomingDispatchRequest, IncomingGuard};
+
+use super::{VerifiedPeerContext, wire_handle::WireIdentity};
 
 type PendingMap<M> = Arc<Mutex<HashMap<String, Entry<M>>>>;
 
@@ -35,6 +37,7 @@ pub(crate) type PendingRequestsMap = Arc<RpcCorrelation<ActrId>>;
 /// so all access is funneled through this module.
 pub(crate) struct RpcCorrelation<M> {
     inner: PendingMap<M>,
+    incoming_guard: RwLock<Option<Arc<dyn IncomingGuard>>>,
 }
 
 struct Entry<M> {
@@ -89,7 +92,15 @@ impl<M> RpcCorrelation<M> {
     pub(crate) fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(HashMap::new())),
+            incoming_guard: RwLock::new(None),
         }
+    }
+
+    pub(crate) fn set_incoming_guard(&self, guard: Option<Arc<dyn IncomingGuard>>) {
+        *self
+            .incoming_guard
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = guard;
     }
 
     /// Insert a pending entry; the returned guard removes it on Drop unless
@@ -201,11 +212,40 @@ impl<M> RpcCorrelation<M> {
     /// the crate-standard warn (`rpc.orphan_response_dropped`) with
     /// request_id / peer / route_key; `peer` is only evaluated on that
     /// drop path.
-    pub(crate) fn complete_from_envelope(
+    pub(crate) async fn complete_from_envelope(
         &self,
         envelope: RpcEnvelope,
+        caller: Option<IncomingCaller<'_>>,
         peer: impl FnOnce() -> String,
     ) -> CompleteOutcome {
+        self.complete_from_envelope_with_context(envelope, caller, None, peer)
+            .await
+    }
+
+    pub(crate) async fn complete_from_envelope_with_context(
+        &self,
+        envelope: RpcEnvelope,
+        caller: Option<IncomingCaller<'_>>,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
+        peer: impl FnOnce() -> String,
+    ) -> CompleteOutcome {
+        let guard = self
+            .incoming_guard
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let Some(guard) = guard
+            && let Err(error) = guard
+                .check(
+                    IncomingDispatchRequest::new(&envelope, caller).with_peer_context(peer_context),
+                )
+                .await
+        {
+            // A rejected response must never release its payload to the guest.
+            // Wake the caller with the authorization error instead of leaving a
+            // pending request alive until its transport deadline.
+            return self.complete(&envelope.request_id, Err(error.into_actr_error()));
+        }
         let RpcEnvelope {
             request_id,
             route_key,
@@ -443,9 +483,11 @@ mod tests {
             payload: Some(Bytes::from_static(b"resp")),
             ..Default::default()
         };
-        let outcome = correlation.complete_from_envelope(envelope, || {
-            panic!("peer must not be computed on the completed path")
-        });
+        let outcome = correlation
+            .complete_from_envelope(envelope, None, || {
+                panic!("peer must not be computed on the completed path")
+            })
+            .await;
         assert_eq!(outcome, CompleteOutcome::Completed);
         let result = pending.recv().await;
         assert_eq!(result.unwrap(), Bytes::from_static(b"resp"));
@@ -460,8 +502,74 @@ mod tests {
             payload: Some(Bytes::from_static(b"resp")),
             ..Default::default()
         };
-        let outcome = correlation.complete_from_envelope(envelope, || "peer-1".to_string());
+        let outcome = correlation
+            .complete_from_envelope(envelope, None, || "peer-1".to_string())
+            .await;
         assert_eq!(outcome, CompleteOutcome::Orphan);
+    }
+
+    struct RejectResponseGuard;
+
+    #[async_trait::async_trait]
+    impl crate::lifecycle::IncomingGuard for RejectResponseGuard {
+        async fn check(
+            &self,
+            request: crate::lifecycle::IncomingDispatchRequest<'_>,
+        ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+            assert_eq!(
+                request.envelope.direction,
+                Some(actr_protocol::Direction::Response as i32)
+            );
+            assert_eq!(
+                request.metadata.get("actrium.request.proof"),
+                Some("host-signed-proof")
+            );
+            Err(crate::lifecycle::IncomingGuardError::new(
+                crate::lifecycle::IncomingGuardErrorCode::Revoked,
+                "session revoked before response delivery",
+            ))
+        }
+
+        async fn authenticate_response(
+            &self,
+            _response: &mut RpcEnvelope,
+        ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+            Ok(())
+        }
+
+        async fn check_stream(
+            &self,
+            _request: crate::lifecycle::IncomingStreamChunk<'_>,
+        ) -> Result<(), crate::lifecycle::IncomingGuardError> {
+            unreachable!("response guard test does not dispatch streams")
+        }
+    }
+
+    #[tokio::test]
+    async fn rejected_response_delivers_guard_error_not_payload() {
+        let correlation: RpcCorrelation<()> = RpcCorrelation::new();
+        correlation.set_incoming_guard(Some(Arc::new(RejectResponseGuard)));
+        let pending = correlation.register("req-revoked", ());
+        let envelope = RpcEnvelope {
+            request_id: "req-revoked".to_string(),
+            route_key: "echo".to_string(),
+            payload: Some(Bytes::from_static(b"must-not-be-delivered")),
+            direction: Some(actr_protocol::Direction::Response as i32),
+            metadata: vec![actr_protocol::MetadataEntry {
+                key: "actrium.request.proof".to_string(),
+                value: "host-signed-proof".to_string(),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            correlation
+                .complete_from_envelope(envelope, None, || "peer".to_string())
+                .await,
+            CompleteOutcome::Completed
+        );
+        let error = pending.recv().await.unwrap_err();
+        assert!(matches!(error, ActrError::PermissionDenied(_)));
+        assert!(error.to_string().contains("session revoked"));
     }
 
     #[cfg(feature = "test-utils")]
