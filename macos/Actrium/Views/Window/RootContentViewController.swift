@@ -57,7 +57,7 @@ final class RootContentViewController: NSViewController {
     private let toolbarHeight: CGFloat = 45
 
     /// Window background color (TODO: make configurable via settings)
-    private let windowBackgroundColor = NSColor(red: 0.1, green: 0.2, blue: 0.4, alpha: 1.0)
+    private let windowBackgroundColor = NSColor.white
 
     /// Traffic lights position (absolute, in our view's coordinates)
     private let trafficLightPosition = NSPoint(x: 15, y: 0)
@@ -375,9 +375,11 @@ struct SelfDrawnToolbarView: View {
                     .padding(.top, -(9 + iconVerticalNudge))
 
                 sidebarToolbarSection(metrics: metrics)
+                    .environment(\.colorScheme, .light)
                     .frame(width: sidebarWidth, alignment: .leading)
 
                 contentToolbarSection
+                    .environment(\.colorScheme, .light)
                     .frame(width: contentWidth, alignment: .leading)
                     .offset(x: contentLeading)
             }
@@ -610,14 +612,14 @@ struct SelfDrawnToolbarView: View {
     // MARK: - Background
 
     private func toolbarBackground(metrics: ToolbarLayoutMetrics) -> some View {
-        // Content background (dark with top-left rounded corner only)
+        // White toolbar background with a top-left rounded corner.
         UnevenRoundedRectangle(
             topLeadingRadius: 12,
             bottomLeadingRadius: 0,
             bottomTrailingRadius: 0,
             topTrailingRadius: 0  // roundedContainer mask handles right corner
         )
-        .fill(AppColors.contentBackgroundColor)
+        .fill(Color.white)
         .padding(.leading, metrics.backgroundLeadingX)
         .allowsHitTesting(false)
     }
@@ -753,6 +755,8 @@ private struct SelfDrawnAddressInputField: NSViewRepresentable {
     func makeNSView(context: Context) -> NSTextField {
         let textField = NSTextField()
         textField.font = .systemFont(ofSize: 13)
+        textField.textColor = .black
+        textField.appearance = NSAppearance(named: .aqua)
         textField.isBordered = false
         textField.drawsBackground = false
         textField.focusRingType = .none

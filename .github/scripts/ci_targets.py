@@ -18,6 +18,7 @@ TARGETS = (
     "python_codegen",
     "python_workload",
     "swift_binding",
+    "macos_host",
     "kotlin_binding",
     "csharp_binding",
     "web_binding",
@@ -107,6 +108,14 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
         if matches_any(path, FULL_TRIGGER_PATTERNS):
             set_all(targets, True)
             reasons.append(f"full_trigger:{path}")
+            continue
+
+        if path.startswith("macos/") or path in (
+            "package.json",
+            "scripts/actrium/filter-xcodebuild-output.sh",
+        ):
+            targets["macos_host"] = True
+            reasons.append(f"macos_host:{path}")
             continue
 
         if path == "crates/actr-cli/tests/e2e_typescript_generated_echo_web.rs":

@@ -7,6 +7,24 @@ import ci_targets
 
 
 class CiTargetsTest(unittest.TestCase):
+    def test_macos_host_changes_run_focused_native_checks(self) -> None:
+        for path in (
+            "macos/ActriumViewService/RendererLayerHosting.swift",
+            "macos/Actrium/Views/Window/RootContentViewController.swift",
+            "macos/scripts/sign-app.sh",
+            "macos/scripts/build-app.sh",
+            "macos/scripts/tests/test_sign_app.py",
+            "package.json",
+            "scripts/actrium/filter-xcodebuild-output.sh",
+        ):
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
+                self.assertTrue(targets["macos_host"])
+                self.assertTrue(targets["release_related"])
+                self.assertFalse(targets["rust_core"])
+                self.assertFalse(targets["swift_binding"])
+                self.assertIn(f"macos_host:{path}", reasons)
+
     def test_mobile_fixture_compile_regression_runs_the_rust_gate(self) -> None:
         path = "scripts/actr/tests/test_mobile_fixture_cfg.py"
         targets, reasons = ci_targets.detect_targets([path], full_run=False)

@@ -1387,7 +1387,7 @@ private class RoundedRowView: NSTableRowView {
     override func drawBackground(in dirtyRect: NSRect) {
         if !isSelected && isHovering {
             let path = NSBezierPath(roundedRect: contentRect, xRadius: 8, yRadius: 8)
-            NSColor.white.withAlphaComponent(0.06).setFill()
+            NSColor.labelColor.withAlphaComponent(0.06).setFill()
             path.fill()
         }
     }
@@ -1493,14 +1493,14 @@ private class TabRowView: NSView {
             if let appIcon = tab.appIcon,
                let image = NSImage(systemSymbolName: appIcon, accessibilityDescription: nil) {
                 iconView.image = image
-                iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+                iconView.contentTintColor = isSelected ? .white : .secondaryLabelColor
             } else if let systemType = tab.systemTabType,
                       let image = NSImage(systemSymbolName: systemType.icon, accessibilityDescription: nil) {
                 iconView.image = image
-                iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+                iconView.contentTintColor = isSelected ? .white : .secondaryLabelColor
             } else {
                 iconView.image = NSImage(systemSymbolName: isSelected ? "doc.text.fill" : "doc.text", accessibilityDescription: nil)
-                iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+                iconView.contentTintColor = isSelected ? .white : .secondaryLabelColor
             }
         }
 
@@ -1526,7 +1526,7 @@ private class TabRowView: NSView {
         // Title
         let titleLabel = NSTextField(labelWithString: tab.title)
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: isSelected ? .medium : .regular)
-        titleLabel.textColor = .labelColor
+        titleLabel.textColor = isSelected ? .white : .labelColor
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -1541,7 +1541,7 @@ private class TabRowView: NSView {
         closeButton.isBordered = false
         closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close tab")
         closeButton.imageScaling = .scaleProportionallyUpOrDown
-        closeButton.contentTintColor = .secondaryLabelColor
+        closeButton.contentTintColor = isSelected ? .white : .secondaryLabelColor
         closeButton.target = self
         closeButton.action = #selector(closeTabClicked)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
