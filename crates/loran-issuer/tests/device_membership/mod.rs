@@ -52,6 +52,191 @@ fn refused(result: Result<serde_json::Value, MembershipClientError>, expected: &
 
 #[tokio::test]
 #[serial]
+async fn development_open_admission_works_across_realms_and_issues_actor_credentials() {
+    use actr_protocol::realm_membership::{MembershipOp, MembershipRequest};
+    use base64::Engine as _;
+    use platform::config::{
+        RealmConfig,
+        realm::{DevJoinConfig, DevJoinMode},
+    };
+    let mut env = setup_test_environment().await;
+    seed_realm(TEST_REALM, None).await;
+    let other = "open-other@acme.com";
+    seed_realm(other, None).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let config = RealmConfig {
+        dev_join: DevJoinConfig {
+            mode: DevJoinMode::Open,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let app = create_router(
+        IssuerState::new(create_test_issuer(&env).await).with_membership(&config, None),
+    );
+    let raw_app = app.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    let a = device(&endpoint, TEST_REALM);
+    let b = device(&endpoint, other);
+    let joined = a.join("", "invite-free").await.unwrap();
+    assert_eq!(joined["role"], "editor");
+    assert_eq!(joined, a.join("", "retry").await.unwrap());
+    // Raw clients may supply any string; signature and nonce checks still run.
+    let unknown = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([42u8; 32]);
+    for invite in [None, Some(""), Some("anything"), Some(unknown.as_str())] {
+        let key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+        let mut request = MembershipRequest::new(
+            MembershipOp::Join,
+            TEST_REALM,
+            PROVIDER_ID,
+            &format!("open-any-{}", rand::random::<u64>()),
+        );
+        request.public_key =
+            Some(base64::engine::general_purpose::STANDARD.encode(key.verifying_key().as_bytes()));
+        request.invite = invite.map(str::to_owned);
+        let document = request.sign(&key);
+        let (status, reply) = post_membership(raw_app.clone(), document.clone()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(reply["role"], "editor");
+        let (status, _) = post_membership(raw_app.clone(), document.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let mut changed = document;
+        changed["nonce"] = "tampered".into();
+        let (status, _) = post_membership(raw_app.clone(), changed).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+    assert_eq!(
+        joined,
+        a.join("not-an-invitation", "arbitrary input")
+            .await
+            .unwrap()
+    );
+    let used = invite(TEST_REALM).await;
+    device(&endpoint, TEST_REALM)
+        .join(&used.invite, "first redemption")
+        .await
+        .unwrap();
+    assert_eq!(
+        device(&endpoint, TEST_REALM)
+            .join(&used.invite, "used invite")
+            .await
+            .unwrap()["role"],
+        "editor"
+    );
+    let expired = invite(TEST_REALM).await;
+    sqlx::query("UPDATE realm_invite SET expires_at=1 WHERE invite_id=?")
+        .bind(&expired.invite_id)
+        .execute(platform::storage::db::get_database().get_pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        device(&endpoint, TEST_REALM)
+            .join(&expired.invite, "expired invite")
+            .await
+            .unwrap()["role"],
+        "editor"
+    );
+    let revoked = invite(TEST_REALM).await;
+    membership::revoke_invite(&owner(TEST_REALM).await, &revoked.invite_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        device(&endpoint, TEST_REALM)
+            .join(&revoked.invite, "revoked invite")
+            .await
+            .unwrap()["role"],
+        "editor"
+    );
+    let foreign = invite(other).await;
+    assert_eq!(
+        device(&endpoint, TEST_REALM)
+            .join(&foreign.invite, "foreign invite")
+            .await
+            .unwrap()["realm"],
+        TEST_REALM
+    );
+    let owner = owner(TEST_REALM).await;
+    let owner_invite = membership::create_invite(
+        &owner,
+        None,
+        Some(&owner.member_id),
+        chrono::Utc::now().timestamp() + 3600,
+        limits(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        device(&endpoint, TEST_REALM)
+            .join(&owner_invite.invite, "owner device")
+            .await
+            .unwrap()["role"],
+        "owner"
+    );
+    assert_eq!(b.join("", "another realm").await.unwrap()["role"], "editor");
+    assert!(a.members().await.unwrap()["members"].is_array());
+    let registration = IssuerClient::new(&endpoint)
+        .with_client_key(a.client_key())
+        .register_linked(linked_register_request())
+        .await
+        .unwrap();
+    assert!(matches!(
+        registration.result,
+        Some(register_response::Result::Success(_))
+    ));
+    membership::revoke_client(&owner, &a.key_id())
+        .await
+        .unwrap();
+    refused(a.join("", "revoked").await, "client_revoked");
+    refused(a.join("anything", "revoked").await, "client_revoked");
+    refused(
+        device(&endpoint, "missing@acme.com")
+            .join("", "missing")
+            .await,
+        "realm_unavailable",
+    );
+    server.abort();
+    // A fresh normal router retains default one-time admission.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let app = create_test_router(&env).await;
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    refused(
+        device(&endpoint, TEST_REALM).join("", "closed").await,
+        "invalid_request",
+    );
+    assert!(matches!(
+        device(&endpoint, TEST_REALM)
+            .join("anything", "closed")
+            .await,
+        Err(MembershipClientError::InvalidInput(_))
+    ));
+    refused(
+        device(&endpoint, TEST_REALM)
+            .join(&foreign.invite, "closed foreign invite")
+            .await,
+        "invite_realm_mismatch",
+    );
+    server.abort();
+    env.shutdown_signer().await;
+}
+
+#[tokio::test]
+#[serial]
 async fn sdk_devices_join_retry_register_renew_reissue_and_revoke() {
     use axum::{middleware, response::IntoResponse};
     use std::sync::atomic::{AtomicBool, Ordering};

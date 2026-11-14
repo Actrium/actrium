@@ -571,6 +571,28 @@ static REGISTRY: &[ConfigFieldDef] = &[
     },
     // ── Issuer ───────────────────────────────────────────────────────
     ConfigFieldDef {
+        key: "realm.dev_join.mode",
+        toml_path: "realm.dev_join.mode",
+        value_type: ConfigValueType::Enum,
+        default_value: "off",
+        dynamic: false,
+        reloadable: true,
+        description: "Development admission for all active Realms on this AFP",
+        service: "issuer",
+        choices: &["off", "open", "reusable_invite"],
+    },
+    ConfigFieldDef {
+        key: "realm.dev_join.default_role",
+        toml_path: "realm.dev_join.default_role",
+        value_type: ConfigValueType::Enum,
+        default_value: "editor",
+        dynamic: false,
+        reloadable: true,
+        description: "Role assigned by open development admission",
+        service: "issuer",
+        choices: &["editor", "viewer"],
+    },
+    ConfigFieldDef {
         key: "services.issuer.server.token_ttl_secs",
         toml_path: "services.issuer.server.token_ttl_secs",
         value_type: ConfigValueType::U64,

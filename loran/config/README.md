@@ -3,6 +3,45 @@
 Development, reference, and production configuration for the composed Loran
 service suite belongs here.
 
+## Development Realm admission
+
+`[realm.dev_join]` applies to every active Realm hosted by the AFP.
+It defaults to `mode = "off"` and `default_role = "editor"`.
+The Loran Admin UI's **Issuer Service → Development admission** form saves
+the configuration and reloads it. File edits take effect on SIGHUP.
+Supervisor-managed AFPs reject local admission-policy changes and show this
+form as read-only.
+The service needs write access to its config file, including a matching
+`ReadWritePaths` entry when systemd uses `ProtectSystem=strict`.
+
+- `off` uses one-time invitations.
+- `open` accepts signed joins with no invitation or any invitation text. Valid
+  invitations use normal redemption. Missing, invalid, expired, used or revoked
+  invitations fall back to the configured Editor or Viewer role. Anyone who
+  knows a hosted Realm's name can join.
+- `reusable_invite` lets an unused member or client invitation admit multiple
+  devices until it expires or is revoked. Owner recovery invitations remain
+  single-use. When this mode is disabled, a remaining invitation becomes single-use.
+
+Each device still proves its own key and receives a stored membership.
+Retries retain the existing identity and role. Revoked keys, removed members,
+inactive Realms, and membership quotas still apply. Turning the switch off
+stops new development admissions. Revoke already admitted clients separately.
+The signed Realm Profile's membership policy is unchanged, so treat this as
+an explicit deployment override for development.
+
+```sh
+actr realm join --realm echo@realm.example --output ./echo-client.json
+actr realm join anything --realm echo@realm.example --output ./another-client.json
+actr realm members --key ./echo-client.json
+```
+
+With `--realm`, the CLI ignores the optional invitation text. SDK callers may
+pass an empty or arbitrary string to `RealmMembershipClient.join(text, label)`.
+The SDK probes open admission for malformed or foreign invitations without
+forwarding their contents to another Realm's Issuer. Normal mode still rejects
+these inputs. Endpoint and response validation apply to every mode.
+
 ## Standalone UDP STUN/TURN
 
 Use the regular Loran executable and the existing configuration schema.

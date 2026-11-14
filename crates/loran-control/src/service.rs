@@ -34,6 +34,9 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
+#[cfg(test)]
+mod admission_policy_tests;
+
 /// A created Realm: the response and its owner invite, returned once.
 pub type CreatedRealm = (CreateRealmResponse, Option<IssuedInvite>);
 type MetricsFuture = Pin<Box<dyn Future<Output = AdminResult<SystemMetrics>> + Send>>;
@@ -446,6 +449,8 @@ impl AdminApiService {
             }),
             "issuer" => cfg.services.issuer.as_ref().map(|a| {
                 serde_json::json!({
+                    "dev_join": cfg.realm.dev_join,
+                    "dev_join_writable": !cfg.superv_managed(),
                     "token_ttl_secs": a.server.token_ttl_secs,
                     "signaling_heartbeat_interval_secs": a.server.signaling_heartbeat_interval_secs,
                     "dependencies": {
@@ -507,9 +512,8 @@ impl AdminApiService {
     /// Write config file to disk (with TOML validation).
     ///
     /// `superv_managed` reflects whether the realm is supervisor-managed (Admin
-    /// UI read-only for the control plane). When true, any change to the
-    /// `control.*` section is rejected so a config write + reload cannot
-    /// re-enable the gRPC API and bypass the realm-write lock.
+    /// UI read-only for the control plane). When true, control settings and
+    /// Realm admission policy are protected by the supervisor's Realm-write lock.
     pub async fn save_config_file_direct(
         &self,
         content: &str,
@@ -552,6 +556,16 @@ impl AdminApiService {
             return Err(Status::permission_denied(
                 "control.* section is read-only while the realm is supervisor-managed",
             ));
+        }
+        if superv_managed {
+            let old_config = LoranConfig::from_toml(&original).map_err(|_| {
+                Status::failed_precondition("Cannot verify the existing admission policy")
+            })?;
+            if new_config.realm.dev_join != old_config.realm.dev_join {
+                return Err(Status::permission_denied(
+                    "realm.dev_join is read-only while the realm is supervisor-managed",
+                ));
+            }
         }
 
         // Validate config semantics
