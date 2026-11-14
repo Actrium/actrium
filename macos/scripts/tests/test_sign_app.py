@@ -137,6 +137,15 @@ class SigningTests(unittest.TestCase):
         result = self.run_signer(IDENTITY_NAME="-", CODESIGN_TIMESTAMP="none")
         self.assertNotEqual(result.returncode, 0)
 
+    def test_missing_renderer_directory_is_rejected_before_signing(self) -> None:
+        binary = self.app / "Contents/MacOS/Actrium"
+        original = binary.read_bytes()
+        shutil.rmtree(self.app / "Contents/Helpers/ActriumRenderer.app")
+        result = self.run_signer(IDENTITY_NAME="-", CODESIGN_TIMESTAMP="none")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing renderer helper", result.stderr)
+        self.assertEqual(binary.read_bytes(), original)
+
 
 if __name__ == "__main__":
     unittest.main()

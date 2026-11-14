@@ -31,6 +31,11 @@ final class RendererCAContext {
     /// editor ends editing. Exporting the whole native window keeps that
     /// reparent inside the exported tree instead of emptying the CAContext.
     func attachWindowLayerTree(for content: NSView) {
+        if layer == nil {
+            // Initialize the native backing tree synchronously. Without this,
+            // the first window update can replace the root chosen below.
+            content.window?.displayIfNeeded()
+        }
         var root = content.superview?.layer ?? content.layer
         while let parent = root?.superlayer {
             root = parent

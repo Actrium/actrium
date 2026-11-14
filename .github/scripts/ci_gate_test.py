@@ -1091,6 +1091,7 @@ def test_service_readiness_waits_for_exact_registration() -> None:
 
 if __name__ == "__main__":
     test_gate_aggregates_webrtc_domain()
+    test_macos_host_checks_are_affected_only_and_gate_failures()
     test_gate_enforces_anonymous_commit_identities()
     test_gate_aggregates_kotlin_native_domain()
     test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm()

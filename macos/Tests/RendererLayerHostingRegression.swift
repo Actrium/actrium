@@ -49,14 +49,14 @@ struct RendererLayerHostingRegression {
             require(content.layer?.superlayer != nil, "Content left the native window hierarchy: \(stage)")
         }
 
-        // Let AppKit initialize the hidden window's native backing tree before
-        // the first content mount, as it does while the renderer loads RN.
-        drain()
+        // Exercise the first mount in production order, before any run-loop
+        // drain can initialize the window's backing tree for the exporter.
         content.needsLayout = true
         content.layoutSubtreeIfNeeded()
         context.attachWindowLayerTree(for: content)
         drain()
         requireHostedTree("initial layout")
+        print("PASS: first attachment survives the initial window update without a pre-attachment run-loop drain")
         // Do not reattach during focus transitions: that would mask the bug.
         for cycle in 0..<30 {
             require(window.makeFirstResponder(first), "Could not focus the first field")

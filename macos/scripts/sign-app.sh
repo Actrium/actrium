@@ -65,13 +65,10 @@ sign_nested_code() {
 echo "==> Signing the app inside out"
 HELPER_APP="${APP_PATH}/Contents/Helpers/ActriumRenderer.app"
 validate_executable "${APP_PATH}"
-if [ -d "${HELPER_APP}" ]; then
-  validate_executable "${HELPER_APP}"
-fi
-if [ -d "${HELPER_APP}" ]; then
-  sign_nested_code "${HELPER_APP}/Contents/Frameworks"
-  codesign "${CODESIGN_ARGS[@]}" --entitlements "${RENDERER_ENTITLEMENTS}" "${HELPER_APP}"
-fi
+[ -d "${HELPER_APP}" ] || die "missing renderer helper: ${HELPER_APP}"
+validate_executable "${HELPER_APP}"
+sign_nested_code "${HELPER_APP}/Contents/Frameworks"
+codesign "${CODESIGN_ARGS[@]}" --entitlements "${RENDERER_ENTITLEMENTS}" "${HELPER_APP}"
 
 sign_nested_code "${APP_PATH}/Contents/Frameworks"
 codesign "${CODESIGN_ARGS[@]}" --entitlements "${APP_ENTITLEMENTS}" "${APP_PATH}"

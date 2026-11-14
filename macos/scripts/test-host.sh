@@ -6,7 +6,9 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/actrium-host-tests.XXXXXX")"
 trap 'rm -rf "${TEST_DIR}"' EXIT
 
-bash -n "${SCRIPT_DIR}/build-app.sh" "${SCRIPT_DIR}/sign-app.sh" "${SCRIPT_DIR}/package-dmg.sh"
+for script in build-app.sh sign-app.sh package-dmg.sh; do
+  bash -n "${SCRIPT_DIR}/${script}"
+done
 python3 "${SCRIPT_DIR}/tests/test_sign_app.py"
 xcrun swiftc -swift-version 5 -framework AppKit -framework QuartzCore \
   "${PROJECT_ROOT}/ActriumViewService/RendererLayerHosting.swift" \
