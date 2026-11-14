@@ -81,7 +81,7 @@ fn peer_context(local: &ActrId, peer: &ActrId, peer_key: &SigningKey) -> Arc<Ver
         transcript_digest: vec![9; 32],
         local_runtime_instance_id: "runtime-1".into(),
         peer_runtime_instance_id: "front-runtime-1".into(),
-        peer_credential_expires_at_epoch_secs: now() + 3600,
+        peer_credential_expires_at_epoch_secs: 2_000_000_000,
         current_policy_binding: vec![7; 32],
         current_state_binding: vec![8; 32],
     })
