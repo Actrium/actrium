@@ -5180,6 +5180,170 @@ public func FfiConverterTypePublisherProfileInfo_lower(_ value: PublisherProfile
  * A verified Realm Profile: the package target and endpoints that feed
  * package acquisition.
  */
+public struct RealmDependencyInfo {
+    public var alias: String
+    public var targetPackage: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(alias: String, targetPackage: String) {
+        self.alias = alias
+        self.targetPackage = targetPackage
+    }
+}
+
+#if compiler(>=6)
+extension RealmDependencyInfo: Sendable {}
+#endif
+
+
+extension RealmDependencyInfo: Equatable, Hashable {
+    public static func ==(lhs: RealmDependencyInfo, rhs: RealmDependencyInfo) -> Bool {
+        if lhs.alias != rhs.alias {
+            return false
+        }
+        if lhs.targetPackage != rhs.targetPackage {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(alias)
+        hasher.combine(targetPackage)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRealmDependencyInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RealmDependencyInfo {
+        return
+            try RealmDependencyInfo(
+                alias: FfiConverterString.read(from: &buf),
+                targetPackage: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RealmDependencyInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.alias, into: &buf)
+        FfiConverterString.write(value.targetPackage, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRealmDependencyInfo_lift(_ buf: RustBuffer) throws -> RealmDependencyInfo {
+    return try FfiConverterTypeRealmDependencyInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRealmDependencyInfo_lower(_ value: RealmDependencyInfo) -> RustBuffer {
+    return FfiConverterTypeRealmDependencyInfo.lower(value)
+}
+
+
+public struct RealmPackageInfo {
+    public var reference: String
+    public var href: String
+    public var sha256: String
+    public var actorType: String
+    public var dependencies: [RealmDependencyInfo]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(reference: String, href: String, sha256: String, actorType: String, dependencies: [RealmDependencyInfo]) {
+        self.reference = reference
+        self.href = href
+        self.sha256 = sha256
+        self.actorType = actorType
+        self.dependencies = dependencies
+    }
+}
+
+#if compiler(>=6)
+extension RealmPackageInfo: Sendable {}
+#endif
+
+
+extension RealmPackageInfo: Equatable, Hashable {
+    public static func ==(lhs: RealmPackageInfo, rhs: RealmPackageInfo) -> Bool {
+        if lhs.reference != rhs.reference {
+            return false
+        }
+        if lhs.href != rhs.href {
+            return false
+        }
+        if lhs.sha256 != rhs.sha256 {
+            return false
+        }
+        if lhs.actorType != rhs.actorType {
+            return false
+        }
+        if lhs.dependencies != rhs.dependencies {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(reference)
+        hasher.combine(href)
+        hasher.combine(sha256)
+        hasher.combine(actorType)
+        hasher.combine(dependencies)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRealmPackageInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RealmPackageInfo {
+        return
+            try RealmPackageInfo(
+                reference: FfiConverterString.read(from: &buf),
+                href: FfiConverterString.read(from: &buf),
+                sha256: FfiConverterString.read(from: &buf),
+                actorType: FfiConverterString.read(from: &buf),
+                dependencies: FfiConverterSequenceTypeRealmDependencyInfo.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RealmPackageInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.reference, into: &buf)
+        FfiConverterString.write(value.href, into: &buf)
+        FfiConverterString.write(value.sha256, into: &buf)
+        FfiConverterString.write(value.actorType, into: &buf)
+        FfiConverterSequenceTypeRealmDependencyInfo.write(value.dependencies, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRealmPackageInfo_lift(_ buf: RustBuffer) throws -> RealmPackageInfo {
+    return try FfiConverterTypeRealmPackageInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRealmPackageInfo_lower(_ value: RealmPackageInfo) -> RustBuffer {
+    return FfiConverterTypeRealmPackageInfo.lower(value)
+}
+
+
 public struct RealmProfileInfo {
     /**
      * Canonical Realm name `<realm_id>@<domain>`.
@@ -5191,6 +5355,9 @@ public struct RealmProfileInfo {
      */
     public var status: String
     public var sequence: UInt64
+    public var primaryPackage: String
+    public var frontPackage: String
+    public var packages: [RealmPackageInfo]
     /**
      * HTTPS download URL of the signed `.actr` package.
      */
@@ -5226,7 +5393,7 @@ public struct RealmProfileInfo {
          */realmName: String, displayName: String,
         /**
          * Always `active`; retired Realms are rejected.
-         */status: String, sequence: UInt64,
+         */status: String, sequence: UInt64, primaryPackage: String, frontPackage: String, packages: [RealmPackageInfo],
         /**
          * HTTPS download URL of the signed `.actr` package.
          */packageHref: String,
@@ -5249,6 +5416,9 @@ public struct RealmProfileInfo {
         self.displayName = displayName
         self.status = status
         self.sequence = sequence
+        self.primaryPackage = primaryPackage
+        self.frontPackage = frontPackage
+        self.packages = packages
         self.packageHref = packageHref
         self.packageSha256 = packageSha256
         self.packageType = packageType
@@ -5277,6 +5447,15 @@ extension RealmProfileInfo: Equatable, Hashable {
             return false
         }
         if lhs.sequence != rhs.sequence {
+            return false
+        }
+        if lhs.primaryPackage != rhs.primaryPackage {
+            return false
+        }
+        if lhs.frontPackage != rhs.frontPackage {
+            return false
+        }
+        if lhs.packages != rhs.packages {
             return false
         }
         if lhs.packageHref != rhs.packageHref {
@@ -5311,6 +5490,9 @@ extension RealmProfileInfo: Equatable, Hashable {
         hasher.combine(displayName)
         hasher.combine(status)
         hasher.combine(sequence)
+        hasher.combine(primaryPackage)
+        hasher.combine(frontPackage)
+        hasher.combine(packages)
         hasher.combine(packageHref)
         hasher.combine(packageSha256)
         hasher.combine(packageType)
@@ -5335,6 +5517,9 @@ public struct FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer {
                 displayName: FfiConverterString.read(from: &buf),
                 status: FfiConverterString.read(from: &buf),
                 sequence: FfiConverterUInt64.read(from: &buf),
+                primaryPackage: FfiConverterString.read(from: &buf),
+                frontPackage: FfiConverterString.read(from: &buf),
+                packages: FfiConverterSequenceTypeRealmPackageInfo.read(from: &buf),
                 packageHref: FfiConverterString.read(from: &buf),
                 packageSha256: FfiConverterString.read(from: &buf),
                 packageType: FfiConverterString.read(from: &buf),
@@ -5351,6 +5536,9 @@ public struct FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer {
         FfiConverterString.write(value.displayName, into: &buf)
         FfiConverterString.write(value.status, into: &buf)
         FfiConverterUInt64.write(value.sequence, into: &buf)
+        FfiConverterString.write(value.primaryPackage, into: &buf)
+        FfiConverterString.write(value.frontPackage, into: &buf)
+        FfiConverterSequenceTypeRealmPackageInfo.write(value.packages, into: &buf)
         FfiConverterString.write(value.packageHref, into: &buf)
         FfiConverterString.write(value.packageSha256, into: &buf)
         FfiConverterString.write(value.packageType, into: &buf)
@@ -7649,6 +7837,56 @@ fileprivate struct FfiConverterSequenceTypePublisherPackageKeyInfo: FfiConverter
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypePublisherPackageKeyInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRealmDependencyInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [RealmDependencyInfo]
+
+    public static func write(_ value: [RealmDependencyInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRealmDependencyInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RealmDependencyInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RealmDependencyInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRealmDependencyInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeRealmPackageInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [RealmPackageInfo]
+
+    public static func write(_ value: [RealmPackageInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRealmPackageInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RealmPackageInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RealmPackageInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRealmPackageInfo.read(from: &buf))
         }
         return seq
     }
@@ -10229,6 +10467,15 @@ public func verifyActrPackage(archive: Data, trustedPublicKey: Data)throws  -> V
     )
 })
 }
+public func verifyRealmFrontPackage(archive: Data, trustedPublicKey: Data, profile: RealmProfileInfo)throws  -> VerifiedActrPackageInfo  {
+    return try  FfiConverterTypeVerifiedActrPackageInfo_lift(try rustCallWithError(FfiConverterTypeActrPackageVerificationError_lift) {
+    uniffi_actrium_core_fn_func_verify_realm_front_package(
+        FfiConverterData.lower(archive),
+        FfiConverterData.lower(trustedPublicKey),
+        FfiConverterTypeRealmProfileInfo_lower(profile),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -11026,6 +11273,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_func_verify_actr_package() != 49733) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_func_verify_realm_front_package() != 30025) {
         return InitializationResult.apiChecksumMismatch
     }
 

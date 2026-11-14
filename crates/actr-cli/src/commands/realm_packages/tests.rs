@@ -73,6 +73,15 @@ fn package(workload: &str, proto: &[u8], publisher: &SigningKey) -> (Value, Vec<
         // A file at the Front's path is not necessarily the Service's RPC export.
         if workload == "actr.component/1" {
             m.workload.rpc_contract = Some(SERVICE_EXPORT.into());
+            m.dependencies.insert(
+                "upstream".into(),
+                ActorDependency {
+                    actor: "publisher.example/echo-ui".into(),
+                    version: "^1.0".into(),
+                    contract: None,
+                    required: false,
+                },
+            );
         } else {
             m.dependencies.insert(
                 "upstream".into(),
@@ -338,5 +347,63 @@ async fn rejects_incompatible_signed_contracts_and_altered_package_bytes() {
             .unwrap_err()
             .to_string()
             .contains("digest mismatch")
+    );
+}
+
+#[tokio::test]
+async fn previews_manual_selections_and_fetches_cyclic_dependency_closure() {
+    let (docs, signer, mut profile) = fixture(PROTO);
+    profile["packages"]["view"]["dependencies"] = json!({"service":"svc"});
+    profile["packages"]["svc"]["dependencies"] = json!({"upstream":"view"});
+    publish_profile(&docs, &signer, &mut profile, 2);
+    let dir = tempfile::tempdir().unwrap();
+    let fetched = from_fixture(
+        &FetchArgs {
+            realm: REALM.into(),
+            additional: vec![],
+            output: dir.path().join("fetch"),
+        },
+        &docs,
+    )
+    .await
+    .unwrap();
+    assert_eq!(fetched["packages"].as_object().unwrap().len(), 2);
+    assert!(
+        fetched["dependencies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["status"] == "selected")
+    );
+    let selection_path = dir.path().join("selection.json");
+    let mut selection = profile.clone();
+    selection.as_object_mut().unwrap().retain(|key, _| {
+        matches!(
+            key.as_str(),
+            "primary_package" | "front_package" | "packages"
+        )
+    });
+    std::fs::write(&selection_path, serde_json::to_vec(&selection).unwrap()).unwrap();
+    let args = CheckArgs {
+        selection: selection_path.clone(),
+        output: dir.path().join("check"),
+    };
+    let check = |url: String, _limit| {
+        std::future::ready(
+            docs.borrow()
+                .get(&url)
+                .cloned()
+                .with_context(|| format!("unexpected fetch {url}")),
+        )
+    };
+    let result = check_selection_with(&args, check).await.unwrap();
+    assert_eq!(result["selection"], selection);
+    assert_eq!(result["dependencies"].as_array().unwrap().len(), 2);
+    selection["packages"]["svc"]["dependencies"] = json!({"not-declared":"view"});
+    std::fs::write(&selection_path, serde_json::to_vec(&selection).unwrap()).unwrap();
+    let error = check_selection_with(&args, check).await.unwrap_err();
+    assert!(
+        error.to_string().contains("svc.not-declared -> view"),
+        "{error}"
     );
 }

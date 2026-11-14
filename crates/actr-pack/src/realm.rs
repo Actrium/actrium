@@ -1,4 +1,7 @@
 //! Verify the Service and Front chosen by a signed Realm Profile.
+mod dependencies;
+pub use dependencies::{check_realm_dependencies, check_realm_package_dependencies};
+
 use actr_protocol::realm_profile::RealmPackage;
 use actr_protocol::{ActrType, PackageSigningKey};
 use semver::{Version, VersionReq};
