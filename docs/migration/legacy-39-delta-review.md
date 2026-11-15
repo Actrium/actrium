@@ -25,7 +25,7 @@ This review uses the original 39 patches in order, not just the changed-path lis
 | `6bea3b6d` | Native pages, app appearance, glass presets, semantic workspace/card colors, stable native-tab lifecycle | Appearance mode and all five glass presets are in `WindowChromeStyle` and General Settings. The frame/header material, body border, Start Page, Overview cards, transition layer, and renderer placeholders now use semantic colors. `PersistentNativeTabLayer` keeps native tabs mounted; the newer runtime keeps ownership of internal-page routing. |
 | `d7dd5b93` | Secure WebKit download retry | Excluded: download implementation. |
 | `2f57d8bb` | Avoid renderer reload on viewport change | Excluded: renderer lifecycle. |
-| `c71c3abf` | Compact tab/group toolbar, in-place drag, address actions, window drag mask | `RootContentViewController`, `CompactTabStripView`, and `ToolbarTabInteractionCoordinator` carry the visible toolbar, group actions, tab reorder, hit regions, address controls, bookmarks/share, and active-tab favicon. New runtime APIs are kept. |
+| `c71c3abf` | Compact tab/group toolbar, in-place drag, address actions, window drag mask | August's final `RootContentViewController` owns the visual toolbar and hit regions; `ToolbarTabInteractionCoordinator` carries group actions, tab reorder, and current-model integration. |
 | `3453d6eb` | Download and media permissions | Excluded: download/permission implementation. |
 | `e10b12e1` | Unsafe Web navigation schemes | Excluded: ordinary WebKit navigation policy. |
 | `5e73ff31` | Persisted browser metadata sanitation | Excluded: browser data policy. |
@@ -36,9 +36,9 @@ This review uses the original 39 patches in order, not just the changed-path lis
 | `a24274b8` | Platform-selective native package staging | Excluded: package staging. |
 | `7347f25e` | WebKit navigation lifecycle hardening | Excluded: ordinary WebKit behavior. |
 | `12edcf27` | Overview transition snapshot and redraw timing | Previously adapted into `ModeTransitionController` and `WorkspaceMainView`; the current workspace remains the renderer. |
-| `55f172c5` | Adaptive widths and tab-strip reveal | Width calculation and reveal alignment live in `CompactTabLayout` and `CompactTabStripView`. |
+| `55f172c5` | Adaptive widths and tab-strip reveal | Width calculation and reveal alignment live in `CompactTabLayout` and the original toolbar view in `RootContentViewController`. |
 | `cb417c92` | Passkey implementation | Excluded by request. |
-| `36532940` | Accordion presentation for overflow | Presentation geometry, depth, and edge click disposition live in `CompactTabLayout` and `CompactTabStripView`. |
+| `36532940` | Accordion presentation for overflow | Presentation geometry, depth, and edge click disposition live in `CompactTabLayout` and the original toolbar view in `RootContentViewController`. |
 | `03e89dba` | Remove synchronous storage from new-tab path | `BrowserViewModel.addNewTab` delays persistence until navigation and requests staged address focus. |
 
 ## Later 17 commits
@@ -46,11 +46,11 @@ This review uses the original 39 patches in order, not just the changed-path lis
 | Original | Exact UI delta checked | Current resolution |
 | --- | --- | --- |
 | `a9a2178a` | Placeholder and inactive tab title remain single-line under compression | Both toolbar address placeholder and tab labels use single-line truncation. |
-| `f844a7d7` | Reveal the newly focused tab after the layout pass | `CompactTabStripView.scheduleActiveTabReveal` checks after yield and after the slide settles. |
+| `f844a7d7` | Reveal the newly focused tab after the layout pass | `MainWindowTabsView.scheduleActiveTabReveal` checks after yield and after the slide settles. |
 | `94a09234` | Three stages: background, editor content, then first responder and ring | `AddressPresentationPhase` and the address field defer focus across the two original delays. Focused plate uses a semantic address surface. |
 | `cdb5568f` | Incoming accordion tab sits over the edge tab; folded slices reveal before selection | Shared presentation z-index and `foldedTabButton` preserve the source click disposition. |
 | `641a05e7` | Larger, softer complete focus outline | `addressFocusRing` uses the source outward 2.5-point contour and inner half-point highlight. |
-| `5bdc518f` | Obscured active address ends editing and first-responder state | `CompactTabStripView` reports obscuring to the toolbar; the editor is unmounted and the interaction coordinator ends editing. |
+| `5bdc518f` | Obscured active address ends editing and first-responder state | The original toolbar view detects obscuring, unmounts the editor, and ends editing through the interaction coordinator. |
 | `4d298d31` | Delay translucent cover until late overlap | `coverHeadEdgeOpacity` in shared accordion geometry drives the cover mask. |
 | `be382597` | Cover the lower tab early in overlap | A layered boundary is painted only on incoming covers, not on flat tabs. |
 | `793ae8df` | Limit translucency to the directional head | The gradient changes only the first or last 30% of the cover. |

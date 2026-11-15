@@ -2,11 +2,11 @@
 
 The complete 39-commit comparison is recorded in [the delta review](legacy-39-delta-review.md), [the private file inventory](https://github.com/kookyleo/actrium/blob/audit/legacy-39-file-review/docs/migration/legacy-39-file-audit.md), and [the original-to-replay commit map](legacy-39-commit-map.md).
 
-This records the selection from the 22 commits between upstream commit `755dea237` and private fork commit `03e89dba1`. It also covers the later 17 local commits previously reviewed for PR #452. Direct cherry-picks would replace newer window, runtime, identity, and branding code.
+This records the selection from the 22 commits between upstream commit `755dea237` and private fork commit `03e89dba1`. It also covers the later 17 local commits previously reviewed for PR #452. The historical commits were rebased onto the current main line; the compatibility commit retains the newer runtime, identity, and branding code.
 
 | Source commits | Decision in PR #452 |
 | --- | --- |
-| `c71c3abf3`, `55f172c56`, `365329404`: compact tabs, width compression, and edge stacks | Already adapted in `CompactTabStripView`, `CompactTabLayout`, and their layout checks. |
+| `c71c3abf3`, `55f172c56`, `365329404`: compact tabs, width compression, and edge stacks | August's final `RootContentViewController` owns the visual strip; `CompactTabLayout` and the interaction coordinator adapt its geometry and drag behavior to current models. |
 | `12edcf272`, `03e89dba1`: overview transitions and new-tab latency | Fade the snapshot layer into the live destination; avoid a global SwiftUI animation and synchronous database write when adding a blank tab; skip whole-window capture for native or empty tabs and avoid a second bitmap draw. |
 | `12a774eb1`: Apple main-window structure | Give the iPad main window its own view while retaining the current phone entry point, system pages, search, universal links, and package drops. Keep the current package model. |
 | `815e44fbc`: cross-platform app icons | Generate macOS, Android, and Windows resources from the current Actrium SVG. iOS already uses its newer `.icon` source. Do not restore the superseded blue-and-yellow mark. |
