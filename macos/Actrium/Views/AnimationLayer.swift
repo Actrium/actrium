@@ -140,7 +140,7 @@ final class AnimationLayerNSView: NSView {
 
         // ━━━━ Background Layer (Consistent with the content area background colour) ━━━━
         // Use and WorkspaceMainView Same dark gray background, blinking when you avoid fade
-        backgroundLayer.backgroundColor = NSColor(white: 0.12, alpha: 1.0).cgColor
+        backgroundLayer.backgroundColor = AppColors.workspaceBackground.cgColor
         backgroundLayer.opacity = 0  // Initial hide, with isVisible=false Consistency
         layer?.addSublayer(backgroundLayer)
 
@@ -153,6 +153,11 @@ final class AnimationLayerNSView: NSView {
         layer?.addSublayer(virtualGridLayer)
     }
 
+    override func layout() {
+        super.layout()
+        updateLayerFrames()
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         backgroundLayer.backgroundColor = AppColors.workspaceBackground.cgColor
@@ -162,11 +167,6 @@ final class AnimationLayerNSView: NSView {
             slot.closeIcon.contents = cachedCloseIcon.image
             slot.container.borderColor = AppColors.separator.cgColor
         }
-    }
-
-    override func layout() {
-        super.layout()
-        updateLayerFrames()
     }
 
     private func updateLayerFrames() {
@@ -238,7 +238,6 @@ final class AnimationLayerNSView: NSView {
                 container.shadowRadius = CardStyle.shadowRadius
                 container.borderColor = AppColors.separator.cgColor
                 container.borderWidth = CardStyle.borderWidth
-                container.cornerRadius = CardStyle.cornerRadius
 
                 // Create Focus Layer (Bottom, show big picture)
                 // Focus No rounded angles in mode (with TabPanel cornerRadius(isFocused ? 0 : 10) Unanimously.)
@@ -320,9 +319,8 @@ final class AnimationLayerNSView: NSView {
             // Close button position (Left, centre vertically)
             let iconSize = cachedCloseIcon.size
             let hPadding = CardStyle.titleBarHorizontalPadding
-            let closeButtonSize = CardStyle.closeButtonSize
             slot.closeIcon.frame = CGRect(
-                x: hPadding + (closeButtonSize - iconSize.width) / 2,
+                x: hPadding,
                 y: (titleBarHeight - iconSize.height) / 2,
                 width: iconSize.width,
                 height: iconSize.height
@@ -385,21 +383,10 @@ final class AnimationLayerNSView: NSView {
     /// - Parameter direction: Animation Direction
     func setAnimationDirection(_ direction: AnimationDirection) {
         animationDirection = direction
-        self.transitionTabId = transitionTabId
 
         // Reset crossfade To Start State
         crossfadeProgress = 0.0
-
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        for (tabId, slot) in cardSlots {
-            if tabId == transitionTabId {
-                applyCurrentCrossfade(to: slot)
-            } else {
-                applyStableOverviewStyle(to: slot)
-            }
-        }
-        CATransaction.commit()
+        updateAllCrossfade()
 
         NSLog("🎬 VirtualGrid: Animation direction set to %@",
               direction == .focusToOverview ? "Focus→Overview" : "Overview→Focus")
@@ -413,12 +400,7 @@ final class AnimationLayerNSView: NSView {
     ///   - offset: Offset
     ///   - crossfade: crossfade Progress (0.0 Present. 1.0)
     func applyTransform(scale: CGFloat, offset: CGPoint, crossfade: CGFloat = 0.0) {
-        applyTransform(
-            scale: scale,
-            offset: offset,
-            opacity: 1.0 - crossfade,
-            transitionProgress: crossfade
-        )
+        applyTransform(scale: scale, offset: offset, opacity: 1.0 - crossfade)
     }
 
     /// Application of change, transparency and roundabouts (new scenario: fade out) + Rounded gradient)
@@ -600,14 +582,7 @@ final class AnimationLayerNSView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         virtualGridLayer.transform = CATransform3DIdentity
-        for slot in cardSlots.values {
-            applyStableOverviewStyle(to: slot)
-        }
         CATransaction.commit()
-
-        transitionTabId = nil
-        crossfadeProgress = 0
-        lastTransitionStyleUpdateCount = 0
     }
 
     /// Reset Status (Fade-Insist)
@@ -665,8 +640,11 @@ struct AnimationLayerRepresentable: NSViewRepresentable {
         // 🔑 Do not update configuration during animation to avoid interference ModeTransitionController Set transform
         // Animation by CVDisplayLink Driver, this update may overwrite the animation status
         let isTransitioning = controller.phase.isTransitioning
+        NSLog("🔄 AnimationLayer.updateNSView: isTransitioning=%d, isVisible=%d, virtualGridLayer.opacity=%.1f",
+              isTransitioning ? 1 : 0, isVisible ? 1 : 0, nsView.layer?.sublayers?.last?.opacity ?? -1)
 
         guard !isTransitioning else {
+            NSLog("🔄 AnimationLayer.updateNSView: SKIPPED (transitioning)")
             return
         }
 
@@ -691,6 +669,9 @@ struct AnimationLayerRepresentable: NSViewRepresentable {
 enum ModeTransitionConstants {
     /// The total length of the animation
     static let totalTransitionDuration: Double = 0.35
+
+    /// Blend into the live destination only after the zoom nearly settles.
+    static let handoffStartProgress: Double = 0.82
 
     /// Spring Response Parameters
     static let springResponse: Double = 0.35

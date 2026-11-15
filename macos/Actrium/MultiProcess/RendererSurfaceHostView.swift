@@ -60,10 +60,9 @@ final class RendererSurfaceHostView: NSView {
     private var crashObserver: NSObjectProtocol?
     private var configureTask: Task<Void, Never>?
     private var lastConfig: [String: Any]?
-    private var lastContentConfigData: Data?
+    private var lastConfigData: Data?
     private var lastConfiguredFingerprint: String?
     private var lastSentSize: CGSize?
-    private var lastSentOverviewMode: Bool?
     private var recoveryAttempt = 0
     private var accessibilityObserver: NSObjectProtocol?
     private var caretObserver: NSObjectProtocol?
@@ -102,7 +101,7 @@ final class RendererSurfaceHostView: NSView {
 
     private func setup() {
         wantsLayer = true
-        applyAppearanceColors()
+        layer?.backgroundColor = AppColors.workspaceBackground.cgColor
         layer?.masksToBounds = true
         caretLayer.backgroundColor = NSColor.controlAccentColor.cgColor
         caretLayer.zPosition = 1
@@ -172,41 +171,28 @@ final class RendererSurfaceHostView: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        applyAppearanceColors()
-    }
-
-    private func applyAppearanceColors() {
         layer?.backgroundColor = AppColors.workspaceBackground.cgColor
     }
 
     func apply(config: [String: Any]) {
-        var contentConfig = config
-        // Focus/overview switches are viewport operations, not content loads.
-        // These transient fields are handled by apply(size:isOverviewMode:).
-        contentConfig.removeValue(forKey: RuntimeBridgeContract.containerWidth)
-        contentConfig.removeValue(forKey: RuntimeBridgeContract.containerHeight)
-        contentConfig.removeValue(forKey: "isOverviewMode")
-
         guard let tabId,
               !fingerprint.isEmpty,
-              JSONSerialization.isValidJSONObject(contentConfig),
-              let contentData = try? JSONSerialization.data(
-                  withJSONObject: contentConfig,
+              JSONSerialization.isValidJSONObject(config),
+              let data = try? JSONSerialization.data(
+                  withJSONObject: config,
                   options: [.sortedKeys]
               ) else {
             return
         }
 
-        // Keep the latest full configuration for crash recovery even when this
-        // update contains layout-only changes.
-        lastConfig = config
         let requestedFingerprint = fingerprint
-        guard contentData != lastContentConfigData
+        guard data != lastConfigData
                 || requestedFingerprint != lastConfiguredFingerprint else {
             return
         }
 
-        lastContentConfigData = contentData
+        lastConfig = config
+        lastConfigData = data
         lastConfiguredFingerprint = requestedFingerprint
         configureTask?.cancel()
         configureTask = Task { @MainActor [weak self] in
@@ -266,7 +252,7 @@ final class RendererSurfaceHostView: NSView {
                     error.localizedDescription
                 )
                 if self.fingerprint == requestedFingerprint {
-                    self.lastContentConfigData = nil
+                    self.lastConfigData = nil
                     self.lastConfiguredFingerprint = nil
                 }
                 self.coordinator?.xpcServiceReady = false
@@ -278,10 +264,8 @@ final class RendererSurfaceHostView: NSView {
         guard size.width > 0, size.height > 0 else { return }
         setFrameSize(size)
         hostLayer?.frame = bounds
-        guard size != lastSentSize || isOverviewMode != lastSentOverviewMode,
-              let tabId else { return }
+        guard size != lastSentSize, let tabId else { return }
         lastSentSize = size
-        lastSentOverviewMode = isOverviewMode
         RendererProcessPool.shared.updateViewport(
             tabId: tabId,
             size: size,
@@ -373,7 +357,7 @@ final class RendererSurfaceHostView: NSView {
                     fingerprint: self.fingerprint
                 )
                 self.coordinator?.allocatedServiceId = rendererId
-                self.lastContentConfigData = nil
+                self.lastConfigData = nil
                 self.apply(config: config)
                 NSLog(
                     "Renderer recovery scheduled: tab=%@ attempt=%d renderer=%@",

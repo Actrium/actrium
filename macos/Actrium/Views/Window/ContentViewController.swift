@@ -61,11 +61,14 @@ final class ContentViewController: NSViewController {
         hostingView = NSHostingView(rootView: contentView)
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
-        // The Body is a complete nested rounded frame. It no longer connects
-        // edge-to-edge with the Header.
+        // Content body is inset from the toolbar and rounded on all sides.
         let container = DividerAwareContainerView()
         container.wantsLayer = true
         container.layer?.cornerRadius = cornerRadius
+        container.layer?.maskedCorners = [
+            .layerMinXMinYCorner, .layerMaxXMinYCorner,
+            .layerMinXMaxYCorner, .layerMaxXMaxYCorner,
+        ]
         container.layer?.masksToBounds = true
         container.layer?.borderWidth = 1
         container.layer?.borderColor = AppColors.bodyBorder.cgColor

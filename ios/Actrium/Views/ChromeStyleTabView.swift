@@ -236,6 +236,7 @@ struct ChromeTabOverviewView: View {
 
             // Card Grid
             cardGridView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(systemType: .settings, viewModel: viewModel)

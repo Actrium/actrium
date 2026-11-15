@@ -1,5 +1,4 @@
 import AppKit
-import ActroCore
 import SwiftUI
 import Combine
 
@@ -19,7 +18,7 @@ import Combine
 /// re-layout the titlebar; the KVO fires synchronously in the setter,
 /// marks this view for layout, and the layout system does the rest.
 private class MainWindowRootView: NSView {
-    weak var controller: MainWindowViewController?
+    weak var controller: RootContentViewController?
     private var titleObservation: NSKeyValueObservation?
     private let chromeMaterialView = NSVisualEffectView()
     private let chromeTintView = WindowChromeTintView()
@@ -201,7 +200,7 @@ private enum CompactToolbarLayout {
 /// Root content view controller - manages 4px edge inset and contains toolbar + split view
 /// macOS renderer for the canonical `MainWindow → Tabs + Workspace` tree.
 /// Windowed and full-screen presentations retain the same two child entities.
-final class MainWindowViewController: NSViewController {
+final class RootContentViewController: NSViewController {
 
     // MARK: - Properties
 
@@ -220,10 +219,7 @@ final class MainWindowViewController: NSViewController {
     private let cornerRadius = CompactToolbarLayout.windowCornerRadius
 
     /// Toolbar height (further reduced by 1pt for optical centering)
-    private let toolbarHeight: CGFloat = 45
-
-    /// Window background color (TODO: make configurable via settings)
-    private let windowBackgroundColor = NSColor.white
+    private let toolbarHeight = CompactToolbarLayout.toolbarHeight
 
     /// Traffic lights position (absolute, in our view's coordinates)
     private let trafficLightPosition = NSPoint(x: 15, y: 0)
@@ -311,7 +307,7 @@ final class MainWindowViewController: NSViewController {
         // Container that holds all content with rounded corners on all sides
         roundedContainer = NSView()
         roundedContainer.setAccessibilityIdentifier(
-            MainWindowEntityName.mainWindow.accessibilityIdentifier
+            "mainWindow"
         )
         roundedContainer.wantsLayer = true
         roundedContainer.layer?.backgroundColor = NSColor.clear.cgColor  // Transparent - content views provide their own background
@@ -337,7 +333,7 @@ final class MainWindowViewController: NSViewController {
 
         toolbarHostingView = InteractiveToolbarHostingView(rootView: AnyView(toolbarView))
         toolbarHostingView.setAccessibilityIdentifier(
-            MainWindowEntityName.tabs.accessibilityIdentifier
+            "compactTabStrip"
         )
         toolbarHostingView.translatesAutoresizingMaskIntoConstraints = false
         toolbarHostingView.wantsLayer = true
@@ -372,7 +368,7 @@ final class MainWindowViewController: NSViewController {
 
         let contentView = contentViewController.view
         contentView.setAccessibilityIdentifier(
-            MainWindowEntityName.workspace.accessibilityIdentifier
+            "workspace"
         )
         contentView.translatesAutoresizingMaskIntoConstraints = false
         roundedContainer.addSubview(contentView)
@@ -558,7 +554,7 @@ private final class CompactToolbarWindowDragRegion: NSView {
             return
         }
 
-        (window as? ActroWindow)?.performExplicitWindowDrag(with: event)
+        (window as? ActriumWindow)?.performExplicitWindowDrag(with: event)
     }
 
     private func performConfiguredDoubleClickAction(on window: NSWindow) {
@@ -595,7 +591,7 @@ private struct ToolbarTabSection: Identifiable {
 }
 
 private enum ToolbarTabStripCoordinateSpace {
-    static let name = "actro.main-window.tabs-strip"
+    static let name = "actrium.main-window.tabs-strip"
 }
 
 private struct ToolbarTabFramePreferenceKey: PreferenceKey {
@@ -711,14 +707,28 @@ struct MainWindowTabsView: View {
                         height: 1
                     )
 
-                sidebarToolbarSection(metrics: metrics)
-                    .environment(\.colorScheme, .light)
-                    .frame(width: sidebarWidth, alignment: .leading)
+                Color.clear.frame(width: itemSpacing, height: 1)
 
-                contentToolbarSection
-                    .environment(\.colorScheme, .light)
-                    .frame(width: contentWidth, alignment: .leading)
-                    .offset(x: contentLeading)
+                tabStrip
+                    .frame(width: resolvedTabStripWidth)
+
+                Spacer(minLength: itemSpacing)
+
+                HStack(spacing: itemSpacing) {
+                    newTabButton
+                    overviewButton
+                }
+            }
+            .padding(.horizontal, CompactToolbarLayout.horizontalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            // Transparent by design: Header and outer frame are one shared
+            // NSVisualEffectView surface owned by MainWindowRootView.
+            .background(Color.clear)
+            .onAppear {
+                layoutState.updateTabStripWidth(resolvedTabStripWidth)
+            }
+            .onChange(of: resolvedTabStripWidth) { _, width in
+                layoutState.updateTabStripWidth(width)
             }
         }
         .onAppear { updateDisplayText() }
@@ -1920,7 +1930,7 @@ struct MainWindowTabsView: View {
     private func tabIdentityIcon(for tab: Tab) -> some View {
         TabIdentityIcon(
             tab: tab,
-            isLoading: viewModel.isTabLoading(tab.id),
+            isLoading: viewModel.isCurrentTabLoading && viewModel.currentTabId == tab.id,
             fallbackSymbol: tabFallbackIcon(for: tab)
         )
     }
@@ -1998,7 +2008,7 @@ struct MainWindowTabsView: View {
         guard let tab = tab else { return "" }
         if let systemType = tab.systemTabType {
             if systemType == .startPage { return "" }
-            return (tab.url ?? systemType.systemURL).absoluteString
+            return (tab.url ?? systemType.aboutURL).absoluteString
         }
         if case .web = tab.contentType, let url = tab.url {
             let host = url.host ?? url.absoluteString
@@ -2011,7 +2021,7 @@ struct MainWindowTabsView: View {
         guard let tab = tab else { return "" }
         if let systemType = tab.systemTabType {
             if systemType == .startPage { return "" }
-            return (tab.url ?? systemType.systemURL).absoluteString
+            return (tab.url ?? systemType.aboutURL).absoluteString
         }
         if let url = tab.url {
             return url.absoluteString
@@ -2042,7 +2052,7 @@ struct MainWindowTabsView: View {
     }
 
     private func focusAddressBar(
-        presentation: AddressBarFocusPresentation
+        presentation: BrowserViewModel.AddressBarFocusPresentation
     ) {
         addressPresentationTask?.cancel()
 
@@ -2100,55 +2110,6 @@ struct MainWindowTabsView: View {
     private func updateDisplayText() {
         guard !interaction.isAddressEditing else { return }
         addressText = displayText(for: viewModel.currentTab)
-    }
-
-    // MARK: - Right Actions
-
-    private var rightActions: some View {
-        HStack(spacing: 8) {
-            // Bookmark button
-            Button(action: { toggleBookmark() }) {
-                Image(systemName: isBookmarked ? "star.fill" : "star")
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(width: iconButtonSize, height: iconButtonSize)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .opacity(isBookmarked ? 1 : 0.5)
-
-            // Refresh button
-            Button(action: { viewModel.reloadCurrentTab() }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(width: iconButtonSize, height: iconButtonSize)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-
-            // More button
-            Button(action: {}) {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(width: iconButtonSize, height: iconButtonSize)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: - Background
-
-    private func toolbarBackground(metrics: ToolbarLayoutMetrics) -> some View {
-        // White toolbar background with a top-left rounded corner.
-        UnevenRoundedRectangle(
-            topLeadingRadius: 12,
-            bottomLeadingRadius: 0,
-            bottomTrailingRadius: 0,
-            topTrailingRadius: 0  // roundedContainer mask handles right corner
-        )
-        .fill(Color.white)
-        .padding(.leading, metrics.backgroundLeadingX)
-        .allowsHitTesting(false)
     }
 
     // MARK: - Actions
@@ -2381,8 +2342,6 @@ private struct SelfDrawnAddressInputField: NSViewRepresentable {
     func makeNSView(context: Context) -> NSTextField {
         let textField = NSTextField()
         textField.font = .systemFont(ofSize: 13)
-        textField.textColor = .black
-        textField.appearance = NSAppearance(named: .aqua)
         textField.isBordered = false
         textField.drawsBackground = false
         textField.focusRingType = .none
@@ -2398,42 +2357,19 @@ private struct SelfDrawnAddressInputField: NSViewRepresentable {
         context.coordinator.textField = textField
         context.coordinator.parent = self
 
-        // SwiftUI mounts the NSView into the window during layout, which can
-        // happen after this runloop tick — a single async focus attempt loses
-        // the race (window == nil → makeFirstResponder silently skipped) and
-        // the field never gains focus. Retry until attached.
-        SelfDrawnAddressInputField.focusWhenAttached(
-            textField: textField,
-            coordinator: context.coordinator,
-            attempt: 0
-        )
+        if requestsFirstResponder {
+            context.coordinator.requestFirstResponder(allowDeferredAttempt: true)
+        }
 
         return textField
     }
 
-    private static func focusWhenAttached(
-        textField: NSTextField,
-        coordinator: Coordinator,
-        attempt: Int
-    ) {
-        DispatchQueue.main.async {
-            guard let window = textField.window else {
-                if attempt < 30 {  // ~0.5s of runloop ticks, well within mount time
-                    SelfDrawnAddressInputField.focusWhenAttached(
-                        textField: textField,
-                        coordinator: coordinator,
-                        attempt: attempt + 1
-                    )
-                }
-                return
-            }
-            let _ = window.makeFirstResponder(textField)
-            textField.currentEditor()?.selectAll(nil)
-            coordinator.startObservingFirstResponder()
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        context.coordinator.parent = self
+        if requestsFirstResponder {
+            context.coordinator.requestFirstResponder(allowDeferredAttempt: false)
         }
     }
-
-    func updateNSView(_ nsView: NSTextField, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)

@@ -54,11 +54,10 @@ final class BrowserSyncProviderSettingsStore {
         "oneDrive",
     ]
 
-    private static let logger = Logger(subsystem: "io.github.actrium.actro", category: "BrowserSyncProviderSettings")
+    private static let logger = Logger(subsystem: "io.actrium.actro", category: "BrowserSyncProviderSettings")
 
     private let fileURL: URL
-    private let bookmarkKey = "io.github.actrium.actro.browserSync.providerFolderBookmark"
-    private let legacyBookmarkKey = "com.actrium.actro.browserSync.providerFolderBookmark"
+    private let bookmarkKey = "com.actrium.actro.browserSync.providerFolderBookmark"
     private let userDefaults = UserDefaults.standard
     private let deviceIdentifierProvider: () -> String
 
@@ -125,7 +124,6 @@ final class BrowserSyncProviderSettingsStore {
     @discardableResult
     func configureLocalFolder(rootPath: String, bookmarkData: Data) -> BrowserSyncProviderSettingsSnapshot {
         userDefaults.set(bookmarkData, forKey: bookmarkKey)
-        userDefaults.removeObject(forKey: legacyBookmarkKey)
         let current = load()
         return save(BrowserSyncProviderSettingsSnapshot(
             version: Self.currentVersion,
@@ -161,7 +159,6 @@ final class BrowserSyncProviderSettingsStore {
     @discardableResult
     func disconnect() -> BrowserSyncProviderSettingsSnapshot {
         userDefaults.removeObject(forKey: bookmarkKey)
-        userDefaults.removeObject(forKey: legacyBookmarkKey)
         var snapshot = load()
         snapshot.providerKind = nil
         snapshot.localFolderRootPath = nil
@@ -177,7 +174,7 @@ final class BrowserSyncProviderSettingsStore {
     // its file IO with start/stopAccessingSecurityScopedResource() on the
     // returned URL, because the Rust local-folder round does real IO on it.
     func resolveRootURL() -> URL? {
-        guard let data = bookmarkDataForResolution() else { return nil }
+        guard let data = userDefaults.data(forKey: bookmarkKey) else { return nil }
         do {
             var isStale = false
             let url = try URL(
@@ -200,20 +197,6 @@ final class BrowserSyncProviderSettingsStore {
             Self.logger.error("Failed to resolve browser sync provider folder bookmark: \(String(describing: error))")
             return nil
         }
-    }
-
-    private func bookmarkDataForResolution() -> Data? {
-        if let data = userDefaults.data(forKey: bookmarkKey) {
-            return data
-        }
-
-        guard let legacy = userDefaults.data(forKey: legacyBookmarkKey) else {
-            return nil
-        }
-
-        userDefaults.set(legacy, forKey: bookmarkKey)
-        userDefaults.removeObject(forKey: legacyBookmarkKey)
-        return legacy
     }
 
     // MARK: - Normalize

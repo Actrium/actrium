@@ -527,11 +527,6 @@ class BrowserViewModel: ObservableObject {
             logger.warning(" Cannot find tab slot position")
             return
         }
-        // A missing slot mapping must not prevent resource teardown.
-        let closedPosition = tabSlotPositions[id] ?? closedIndex
-        if tabSlotPositions[id] == nil {
-            logger.warning(" Cannot find tab slot position; using array index")
-        }
 
         // If this is the last tab
         if tabs.count == 1 {
@@ -569,8 +564,6 @@ class BrowserViewModel: ObservableObject {
 
         // Remove the location map of this tab
         tabSlotPositions.removeValue(forKey: id)
-        loadingTabIDs.remove(id)
-        tabLoadingProgress.removeValue(forKey: id)
 
         // Reorganization position: reduce all positions larger than the deleted position1
         for tabId in tabs.map({ $0.id }) {
@@ -736,40 +729,6 @@ class BrowserViewModel: ObservableObject {
         }
     }
 
-    /// Reorders a Tab during an in-place toolbar pointer gesture.
-    ///
-    /// A toolbar drag can cross several siblings and groups before mouse-up.
-    /// Keeping these intermediate moves free of persistence and empty-group
-    /// cleanup makes the gesture fluid and prevents a source group from being
-    /// destroyed merely because its last Tab is passing over another section.
-    func moveTabInteractively(tabId: UUID, toIndex: Int, groupId: UUID?) {
-        guard let fromIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return }
-
-        tabs[fromIndex].groupId = groupId
-        let tab = tabs.remove(at: fromIndex)
-        let targetIndex = min(max(0, toIndex), tabs.count)
-        tabs.insert(tab, at: targetIndex)
-    }
-
-    /// Moves a complete Tabs Group as one consecutive block during a toolbar
-    /// header drag. Group membership and the relative order of its Tabs are
-    /// preserved; persistence is deferred until the drag commits.
-    func moveGroupInteractively(groupId: UUID, toIndex: Int) {
-        let movingTabs = tabs.filter { $0.groupId == groupId }
-        guard !movingTabs.isEmpty else { return }
-
-        tabs.removeAll { $0.groupId == groupId }
-        let targetIndex = min(max(0, toIndex), tabs.count)
-        tabs.insert(contentsOf: movingTabs, at: targetIndex)
-    }
-
-    /// Commits the final result of an in-place toolbar Tab drag.
-    func commitInteractiveTabReorder() {
-        let populatedGroupIDs = Set(tabs.compactMap(\.groupId))
-        tabGroups.removeAll { !populatedGroupIDs.contains($0.id) }
-        persistBrowserPageSession()
-    }
-
     /// Insert a tab received from another window (cross-window drag)
     func insertTabFromCrossWindow(_ tab: Tab, at index: Int, groupId: UUID?) {
         var newTab = tab
@@ -846,7 +805,6 @@ class BrowserViewModel: ObservableObject {
     /// Add a tab to a group
     func addTabToGroup(tabId: UUID, groupId: UUID) {
         guard let tabIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return }
-        let oldGroupId = tabs[tabIndex].groupId
         tabs[tabIndex].groupId = groupId
         logger.debug("📁 Tab \(tabId) Add Group \(groupId)")
     }

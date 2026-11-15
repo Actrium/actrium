@@ -37,7 +37,7 @@ final class BrowserSyncCredentialsProvider: AppleBrowserStorageSyncCredentialsPr
         var savedAtUnixSeconds: Int64
     }
 
-    private static let logger = Logger(subsystem: "io.github.actrium.actro", category: "BrowserSyncCredentials")
+    private static let logger = Logger(subsystem: "io.actrium.actro", category: "BrowserSyncCredentials")
 
     // Legacy plaintext UserDefaults keys. The session (including the access
     // token) now lives in the Keychain; these keys are only read once for
@@ -46,13 +46,11 @@ final class BrowserSyncCredentialsProvider: AppleBrowserStorageSyncCredentialsPr
     private let accessTokenKey = "browserSyncAccessToken"
     private let scopeKey = "browserSyncScope"
     private let legacyStoredSessionKey = "com.actrium.actro.browserSync.session"
-    private let deviceIdKey = "io.github.actrium.actro.browserSync.deviceId"
-    private let legacyNamespacedDeviceIdKey = "com.actrium.actro.browserSync.deviceId"
+    private let deviceIdKey = "com.actrium.actro.browserSync.deviceId"
     private let legacyDeviceIdKey = "syncDeviceId"
     private let defaultScope = "default"
     private let userDefaults = UserDefaults.standard
-    private let keychain = KeychainStore(service: "io.github.actrium.actro.browserSync")
-    private let legacyKeychain = KeychainStore(service: "com.actrium.actro.browserSync")
+    private let keychain = KeychainStore(service: "com.actrium.actro.browserSync")
     private let keychainSessionAccount = "session"
 
     private init() {}
@@ -86,7 +84,6 @@ final class BrowserSyncCredentialsProvider: AppleBrowserStorageSyncCredentialsPr
 
     func clear() {
         keychain.removeData(forAccount: keychainSessionAccount)
-        legacyKeychain.removeData(forAccount: keychainSessionAccount)
         removePlaintextSessionCopies()
     }
 
@@ -168,29 +165,7 @@ final class BrowserSyncCredentialsProvider: AppleBrowserStorageSyncCredentialsPr
            let session = try? JSONDecoder().decode(StoredSession.self, from: data) {
             return normalizedSession(session)
         }
-        if let session = migrateLegacyKeychainSessionIfNeeded() {
-            return session
-        }
         return migrateLegacySessionIfNeeded()
-    }
-
-    private func migrateLegacyKeychainSessionIfNeeded() -> StoredSession? {
-        guard let data = legacyKeychain.data(forAccount: keychainSessionAccount),
-              let legacy = try? JSONDecoder().decode(StoredSession.self, from: data)
-        else {
-            return nil
-        }
-
-        let session = normalizedSession(legacy)
-        if persist(session) {
-            legacyKeychain.removeData(forAccount: keychainSessionAccount)
-            Self.logger.notice("Migrated browser sync session from legacy Keychain service")
-        } else {
-            Self.logger.error(
-                "Keychain migration from legacy service failed; legacy item kept so migration can retry on next read"
-            )
-        }
-        return session
     }
 
     /// One-time migration: earlier builds persisted the session (including
@@ -271,13 +246,6 @@ final class BrowserSyncCredentialsProvider: AppleBrowserStorageSyncCredentialsPr
         if let existing = userDefaults.string(forKey: deviceIdKey),
            !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return existing
-        }
-
-        if let legacy = userDefaults.string(forKey: legacyNamespacedDeviceIdKey),
-           !legacy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            userDefaults.set(legacy, forKey: deviceIdKey)
-            userDefaults.removeObject(forKey: legacyNamespacedDeviceIdKey)
-            return legacy
         }
 
         if let legacy = userDefaults.string(forKey: legacyDeviceIdKey),

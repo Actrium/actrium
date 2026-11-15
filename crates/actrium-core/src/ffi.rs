@@ -20,10 +20,6 @@ use crate::persistence;
 use crate::realm_link;
 use crate::runtime_persistence;
 use crate::speech;
-pub use crate::toolbar_interaction::{
-    ToolbarTabInteractionInput, ToolbarTabInteractionPhase,
-    ToolbarTabInteractionTransitionInfo,
-};
 
 #[derive(Debug, Clone)]
 pub struct ActrPackageManifestInfo {
@@ -208,13 +204,6 @@ pub struct BrowserStorageSyncSqlInfo {
     pub mark_session_tab_synced: String,
     pub upsert_sync_cursor: String,
     pub select_sync_cursors_for_scope: String,
-}
-
-pub fn toolbar_tab_interaction_transition(
-    phase: ToolbarTabInteractionPhase,
-    input: ToolbarTabInteractionInput,
-) -> ToolbarTabInteractionTransitionInfo {
-    crate::toolbar_interaction::transition(phase, input)
 }
 
 #[derive(Debug, Clone)]

@@ -46,8 +46,8 @@ final class SidebarLayoutState: ObservableObject {
     }
 
     func updateTabStripWidth(_ width: CGFloat) {
-        let normalizedWidth = max(0, width)
-        guard abs(tabStripWidth - normalizedWidth) > changeEpsilon else { return }
-        tabStripWidth = normalizedWidth
+        let normalized = max(0, width)
+        guard abs(tabStripWidth - normalized) > changeEpsilon else { return }
+        tabStripWidth = normalized
     }
 }

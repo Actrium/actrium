@@ -16,7 +16,7 @@ import SwiftUI
 /// Individual Download Items
 class DownloadItem: ObservableObject, Identifiable {
     let id = UUID()
-    @Published var filename: String
+    let filename: String
     let sourceURL: URL?
     var destinationURL: URL?
 
@@ -26,10 +26,7 @@ class DownloadItem: ObservableObject, Identifiable {
     @Published var error: String?
     @Published var fileExists: Bool = true
 
-    var download: WKDownload?
-    var transport: DownloadTransport = .urlSession
-    weak var sourceWebView: WKWebView?
-    var webKitResumeData: Data?
+    weak var download: WKDownload?
 
     /// Check if the downloaded file still exists on disk
     func checkFileExists() {
@@ -57,199 +54,32 @@ class DownloadItem: ObservableObject, Identifiable {
     }
 
     init(filename: String, sourceURL: URL? = nil) {
-        self.filename = DownloadDestinationPolicy.safeFilename(filename)
+        self.filename = filename
         self.sourceURL = sourceURL
     }
 
     func cancel() {
-        download?.cancel { [weak self] resumeData in
-            Task { @MainActor [weak self] in
-                self?.webKitResumeData = resumeData
-            }
-        }
+        download?.cancel()
         URLSessionDownloader.shared.cancelDownload(for: self)
         state = .cancelled
     }
 
     func retry() {
         guard let url = sourceURL else { return }
-
-        if transport == .webKit, sourceWebView == nil {
-            error = "The source webpage is no longer available. Start the download again from the webpage."
-            state = .failed
-            return
-        }
-
         bytesReceived = 0
         totalBytes = 0
         error = nil
         state = .downloading
-
-        switch transport {
-        case .urlSession:
-            URLSessionDownloader.shared.startDownload(url: url, item: self)
-
-        case .webKit:
-            guard let sourceWebView else { return }
-            let resumeData = webKitResumeData
-            webKitResumeData = nil
-            let completion: (WKDownload) -> Void = { [weak self, weak sourceWebView] download in
-                Task { @MainActor in
-                    guard let self, let sourceWebView else {
-                        _ = await download.cancel()
-                        return
-                    }
-                    DownloadManager.shared.adoptWebKitDownload(
-                        download,
-                        item: self,
-                        sourceWebView: sourceWebView
-                    )
-                }
-            }
-
-            if let resumeData {
-                sourceWebView.resumeDownload(fromResumeData: resumeData, completionHandler: completion)
-            } else {
-                sourceWebView.startDownload(using: URLRequest(url: url), completionHandler: completion)
-            }
-        }
+        URLSessionDownloader.shared.startDownload(url: url, item: self)
     }
 }
 
-nonisolated enum DownloadState: Equatable {
+enum DownloadState: Equatable {
     case waiting
     case downloading
     case completed
     case failed
     case cancelled
-}
-
-nonisolated enum DownloadTransport {
-    case urlSession
-    case webKit
-}
-
-nonisolated enum DownloadFailureMessage {
-    static func message(for error: Error) -> String {
-        let nsError = error as NSError
-        guard nsError.domain == NSURLErrorDomain else {
-            return "The download couldn’t be completed."
-        }
-
-        switch nsError.code {
-        case NSURLErrorNotConnectedToInternet:
-            return "No internet connection."
-        case NSURLErrorTimedOut:
-            return "The download timed out."
-        case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost,
-             NSURLErrorDNSLookupFailed, NSURLErrorNetworkConnectionLost:
-            return "The download server couldn’t be reached."
-        case NSURLErrorSecureConnectionFailed,
-             NSURLErrorServerCertificateHasBadDate,
-             NSURLErrorServerCertificateUntrusted,
-             NSURLErrorServerCertificateHasUnknownRoot:
-            return "A secure connection couldn’t be established."
-        default:
-            return "The download couldn’t be completed."
-        }
-    }
-}
-
-/// Keeps server- and page-provided names inside the Downloads directory and
-/// removes characters commonly used for hidden-file or extension spoofing.
-nonisolated enum DownloadDestinationPolicy {
-    private static let maximumFilenameBytes = 180
-    private static let bidirectionalControls: Set<UInt32> = [
-        0x061C, 0x200E, 0x200F,
-        0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
-        0x2066, 0x2067, 0x2068, 0x2069
-    ]
-
-    static func safeFilename(_ rawName: String, fallback: String = "download") -> String {
-        let normalized = rawName.precomposedStringWithCanonicalMapping
-        let leafName = normalized
-            .replacingOccurrences(of: "\\", with: "/")
-            .split(separator: "/", omittingEmptySubsequences: true)
-            .last
-            .map(String.init) ?? ""
-
-        let filteredScalars = leafName.unicodeScalars.filter { scalar in
-            !CharacterSet.controlCharacters.contains(scalar)
-                && !CharacterSet.illegalCharacters.contains(scalar)
-                && scalar != ":"
-                && !bidirectionalControls.contains(scalar.value)
-        }
-        var candidate = String(String.UnicodeScalarView(filteredScalars))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        candidate = candidate.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-
-        guard !candidate.isEmpty, candidate != ".", candidate != ".." else {
-            return fallback
-        }
-        return truncatingFilename(candidate, toUTF8Bytes: maximumFilenameBytes, fallback: fallback)
-    }
-
-    static func availableDestinationURL(for rawName: String, in directory: URL) -> URL {
-        let filename = safeFilename(rawName)
-        let name = (filename as NSString).deletingPathExtension
-        let ext = (filename as NSString).pathExtension
-        let fileManager = FileManager.default
-
-        for counter in 0...10_000 {
-            let candidateName: String
-            if counter == 0 {
-                candidateName = filename
-            } else if ext.isEmpty {
-                candidateName = "\(name) (\(counter))"
-            } else {
-                candidateName = "\(name) (\(counter)).\(ext)"
-            }
-            let candidateURL = directory.appendingPathComponent(candidateName, isDirectory: false)
-            if !fileManager.fileExists(atPath: candidateURL.path) {
-                return candidateURL
-            }
-        }
-
-        let suffix = UUID().uuidString
-        let fallbackName = ext.isEmpty ? "download-\(suffix)" : "download-\(suffix).\(ext)"
-        return directory.appendingPathComponent(fallbackName, isDirectory: false)
-    }
-
-    private static func truncatingFilename(
-        _ filename: String,
-        toUTF8Bytes maximumBytes: Int,
-        fallback: String
-    ) -> String {
-        guard filename.utf8.count > maximumBytes else { return filename }
-
-        let extensionPart = utf8Prefix((filename as NSString).pathExtension, maximumBytes: 32)
-        if !extensionPart.isEmpty {
-            let base = (filename as NSString).deletingPathExtension
-            let baseBudget = maximumBytes - extensionPart.utf8.count - 1
-            let shortenedBase = utf8Prefix(base, maximumBytes: baseBudget)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !shortenedBase.isEmpty {
-                return "\(shortenedBase).\(extensionPart)"
-            }
-        }
-
-        let shortened = utf8Prefix(filename, maximumBytes: maximumBytes)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return shortened.isEmpty ? fallback : shortened
-    }
-
-    private static func utf8Prefix(_ value: String, maximumBytes: Int) -> String {
-        guard maximumBytes > 0 else { return "" }
-        var result = ""
-        var byteCount = 0
-        for character in value {
-            let characterBytes = String(character).utf8.count
-            guard byteCount + characterBytes <= maximumBytes else { break }
-            result.append(character)
-            byteCount += characterBytes
-        }
-        return result
-    }
 }
 
 // MARK: - Download Manager
@@ -261,7 +91,6 @@ class DownloadManager: ObservableObject {
 
     @Published var downloads: [DownloadItem] = []
     @Published var hasActiveDownloads: Bool = false
-    private var webKitDownloadHandlers: [ObjectIdentifier: DownloadDelegateHandler] = [:]
 
     private init() {}
 
@@ -351,9 +180,11 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
 
     /// Start a download using URLSession
     func startDownload(url: URL, item: DownloadItem) {
-        // Let URLSession provide its native networking identity. A direct
-        // downloader must not impersonate an unrelated Safari release.
-        let task = session.downloadTask(with: URLRequest(url: url))
+        var request = URLRequest(url: url)
+        // Use Safari-like user agent to avoid blocks
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
+
+        let task = session.downloadTask(with: request)
         downloadTasks[task] = item
 
         Task { @MainActor in
@@ -361,7 +192,7 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
         }
 
         task.resume()
-        NSLog("📥 URLSessionDownloader: Started download")
+        NSLog("📥 URLSessionDownloader: Started download - \(url.lastPathComponent)")
     }
 
     /// Cancel a download
@@ -379,11 +210,19 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
 
         // Generate destination path
         let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
-        let destinationURL = DownloadDestinationPolicy.availableDestinationURL(
-            for: item.filename,
-            in: downloadsURL
-        )
+        var destinationURL = downloadsURL.appendingPathComponent(item.filename)
+
+        // Handle duplicate filenames
+        var counter = 1
         let fileManager = FileManager.default
+        let baseName = (item.filename as NSString).deletingPathExtension
+        let ext = (item.filename as NSString).pathExtension
+
+        while fileManager.fileExists(atPath: destinationURL.path) {
+            let newName = ext.isEmpty ? "\(baseName) (\(counter))" : "\(baseName) (\(counter)).\(ext)"
+            destinationURL = downloadsURL.appendingPathComponent(newName)
+            counter += 1
+        }
 
         do {
             try fileManager.moveItem(at: location, to: destinationURL)
@@ -391,14 +230,13 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
             Task { @MainActor in
                 item.destinationURL = destinationURL
                 DownloadManager.shared.updateItem(item, state: .completed)
-                NSLog("📥 URLSessionDownloader: Download completed")
+                NSLog("📥 URLSessionDownloader: Download completed - \(item.filename) -> \(destinationURL.path)")
             }
         } catch {
             Task { @MainActor in
-                item.error = DownloadFailureMessage.message(for: error)
+                item.error = error.localizedDescription
                 DownloadManager.shared.updateItem(item, state: .failed)
-                let nsError = error as NSError
-                NSLog("📥 URLSessionDownloader: Failed to move file (%@/%d)", nsError.domain, nsError.code)
+                NSLog("📥 URLSessionDownloader: Failed to move file - \(error.localizedDescription)")
             }
         }
 
@@ -425,10 +263,9 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
             }
         } else {
             Task { @MainActor in
-                item.error = DownloadFailureMessage.message(for: error)
+                item.error = error.localizedDescription
                 DownloadManager.shared.updateItem(item, state: .failed)
-                let nsError = error as NSError
-                NSLog("📥 URLSessionDownloader: Download failed (%@/%d)", nsError.domain, nsError.code)
+                NSLog("📥 URLSessionDownloader: Download failed - \(item.filename): \(error.localizedDescription)")
             }
         }
 
@@ -436,16 +273,15 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
     }
 }
 
-// MARK: - Download Delegate Handler
+// MARK: - Download Delegate Handler (WKDownload fallback)
 
 /// Downloading Proxy Processor - For WKDownload, but automatically switch to URLSession
 class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
     weak var item: DownloadItem?
-    private let onTerminalState: (WKDownload) -> Void
+    private var hasTriedURLSessionFallback = false
 
-    init(item: DownloadItem, onTerminalState: @escaping (WKDownload) -> Void = { _ in }) {
+    init(item: DownloadItem) {
         self.item = item
-        self.onTerminalState = onTerminalState
         super.init()
     }
 
@@ -467,12 +303,11 @@ class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
         }
 
         Task { @MainActor in
-            item?.filename = safeFilename
             item?.destinationURL = destinationURL
             item?.state = .downloading
         }
 
-        NSLog("📥 DownloadManager: Downloading")
+        NSLog("📥 DownloadManager: Downloading to \(destinationURL.path)")
         completionHandler(destinationURL)
     }
 
@@ -489,13 +324,9 @@ class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
 
     func downloadDidFinish(_ download: WKDownload) {
         Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { self.onTerminalState(download) }
-            guard let item = self.item else { return }
-            item.download = nil
-            item.webKitResumeData = nil
+            guard let item = self?.item else { return }
             DownloadManager.shared.updateItem(item, state: .completed)
-            NSLog("📥 DownloadManager: Download completed")
+            NSLog("📥 DownloadManager: Download completed - \(item.filename)")
         }
     }
 
@@ -522,15 +353,9 @@ class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
                 }
             }
 
-            let nsError = error as NSError
-            if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
-                item.error = nil
-                DownloadManager.shared.updateItem(item, state: .cancelled)
-            } else {
-                item.error = DownloadFailureMessage.message(for: error)
-                DownloadManager.shared.updateItem(item, state: .failed)
-            }
-            NSLog("📥 DownloadManager: Download failed (%@/%d)", nsError.domain, nsError.code)
+            item.error = error.localizedDescription
+            DownloadManager.shared.updateItem(item, state: .failed)
+            NSLog("📥 DownloadManager: Download failed - \(item.filename): \(error.localizedDescription)")
         }
     }
 }

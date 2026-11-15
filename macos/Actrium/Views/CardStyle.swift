@@ -30,11 +30,7 @@ enum CardStyle {
     /// Spacing between title bar items
     static let titleBarItemSpacing: CGFloat = 8
 
-    /// Close button layout box. The symbol is centered inside this box.
-    /// Keep this shared with AnimationLayer so the title starts at the same x.
     static let closeButtonSize: CGFloat = 20
-
-    /// Overview card outline and shadow metrics.
     static let borderWidth: CGFloat = 1
     static let shadowOpacity: Float = 0.3
     static let shadowRadius: CGFloat = 5

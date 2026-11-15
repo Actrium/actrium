@@ -10182,18 +10182,6 @@ public func systemAppTypeSettings() -> String  {
 })
 }
 /**
- * Advance the deterministic compact-toolbar Tab interaction state machine.
- */
-public func toolbarTabInteractionTransition(phase: ToolbarTabInteractionPhase, input: ToolbarTabInteractionInput) -> ToolbarTabInteractionTransitionInfo {
-    return try! FfiConverterTypeToolbarTabInteractionTransitionInfo.lift(try! rustCall {
-        uniffi_actro_core_fn_func_toolbar_tab_interaction_transition(
-            FfiConverterTypeToolbarTabInteractionPhase.lower(phase),
-            FfiConverterTypeToolbarTabInteractionInput.lower(input), $0
-        )
-    })
-}
-
-/**
  * Return the canonical TTS native module/event/options/payload contract.
  */
 public func ttsBridgeContract() -> TtsBridgeContractInfo  {

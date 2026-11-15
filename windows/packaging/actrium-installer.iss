@@ -27,9 +27,7 @@
 ; certificate yet); SmartScreen warns on first run. Sign both with signtool
 ; once a certificate exists.
 ;
-; No SetupIconFile / shortcut IconFilename yet: the repo has no app icon
-; asset to convert (the Apple icon sets carry only Contents.json). Wire an
-; .ico here and via ApplicationIcon in Actrium.Windows.csproj once authored.
+; The installer and the application use the current Actrium logo.
 
 #ifndef AppVersion
   #error AppVersion must be defined, e.g. ISCC /DAppVersion=0.1.0
@@ -55,12 +53,12 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.19041
 UninstallDisplayName=Actrium
 UninstallDisplayIcon={app}\Actrium.exe
+SetupIconFile=..\assets\Actrium.ico
 ; lzma2/fast: the self-contained .NET payload is ~200 MB; normal lzma2
 ; roughly doubles compile time for a marginal size win.
 Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
-SetupIconFile=..\assets\Actro.ico
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion

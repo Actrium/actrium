@@ -5,7 +5,7 @@
 	<!-- App Groups for XPC Broker -->
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.io.github.actrium.actro</string>
+		<string>group.io.actrium.actro</string>
 	</array>
 
 	<!-- App Sandbox (disabled for development) -->
@@ -19,12 +19,6 @@
 	<key>com.apple.security.network.server</key>
 	<true/>
 
-	<!-- Web browser capabilities required for platform passkeys in WKWebView. -->
-	<key>com.apple.developer.web-browser</key>
-	<true/>
-	<key>com.apple.developer.web-browser.public-key-credential</key>
-	<true/>
-
 	<!-- File Access -->
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
@@ -34,7 +28,7 @@
 	<!-- Allow connecting to broker Mach service -->
 	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
 	<array>
-		<string>group.io.github.actrium.actro.broker</string>
+		<string>group.io.actrium.actro.broker</string>
 	</array>
 
 	<!-- Allow JIT Compilation (Required for WebKit JavaScript) -->

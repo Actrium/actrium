@@ -7,14 +7,6 @@ private let macOSBookmarkBackfillKey = "apple_macos_local_bookmarks_backfilled_v
 
 final class BrowserDataRepository {
     static let shared = BrowserDataRepository()
-    private static let maximumPersistedTabs = 2_048
-    private static let maximumAddressBytes = 65_536
-    private static let maximumTitleBytes = 1_024
-    private static let bidirectionalControls: Set<UInt32> = [
-        0x061C, 0x200E, 0x200F,
-        0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
-        0x2066, 0x2067, 0x2068, 0x2069
-    ]
 
     private let database: AppleBrowserStorageDatabase?
     private let syncScheduler: AppleBrowserStorageSyncScheduler?
@@ -31,7 +23,7 @@ final class BrowserDataRepository {
     // kind; within a session it reflects the last round's provider error
     // classification. Serialized through an actor-free serial queue because
     // the local-folder cycle can be invoked from concurrent UI actions.
-    private let providerStateQueue = DispatchQueue(label: "io.github.actrium.actro.browserSync.localFolderProvider")
+    private let providerStateQueue = DispatchQueue(label: "io.actrium.actro.browserSync.localFolderProvider")
     private var lastProviderErrorKindStorage: String?
 
     private init() {
@@ -47,13 +39,12 @@ final class BrowserDataRepository {
             )
             syncScheduler = AppleBrowserStorageSyncScheduler(coordinator: syncCoordinator)
             localFolderSyncClient = AppleBrowserStorageSyncClient(database: openedDatabase)
-            browserDataLogger.notice("Initialized browser storage")
+            browserDataLogger.notice("Initialized browser storage at: \(path)")
         } catch {
             database = nil
             syncScheduler = nil
             localFolderSyncClient = nil
-            let nsError = error as NSError
-            browserDataLogger.error("Failed to open browser storage (\(nsError.domain)/\(nsError.code))")
+            browserDataLogger.error("Failed to open browser storage at: \(path), error: \(String(describing: error))")
         }
     }
 
@@ -86,7 +77,7 @@ final class BrowserDataRepository {
             bookmarkData: bookmarkData
         )
         setLastProviderErrorKind(nil)
-        browserDataLogger.notice("Configured local-folder browser sync provider")
+        browserDataLogger.notice("Configured local-folder browser sync provider at: \(rootURL.path)")
         return snapshot
     }
 
@@ -287,10 +278,10 @@ final class BrowserDataRepository {
     }
 
     func recordVisit(title: String, url: URL) {
-        guard let safeURL = Self.safeBrowserURL(url) else { return }
+        guard Self.isBrowserPageURL(url) else { return }
         let item = AppleBrowserHistoryItem(
-            title: Self.normalizedTitle(title, url: safeURL),
-            address: safeURL.absoluteString,
+            title: normalizedTitle(title, url: url),
+            address: url.absoluteString,
             visitedAtUnixSeconds: Int64(Date().timeIntervalSince1970),
             visitCount: 1
         )
@@ -320,8 +311,8 @@ final class BrowserDataRepository {
     }
 
     func removeHistory(item: HistoryItem) {
-        guard let url = item.appURL, let safeURL = Self.safeBrowserURL(url) else { return }
-        _ = database?.deleteHistory(address: safeURL.absoluteString)
+        guard let url = item.appURL, Self.isBrowserPageURL(url) else { return }
+        _ = database?.deleteHistory(address: url.absoluteString)
     }
 
     func clearHistory() {
@@ -358,8 +349,8 @@ final class BrowserDataRepository {
     }
 
     func removeBookmark(_ bookmark: Bookmark) {
-        guard let url = bookmark.appURL, let safeURL = Self.safeBrowserURL(url) else { return }
-        if database?.deleteBookmark(address: safeURL.absoluteString) == true {
+        guard let url = bookmark.appURL, Self.isBrowserPageURL(url) else { return }
+        if database?.deleteBookmark(address: url.absoluteString) == true {
             scheduleSyncAfterLocalChange()
         }
     }
@@ -404,8 +395,8 @@ final class BrowserDataRepository {
             guard let url = tab.url, Self.isSessionRestorableURL(url) else { return nil }
             let item = AppleBrowserSessionTab(
                 id: tab.id.uuidString,
-                title: Self.normalizedTitle(tab.title, url: safeURL),
-                address: safeURL.absoluteString,
+                title: normalizedTitle(tab.title, url: url),
+                address: url.absoluteString,
                 createdAtUnixSeconds: now,
                 updatedAtUnixSeconds: now
             )
@@ -436,59 +427,6 @@ final class BrowserDataRepository {
         }
     }
 
-    /// Loads the last ordinary web-browsing session. Browser-owned pages and
-    /// app surfaces are intentionally not restored through this path.
-    func loadSessionTabs() -> (tabs: [Tab], currentTabId: UUID?)? {
-        guard let snapshot = database?.loadSession() else { return nil }
-        return Self.restoreSession(from: snapshot)
-    }
-
-    /// Converts a persisted snapshot into a safe, internally consistent set of
-    /// Tabs. The source index is retained while malformed entries are filtered,
-    /// so the active Tab does not silently shift to a different page.
-    static func restoreSession(
-        from snapshot: AppleBrowserSessionSnapshot
-    ) -> (tabs: [Tab], currentTabId: UUID?)? {
-        let activeSourceIndex = Int(snapshot.activeTabIndex)
-        var usedIDs = Set<UUID>()
-        var restored: [(sourceIndex: Int, tab: Tab)] = []
-
-        for (sourceIndex, item) in snapshot.tabs.prefix(maximumPersistedTabs).enumerated() {
-            guard item.address.utf8.count <= maximumAddressBytes,
-                  let parsedURL = URL(string: item.address),
-                  let url = safeBrowserURL(parsedURL) else { continue }
-
-            let boundedPersistedID = item.id.utf8.count <= 128 ? item.id : "oversized-id"
-            let persistedID = UUID(uuidString: boundedPersistedID)
-            let candidateID = persistedID ?? stableUUID(
-                for: "session:\(sourceIndex):\(boundedPersistedID):\(item.address)"
-            )
-            let tabID: UUID
-            if usedIDs.insert(candidateID).inserted {
-                tabID = candidateID
-            } else {
-                tabID = stableUUID(
-                    for: "session-duplicate:\(sourceIndex):\(boundedPersistedID):\(item.address)"
-                )
-                usedIDs.insert(tabID)
-            }
-
-            restored.append((
-                sourceIndex: sourceIndex,
-                tab: Tab(
-                    id: tabID,
-                    title: normalizedTitle(item.title, url: url),
-                    url: url
-                )
-            ))
-        }
-
-        guard !restored.isEmpty else { return nil }
-        let activeTab = restored.first(where: { $0.sourceIndex == activeSourceIndex })?.tab
-            ?? restored.first?.tab
-        return (restored.map(\.tab), activeTab?.id)
-    }
-
     private func scheduleSyncAfterLocalChange() {
         guard let syncScheduler else { return }
         Task {
@@ -508,39 +446,23 @@ final class BrowserDataRepository {
 
     static func isBrowserPageURL(_ url: URL) -> Bool {
         let scheme = url.scheme?.lowercased()
-        guard scheme == "http" || scheme == "https" else { return false }
-        return !(url.host?.isEmpty ?? true)
-    }
-
-    /// Browser storage never persists URL user-info. Embedded credentials can
-    /// otherwise leak through session sync, history, bookmarks and logs.
-    static func safeBrowserURL(_ url: URL) -> URL? {
-        guard isBrowserPageURL(url), url.absoluteString.utf8.count <= maximumAddressBytes,
-              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            return nil
-        }
-        components.user = nil
-        components.password = nil
-        guard let safeURL = components.url, isBrowserPageURL(safeURL) else { return nil }
-        return safeURL
+        return scheme == "http" || scheme == "https"
     }
 
     private func historyItem(from item: AppleBrowserHistoryItem) -> HistoryItem? {
-        guard item.address.utf8.count <= Self.maximumAddressBytes,
-              let parsedURL = URL(string: item.address),
-              let url = Self.safeBrowserURL(parsedURL) else { return nil }
+        guard let url = URL(string: item.address), Self.isBrowserPageURL(url) else { return nil }
         return HistoryItem(
-            id: Self.stableUUID(for: "history:\(url.absoluteString)"),
-            title: Self.normalizedTitle(item.title, url: url),
+            id: stableUUID(for: "history:\(item.address)"),
+            title: normalizedTitle(item.title, url: url),
             appURL: url,
             visitTime: Date(timeIntervalSince1970: TimeInterval(item.visitedAtUnixSeconds))
         )
     }
 
     private func browserHistoryItem(from item: HistoryItem) -> AppleBrowserHistoryItem? {
-        guard let sourceURL = item.appURL, let url = Self.safeBrowserURL(sourceURL) else { return nil }
+        guard let url = item.appURL, Self.isBrowserPageURL(url) else { return nil }
         return AppleBrowserHistoryItem(
-            title: Self.normalizedTitle(item.title, url: url),
+            title: normalizedTitle(item.title, url: url),
             address: url.absoluteString,
             visitedAtUnixSeconds: Int64(item.visitTime.timeIntervalSince1970),
             visitCount: 1
@@ -548,12 +470,12 @@ final class BrowserDataRepository {
     }
 
     private func browserBookmarkItem(from bookmark: Bookmark) -> AppleBrowserBookmarkItem? {
-        guard let sourceURL = bookmark.appURL, let url = Self.safeBrowserURL(sourceURL) else { return nil }
+        guard let url = bookmark.appURL, Self.isBrowserPageURL(url) else { return nil }
         let createdAt = Int64(bookmark.createdAt.timeIntervalSince1970)
         let updatedAt = Int64((bookmark.lastUsedAt ?? bookmark.createdAt).timeIntervalSince1970)
         return AppleBrowserBookmarkItem(
             id: bookmark.id.uuidString,
-            title: Self.normalizedTitle(bookmark.title, url: url),
+            title: normalizedTitle(bookmark.title, url: url),
             address: url.absoluteString,
             createdAtUnixSeconds: createdAt,
             updatedAtUnixSeconds: updatedAt,
@@ -562,12 +484,10 @@ final class BrowserDataRepository {
     }
 
     private func bookmark(from item: AppleBrowserBookmarkItem) -> Bookmark? {
-        guard item.address.utf8.count <= Self.maximumAddressBytes,
-              let parsedURL = URL(string: item.address),
-              let url = Self.safeBrowserURL(parsedURL) else { return nil }
+        guard let url = URL(string: item.address), Self.isBrowserPageURL(url) else { return nil }
         return Bookmark(
-            id: UUID(uuidString: item.id) ?? Self.stableUUID(for: "bookmark:\(url.absoluteString)"),
-            title: Self.normalizedTitle(item.title, url: url),
+            id: UUID(uuidString: item.id) ?? stableUUID(for: "bookmark:\(item.address)"),
+            title: normalizedTitle(item.title, url: url),
             appURL: url,
             createdAt: Date(timeIntervalSince1970: TimeInterval(item.createdAtUnixSeconds)),
             lastUsedAt: Date(timeIntervalSince1970: TimeInterval(item.updatedAtUnixSeconds)),
@@ -575,16 +495,8 @@ final class BrowserDataRepository {
         )
     }
 
-    private static func normalizedTitle(_ title: String, url: URL) -> String {
-        let filteredScalars = title.unicodeScalars.prefix(maximumTitleBytes * 2).filter { scalar in
-            !CharacterSet.controlCharacters.contains(scalar)
-                && !CharacterSet.illegalCharacters.contains(scalar)
-                && !bidirectionalControls.contains(scalar.value)
-        }
-        let trimmed = utf8Prefix(
-            String(String.UnicodeScalarView(filteredScalars)).trimmingCharacters(in: .whitespacesAndNewlines),
-            maximumBytes: maximumTitleBytes
-        )
+    private func normalizedTitle(_ title: String, url: URL) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             return trimmed
         }
@@ -594,19 +506,7 @@ final class BrowserDataRepository {
         return url.absoluteString
     }
 
-    private static func utf8Prefix(_ value: String, maximumBytes: Int) -> String {
-        var result = ""
-        var byteCount = 0
-        for character in value {
-            let characterBytes = String(character).utf8.count
-            guard byteCount + characterBytes <= maximumBytes else { break }
-            result.append(character)
-            byteCount += characterBytes
-        }
-        return result
-    }
-
-    private static func stableUUID(for value: String) -> UUID {
+    private func stableUUID(for value: String) -> UUID {
         let bytes = stableIdentifierBytes(for: value)
         return UUID(uuid: (
             bytes[0], bytes[1], bytes[2], bytes[3],
@@ -616,7 +516,7 @@ final class BrowserDataRepository {
         ))
     }
 
-    private static func stableIdentifierBytes(for value: String) -> [UInt8] {
+    private func stableIdentifierBytes(for value: String) -> [UInt8] {
         let first = fnv1a64(value.utf8)
         let second = fnv1a64(("actro:" + value).utf8)
         var bytes = [UInt8](repeating: 0, count: 16)
@@ -629,7 +529,7 @@ final class BrowserDataRepository {
         return bytes
     }
 
-    private static func fnv1a64<T: Sequence>(_ bytes: T) -> UInt64 where T.Element == UInt8 {
+    private func fnv1a64<T: Sequence>(_ bytes: T) -> UInt64 where T.Element == UInt8 {
         var hash: UInt64 = 0xcbf29ce484222325
         for byte in bytes {
             hash ^= UInt64(byte)

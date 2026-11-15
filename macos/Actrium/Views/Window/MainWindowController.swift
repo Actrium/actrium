@@ -2,11 +2,21 @@ import AppKit
 import SwiftUI
 import Combine
 
-// MARK: - Custom Window
+// MARK: - Compact Toolbar Window
 
-/// NSWindow subclass that restores double-click-to-zoom on the titlebar
-/// when a custom toolbar overlay intercepts mouse events.
+/// The compact toolbar owns pointer gestures; only its explicit chrome mask
+/// can start a window move.
 final class ActriumWindow: NSWindow {
+    weak var toolbarInteraction: ToolbarTabInteractionCoordinator?
+    var activeTabIDProvider: (() -> UUID?)?
+
+    func performExplicitWindowDrag(with event: NSEvent) {
+        guard event.type == .leftMouseDown else { return }
+        let wasMovable = isMovable
+        isMovable = true
+        defer { isMovable = wasMovable }
+        performDrag(with: event)
+    }
 
     override func sendEvent(_ event: NSEvent) {
         super.sendEvent(event)
@@ -23,9 +33,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     let viewModel: BrowserViewModel  // Public for AppDelegate access
     private let historyVM: HistoryViewModel
     private let bookmarkVM: BookmarkViewModel
-    private let toolbarInteraction: ToolbarTabInteractionCoordinator
 
-    private var mainWindowViewController: MainWindowViewController!
+    private var rootViewController: RootContentViewController!
+    private let toolbarInteraction = ToolbarTabInteractionCoordinator()
     private var cancellables = Set<AnyCancellable>()
     private var fullScreenTitleLabel: NSTextField?
     private let fullScreenTrafficLightLeftInset: CGFloat = 18
@@ -42,7 +52,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         self.viewModel = viewModel
         self.historyVM = historyVM
         self.bookmarkVM = bookmarkVM
-        self.toolbarInteraction = ToolbarTabInteractionCoordinator()
 
         // Create window with transparent titlebar
         let window = ActriumWindow(
@@ -55,9 +64,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
 
         window.toolbarInteraction = toolbarInteraction
-        window.activeTabIDProvider = { [weak viewModel] in
-            viewModel?.currentTabId
-        }
+        window.activeTabIDProvider = { [weak viewModel] in viewModel?.currentTabId }
 
         configureWindow(window)
         setupContentViewController()
@@ -79,9 +86,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.title = resolvedWindowTitle()
         window.backgroundColor = .clear
-        // This is the hard boundary: no titlebar/background hit can ever start
-        // a native window drag. The explicit Header mask tracks and applies
-        // window movement only for points outside Tabs/Tabs Group and controls.
         window.isMovable = false
         window.isMovableByWindowBackground = false
 
@@ -135,7 +139,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         guard let window = window else { return }
 
         // Create root content view controller with 4px edge inset
-        mainWindowViewController = MainWindowViewController(
+        rootViewController = RootContentViewController(
             viewModel: viewModel,
             historyVM: historyVM,
             bookmarkVM: bookmarkVM,
@@ -143,8 +147,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         )
 
         // Set as window's content view controller
-        window.contentViewController = mainWindowViewController
-        mainWindowViewController?.updateWindowFullScreenState(window.styleMask.contains(.fullScreen))
+        window.contentViewController = rootViewController
+        rootViewController?.updateWindowFullScreenState(window.styleMask.contains(.fullScreen))
     }
 
     // MARK: - Public Methods
@@ -169,30 +173,30 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.title = resolvedWindowTitle()
         window.titlebarAppearsTransparent = false
         window.titleVisibility = .hidden
-        mainWindowViewController?.updateWindowFullScreenState(true)
-        mainWindowViewController?.view.needsLayout = true
+        rootViewController?.updateWindowFullScreenState(true)
+        rootViewController?.view.needsLayout = true
     }
 
     func windowWillExitFullScreen(_ notification: Notification) {
         removeFullScreenLeftAlignedTitle()
         window?.titleVisibility = .hidden
         window?.titlebarAppearsTransparent = true
-        mainWindowViewController?.updateWindowFullScreenState(false)
-        mainWindowViewController?.view.needsLayout = true
+        rootViewController?.updateWindowFullScreenState(false)
+        rootViewController?.view.needsLayout = true
     }
 
     func windowDidEnterFullScreen(_ notification: Notification) {
-        mainWindowViewController?.view.layoutSubtreeIfNeeded()
-        mainWindowViewController?.updateWindowFullScreenState(true)
+        rootViewController?.view.layoutSubtreeIfNeeded()
+        rootViewController?.updateWindowFullScreenState(true)
         ensureFullScreenLeftAlignedTitle()
         updateFullScreenLeftAlignedTitleFrame()
-        mainWindowViewController?.view.needsLayout = true
+        rootViewController?.view.needsLayout = true
     }
 
     func windowDidExitFullScreen(_ notification: Notification) {
         removeFullScreenLeftAlignedTitle()
-        mainWindowViewController?.updateWindowFullScreenState(false)
-        mainWindowViewController?.view.needsLayout = true
+        rootViewController?.updateWindowFullScreenState(false)
+        rootViewController?.view.needsLayout = true
     }
 
     func windowDidResize(_ notification: Notification) {

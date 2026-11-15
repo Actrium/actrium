@@ -17,24 +17,24 @@ final class FaviconCache: @unchecked Sendable {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
-        configuration.timeoutIntervalForRequest = 8
-        configuration.timeoutIntervalForResource = 12
         session = URLSession(configuration: configuration)
     }
 
-    static func cacheKey(for pageURL: URL) -> String? {
+    private static func originKey(for pageURL: URL) -> String? {
         guard let scheme = pageURL.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
-              let host = pageURL.host?.lowercased(),
-              !host.isEmpty else { return nil }
-        let port = pageURL.port.map { ":\($0)" } ?? ""
-        return "\(scheme)://\(host)\(port)"
+              let host = pageURL.host?.lowercased(), !host.isEmpty else { return nil }
+        return "\(scheme)://\(host)\(pageURL.port.map { ":\($0)" } ?? "")"
     }
 
-    /// Uses only the page's own origin. A favicon lookup must not disclose the
-    /// user's browsing history to a third-party icon aggregation service.
-    static func faviconURL(for pageURL: URL) -> URL? {
-        guard cacheKey(for: pageURL) != nil,
+    func getSync(for pageURL: URL) -> NSImage? {
+        guard let key = Self.originKey(for: pageURL) else { return nil }
+        return getSync(key)
+    }
+
+    func image(for pageURL: URL) async -> NSImage? {
+        if let cached = getSync(for: pageURL) { return cached }
+        guard let key = Self.originKey(for: pageURL),
               var components = URLComponents(url: pageURL, resolvingAgainstBaseURL: false) else {
             return nil
         }
@@ -43,45 +43,13 @@ final class FaviconCache: @unchecked Sendable {
         components.path = "/favicon.ico"
         components.query = nil
         components.fragment = nil
-        return components.url
-    }
-
-    /// Synchronous get - safe to call from main thread without await
-    func getSync(for pageURL: URL) -> NSImage? {
-        guard let key = Self.cacheKey(for: pageURL) else { return nil }
-        lock.lock()
-        defer { lock.unlock() }
-        return cache[key]
-    }
-
-    /// Async get for compatibility
-    func get(for pageURL: URL) async -> NSImage? {
-        getSync(for: pageURL)
-    }
-
-    func set(for pageURL: URL, image: NSImage) {
-        guard let key = Self.cacheKey(for: pageURL) else { return }
-        lock.lock()
-        defer { lock.unlock() }
-        cache[key] = image
-    }
-
-    /// Shared favicon loading path for every Tab presentation. The URL cache
-    /// and this in-memory cache together avoid separate Header/Sidebar fetches.
-    func image(for pageURL: URL) async -> NSImage? {
-        if let cached = getSync(for: pageURL) { return cached }
-        guard let faviconURL = Self.faviconURL(for: pageURL) else { return nil }
-
+        guard let url = components.url else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 12
         do {
-            let (bytes, response) = try await session.bytes(from: faviconURL)
-            if let response = response as? HTTPURLResponse,
-               !(200..<300).contains(response.statusCode) {
-                return nil
-            }
-            if response.expectedContentLength > Self.maximumFaviconBytes {
-                return nil
-            }
-
+            let (bytes, response) = try await session.bytes(for: request)
+            guard (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
+                  response.expectedContentLength <= Self.maximumFaviconBytes else { return nil }
             var data = Data()
             data.reserveCapacity(min(max(Int(response.expectedContentLength), 0), Self.maximumFaviconBytes))
             for try await byte in bytes {
@@ -89,11 +57,29 @@ final class FaviconCache: @unchecked Sendable {
                 data.append(byte)
             }
             guard let image = NSImage(data: data) else { return nil }
-            set(for: pageURL, image: image)
+            set(key, image: image)
             return image
         } catch {
             return nil
         }
+    }
+
+    /// Synchronous get - safe to call from main thread without await
+    func getSync(_ host: String) -> NSImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cache[host]
+    }
+
+    /// Async get for compatibility
+    func get(_ host: String) async -> NSImage? {
+        getSync(host)
+    }
+
+    func set(_ host: String, image: NSImage) {
+        lock.lock()
+        defer { lock.unlock() }
+        cache[host] = image
     }
 }
 
@@ -1544,9 +1530,9 @@ private class TabRowView: NSView {
 
         // Try to get favicon from cache synchronously for web tabs
         var usedCachedFavicon = false
-        if case .web(let url) = tab.contentType {
+        if case .web(let url) = tab.contentType, let host = url.host {
             // Synchronous cache check - avoids flicker when favicon is already cached!
-            if let cachedImage = FaviconCache.shared.getSync(for: url) {
+            if let cachedImage = FaviconCache.shared.getSync(host) {
                 iconView.image = cachedImage
                 iconView.contentTintColor = nil
                 usedCachedFavicon = true
@@ -1570,13 +1556,20 @@ private class TabRowView: NSView {
         }
 
         // Fetch favicon asynchronously for web tabs if not cached
-        if case .web(let url) = tab.contentType, !usedCachedFavicon {
+        if case .web(let url) = tab.contentType, let host = url.host, !usedCachedFavicon {
             Task {
-                if let image = await FaviconCache.shared.image(for: url) {
-                    await MainActor.run {
-                        iconView.image = image
-                        iconView.contentTintColor = nil
+                guard let faviconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32") else { return }
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: faviconURL)
+                    if let image = NSImage(data: data) {
+                        FaviconCache.shared.set(host, image: image)
+                        await MainActor.run {
+                            iconView.image = image
+                            iconView.contentTintColor = nil
+                        }
                     }
+                } catch {
+                    // Keep default icon on failure
                 }
             }
         }

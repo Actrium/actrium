@@ -74,15 +74,11 @@ class TabSurfaceDisplayNSView: NSView {
 
     private func setupLayer() {
         wantsLayer = true
-        applyAppearanceColors()
+        layer?.backgroundColor = AppColors.workspaceBackground.cgColor
     }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        applyAppearanceColors()
-    }
-
-    private func applyAppearanceColors() {
         layer?.backgroundColor = AppColors.workspaceBackground.cgColor
     }
 
@@ -172,7 +168,7 @@ class TabSurfaceDisplayNSView: NSView {
         currentContextId = 0
         hostLayer?.removeFromSuperlayer()
         hostLayer = nil
-        applyAppearanceColors()
+        layer?.backgroundColor = AppColors.workspaceBackground.cgColor
     }
 
     override func layout() {

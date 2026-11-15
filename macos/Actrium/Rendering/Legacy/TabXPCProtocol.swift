@@ -453,7 +453,7 @@ protocol TabRendererCallbackProtocol {
 /// Factory for creating XPC interfaces with proper allowed classes
 enum TabXPCInterface {
     /// Fixed Mach service name for the broker (using App Group)
-    static let brokerServiceName = "group.io.github.actrium.actro.broker"
+    static let brokerServiceName = "group.io.actrium.actro.broker"
 
     /// Create the broker protocol interface
     static func brokerInterface() -> NSXPCInterface {

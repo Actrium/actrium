@@ -12,26 +12,6 @@ extension Notification.Name {
     static let ensureActiveTabVisibleRequested = Notification.Name("ensureActiveTabVisibleRequested")
 }
 
-enum TransitionSnapshotWarmupStrategy: Equatable {
-    case rendererCache
-    case none
-}
-
-/// Renderer processes already expose bounded, content-only snapshots. Native
-/// SwiftUI and empty Tabs do not: redrawing the window to synthesize one also
-/// captures its material/blur hierarchy and can monopolize the main thread for
-/// hundreds of milliseconds. Overview can render those native cards live.
-func transitionSnapshotWarmupStrategy(
-    for contentType: TabContentType
-) -> TransitionSnapshotWarmupStrategy {
-    switch contentType {
-    case .web, .reactNative:
-        return .rendererCache
-    case .native, .empty:
-        return .none
-    }
-}
-
 // MARK: - Main View
 
 /// Large canvas structure - Unified Actrium View
@@ -63,6 +43,7 @@ struct WorkspaceMainView: View {
     @State private var cumulativeMagnification: CGFloat = 0
 
     // Web loading state
+    @State private var isWebLoading: Bool = false
 
     // Search Tabs Status
     @State private var searchTabsText: String = ""
@@ -80,7 +61,6 @@ struct WorkspaceMainView: View {
 
     // Mode Switch Transition controller
     @StateObject private var modeTransitionController = ModeTransitionController()
-    @State private var transitionSnapshotWarmupTask: Task<Void, Never>?
 
     // 🔑 Drag State (from) TabGridView Raise, Jean. UnifiedReactNativeLayer I can also visit)
     @State private var draggingTabId: UUID?
@@ -124,6 +104,8 @@ struct WorkspaceMainView: View {
             height: max(viewportSize.height, 100)
         )
 
+        // Toolbar height estimation (for grid layout calculations)
+        let toolbarHeight: CGFloat = 52
         let contentSize = safeViewportSize
             // Titlebar removed, card ratio = Portrait ratio
             let titleBarRatio: CGFloat = 0
@@ -149,14 +131,15 @@ struct WorkspaceMainView: View {
                     return calculateFocusTransform(
                         for: tabId,
                         gridResult: gridResult,
-                        viewportSize: safeViewportSize
+                        viewportSize: safeViewportSize,
+                        titleBarRatio: titleBarRatio
                     )
                 }
             }()
 
             ZStack(alignment: .topTrailing) {
                 // Safari Style: Deep Grey Content Regional Background (not extended to toolbar)
-                Color(nsColor: NSColor(white: 0.12, alpha: 1.0))
+                AppColors.workspaceBackgroundColor
 
                 // Actrium View - Include All Tab Card
                 // ViewBridge Always. Actrium Inside, smooth animation through snapshots
@@ -208,25 +191,24 @@ struct WorkspaceMainView: View {
                 .contentShape(Rectangle())
                 // The address bar exit focus has been wired by global mouse events (mouseEventMonitor)
 
-                // Focus Under Mode Native Content Layer (By)actrium Changed)
-                // Native SwiftUI views need to render at viewportSize in Focus mode,
-                // otherwise they would be scaled up (blurry) by actrium transform
-                if case .focus(let focusedTabId) = viewModel.actriumMode,
-                   let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
-                   case .native(let nativeType) = focusedTab.contentType {
-                    switch nativeType {
-                    case .startPage:
-                        StartPageView(
-                            bookmarks: bookmarkVM.bookmarks,
-                            recentHistory: historyVM.recentItems,
-                            containerSize: safeViewportSize,
-                            isCompactMode: false,
-                            onNavigate: { url in
-                                viewModel.navigateCurrentTab(to: url.absoluteString)
-                            }
-                        )
-                        .frame(width: safeViewportSize.width, height: safeViewportSize.height)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                // Keep every native tab mounted; switching changes visibility
+                // and hit testing without discarding the tab's SwiftUI state.
+                ZStack(alignment: .topLeading) {
+                    ForEach(viewModel.tabs) { tab in
+                        if case .native(let nativeType) = tab.contentType {
+                            PersistentNativeTabLayer(
+                                tab: tab,
+                                nativeType: nativeType,
+                                isFocused: viewModel.actriumMode == .focus(tabId: tab.id),
+                                viewportSize: safeViewportSize,
+                                bookmarkVM: bookmarkVM,
+                                historyVM: historyVM,
+                                onNavigate: { url in
+                                    guard viewModel.currentTabId == tab.id else { return }
+                                    viewModel.navigateCurrentTab(to: url.absoluteString)
+                                }
+                            )
+                        }
                     }
                 }
                 .frame(width: safeViewportSize.width, height: safeViewportSize.height)
@@ -243,7 +225,6 @@ struct WorkspaceMainView: View {
                             url: url,
                             viewportSize: safeViewportSize,
                             onNavigationFinished: { title, newURL in
-                                guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
                                 // Update tab title and record history
                                 if let title = title, !title.isEmpty {
                                     viewModel.updateTabTitle(for: focusedTabId, title: title)
@@ -255,21 +236,24 @@ struct WorkspaceMainView: View {
                                         historyVM.recordVisit(tab: tab)
                                     }
                                 }
+                                // Update snapshot for Overview mode (delayed to allow rendering)
+                                Task {
+                                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s delay
+                                    await WebViewHolderManager.shared.takeSnapshot(for: focusedTabId)
+                                }
                             },
                             onURLChanged: { newURL in
-                                guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
                                 // Update tab URL when page uses History.pushState/replaceState
                                 if let newURL = newURL {
-                                    NSLog("🔗 WorkspaceMainView: Updating web tab URL")
+                                    NSLog("🔗 WorkspaceMainView: Updating tab \(focusedTabId) URL to: \(newURL.absoluteString)")
                                     viewModel.updateTabURL(for: focusedTabId, url: newURL)
                                 }
                             },
                             onLoadingStateChanged: { loading in
-                                guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
-                                viewModel.updateLoadingState(for: focusedTabId, isLoading: loading)
+                                isWebLoading = loading
+                                viewModel.isCurrentTabLoading = loading
                             },
                             onOpenNewWindow: { newURL in
-                                guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
                                 // Open target="_blank" links in a new tab (don't focus address bar)
                                 let newTab = viewModel.addNewTab(focusAddressBar: false)
                                 viewModel.navigateCurrentTab(to: newURL.absoluteString)
@@ -277,12 +261,10 @@ struct WorkspaceMainView: View {
                                 enterFocus(tabId: newTab.id)
                             },
                             onThemeColorChanged: { color in
-                                guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
                                 viewModel.updateTabBackgroundColor(for: focusedTabId, color: color)
                             },
                             onProgressChanged: { progress in
-                                guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
-                                viewModel.updateLoadingProgress(for: focusedTabId, progress: progress)
+                                viewModel.loadingProgress = progress
                             },
                             onContentFocused: {
                                 NotificationCenter.default.post(
@@ -292,6 +274,19 @@ struct WorkspaceMainView: View {
                             }
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                        // Safari-style loading progress bar
+                        if viewModel.isCurrentTabLoading {
+                            GeometryReader { geo in
+                                Rectangle()
+                                    .fill(Color.accentColor)
+                                    .frame(width: geo.size.width * viewModel.loadingProgress, height: 2)
+                                    .animation(.linear(duration: 0.2), value: viewModel.loadingProgress)
+                            }
+                            .frame(height: 2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .transition(.opacity)
+                        }
 
                         SavePasswordBannerView()
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -489,7 +484,7 @@ struct WorkspaceMainView: View {
                             guard let tab = viewModel.currentTab else { return .none }
                             switch tab.contentType {
                             case .reactNative: return .menu
-                            case .web: return viewModel.isTabLoading(tab.id) ? .loading : .none
+                            case .web: return isWebLoading ? .loading : .none
                             case .native, .empty: return .none
                             }
                         }()
@@ -602,13 +597,11 @@ struct WorkspaceMainView: View {
 
             // Enter Overview The tags need automatic focus search boxes when mode is ticked
             if case .overview = newValue {
-                transitionSnapshotWarmupTask?.cancel()
                 shouldAutoFocusSearchTabs = true
             } else {
                 // Leave Overview Empty search text while mode
                 searchTabsText = ""
                 isSearchTabsFocused = false
-                scheduleTransitionSnapshotWarmup(for: focusedTabId)
             }
             // Note: isOverviewMode By ViewBridgeCoordinatorManager Subscriptions actriumMode AutoSync
         }
@@ -683,12 +676,7 @@ struct WorkspaceMainView: View {
                         if let window = event.window ?? NSApp.keyWindow,
                            let contentView = window.contentView {
                             let pointInContent = contentView.convert(event.locationInWindow, from: nil)
-                            // The self-drawn compact toolbar lives inside the
-                            // content view. Keep clicks in its address-editing
-                            // region intact; only clicks below it dismiss input.
-                            let toolbarBottom = contentView.bounds.maxY - 53
                             return contentView.bounds.contains(pointInContent)
-                                && pointInContent.y < toolbarBottom
                         }
                         return false
                     } else {
@@ -948,7 +936,19 @@ struct WorkspaceMainView: View {
         // 🔑 Intercept Current Focus Under Mode Tab Content snapshot (large chart)
         // This is... Focus → Overview Animation Starts
         // Note:applyBlur=false Ensure that the settings are synchronized and are available immediately from the start of the animation
-        let focusSnapshot = captureViewportSnapshot(viewportSize: viewportSize)
+        // Native Start Pages render live in overview. Capturing the entire
+        // window for them blocks the main thread during the transition.
+        let focusSnapshot: NSImage?
+        if let tab = viewModel.tabs.first(where: { $0.id == currentTabId }) {
+            switch tab.contentType {
+            case .native, .empty:
+                focusSnapshot = nil
+            case .web, .reactNative:
+                focusSnapshot = captureViewportSnapshot(viewportSize: viewportSize)
+            }
+        } else {
+            focusSnapshot = nil
+        }
         if let snapshot = focusSnapshot {
             TabSnapshotCacheManager.shared.setFocusSnapshot(snapshot, for: currentTabId, applyBlur: false)
 
@@ -1035,14 +1035,10 @@ struct WorkspaceMainView: View {
         let toolbarHeight = windowSize.height - viewportSize.height
         let isFlipped = contentView.isFlipped
 
-        // Exclude Top 1px It's... toolbar Separator
-        let separatorHeight: CGFloat = 1
-
         // I'm a visualist. y Coordinates:
         // - Not flipped (Bottom Left Point of Origin): y = 0 (The eye is at the bottom.), the top segment is to be removed. height
-        // - flipped (Top Left Point of Origin): y = toolbarHeight + 1 (Skip the partition line)
-        let viewportY: CGFloat = isFlipped ? (toolbarHeight + separatorHeight) : 0
-        let captureHeight: CGFloat = viewportSize.height - separatorHeight
+        // - flipped (Top Left Point of Origin): y = toolbarHeight
+        let viewportY: CGFloat = isFlipped ? toolbarHeight : 0
 
         let captureRect = CGRect(
             x: sidebarWidth,
@@ -1066,7 +1062,8 @@ struct WorkspaceMainView: View {
         contentView.cacheDisplay(in: captureRect, to: bitmapRep)
         let captureTime = CACurrentMediaTime()
 
-        // Create Full viewportSize , and stretch full when drawing (excluded) 1px Almost invisible)
+        // Keep the bitmap at its native dimensions. Redrawing with lockFocus
+        // adds main-thread work and stretches the transition by one point.
         let image = NSImage(size: viewportSize)
         image.addRepresentation(bitmapRep)
 
@@ -1143,8 +1140,10 @@ struct WorkspaceMainView: View {
 
     // Judgement Tab Need any? ViewBridge Rendering Contents
     private func hasRNContentForTab(_ tab: Tab) -> Bool {
-        if case .reactNative = tab.contentType { return true }
-        return false
+        tab.systemTabType != nil ||
+        tab.unifiedScript != nil ||
+        tab.leftPanelScript != nil ||
+        tab.guestScript != nil
     }
 
     // MARK: - Data Conversion for React Native
@@ -1215,7 +1214,7 @@ struct WorkspaceMainView: View {
         }
 
         let cardPosition = gridResult.positions[position]
-        let cardContentRect = CGRect(
+        let cardFullRect = CGRect(
             x: cardPosition.x,
             y: cardPosition.y,
             width: gridResult.cardWidth,
@@ -1270,7 +1269,7 @@ struct WorkspaceMainView: View {
     private static let addButtonUUID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     /// Cache [+] Button Image and its Dimensions (avoid each time) body Recreated during assessment)
-    private static var cachedAddButtonImage: (image: NSImage, size: CGSize)?
+    private static var cachedAddButtonImage: (image: NSImage, size: CGSize, appearanceName: String)?
 
     private func buildVirtualGridCards(
         tabs: [Tab],
@@ -1290,8 +1289,6 @@ struct WorkspaceMainView: View {
             // From TabSnapshotCache Get a double buffer.
             let focusSnapshot = cacheManager.focusSnapshot(for: tab.id)
             let overviewSnapshot = cacheManager.overviewSnapshot(for: tab.id)
-                ?? rendererSnapshot
-                ?? focusSnapshot
 
             return VirtualGridCardInfo(
                 tabId: tab.id,
@@ -1331,8 +1328,9 @@ struct WorkspaceMainView: View {
 
         // Check Cache: If size equal, return the cache image directly
         if let cached = Self.cachedAddButtonImage,
-           cached.appearanceName == appearanceName,
-           abs(cached.size.width - size.width) < 1 && abs(cached.size.height - size.height) < 1 {
+           abs(cached.size.width - size.width) < 1,
+           abs(cached.size.height - size.height) < 1,
+           cached.appearanceName == appearanceName {
             return cached.image
         }
 
@@ -1343,13 +1341,13 @@ struct WorkspaceMainView: View {
         let rect = NSRect(origin: .zero, size: size)
         let cornerRadius = CardStyle.cornerRadius
 
-        // Background: Dark grey (Match NSColor(white: 0.15, alpha: 1.0))
+        // Match the native Overview card surface in the current appearance.
         let backgroundPath = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
         AppColors.overviewCardBackground.setFill()
         backgroundPath.fill()
 
         // Border: White 0.15 Transparency
-        NSColor.white.withAlphaComponent(0.15).setStroke()
+        AppColors.separator.setStroke()
         backgroundPath.lineWidth = 1.0
         backgroundPath.stroke()
 
@@ -1368,14 +1366,14 @@ struct WorkspaceMainView: View {
                 height: plusImage.size.height
             )
             // Set White 0.5 Transparency
-            NSColor.white.withAlphaComponent(0.5).set()
-            plusImage.draw(in: plusRect, from: .zero, operation: .sourceOver, fraction: 0.5)
+            NSColor.secondaryLabelColor.set()
+            plusImage.draw(in: plusRect, from: .zero, operation: .sourceOver, fraction: 1)
         }
 
         image.unlockFocus()
 
         // Cache newly created images
-        Self.cachedAddButtonImage = (image: image, size: size)
+        Self.cachedAddButtonImage = (image: image, size: size, appearanceName: appearanceName)
 
         return image
     }
@@ -1488,6 +1486,36 @@ struct WorkspaceMainView: View {
 
 }
 
+private struct PersistentNativeTabLayer: View {
+    let tab: Tab
+    let nativeType: NativeContentType
+    let isFocused: Bool
+    let viewportSize: CGSize
+    @ObservedObject var bookmarkVM: BookmarkViewModel
+    @ObservedObject var historyVM: HistoryViewModel
+    let onNavigate: (URL) -> Void
+
+    var body: some View {
+        Group {
+            switch nativeType {
+            case .startPage:
+                StartPageView(
+                    bookmarks: bookmarkVM.bookmarks,
+                    recentHistory: historyVM.recentItems,
+                    containerSize: viewportSize,
+                    isCompactMode: false,
+                    onNavigate: onNavigate
+                )
+            }
+        }
+        .frame(width: viewportSize.width, height: viewportSize.height)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .opacity(isFocused ? 1 : 0)
+        .allowsHitTesting(isFocused)
+        .accessibilityHidden(!isFocused)
+    }
+}
+
 // MARK: - Actrium View
 
 private struct TabGridView: View {
@@ -1570,6 +1598,9 @@ private struct TabGridView: View {
                         tab: tab,
                         cardWidth: cardWidth,
                         cardHeight: cardHeight,
+                        titleBarRatio: titleBarRatio,
+                        toolbarHeight: toolbarHeight,
+                        currentScale: currentScale,
                         isFocused: {
                             if case .focus(let tabId) = mode {
                                 return tabId == tab.id
@@ -1917,7 +1948,7 @@ private struct AddressBarLeftIcon: View {
             // Menu button for RN apps
             Button(action: action) {
                 Image(systemName: "list.bullet")
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.white.opacity(0.7))
             }
             .buttonStyle(.borderless)
             .help("Toggle Left Panel")
@@ -2188,9 +2219,7 @@ private struct TabPanel: View {
     private var floatingTitleBarHeight: CGFloat { CardStyle.titleBarHeight }
 
     private var tabBackgroundColor: Color {
-        if case .native = tab.contentType {
-            return AppColors.overviewCardBackgroundColor
-        }
+        if case .native = tab.contentType { return AppColors.overviewCardBackgroundColor }
         return Color(hslString: tab.backgroundColor)
     }
 
@@ -2216,7 +2245,12 @@ private struct TabPanel: View {
                         .stroke(AppColors.separatorColor, lineWidth: CardStyle.borderWidth)
                 }
             }
-            .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
+            .shadow(
+                color: isFocused ? .clear : Color.black.opacity(Double(CardStyle.shadowOpacity)),
+                radius: CardStyle.shadowRadius,
+                x: CardStyle.shadowOffset.width,
+                y: CardStyle.shadowOffset.height
+            )
             // Only the card's main subject responded. onTapGesture(excluding title bar)
             .contentShape(Rectangle())
             .onTapGesture {
@@ -2282,7 +2316,7 @@ private struct TabPanel: View {
                 tabBackgroundColor
                 Image(systemName: "globe")
                     .font(.system(size: 32))
-                    .foregroundColor(.secondary.opacity(0.5))
+                    .foregroundStyle(Color.secondary.opacity(0.5))
             }
             .frame(width: cardWidth, height: cardHeight)
             .cornerRadius(CardStyle.cornerRadius)
@@ -2322,6 +2356,12 @@ private struct TabPanel: View {
         } else {
             renderSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
         }
+
+        let _ = NSLog("📐 TabPanel.contentView: type=%@, isFocused=%d, viewportSize=%.0fx%.0f, cardSize=%.0fx%.0f, renderSize=%.0fx%.0f",
+                      String(describing: tab.contentType), isFocused ? 1 : 0,
+                      viewportSize.width, viewportSize.height,
+                      cardWidth, cardHeight,
+                      renderSize.width, renderSize.height)
 
         return ZStack(alignment: .topLeading) {
             // Bottom Background - Use Tab Random background colour
@@ -2386,12 +2426,6 @@ private struct TabPanel: View {
                             }
                         )
                         .frame(width: nativeSize.width, height: nativeSize.height)
-                    case .internalPage(let page):
-                        InternalPageCompactPreview(page: page)
-                            .frame(width: nativeSize.width, height: nativeSize.height)
-                    case .about:
-                        AboutActroView(isCompactMode: true)
-                            .frame(width: nativeSize.width, height: nativeSize.height)
                     }
                 }
 
@@ -2425,7 +2459,7 @@ private struct CloseButtonView: View {
                 .frame(width: iconSize * 1.6, height: iconSize * 1.6)
                 .background(
                     Circle()
-                        .fill(isHovering ? Color.primary.opacity(0.12) : Color.clear)
+                        .fill(isHovering ? Color.white.opacity(0.15) : Color.clear)
                 )
                 .contentShape(Rectangle())
         }

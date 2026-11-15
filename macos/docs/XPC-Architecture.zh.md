@@ -82,7 +82,7 @@ Actrium 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程
 │   │                                                                              │   │
 │   │  TabA.HostView ─┐                                                            │   │
 │   │  TabB.HostView ─┼─► NSRemoteViewController.requestViewController(...)        │   │
-│   │  TabC.HostView ─┤     fromService: "io.github.actrium.actro.rctviewservice{i}"   │   │
+│   │  TabC.HostView ─┤     fromService: "io.actrium.actro.rctviewservice{i}"   │   │
 │   │  TabD.HostView ─┘                                                            │   │
 │   └─────────────────────────────────────────────────────────────────────────────┘   │
 │                              │                                                       │
@@ -97,7 +97,7 @@ Actrium 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程
 │                                                                                      │
 │  ┌───────────────────────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
 │  │        RCTViewService0            │  │  RCTViewService1 │  │  RCTViewService2 │  │
-│  │ io.github.actrium.actro.rctviewservice0│  │ ...Service1      │  │ ...Service2      │  │
+│  │ io.actrium.actro.rctviewservice0│  │ ...Service1      │  │ ...Service2      │  │
 │  │                                   │  │                  │  │                  │  │
 │  │  ┌─────────────────────────────┐  │  │ ┌──────────────┐ │  │ ┌──────────────┐ │  │
 │  │  │  ServiceReactNativeHost     │  │  │ │    SRNH      │ │  │ │    SRNH      │ │  │
@@ -153,10 +153,10 @@ Actrium 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程
 
 | Slot | Bundle Identifier |
 |------|-------------------|
-| 0 | `io.github.actrium.actro.rctviewservice0` |
-| 1 | `io.github.actrium.actro.rctviewservice1` |
-| 2 | `io.github.actrium.actro.rctviewservice2` |
-| 3 | `io.github.actrium.actro.rctviewservice3` |
+| 0 | `io.actrium.actro.rctviewservice0` |
+| 1 | `io.actrium.actro.rctviewservice1` |
+| 2 | `io.actrium.actro.rctviewservice2` |
+| 3 | `io.actrium.actro.rctviewservice3` |
 
 ## IPC Communication
 

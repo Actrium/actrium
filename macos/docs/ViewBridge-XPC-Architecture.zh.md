@@ -306,7 +306,7 @@ sequenceDiagram
 ### 6.1 配置
 
 - **Pool 大小**: 4 个 slot (RCTViewService0 - RCTViewService3)
-- **Bundle ID 格式**: `io.github.actrium.actro.rctviewservice{N}`
+- **Bundle ID 格式**: `io.actrium.actro.rctviewservice{N}`
 
 ### 6.2 分配策略
 

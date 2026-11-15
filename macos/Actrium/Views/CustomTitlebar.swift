@@ -246,11 +246,6 @@ private class ToolbarContainerView: NSView {
         self.backgroundLayer = bgLayer
     }
 
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        backgroundLayer?.fillColor = AppColors.contentBackground.cgColor
-    }
-
     // MARK: - Event Passthrough
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -722,8 +717,6 @@ private struct ToolbarContentView: View {
                         Text("Search or enter website name")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
                             .allowsHitTesting(false)
                     }
                     AddressInputField(
@@ -741,8 +734,6 @@ private struct ToolbarContentView: View {
                         Text("Search or enter website name")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
                     } else {
                         Text(addressText)
                             .font(.system(size: 13))
@@ -797,7 +788,7 @@ private struct ToolbarContentView: View {
         .frame(height: 30)
         .padding(.horizontal, 4)
         .padding(.vertical, 3)
-        .background(Color.primary.opacity(0.08))
+        .background(Color.white.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)
@@ -872,8 +863,7 @@ private struct ToolbarContentView: View {
     private func displayText(for tab: Tab?) -> String {
         guard let tab = tab else { return "" }
         if let systemType = tab.systemTabType {
-            if systemType == .startPage { return "" }
-            return (tab.url ?? systemType.systemURL).absoluteString
+            return systemType.aboutURL.absoluteString
         }
         if case .web = tab.contentType, let url = tab.url {
             let host = url.host ?? url.absoluteString
@@ -885,8 +875,7 @@ private struct ToolbarContentView: View {
     private func editingText(for tab: Tab?) -> String {
         guard let tab = tab else { return "" }
         if let systemType = tab.systemTabType {
-            if systemType == .startPage { return "" }
-            return (tab.url ?? systemType.systemURL).absoluteString
+            return systemType.aboutURL.absoluteString
         }
         if let url = tab.url {
             return url.absoluteString

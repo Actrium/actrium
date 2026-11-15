@@ -12,40 +12,23 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>io.github.actrium.actro</string>
+			<string>io.actrium.actro</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>actro</string>
 			</array>
 		</dict>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Viewer</string>
-			<key>CFBundleURLName</key>
-			<string>Web URL</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>http</string>
-				<string>https</string>
-			</array>
-		</dict>
 	</array>
 	<key>MachServices</key>
 	<dict>
-		<key>group.io.github.actrium.actro.broker</key>
+		<key>group.io.actrium.actro.broker</key>
 		<true/>
 	</dict>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- A browser must be able to render user-requested HTTP pages, but the
-		     application networking stack should still retain normal ATS checks. -->
-		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
-	<key>NSCameraUsageDescription</key>
-	<string>Actro uses the camera only when you allow a website to access it.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Actro uses the microphone only when you allow a website to access it.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 </dict>

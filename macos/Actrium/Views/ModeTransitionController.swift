@@ -107,20 +107,22 @@ final class ModeTransitionController: ObservableObject {
     /// Overview transform (scale and offset for centered Overview mode)
     private var overviewTransform: (scale: CGFloat, offset: CGPoint) = (1.0, .zero)
 
-    /// Main-run-loop display link tied to the window's current screen.
-    /// CADisplayLink avoids queuing a backlog of main-thread blocks when a
-    /// frame is briefly busy.
-    private var displayLink: CADisplayLink?
+    /// CVDisplayLink for vsync-aligned animation
+    private var displayLink: CVDisplayLink?
 
     /// Frame counter for performance logging
     private var frameCount: Int = 0
+    private var lastLogTime: CFTimeInterval = 0
 
     // MARK: - Initialization
 
     init() {}
 
     deinit {
-        displayLink?.invalidate()
+        // Stop display link directly without going through main actor
+        if let link = displayLink {
+            CVDisplayLinkStop(link)
+        }
     }
 
     // MARK: - Public API
@@ -194,13 +196,7 @@ final class ModeTransitionController: ObservableObject {
         // 🔑 showWithTransform In one. CATransaction In which to complete all settings
         if let animView = animationLayerView {
             NSLog("🎬 ModeTransitionController: animationLayerView OK, calling showWithTransform")
-            let cache = TabSnapshotCacheManager.shared
-            animView.prepareTransition(
-                tabId: tabId,
-                focusSnapshot: cache.focusSnapshot(for: tabId),
-                overviewSnapshot: overviewSnapshot ?? cache.overviewSnapshot(for: tabId)
-            )
-            animView.setAnimationDirection(.focusToOverview, transitionTabId: tabId)
+            animView.setAnimationDirection(.focusToOverview)
             animView.showWithTransform(scale: currentScale, offset: currentOffset, cornerRadius: 0)
         } else {
             NSLog("⚠️ ModeTransitionController: animationLayerView is NIL! Animation will fail")
@@ -304,50 +300,75 @@ final class ModeTransitionController: ObservableObject {
     private func startAnimation() {
         animationStartTime = CACurrentMediaTime()
         frameCount = 0
+        lastLogTime = 0
 
         NSLog("🎞️ Animation starting, duration=%.2fs, targetScale=%.2f", totalDuration, targetScale)
 
         startDisplayLink()
     }
 
-    /// Start a display link attached to the animation view's screen.
+    /// Start CVDisplayLink for vsync-aligned animation
     private func startDisplayLink() {
         stopDisplayLink()
 
-        guard let animationLayerView else {
-            NSLog("⚠️ Failed to create display link: animation layer is unavailable")
-            completeTransition()
+        var link: CVDisplayLink?
+        CVDisplayLinkCreateWithActiveCGDisplays(&link)
+
+        guard let displayLink = link else {
+            NSLog("⚠️ Failed to create CVDisplayLink")
             return
         }
 
-        let displayLink = animationLayerView.displayLink(
-            target: self,
-            selector: #selector(handleDisplayLink(_:))
-        )
         self.displayLink = displayLink
-        displayLink.add(to: .main, forMode: .common)
+
+        // Store weak self in a context pointer
+        let context = Unmanaged.passUnretained(self).toOpaque()
+
+        CVDisplayLinkSetOutputCallback(displayLink, { (_, _, _, _, _, context) -> CVReturn in
+            guard let context = context else { return kCVReturnSuccess }
+            let controller = Unmanaged<ModeTransitionController>.fromOpaque(context).takeUnretainedValue()
+
+            // Dispatch to main thread for UI updates
+            DispatchQueue.main.async {
+                controller.displayLinkCallback()
+            }
+
+            return kCVReturnSuccess
+        }, context)
+
+        CVDisplayLinkStart(displayLink)
     }
 
-    /// Stop the display link and release its target.
+    /// Stop CVDisplayLink
     private func stopDisplayLink() {
-        displayLink?.invalidate()
-        displayLink = nil
+        if let link = displayLink {
+            CVDisplayLinkStop(link)
+            displayLink = nil
+        }
     }
 
-    /// CADisplayLink callback, delivered directly on the main run loop.
-    @objc private func handleDisplayLink(_ displayLink: CADisplayLink) {
+    /// CVDisplayLink callback (called on main thread via dispatch)
+    private func displayLinkCallback() {
         guard phase.isTransitioning else {
             stopDisplayLink()
             return
         }
-        updateAnimation(now: displayLink.timestamp)
+        updateAnimation()
     }
 
-    private func updateAnimation(now: CFTimeInterval) {
+    private func updateAnimation() {
+        let now = CACurrentMediaTime()
         let elapsed = now - animationStartTime
-        let totalProgress = max(min(elapsed / totalDuration, 1.0), 0.0)
+        let totalProgress = min(elapsed / totalDuration, 1.0)
 
+        // Performance logging: log every 10 frames
         frameCount += 1
+        if frameCount % 10 == 0 {
+            let fps = lastLogTime > 0 ? 10.0 / (now - lastLogTime) : 0
+            NSLog("🎞️ Animation frame %d: progress=%.2f, scale=%.3f, fps=%.1f",
+                  frameCount, totalProgress, currentScale, fps)
+            lastLogTime = now
+        }
 
         // Calculate eased progress
         let easedProgress = easeOutCubic(totalProgress)
@@ -364,9 +385,10 @@ final class ModeTransitionController: ObservableObject {
         }
 
         // 🔑 New scheme: the animation layer remains visible and disappears at the last minute
-        // opacity: Full 1, change when the animation is finished 0
+        // Fade into the already prepared destination near the end. A single
+        // final-frame hide makes small text differences look like a jump.
         // cornerRadius: Overview(10) → Focus(0) or Focus(0) → Overview(10)
-        let opacity: Double = totalProgress < 1.0 ? 1.0 : 0.0
+        let opacity = Self.animationLayerOpacity(at: totalProgress)
 
         let cornerRadius: CGFloat
         switch phase {
@@ -377,14 +399,13 @@ final class ModeTransitionController: ObservableObject {
             // Focus → Overview: Rounded Angle From 0 And become 10
             cornerRadius = 10.0 * CGFloat(easedProgress)
         case .idle:
-            cornerRadius = CardStyle.cornerRadius
+            cornerRadius = 10.0
         }
 
         animationLayerView?.applyTransform(
             scale: currentScale,
             offset: currentOffset,
             opacity: opacity,
-            transitionProgress: CGFloat(easedProgress),
             cornerRadius: cornerRadius
         )
 
@@ -452,14 +473,10 @@ final class ModeTransitionController: ObservableObject {
         return 1.0 - t1 * t1 * t1
     }
 
-    /// Opacity of the snapshot animation layer. The handoff starts only after
-    /// geometry is essentially settled and uses smoothstep to avoid a visible
-    /// velocity discontinuity.
     static func animationLayerOpacity(at progress: Double) -> CGFloat {
         let start = ModeTransitionConstants.handoffStartProgress
         guard progress > start else { return 1 }
         guard progress < 1 else { return 0 }
-
         let normalized = (progress - start) / (1 - start)
         let smooth = normalized * normalized * (3 - 2 * normalized)
         return CGFloat(1 - smooth)
