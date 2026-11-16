@@ -11,6 +11,7 @@ private struct ToolbarInPlaceDragState: Equatable {
     let subject: ToolbarInPlaceDragSubject
     let grabOffsetX: CGFloat
     var originX: CGFloat
+    var lastReorderPointerX: CGFloat?
 }
 
 enum ToolbarTabInteractionPhase: Equatable {
@@ -119,6 +120,17 @@ func toolbarEdgeUngroupInsertionIndex(
     return nil
 }
 
+func toolbarDragCanReorder(
+    pointerX: CGFloat,
+    lastReorderPointerX: CGFloat?,
+    minimumTravel: CGFloat = 12
+) -> Bool {
+    // A stationary pointer must not reverse a move while SwiftUI catches up
+    // with the changed group header and tab slots.
+    guard let lastReorderPointerX else { return true }
+    return abs(pointerX - lastReorderPointerX) >= minimumTravel
+}
+
 /// Owns the one exclusive Tab interaction that can be in progress in the compact toolbar.
 /// Its transition table is local to this view layer.
 @MainActor
@@ -133,7 +145,7 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
 
     private weak var reorderViewModel: BrowserViewModel?
     private var pendingVisualTabOrder: [UUID]?
-    private var pendingGroupFrameChange: (groupID: UUID, previousMinX: CGFloat)?
+    private var pendingGroupFrameChange: (groupID: UUID, previousFrame: CGRect)?
 
     var isAddressEditing: Bool {
         phase == .addressEditing
@@ -213,10 +225,15 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         guard groupFrames != frames else { return }
         groupFrames = frames
 
-        if let pendingGroupFrameChange,
-           let frame = frames[pendingGroupFrameChange.groupID],
-           abs(frame.minX - pendingGroupFrameChange.previousMinX) > 0.5 {
-            self.pendingGroupFrameChange = nil
+        if let pendingGroupFrameChange {
+            if let frame = frames[pendingGroupFrameChange.groupID] {
+                if abs(frame.minX - pendingGroupFrameChange.previousFrame.minX) > 0.5
+                    || abs(frame.width - pendingGroupFrameChange.previousFrame.width) > 0.5 {
+                    self.pendingGroupFrameChange = nil
+                }
+            } else {
+                self.pendingGroupFrameChange = nil
+            }
         }
     }
 
@@ -345,7 +362,8 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
             inPlaceDragState = ToolbarInPlaceDragState(
                 subject: subject,
                 grabOffsetX: startLocationX - frame.minX,
-                originX: frame.minX
+                originX: frame.minX,
+                lastReorderPointerX: nil
             )
         }
 
@@ -417,6 +435,12 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         draggedFrame: CGRect,
         viewModel: BrowserViewModel
     ) {
+        guard pendingVisualTabOrder == nil,
+              pendingGroupFrameChange == nil,
+              toolbarDragCanReorder(
+                  pointerX: pointerX,
+                  lastReorderPointerX: inPlaceDragState?.lastReorderPointerX
+              ) else { return }
         guard let sourceIndex = viewModel.tabs.firstIndex(where: { $0.id == tabID }) else {
             return
         }
@@ -430,11 +454,11 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
                 tabID: tabID,
                 targetIndex: edgeIndex,
                 groupID: nil,
+                pointerX: pointerX,
                 viewModel: viewModel
             )
             return
         }
-        guard pendingVisualTabOrder == nil else { return }
         let candidates = chromeInsertionCandidates(
             tabs: viewModel.tabs,
             sourceIndex: sourceIndex,
@@ -459,6 +483,7 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
             tabID: tabID,
             targetIndex: targetIndex,
             groupID: groupID,
+            pointerX: pointerX,
             viewModel: viewModel
         )
     }
@@ -615,6 +640,7 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         tabID: UUID,
         targetIndex: Int,
         groupID: UUID?,
+        pointerX: CGFloat,
         viewModel: BrowserViewModel
     ) {
         guard let fromIndex = viewModel.tabs.firstIndex(where: { $0.id == tabID }) else { return }
@@ -624,6 +650,8 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         guard boundedTargetIndex != fromIndex || currentGroupID != groupID else { return }
 
         let previousVisualOrder = visibleModelTabOrder(viewModel)
+        let changedGroupID = groupID != currentGroupID ? (groupID ?? currentGroupID) : nil
+        let previousGroupFrame = changedGroupID.flatMap { groupFrames[$0] }
         withAnimation(ToolbarTabMotion.slide) {
             viewModel.moveTabInteractively(
                 tabId: tabID,
@@ -635,6 +663,10 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         if nextVisualOrder != previousVisualOrder {
             pendingVisualTabOrder = nextVisualOrder
         }
+        if let changedGroupID, let previousGroupFrame {
+            pendingGroupFrameChange = (changedGroupID, previousGroupFrame)
+        }
+        inPlaceDragState?.lastReorderPointerX = pointerX
     }
 
     private func performInteractiveGroupMove(
@@ -648,7 +680,7 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         guard boundedTargetIndex != sourceIndex else { return }
 
         let previousVisualOrder = visibleModelTabOrder(viewModel)
-        let previousGroupMinX = groupFrames[groupID]?.minX
+        let previousGroupFrame = groupFrames[groupID]
         withAnimation(ToolbarTabMotion.slide) {
             viewModel.moveGroupInteractively(groupId: groupID, toIndex: boundedTargetIndex)
         }
@@ -656,8 +688,8 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         if nextVisualOrder != previousVisualOrder {
             pendingVisualTabOrder = nextVisualOrder
         }
-        if let previousGroupMinX {
-            pendingGroupFrameChange = (groupID, previousGroupMinX)
+        if let previousGroupFrame {
+            pendingGroupFrameChange = (groupID, previousGroupFrame)
         }
     }
 

@@ -80,6 +80,14 @@ struct CompactTabLayoutTests {
         ) == nil)
     }
 
+    @Test func groupBoundaryReorderWaitsForPointerTravel() {
+        #expect(toolbarDragCanReorder(pointerX: 100, lastReorderPointerX: nil))
+        #expect(!toolbarDragCanReorder(pointerX: 100, lastReorderPointerX: 100))
+        #expect(!toolbarDragCanReorder(pointerX: 111, lastReorderPointerX: 100))
+        #expect(toolbarDragCanReorder(pointerX: 112, lastReorderPointerX: 100))
+        #expect(toolbarDragCanReorder(pointerX: 88, lastReorderPointerX: 100))
+    }
+
     @Test func addressEditingOwnsPointerUntilItEnds() {
         let rejected = toolbarTabInteractionTransition(
             phase: .addressEditing,

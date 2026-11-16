@@ -1312,7 +1312,6 @@ struct MainWindowTabsView: View {
 
             HStack(spacing: 0) {
                 groupHeader(group, tabCount: tabs.count)
-                    .frame(width: groupLabelWidth(group))
 
                 if !group.isCollapsed {
                     HStack(spacing: 0) {
@@ -1333,7 +1332,10 @@ struct MainWindowTabsView: View {
             }
             .overlay {
                 groupShape(for: group)
-                    .strokeBorder(group.color.swiftUIColor.opacity(0.85), lineWidth: 1.5)
+                    .strokeBorder(
+                        group.color.swiftUIColor.opacity(groupBorderOpacity),
+                        lineWidth: 1.5
+                    )
             }
             .position(x: frame.midX, y: frame.midY)
             .allowsHitTesting(false)
@@ -1349,6 +1351,11 @@ struct MainWindowTabsView: View {
 
     private func interactionState(for tab: Tab) -> ToolbarTabInteractionPhase {
         interaction.phase(for: tab.id, activeTabID: viewModel.currentTabId)
+    }
+
+    private var groupBorderOpacity: Double {
+        interaction.isAddressEditing && addressPresentationPhase.showsFocusAffordances
+            ? 0.24 : 0.85
     }
 
     private var tabReorderGesture: some Gesture {
@@ -1380,7 +1387,6 @@ struct MainWindowTabsView: View {
         let isMoving = interaction.isMovingGroup(group.id)
         let content = HStack(spacing: 0) {
             groupHeader(group, tabCount: tabs.count)
-                .frame(width: groupLabelWidth(group))
                 .background {
                     GeometryReader { proxy in
                         Color.clear.preference(
@@ -1423,7 +1429,10 @@ struct MainWindowTabsView: View {
         }
         .overlay {
             groupShape(for: group)
-                .strokeBorder(group.color.swiftUIColor.opacity(0.85), lineWidth: 1.5)
+                .strokeBorder(
+                    group.color.swiftUIColor.opacity(groupBorderOpacity),
+                    lineWidth: 1.5
+                )
         }
         .opacity(isMoving ? 0 : 1)
         .transition(.identity)
@@ -1456,6 +1465,8 @@ struct MainWindowTabsView: View {
     private func groupHeader(_ group: TabGroup, tabCount: Int) -> some View {
         let title = group.name.isEmpty ? "Tab Group" : group.name
         let containsCurrentTab = viewModel.currentTab?.groupId == group.id
+        let trailingSeparation = group.isCollapsed
+            ? 0 : CompactToolbarLayout.tabSeparationWidth
 
         return HStack(spacing: 3) {
             Button {
@@ -1498,11 +1509,14 @@ struct MainWindowTabsView: View {
             }
         }
         .padding(.horizontal, 5)
-        .frame(height: 30)
+        .frame(width: groupLabelWidth(group) - trailingSeparation, height: 30)
         .background {
             groupHeaderShape(for: group)
                 .fill(group.color.swiftUIColor.opacity(containsCurrentTab ? 0.32 : 0.2))
         }
+        // The next Tab already contributes its leading half of the seam.
+        // Reserve the same trailing half that every Tab surface contributes.
+        .padding(.trailing, trailingSeparation)
         .contextMenu {
             Button("Edit Group…") {
                 groupNameDraft = group.name
@@ -1654,9 +1668,8 @@ struct MainWindowTabsView: View {
         .padding(.horizontal, 10)
         .frame(height: 32)
         .background {
-            tabSurface(for: tab, tintOpacity: 0.035)
+            tabSurface(for: tab, isActive: false)
         }
-        .overlay(alignment: .bottom) { groupIndicator(for: tab) }
         .contentShape(tabShape(for: tab))
         .onTapGesture {
             exitEditingMode()
@@ -1697,9 +1710,8 @@ struct MainWindowTabsView: View {
         .padding(.horizontal, 6)
         .frame(height: 32)
         .background {
-            tabSurface(for: tab, tintOpacity: 0.11)
+            tabSurface(for: tab, isActive: true)
         }
-        .overlay(alignment: .bottom) { groupIndicator(for: tab) }
         .contentShape(tabShape(for: tab))
         .onHover { isInside in
             hoveredTabID = isInside ? tab.id : nil
@@ -1712,12 +1724,25 @@ struct MainWindowTabsView: View {
     /// The plate is inset only horizontally inside its zero-spacing slot. Two
     /// touching 1.5pt side insets expose a 3pt live-Header separator, while the
     /// top and bottom remain visually continuous with the Tab surface.
-    private func tabSurface(for tab: Tab, tintOpacity: Double) -> some View {
+    private func tabSurface(
+        for tab: Tab,
+        isActive: Bool,
+        isEditing: Bool = false
+    ) -> some View {
         let shape = tabShape(for: tab)
 
         return ZStack {
-            shape.fill(AppColors.windowChromeTabPlateColor)
-            shape.fill(Color.primary.opacity(tintOpacity))
+            shape.fill(
+                isActive
+                    ? AppColors.windowChromeActiveTabPlateColor
+                    : AppColors.windowChromeTabPlateColor
+            )
+            if !isActive {
+                shape.fill(Color.primary.opacity(0.035))
+            }
+            if isEditing {
+                shape.fill(AppColors.addressEditingSurfaceColor)
+            }
         }
         .padding(.horizontal, CompactToolbarLayout.tabSeparationWidth)
         // Reordering still animates the Tab's geometry, but never its surface.
@@ -1810,9 +1835,8 @@ struct MainWindowTabsView: View {
         }
     }
 
-    /// The editing plate follows the same side-only separation as every other
-    /// Tab. Its focus ring is built outward from that plate: no blue pixels
-    /// consume input space, and the complete contour remains visible.
+    /// The ring extends beyond the Tab and overlaps its edge, so the colored
+    /// contour stays continuous above a group's translucent background.
     private func addressFocusRing(for tab: Tab, isVisible: Bool) -> some View {
         let showsFocusRing = isVisible
             && tab.id == viewModel.currentTabId
@@ -1825,7 +1849,7 @@ struct MainWindowTabsView: View {
                 .inset(by: -2.5)
                 .strokeBorder(
                     AppColors.softenedAddressFocusAccentColor.opacity(0.88),
-                    lineWidth: 2.5
+                    lineWidth: 4
                 )
                 .shadow(
                     color: AppColors.softenedAddressFocusAccentColor.opacity(0.12),
@@ -1833,7 +1857,7 @@ struct MainWindowTabsView: View {
                 )
 
             surfaceShape
-                .inset(by: -0.5)
+                .inset(by: 1.5)
                 .strokeBorder(
                     AppColors.addressFocusInnerHighlightColor,
                     lineWidth: 0.5
@@ -1879,31 +1903,11 @@ struct MainWindowTabsView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32)
         .background {
-            let shape = tabShape(for: tab)
-            ZStack {
-                shape.fill(AppColors.windowChromeTabPlateColor)
-                shape.fill(AppColors.addressEditingSurfaceColor)
-            }
-            .padding(.horizontal, CompactToolbarLayout.tabSeparationWidth)
-            .transaction { transaction in
-                transaction.animation = nil
-            }
+            tabSurface(for: tab, isActive: true, isEditing: true)
         }
-        .overlay(alignment: .bottom) { groupIndicator(for: tab) }
         .contentShape(tabShape(for: tab))
         .accessibilityLabel("Address for \(tab.title.isEmpty ? "New Tab" : tab.title)")
         .accessibilityAddTraits(.isSelected)
-    }
-
-    @ViewBuilder
-    private func groupIndicator(for tab: Tab) -> some View {
-        if let groupID = tab.groupId,
-           let group = viewModel.tabGroups.first(where: { $0.id == groupID }) {
-            Capsule()
-                .fill(Color(nsColor: group.color.nsColor))
-                .frame(height: 2)
-                .padding(.horizontal, 10)
-        }
     }
 
     @ViewBuilder

@@ -39,6 +39,12 @@ enum AppColors {
         ))
     }
 
+    static var windowChromeActiveTabPlateColor: Color {
+        Color(nsColor: NSColor(
+            calibratedWhite: usesDarkAppearance ? 0.32 : 1, alpha: 1
+        ))
+    }
+
     static var addressEditingSurfaceColor: Color {
         usesDarkAppearance ? Color.white.opacity(0.10) : Color.white.opacity(0.56)
     }
