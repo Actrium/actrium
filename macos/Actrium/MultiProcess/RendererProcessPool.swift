@@ -541,7 +541,7 @@ final class RendererProcessPool: ObservableObject {
                         response = RealmServiceReply(id: request.id, payload: payload)
                     } catch {
                         AppLogger.reactNative.warning("Realm Service call failed: \(error.localizedDescription)")
-                        response = RealmServiceReply(id: request.id, error: error.localizedDescription)
+                        response = RealmServiceReply(id: request.id, failure: RealmServiceFailure(serviceError: error))
                     }
                     guard let self, let worker, self.worker(for: tabId) === worker,
                           let data = try? JSONEncoder().encode(response) else { return }

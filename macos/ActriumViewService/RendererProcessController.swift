@@ -101,7 +101,8 @@ final class RendererProcessController {
     ) {
         guard let controller = RendererProcessLifetime.shared.controller,
               controller.surfaces[tabId] != nil else {
-            reply(RealmServiceReply(id: call.id, error: "The Realm tab is unavailable."))
+            let failure = RealmServiceFailure(code: "realm_tab_unavailable", message: "The Realm tab is unavailable.")
+            reply(RealmServiceReply(id: call.id, failure: failure))
             return
         }
         do {
@@ -113,12 +114,13 @@ final class RendererProcessController {
             )
             controller.serviceCalls[call.id] = reply
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(call.timeoutMs)) { [weak controller] in
-                controller?.serviceCalls.removeValue(forKey: call.id)?(
-                    RealmServiceReply(id: call.id, error: "The Service call timed out.")
+                let failure = RealmServiceFailure(
+                    code: "realm_service_timeout", message: "The Service call timed out."
                 )
+                controller?.serviceCalls.removeValue(forKey: call.id)?(RealmServiceReply(id: call.id, failure: failure))
             }
         } catch {
-            reply(RealmServiceReply(id: call.id, error: error.localizedDescription))
+            reply(RealmServiceReply(id: call.id, failure: RealmServiceFailure(error: error)))
         }
     }
     private let reactNativeHost = ServiceReactNativeHost.shared

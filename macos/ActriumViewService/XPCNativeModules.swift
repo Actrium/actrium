@@ -46,7 +46,15 @@ final class RealmService: NSObject {
                 if let payload = response.payload {
                     resolve(["payloadBase64": payload.base64EncodedString()])
                 } else {
-                    reject("realm_service_call_failed", response.error ?? "The Service call failed.", nil)
+                    let error = response.failure.map { failure in
+                        var userInfo: [String: Any] = [
+                            NSLocalizedDescriptionKey: failure.message,
+                            "code": failure.code,
+                        ]
+                        userInfo["details"] = failure.details
+                        return NSError(domain: failure.domain ?? "RealmService", code: 1, userInfo: userInfo)
+                    }
+                    reject("realm_service_call_failed", response.error ?? "The Service call failed.", error)
                 }
             }
         }

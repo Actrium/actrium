@@ -9,6 +9,36 @@ struct RealmServiceError: LocalizedError {
     var errorDescription: String? { message }
 }
 
+extension RealmServiceFailure {
+    init(serviceError error: Error) {
+        guard let error = error as? ActrBindings.ActrError else {
+            self.init(error: error)
+            return
+        }
+        let code: String
+        let details: [String: String]?
+        switch error {
+        case .Unavailable(let msg): (code, details) = ("unavailable", ["msg": msg])
+        case .ConnectionNotReady(let info):
+            (code, details) = ("connection_not_ready", info.retryAfterMs.map { ["retryAfterMs": String($0)] })
+        case .TimedOut: (code, details) = ("timed_out", nil)
+        case .NotFound(let msg): (code, details) = ("not_found", ["msg": msg])
+        case .PermissionDenied(let msg): (code, details) = ("permission_denied", ["msg": msg])
+        case .InvalidArgument(let msg): (code, details) = ("invalid_argument", ["msg": msg])
+        case .UnknownRoute(let msg): (code, details) = ("unknown_route", ["msg": msg])
+        case .DependencyNotFound(let serviceName, let detail):
+            (code, details) = ("dependency_not_found", ["serviceName": serviceName, "detail": detail])
+        case .DecodeFailure(let msg): (code, details) = ("decode_failure", ["msg": msg])
+        case .NotImplemented(let msg): (code, details) = ("not_implemented", ["msg": msg])
+        case .Internal(let msg): (code, details) = ("internal", ["msg": msg])
+        case .Config(let msg): (code, details) = ("config", ["msg": msg])
+        case .DeliveryUncertain(let operationId, let cause):
+            (code, details) = ("delivery_uncertain", ["operationId": operationId, "cause": cause])
+        }
+        self.init(code: code, message: error.localizedDescription, details: details)
+    }
+}
+
 @MainActor
 final class RealmServiceBindings {
     static let shared = RealmServiceBindings()
