@@ -92,6 +92,10 @@ pub struct RealmPackage {
     pub sha256: String,
     /// Actor type of the package manifest, `publisher/program@version`.
     pub r#type: String,
+    /// Dependency alias in this package's signed manifest -> selected package reference.
+    /// Omitted bindings continue to use the package's normal dependency resolution.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dependencies: BTreeMap<String, String>,
     /// Preserve extension members when the accepted package map is copied to a draft.
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,
@@ -981,6 +985,56 @@ mod tests {
         v["packages"]["another"] = v["packages"]["ui"].clone();
         v["packages"]["another"]["sha256"] = "ef".repeat(32).into();
         assert!(verify(v).is_err());
+    }
+
+    #[test]
+    fn dependency_selections_are_signed_and_require_a_new_sequence() {
+        let key = signing_key();
+        let keys = keys(&[("rs-1", &key, KeyStatus::Active)]);
+        let mut document = unsigned(1);
+        document["packages"]["service"]["dependencies"] = json!({"self": "service"});
+        document["packages"]["ui"]["x-extension"] = json!({"preserved": true});
+        let signed = sign(document.clone(), "rs-1", &key);
+        let previous = RealmProfile::verify(&signed, NAME, &keys).unwrap();
+        let selection = previous.selection.as_ref().unwrap();
+        assert_eq!(
+            selection.packages["service"].dependencies["self"],
+            "service"
+        );
+        assert_eq!(
+            serde_json::to_value(selection).unwrap()["packages"],
+            document["packages"]
+        );
+
+        let compact =
+            serde_json::to_string(&serde_json::from_slice::<Value>(&signed).unwrap()).unwrap();
+        let duplicate = compact.replace(
+            "\"self\":\"service\"",
+            "\"self\":\"ui\",\"self\":\"service\"",
+        );
+        assert_ne!(duplicate, compact);
+        assert!(RealmProfile::verify(duplicate.as_bytes(), NAME, &keys).is_err());
+
+        let mut changed: Value = serde_json::from_slice(&signed).unwrap();
+        changed["packages"]["service"]["dependencies"]["self"] = json!("ui");
+        let error =
+            RealmProfile::verify(&serde_json::to_vec(&changed).unwrap(), NAME, &keys).unwrap_err();
+        assert!(error.to_string().contains("signature verification failed"));
+
+        changed.as_object_mut().unwrap().remove("signature");
+        let candidate =
+            RealmProfile::verify(&sign(changed.clone(), "rs-1", &key), NAME, &keys).unwrap();
+        assert_eq!(
+            previous.check_successor(&candidate).unwrap_err().code(),
+            "REALM_PROFILE_ROLLBACK"
+        );
+        changed["sequence"] = json!(2);
+        let candidate = RealmProfile::verify(&sign(changed, "rs-1", &key), NAME, &keys).unwrap();
+        previous.check_successor(&candidate).unwrap();
+
+        document["packages"]["service"]["dependencies"]["self"] = json!("missing");
+        let error = RealmProfile::verify(&sign(document, "rs-1", &key), NAME, &keys).unwrap_err();
+        assert!(error.to_string().contains("unknown package reference"));
     }
 
     #[test]

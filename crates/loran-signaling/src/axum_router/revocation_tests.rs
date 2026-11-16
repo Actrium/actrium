@@ -458,6 +458,53 @@ async fn live_server_with_shutdown(
 
 #[tokio::test]
 #[serial_test::serial]
+async fn removed_connection_during_registration_receives_policy_close() {
+    let signing = initialize().await;
+    let (actor, credential, signer) = fixture(93, &signing).await;
+    let (base, handle, listener) = live_server().await;
+
+    // Hold setup at index insertion while it owns the clients write lock.
+    let index = handle.actor_id_index.write().await;
+    let (mut ws, _) = connect_async(address(&base, &actor, &credential, false))
+        .await
+        .unwrap();
+    timeout(Duration::from_secs(3), async {
+        while handle.clients.try_read().is_ok() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    // Tokio's fair lock puts this cleanup before setup's registration read.
+    // The real revocation follower can remove this row during the intervening
+    // pending-registration query. Force that order without a timing sleep.
+    let cleanup = handle.clients.write();
+    tokio::pin!(cleanup);
+    assert!(futures_util::poll!(cleanup.as_mut()).is_pending());
+    drop(index);
+    let mut clients = timeout(Duration::from_secs(3), cleanup).await.unwrap();
+    membership::revoke_client(&signer, &signer.key_id)
+        .await
+        .unwrap();
+    let client_id = handle.actor_id_index.write().await.remove(&actor).unwrap();
+    assert!(clients.remove(&client_id).is_some());
+    drop(clients);
+
+    let frame = timeout(Duration::from_secs(3), ws.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(frame, Message::Close(Some(frame)) if u16::from(frame.code) == 1008),
+        "a removed setup connection must send a policy Close before dropping the socket"
+    );
+    listener.abort();
+}
+
+#[tokio::test]
+#[serial_test::serial]
 async fn router_reload_closes_old_signaling_connections() {
     let signing = initialize().await;
     let (actor, credential, _) = fixture(91, &signing).await;

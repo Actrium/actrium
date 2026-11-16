@@ -787,6 +787,18 @@ pub(crate) async fn handle_websocket_connection_inner(
                 .get(&client_id)
                 .is_none_or(|client| client.actor_id.as_ref() != Some(&actor_id_for_registry))
             {
+                drop(clients);
+                // Cleanup can remove this client before its writer starts.
+                // Its queued Close would otherwise be dropped with the socket.
+                let close_frame = axum::extract::ws::CloseFrame {
+                    code: axum::extract::ws::close_code::POLICY,
+                    reason: "connection revoked or replaced".into(),
+                };
+                let _ = timeout(
+                    write_timeout,
+                    ws_sender.send(WsMessage::Close(Some(close_frame))),
+                )
+                .await;
                 return Ok(());
             }
             let mut registry = server.actor_registry.write().await;

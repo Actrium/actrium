@@ -1219,6 +1219,22 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -1234,7 +1250,13 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 // when the library is loaded.
 internal interface IntegrityCheckingUniffiLib : Library {
     // Integrity check functions only
-    fun uniffi_actrium_core_checksum_func_active_tab_from_row(
+    fun uniffi_actrium_core_checksum_func_accept_authority_descriptor(
+): Short
+fun uniffi_actrium_core_checksum_func_accept_publisher_profile(
+): Short
+fun uniffi_actrium_core_checksum_func_accept_realm_profile(
+): Short
+fun uniffi_actrium_core_checksum_func_active_tab_from_row(
 ): Short
 fun uniffi_actrium_core_checksum_func_active_tab_rows_from_tabs(
 ): Short
@@ -1548,6 +1570,8 @@ fun uniffi_actrium_core_checksum_func_core_tag_update_params(
 ): Short
 fun uniffi_actrium_core_checksum_func_create_actr_integrity_plan(
 ): Short
+fun uniffi_actrium_core_checksum_func_decode_actr_invite(
+): Short
 fun uniffi_actrium_core_checksum_func_default_runtime_app_status(
 ): Short
 fun uniffi_actrium_core_checksum_func_default_system_tags(
@@ -1563,6 +1587,8 @@ fun uniffi_actrium_core_checksum_func_empty_browser_storage_sync_batch_json(
 fun uniffi_actrium_core_checksum_func_evaluate_contract(
 ): Short
 fun uniffi_actrium_core_checksum_func_extract_app_id_from_url(
+): Short
+fun uniffi_actrium_core_checksum_func_generate_installation_id(
 ): Short
 fun uniffi_actrium_core_checksum_func_is_asset_path(
 ): Short
@@ -1597,6 +1623,8 @@ fun uniffi_actrium_core_checksum_func_normalize_sha256_hex(
 fun uniffi_actrium_core_checksum_func_parse_actr_actor_type(
 ): Short
 fun uniffi_actrium_core_checksum_func_parse_actr_package_manifest(
+): Short
+fun uniffi_actrium_core_checksum_func_parse_actr_uri(
 ): Short
 fun uniffi_actrium_core_checksum_func_parse_app_source_type(
 ): Short
@@ -1740,7 +1768,11 @@ fun uniffi_actrium_core_checksum_func_user_info_bridge_contract(
 ): Short
 fun uniffi_actrium_core_checksum_func_validate_actr_package_manifest(
 ): Short
+fun uniffi_actrium_core_checksum_func_validate_installation_id(
+): Short
 fun uniffi_actrium_core_checksum_func_verify_actr_package(
+): Short
+fun uniffi_actrium_core_checksum_func_verify_realm_front_package(
 ): Short
 fun ffi_actrium_core_uniffi_contract_version(
 ): Int
@@ -1787,7 +1819,13 @@ internal interface UniffiLib : Library {
     }
 
     // FFI functions
-    fun uniffi_actrium_core_fn_func_active_tab_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_actrium_core_fn_func_accept_authority_descriptor(`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_accept_publisher_profile(`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_accept_realm_profile(`body`: RustBuffer.ByValue,`realmName`: RustBuffer.ByValue,`signingKeysJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_active_tab_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_active_tab_rows_from_tabs(`tabs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -2101,6 +2139,8 @@ fun uniffi_actrium_core_fn_func_core_tag_update_params(`name`: RustBuffer.ByValu
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_create_actr_integrity_plan(`manifestToml`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_decode_actr_invite(`inviteText`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_default_runtime_app_status(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_default_system_tags(uniffi_out_err: UniffiRustCallStatus,
@@ -2116,6 +2156,8 @@ fun uniffi_actrium_core_fn_func_empty_browser_storage_sync_batch_json(`scope`: R
 fun uniffi_actrium_core_fn_func_evaluate_contract(`name`: RustBuffer.ByValue,`version`: Int,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_extract_app_id_from_url(`url`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_generate_installation_id(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_is_asset_path(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
@@ -2150,6 +2192,8 @@ fun uniffi_actrium_core_fn_func_normalize_sha256_hex(`hash`: RustBuffer.ByValue,
 fun uniffi_actrium_core_fn_func_parse_actr_actor_type(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_parse_actr_package_manifest(`source`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_parse_actr_uri(`uri`: RustBuffer.ByValue,`installationId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_parse_app_source_type(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -2293,7 +2337,11 @@ fun uniffi_actrium_core_fn_func_user_info_bridge_contract(uniffi_out_err: Uniffi
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_validate_actr_package_manifest(`source`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
+fun uniffi_actrium_core_fn_func_validate_installation_id(`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Unit
 fun uniffi_actrium_core_fn_func_verify_actr_package(`archive`: RustBuffer.ByValue,`trustedPublicKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_verify_realm_front_package(`archive`: RustBuffer.ByValue,`trustedPublicKey`: RustBuffer.ByValue,`profile`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun ffi_actrium_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -2421,6 +2469,15 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_actrium_core_checksum_func_accept_authority_descriptor() != 22442.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_func_accept_publisher_profile() != 50717.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_func_accept_realm_profile() != 6481.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_func_active_tab_from_row() != 51323.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2892,6 +2949,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_func_create_actr_integrity_plan() != 9942.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_func_decode_actr_invite() != 2065.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_func_default_runtime_app_status() != 1707.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -2914,6 +2974,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actrium_core_checksum_func_extract_app_id_from_url() != 65157.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_func_generate_installation_id() != 33456.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actrium_core_checksum_func_is_asset_path() != 48112.toShort()) {
@@ -2965,6 +3028,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actrium_core_checksum_func_parse_actr_package_manifest() != 53207.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_func_parse_actr_uri() != 57552.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actrium_core_checksum_func_parse_app_source_type() != 15889.toShort()) {
@@ -3180,7 +3246,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_func_validate_actr_package_manifest() != 38515.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_func_validate_installation_id() != 9871.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_func_verify_actr_package() != 49733.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_func_verify_realm_front_package() != 30025.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -3305,6 +3377,29 @@ public object FfiConverterInt: FfiConverter<Int, Int> {
 
     override fun write(value: Int, buf: ByteBuffer) {
         buf.putInt(value)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterULong: FfiConverter<ULong, Long> {
+    override fun lift(value: Long): ULong {
+        return value.toULong()
+    }
+
+    override fun read(buf: ByteBuffer): ULong {
+        return lift(buf.getLong())
+    }
+
+    override fun lower(value: ULong): Long {
+        return value.toLong()
+    }
+
+    override fun allocationSize(value: ULong) = 8UL
+
+    override fun write(value: ULong, buf: ByteBuffer) {
+        buf.putLong(value.toLong())
     }
 }
 
@@ -3943,6 +4038,40 @@ public object FfiConverterTypeActrBridgeContractInfo: FfiConverterRustBuffer<Act
 
 
 
+/**
+ * The Realm name carried by a `ri_` invite text.
+ */
+data class ActrInviteInfo (
+    /**
+     * Canonical Realm name `<realm_id>@<domain>`.
+     */
+    var `realmName`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeActrInviteInfo: FfiConverterRustBuffer<ActrInviteInfo> {
+    override fun read(buf: ByteBuffer): ActrInviteInfo {
+        return ActrInviteInfo(
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ActrInviteInfo) = (
+            FfiConverterString.allocationSize(value.`realmName`)
+    )
+
+    override fun write(value: ActrInviteInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`realmName`, buf)
+    }
+}
+
+
+
 data class ActrPackageManifestInfo (
     var `name`: kotlin.String,
     var `version`: kotlin.String,
@@ -4018,6 +4147,62 @@ public object FfiConverterTypeActrPackageManifestInfo: FfiConverterRustBuffer<Ac
             FfiConverterOptionalString.write(value.`capabilities`, buf)
             FfiConverterOptionalString.write(value.`systemAppType`, buf)
             FfiConverterOptionalString.write(value.`themeColor`, buf)
+    }
+}
+
+
+
+/**
+ * Parsed `actr://` Realm link or Actor address.
+ */
+data class ActrUriInfo (
+    /**
+     * Lowercase IDNA A-label domain, or `<installation-id>.actr.alt`.
+     */
+    var `domain`: kotlin.String,
+    var `realmId`: kotlin.String?,
+    var `serial`: kotlin.String?,
+    /**
+     * Whether the link targets this installation's local Realm.
+     */
+    var `isLocal`: kotlin.Boolean,
+    /**
+     * `https://<domain>/.well-known/actr`; null for a local Realm.
+     */
+    var `discoveryUrl`: kotlin.String?
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeActrUriInfo: FfiConverterRustBuffer<ActrUriInfo> {
+    override fun read(buf: ByteBuffer): ActrUriInfo {
+        return ActrUriInfo(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ActrUriInfo) = (
+            FfiConverterString.allocationSize(value.`domain`) +
+            FfiConverterOptionalString.allocationSize(value.`realmId`) +
+            FfiConverterOptionalString.allocationSize(value.`serial`) +
+            FfiConverterBoolean.allocationSize(value.`isLocal`) +
+            FfiConverterOptionalString.allocationSize(value.`discoveryUrl`)
+    )
+
+    override fun write(value: ActrUriInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`domain`, buf)
+            FfiConverterOptionalString.write(value.`realmId`, buf)
+            FfiConverterOptionalString.write(value.`serial`, buf)
+            FfiConverterBoolean.write(value.`isLocal`, buf)
+            FfiConverterOptionalString.write(value.`discoveryUrl`, buf)
     }
 }
 
@@ -4178,6 +4363,58 @@ public object FfiConverterTypeAsrSegmentInfo: FfiConverterRustBuffer<AsrSegmentI
     override fun write(value: AsrSegmentInfo, buf: ByteBuffer) {
             FfiConverterString.write(value.`word`, buf)
             FfiConverterOptionalString.write(value.`nature`, buf)
+    }
+}
+
+
+
+/**
+ * Validated authority descriptor for a Realm domain.
+ */
+data class AuthorityDiscoveryInfo (
+    /**
+     * Realms service href; Realm Profile GETs append `/<realm_id>`.
+     */
+    var `realmsHref`: kotlin.String,
+    /**
+     * Sequence of the accepted `realm_signing_keys` member.
+     */
+    var `keysSequence`: kotlin.ULong,
+    var `signingKeys`: List<RealmSigningKeyInfo>,
+    /**
+     * The accepted member serialized; pass back to `accept_realm_profile`.
+     */
+    var `signingKeysJson`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAuthorityDiscoveryInfo: FfiConverterRustBuffer<AuthorityDiscoveryInfo> {
+    override fun read(buf: ByteBuffer): AuthorityDiscoveryInfo {
+        return AuthorityDiscoveryInfo(
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterSequenceTypeRealmSigningKeyInfo.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: AuthorityDiscoveryInfo) = (
+            FfiConverterString.allocationSize(value.`realmsHref`) +
+            FfiConverterULong.allocationSize(value.`keysSequence`) +
+            FfiConverterSequenceTypeRealmSigningKeyInfo.allocationSize(value.`signingKeys`) +
+            FfiConverterString.allocationSize(value.`signingKeysJson`)
+    )
+
+    override fun write(value: AuthorityDiscoveryInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`realmsHref`, buf)
+            FfiConverterULong.write(value.`keysSequence`, buf)
+            FfiConverterSequenceTypeRealmSigningKeyInfo.write(value.`signingKeys`, buf)
+            FfiConverterString.write(value.`signingKeysJson`, buf)
     }
 }
 
@@ -5423,6 +5660,333 @@ public object FfiConverterTypePackageIntegrityPlanInfo: FfiConverterRustBuffer<P
 
 
 
+/**
+ * A package signing key from a verified Publisher Profile.
+ */
+data class PublisherPackageKeyInfo (
+    /**
+     * `actr-pub-` + 16 lowercase hex characters of the key digest.
+     */
+    var `id`: kotlin.String,
+    /**
+     * Base64 Ed25519 public key.
+     */
+    var `publicKeyBase64`: kotlin.String,
+    /**
+     * `active` or `retired`.
+     */
+    var `status`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePublisherPackageKeyInfo: FfiConverterRustBuffer<PublisherPackageKeyInfo> {
+    override fun read(buf: ByteBuffer): PublisherPackageKeyInfo {
+        return PublisherPackageKeyInfo(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PublisherPackageKeyInfo) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`publicKeyBase64`) +
+            FfiConverterString.allocationSize(value.`status`)
+    )
+
+    override fun write(value: PublisherPackageKeyInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`publicKeyBase64`, buf)
+            FfiConverterString.write(value.`status`, buf)
+    }
+}
+
+
+
+/**
+ * Verified Publisher Profile for a publisher domain.
+ */
+data class PublisherProfileInfo (
+    var `domain`: kotlin.String,
+    var `profileSequence`: kotlin.ULong,
+    /**
+     * RFC 3339; past this point the profile must be re-fetched.
+     */
+    var `profileExpiresAt`: kotlin.String,
+    var `packageSigningKeys`: List<PublisherPackageKeyInfo>
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePublisherProfileInfo: FfiConverterRustBuffer<PublisherProfileInfo> {
+    override fun read(buf: ByteBuffer): PublisherProfileInfo {
+        return PublisherProfileInfo(
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypePublisherPackageKeyInfo.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PublisherProfileInfo) = (
+            FfiConverterString.allocationSize(value.`domain`) +
+            FfiConverterULong.allocationSize(value.`profileSequence`) +
+            FfiConverterString.allocationSize(value.`profileExpiresAt`) +
+            FfiConverterSequenceTypePublisherPackageKeyInfo.allocationSize(value.`packageSigningKeys`)
+    )
+
+    override fun write(value: PublisherProfileInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`domain`, buf)
+            FfiConverterULong.write(value.`profileSequence`, buf)
+            FfiConverterString.write(value.`profileExpiresAt`, buf)
+            FfiConverterSequenceTypePublisherPackageKeyInfo.write(value.`packageSigningKeys`, buf)
+    }
+}
+
+
+
+/**
+ * A verified Realm Profile: the package target and endpoints that feed
+ * package acquisition.
+ */
+data class RealmDependencyInfo (
+    var `alias`: kotlin.String,
+    var `targetPackage`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRealmDependencyInfo: FfiConverterRustBuffer<RealmDependencyInfo> {
+    override fun read(buf: ByteBuffer): RealmDependencyInfo {
+        return RealmDependencyInfo(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RealmDependencyInfo) = (
+            FfiConverterString.allocationSize(value.`alias`) +
+            FfiConverterString.allocationSize(value.`targetPackage`)
+    )
+
+    override fun write(value: RealmDependencyInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`alias`, buf)
+            FfiConverterString.write(value.`targetPackage`, buf)
+    }
+}
+
+
+
+data class RealmPackageInfo (
+    var `reference`: kotlin.String,
+    var `href`: kotlin.String,
+    var `sha256`: kotlin.String,
+    var `actorType`: kotlin.String,
+    var `dependencies`: List<RealmDependencyInfo>
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRealmPackageInfo: FfiConverterRustBuffer<RealmPackageInfo> {
+    override fun read(buf: ByteBuffer): RealmPackageInfo {
+        return RealmPackageInfo(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeRealmDependencyInfo.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RealmPackageInfo) = (
+            FfiConverterString.allocationSize(value.`reference`) +
+            FfiConverterString.allocationSize(value.`href`) +
+            FfiConverterString.allocationSize(value.`sha256`) +
+            FfiConverterString.allocationSize(value.`actorType`) +
+            FfiConverterSequenceTypeRealmDependencyInfo.allocationSize(value.`dependencies`)
+    )
+
+    override fun write(value: RealmPackageInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`reference`, buf)
+            FfiConverterString.write(value.`href`, buf)
+            FfiConverterString.write(value.`sha256`, buf)
+            FfiConverterString.write(value.`actorType`, buf)
+            FfiConverterSequenceTypeRealmDependencyInfo.write(value.`dependencies`, buf)
+    }
+}
+
+
+
+data class RealmProfileInfo (
+    /**
+     * Canonical Realm name `<realm_id>@<domain>`.
+     */
+    var `realmName`: kotlin.String,
+    var `displayName`: kotlin.String,
+    /**
+     * Always `active`; retired Realms are rejected.
+     */
+    var `status`: kotlin.String,
+    var `sequence`: kotlin.ULong,
+    var `primaryPackage`: kotlin.String,
+    var `frontPackage`: kotlin.String,
+    var `packages`: List<RealmPackageInfo>,
+    /**
+     * HTTPS download URL of the signed `.actr` package.
+     */
+    var `packageHref`: kotlin.String,
+    /**
+     * Lowercase hex SHA-256 the package must match.
+     */
+    var `packageSha256`: kotlin.String,
+    /**
+     * Actor type `publisher/program@version`.
+     */
+    var `packageType`: kotlin.String,
+    /**
+     * Service package: deployed and verified by the Service Host.
+     */
+    var `serviceHref`: kotlin.String,
+    var `serviceSha256`: kotlin.String,
+    var `serviceType`: kotlin.String,
+    /**
+     * Issuer endpoint that serves Actor credentials.
+     */
+    var `issuerUrl`: kotlin.String,
+    /**
+     * Actr Facility Provider ID; a membership client binds to it.
+     */
+    var `providerId`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer<RealmProfileInfo> {
+    override fun read(buf: ByteBuffer): RealmProfileInfo {
+        return RealmProfileInfo(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeRealmPackageInfo.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RealmProfileInfo) = (
+            FfiConverterString.allocationSize(value.`realmName`) +
+            FfiConverterString.allocationSize(value.`displayName`) +
+            FfiConverterString.allocationSize(value.`status`) +
+            FfiConverterULong.allocationSize(value.`sequence`) +
+            FfiConverterString.allocationSize(value.`primaryPackage`) +
+            FfiConverterString.allocationSize(value.`frontPackage`) +
+            FfiConverterSequenceTypeRealmPackageInfo.allocationSize(value.`packages`) +
+            FfiConverterString.allocationSize(value.`packageHref`) +
+            FfiConverterString.allocationSize(value.`packageSha256`) +
+            FfiConverterString.allocationSize(value.`packageType`) +
+            FfiConverterString.allocationSize(value.`serviceHref`) +
+            FfiConverterString.allocationSize(value.`serviceSha256`) +
+            FfiConverterString.allocationSize(value.`serviceType`) +
+            FfiConverterString.allocationSize(value.`issuerUrl`) +
+            FfiConverterString.allocationSize(value.`providerId`)
+    )
+
+    override fun write(value: RealmProfileInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`realmName`, buf)
+            FfiConverterString.write(value.`displayName`, buf)
+            FfiConverterString.write(value.`status`, buf)
+            FfiConverterULong.write(value.`sequence`, buf)
+            FfiConverterString.write(value.`primaryPackage`, buf)
+            FfiConverterString.write(value.`frontPackage`, buf)
+            FfiConverterSequenceTypeRealmPackageInfo.write(value.`packages`, buf)
+            FfiConverterString.write(value.`packageHref`, buf)
+            FfiConverterString.write(value.`packageSha256`, buf)
+            FfiConverterString.write(value.`packageType`, buf)
+            FfiConverterString.write(value.`serviceHref`, buf)
+            FfiConverterString.write(value.`serviceSha256`, buf)
+            FfiConverterString.write(value.`serviceType`, buf)
+            FfiConverterString.write(value.`issuerUrl`, buf)
+            FfiConverterString.write(value.`providerId`, buf)
+    }
+}
+
+
+
+/**
+ * A trusted realm signing key from an accepted authority descriptor.
+ */
+data class RealmSigningKeyInfo (
+    var `id`: kotlin.String,
+    /**
+     * Base64 Ed25519 public key, as listed by the descriptor.
+     */
+    var `publicKeyBase64`: kotlin.String,
+    /**
+     * `active` or `retired`.
+     */
+    var `status`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRealmSigningKeyInfo: FfiConverterRustBuffer<RealmSigningKeyInfo> {
+    override fun read(buf: ByteBuffer): RealmSigningKeyInfo {
+        return RealmSigningKeyInfo(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RealmSigningKeyInfo) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`publicKeyBase64`) +
+            FfiConverterString.allocationSize(value.`status`)
+    )
+
+    override fun write(value: RealmSigningKeyInfo, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`publicKeyBase64`, buf)
+            FfiConverterString.write(value.`status`, buf)
+    }
+}
+
+
+
 data class RuntimeContainerSizeChangeEventInfo (
     var `containerWidth`: kotlin.Int,
     var `containerHeight`: kotlin.Int
@@ -6157,6 +6721,24 @@ sealed class CoreException(message: String): kotlin.Exception(message) {
 
         class InvalidActrActorType(message: String) : CoreException(message)
 
+        class UriSchemeInvalid(message: String) : CoreException(message)
+
+        class UriDomainInvalid(message: String) : CoreException(message)
+
+        class UriLabelInvalid(message: String) : CoreException(message)
+
+        class UriLegacyForm(message: String) : CoreException(message)
+
+        class UriLocalRealmForeign(message: String) : CoreException(message)
+
+        class InvalidInstallationId(message: String) : CoreException(message)
+
+        class AuthorityDescriptorInvalid(message: String) : CoreException(message)
+
+        class RealmProfileInvalid(message: String) : CoreException(message)
+
+        class RealmRetired(message: String) : CoreException(message)
+
 
     companion object ErrorHandler : UniffiRustCallStatusErrorHandler<CoreException> {
         override fun lift(error_buf: RustBuffer.ByValue): CoreException = FfiConverterTypeCoreError.lift(error_buf)
@@ -6177,6 +6759,15 @@ public object FfiConverterTypeCoreError : FfiConverterRustBuffer<CoreException> 
             5 -> CoreException.UnknownSystemAppType(FfiConverterString.read(buf))
             6 -> CoreException.UnknownAppSourceType(FfiConverterString.read(buf))
             7 -> CoreException.InvalidActrActorType(FfiConverterString.read(buf))
+            8 -> CoreException.UriSchemeInvalid(FfiConverterString.read(buf))
+            9 -> CoreException.UriDomainInvalid(FfiConverterString.read(buf))
+            10 -> CoreException.UriLabelInvalid(FfiConverterString.read(buf))
+            11 -> CoreException.UriLegacyForm(FfiConverterString.read(buf))
+            12 -> CoreException.UriLocalRealmForeign(FfiConverterString.read(buf))
+            13 -> CoreException.InvalidInstallationId(FfiConverterString.read(buf))
+            14 -> CoreException.AuthorityDescriptorInvalid(FfiConverterString.read(buf))
+            15 -> CoreException.RealmProfileInvalid(FfiConverterString.read(buf))
+            16 -> CoreException.RealmRetired(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
 
@@ -6214,6 +6805,42 @@ public object FfiConverterTypeCoreError : FfiConverterRustBuffer<CoreException> 
             }
             is CoreException.InvalidActrActorType -> {
                 buf.putInt(7)
+                Unit
+            }
+            is CoreException.UriSchemeInvalid -> {
+                buf.putInt(8)
+                Unit
+            }
+            is CoreException.UriDomainInvalid -> {
+                buf.putInt(9)
+                Unit
+            }
+            is CoreException.UriLabelInvalid -> {
+                buf.putInt(10)
+                Unit
+            }
+            is CoreException.UriLegacyForm -> {
+                buf.putInt(11)
+                Unit
+            }
+            is CoreException.UriLocalRealmForeign -> {
+                buf.putInt(12)
+                Unit
+            }
+            is CoreException.InvalidInstallationId -> {
+                buf.putInt(13)
+                Unit
+            }
+            is CoreException.AuthorityDescriptorInvalid -> {
+                buf.putInt(14)
+                Unit
+            }
+            is CoreException.RealmProfileInvalid -> {
+                buf.putInt(15)
+                Unit
+            }
+            is CoreException.RealmRetired -> {
+                buf.putInt(16)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -6771,6 +7398,118 @@ public object FfiConverterSequenceTypePackageIntegrityFilePlanInfo: FfiConverter
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypePublisherPackageKeyInfo: FfiConverterRustBuffer<List<PublisherPackageKeyInfo>> {
+    override fun read(buf: ByteBuffer): List<PublisherPackageKeyInfo> {
+        val len = buf.getInt()
+        return List<PublisherPackageKeyInfo>(len) {
+            FfiConverterTypePublisherPackageKeyInfo.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<PublisherPackageKeyInfo>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypePublisherPackageKeyInfo.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<PublisherPackageKeyInfo>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypePublisherPackageKeyInfo.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeRealmDependencyInfo: FfiConverterRustBuffer<List<RealmDependencyInfo>> {
+    override fun read(buf: ByteBuffer): List<RealmDependencyInfo> {
+        val len = buf.getInt()
+        return List<RealmDependencyInfo>(len) {
+            FfiConverterTypeRealmDependencyInfo.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<RealmDependencyInfo>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeRealmDependencyInfo.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<RealmDependencyInfo>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeRealmDependencyInfo.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeRealmPackageInfo: FfiConverterRustBuffer<List<RealmPackageInfo>> {
+    override fun read(buf: ByteBuffer): List<RealmPackageInfo> {
+        val len = buf.getInt()
+        return List<RealmPackageInfo>(len) {
+            FfiConverterTypeRealmPackageInfo.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<RealmPackageInfo>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeRealmPackageInfo.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<RealmPackageInfo>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeRealmPackageInfo.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeRealmSigningKeyInfo: FfiConverterRustBuffer<List<RealmSigningKeyInfo>> {
+    override fun read(buf: ByteBuffer): List<RealmSigningKeyInfo> {
+        val len = buf.getInt()
+        return List<RealmSigningKeyInfo>(len) {
+            FfiConverterTypeRealmSigningKeyInfo.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<RealmSigningKeyInfo>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeRealmSigningKeyInfo.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<RealmSigningKeyInfo>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeRealmSigningKeyInfo.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<List<RuntimeTabInfo>> {
     override fun read(buf: ByteBuffer): List<RuntimeTabInfo> {
         val len = buf.getInt()
@@ -6792,6 +7531,56 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
         }
     }
 }
+        /**
+         * Validate an authority descriptor response for `domain` and extract
+         * the trusted realm signing keys plus the realms service href.
+         *
+         * `body` is the raw JSON text as received over HTTPS. Key pinning
+         * across visits is not applied yet.
+         */
+    @Throws(CoreException::class) fun `acceptAuthorityDescriptor`(`body`: kotlin.String, `domain`: kotlin.String): AuthorityDiscoveryInfo {
+            return FfiConverterTypeAuthorityDiscoveryInfo.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_accept_authority_descriptor(
+        FfiConverterString.lower(`body`),FfiConverterString.lower(`domain`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Validate the descriptor served by a publisher domain and verify its
+         * inline Publisher Profile; extract the package signing keys that
+         * verify the `.actr` package signature.
+         */
+    @Throws(CoreException::class) fun `acceptPublisherProfile`(`body`: kotlin.String, `domain`: kotlin.String): PublisherProfileInfo {
+            return FfiConverterTypePublisherProfileInfo.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_accept_publisher_profile(
+        FfiConverterString.lower(`body`),FfiConverterString.lower(`domain`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Validate a Realm Profile response for `realm_name` and extract the
+         * package target.
+         *
+         * `body` is the raw JSON text as received; `signing_keys_json` is the
+         * `signingKeysJson` output of `accept_authority_descriptor`. Retired
+         * Realms are rejected.
+         */
+    @Throws(CoreException::class) fun `acceptRealmProfile`(`body`: kotlin.String, `realmName`: kotlin.String, `signingKeysJson`: kotlin.String): RealmProfileInfo {
+            return FfiConverterTypeRealmProfileInfo.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_accept_realm_profile(
+        FfiConverterString.lower(`body`),FfiConverterString.lower(`realmName`),FfiConverterString.lower(`signingKeysJson`),_status)
+}
+    )
+    }
+
+
         /**
          * Convert a persisted active-tab row into the platform active-tab model.
          */ fun `activeTabFromRow`(`row`: ActiveTabRowInfo): ActiveTabInfo {
@@ -8630,6 +9419,20 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
 
 
         /**
+         * Decode a `ri_` invite text far enough to name its Realm. The secret
+         * stays inside Rust; `join` re-decodes the same text internally.
+         */
+    @Throws(CoreException::class) fun `decodeActrInvite`(`inviteText`: kotlin.String): ActrInviteInfo {
+            return FfiConverterTypeActrInviteInfo.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_decode_actr_invite(
+        FfiConverterString.lower(`inviteText`),_status)
+}
+    )
+    }
+
+
+        /**
          * Return the default runtime app status.
          */ fun `defaultRuntimeAppStatus`(): kotlin.String {
             return FfiConverterString.lift(
@@ -8720,6 +9523,20 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_extract_app_id_from_url(
         FfiConverterString.lower(`url`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Generate a fresh installation id: 26 lowercase base32 characters
+         * from 16 OS-CSPRNG bytes. Platforms persist the value once and own
+         * the storage.
+         */ fun `generateInstallationId`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_generate_installation_id(
+        _status)
 }
     )
     }
@@ -8927,6 +9744,23 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_parse_actr_package_manifest(
         FfiConverterString.lower(`source`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Parse and validate an `actr://` Realm link or Actor address.
+         *
+         * Layer-0 verification-funnel step: zero network. Delegates to
+         * `realm_link::open_realm_link`; `installation_id` is this
+         * installation's local Realm id (26 lowercase base32 characters).
+         */
+    @Throws(CoreException::class) fun `parseActrUri`(`uri`: kotlin.String, `installationId`: kotlin.String): ActrUriInfo {
+            return FfiConverterTypeActrUriInfo.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_parse_actr_uri(
+        FfiConverterString.lower(`uri`),FfiConverterString.lower(`installationId`),_status)
 }
     )
     }
@@ -9664,6 +10498,18 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
 
 
         /**
+         * Validate an installation id against the `.actr.alt` domain rules.
+         */
+    @Throws(CoreException::class) fun `validateInstallationId`(`id`: kotlin.String)
+        =
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_validate_installation_id(
+        FfiConverterString.lower(`id`),_status)
+}
+
+
+
+        /**
          * Verify one actr-package/2 archive using a trusted public key in raw 32-byte Ed25519 form.
          * Return the manifest info and workload bytes read from that verified archive.
          */
@@ -9672,6 +10518,16 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
     uniffiRustCallWithError(ActrPackageVerificationException) { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_verify_actr_package(
         FfiConverterByteArray.lower(`archive`),FfiConverterByteArray.lower(`trustedPublicKey`),_status)
+}
+    )
+    }
+
+
+    @Throws(ActrPackageVerificationException::class) fun `verifyRealmFrontPackage`(`archive`: kotlin.ByteArray, `trustedPublicKey`: kotlin.ByteArray, `profile`: RealmProfileInfo): VerifiedActrPackageInfo {
+            return FfiConverterTypeVerifiedActrPackageInfo.lift(
+    uniffiRustCallWithError(ActrPackageVerificationException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_verify_realm_front_package(
+        FfiConverterByteArray.lower(`archive`),FfiConverterByteArray.lower(`trustedPublicKey`),FfiConverterTypeRealmProfileInfo.lower(`profile`),_status)
 }
     )
     }

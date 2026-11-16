@@ -503,6 +503,7 @@ dependencies = [
 name = "actrium-core"
 version = "0.0.0"
 dependencies = [
+ "actr-config",
  "actr-pack",
  "actr-protocol",
  "base64 0.22.1",

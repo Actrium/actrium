@@ -171,6 +171,26 @@
           "description": "publisher/program@version; Publisher identity and version semantics require the Actor-type parser.",
           "type": "string",
           "pattern": "^[^/@\\s]+/[^/@\\s]+@[^/@\\s]+$"
+        },
+        "dependencies": {
+          "description": "Optional dependency alias to selected package reference map. The verifier checks that targets exist; consumers check aliases, types, versions, contracts and locks against the signed packages. Cycles are allowed and do not specify startup order.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "not": {
+              "pattern": "^\\s|\\s$"
+            }
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 63,
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+            "not": {
+              "pattern": "[^a-z0-9-]"
+            }
+          }
         }
       },
       "additionalProperties": true

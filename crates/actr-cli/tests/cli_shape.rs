@@ -114,6 +114,7 @@ fn realm_group_exposes_the_signing_and_membership_tools() {
     assert_eq!(
         subs,
         [
+            "check-selection",
             "create-request",
             "draft-request",
             "fetch-packages",

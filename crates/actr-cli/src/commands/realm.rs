@@ -77,6 +77,8 @@ pub enum RealmCommand {
     Update(realm_members::UpdateArgs),
     /// Download and verify the selected Service and Front into a new directory
     FetchPackages(super::realm_packages::FetchArgs),
+    /// Download and validate a complete manual selection before signing a Realm Profile
+    CheckSelection(super::realm_packages::CheckArgs),
     /// List members, clients and open invites (a non-owner sees its own).
     Members(KeyArgs),
     /// Revoke an unused invite.
@@ -250,6 +252,9 @@ impl Command for RealmArgs {
             RealmCommand::Join(args) => realm_members::join(args).await?,
             RealmCommand::Update(args) => realm_members::update(args).await?,
             RealmCommand::FetchPackages(args) => super::realm_packages::fetch(args).await?,
+            RealmCommand::CheckSelection(args) => {
+                super::realm_packages::check_selection(args).await?
+            }
             RealmCommand::Invite(args) => realm_members::invite(args).await?,
             RealmCommand::Members(args) => realm_members::members(args).await?,
             RealmCommand::RevokeInvite(args) => realm_members::revoke_invite(args).await?,
