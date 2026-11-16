@@ -161,9 +161,6 @@
     "examples/actrium/echo/run-macos.sh": {
       "actro://": 1
     },
-    "packages/actrium/keel-guest-examples/counterapp/run-macos.sh": {
-      "actro://": 1
-    },
     "ios/Actrium.xcodeproj/project.pbxproj": {
       "io.actrium.actro.ios": 2
     },
@@ -205,12 +202,6 @@
     },
     "ios/Scripts/TESTFLIGHT_README.zh.md": {
       "com.actrium.actro": 1
-    },
-    "macos/AGENTS.md": {
-      "actro://": 1
-    },
-    "macos/AGENTS.zh.md": {
-      "actro://": 1
     },
     "macos/Actrium.xcodeproj/project.pbxproj": {
       "io.actrium.actro": 2,
