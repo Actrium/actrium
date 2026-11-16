@@ -48,6 +48,38 @@ struct CompactTabLayoutTests {
         ) == 0)
     }
 
+    @Test func edgeGroupsExposeOutsideUngroupSlots() {
+        let group = UUID()
+        let leading = [group, group, nil] as [UUID?]
+        let trailing = [nil, group, group] as [UUID?]
+        let middle = [nil, group, nil] as [UUID?]
+
+        #expect(toolbarEdgeUngroupInsertionIndex(
+            pointerX: 6,
+            viewportWidth: 300,
+            sourceGroupID: group,
+            tabGroupIDs: leading
+        ) == 0)
+        #expect(toolbarEdgeUngroupInsertionIndex(
+            pointerX: 294,
+            viewportWidth: 300,
+            sourceGroupID: group,
+            tabGroupIDs: trailing
+        ) == 2)
+        #expect(toolbarEdgeUngroupInsertionIndex(
+            pointerX: 24,
+            viewportWidth: 300,
+            sourceGroupID: group,
+            tabGroupIDs: leading
+        ) == nil)
+        #expect(toolbarEdgeUngroupInsertionIndex(
+            pointerX: 300,
+            viewportWidth: 300,
+            sourceGroupID: group,
+            tabGroupIDs: middle
+        ) == nil)
+    }
+
     @Test func addressEditingOwnsPointerUntilItEnds() {
         let rejected = toolbarTabInteractionTransition(
             phase: .addressEditing,

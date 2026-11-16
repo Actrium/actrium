@@ -96,6 +96,29 @@ func toolbarTabChromeInsertionIndex(
     return insertionIndex
 }
 
+/// A group at either logical end needs an outside drop slot even when its
+/// visible tabs fill the strip. The pointer may leave the strip during a drag;
+/// a small in-strip threshold makes the slot reachable at the window edge.
+func toolbarEdgeUngroupInsertionIndex(
+    pointerX: CGFloat,
+    viewportWidth: CGFloat,
+    sourceGroupID: UUID?,
+    tabGroupIDs: [UUID?],
+    edgeThreshold: CGFloat = 8
+) -> Int? {
+    guard let sourceGroupID, !tabGroupIDs.isEmpty, viewportWidth > 0 else {
+        return nil
+    }
+    if tabGroupIDs[0] == sourceGroupID, pointerX <= edgeThreshold {
+        return 0
+    }
+    if tabGroupIDs[tabGroupIDs.count - 1] == sourceGroupID,
+       pointerX >= viewportWidth - edgeThreshold {
+        return tabGroupIDs.count - 1
+    }
+    return nil
+}
+
 /// Owns the one exclusive Tab interaction that can be in progress in the compact toolbar.
 /// Its transition table is local to this view layer.
 @MainActor
@@ -331,9 +354,10 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
             max(locationX - drag.grabOffsetX, leadingInset),
             trailingLimit
         )
-        guard nextOriginX != drag.originX else { return }
-        drag.originX = nextOriginX
-        inPlaceDragState = drag
+        if nextOriginX != drag.originX {
+            drag.originX = nextOriginX
+            inPlaceDragState = drag
+        }
 
         let draggedFrame = CGRect(
             x: nextOriginX,
@@ -345,7 +369,7 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         case let .tab(tabID):
             reorderTabIfNeeded(
                 tabID: tabID,
-                pointerX: min(max(locationX, leadingInset), tabStripWidth - leadingInset),
+                pointerX: locationX,
                 draggedFrame: draggedFrame,
                 viewModel: viewModel
             )
@@ -391,10 +415,24 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         draggedFrame: CGRect,
         viewModel: BrowserViewModel
     ) {
-        guard pendingVisualTabOrder == nil else { return }
         guard let sourceIndex = viewModel.tabs.firstIndex(where: { $0.id == tabID }) else {
             return
         }
+        if let edgeIndex = toolbarEdgeUngroupInsertionIndex(
+            pointerX: pointerX,
+            viewportWidth: tabStripWidth,
+            sourceGroupID: viewModel.tabs[sourceIndex].groupId,
+            tabGroupIDs: viewModel.tabs.map(\.groupId)
+        ) {
+            performInteractiveMove(
+                tabID: tabID,
+                targetIndex: edgeIndex,
+                groupID: nil,
+                viewModel: viewModel
+            )
+            return
+        }
+        guard pendingVisualTabOrder == nil else { return }
         let candidates = chromeInsertionCandidates(
             tabs: viewModel.tabs,
             sourceIndex: sourceIndex,
