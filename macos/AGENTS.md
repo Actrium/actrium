@@ -6,7 +6,7 @@ System bundle(includes StartPage/History/Bookmarks/Debug, also includes `Runtime
 `./scripts/bundle-actrium-runtime.sh --target system --dev`
 
 ## 2) Build CounterApp(Guest)
-`cd ../../../packages/actrium/keel-guest-examples/counterapp && bun run build`
+Follow the [CounterApp instructions in ACTR Hub](https://github.com/Actrium/actr-hub/tree/main/counterapp#build-the-packages).
 
 ## 3) Compile
 `xcodebuild -workspace Actrium.xcworkspace -scheme Actrium build`
@@ -15,10 +15,6 @@ System bundle(includes StartPage/History/Bookmarks/Debug, also includes `Runtime
 Directly initiate:
 
 `open "$(xcodebuild -workspace Actrium.xcworkspace -scheme Actrium -showBuildSettings 2>/dev/null | awk '/BUILT_PRODUCTS_DIR/ {print $3; exit}')/Actrium.app"`
-
-Auto Open After Start CounterApp(Recommended for validation) keel/Bundle Matches:
-
-`open -a "$(xcodebuild -workspace Actrium.xcworkspace -scheme Actrium -showBuildSettings 2>/dev/null | awk '/BUILT_PRODUCTS_DIR/ {print $3; exit}')/Actrium.app" --args --url "actro://$(cd ../../../packages/actrium/keel-guest-examples/counterapp && pwd)"`
 
 ## 5) View Log
 IPC Debug log:

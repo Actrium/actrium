@@ -333,28 +333,6 @@ importers:
         specifier: ^8.48.0
         version: 8.69.0(eslint@9.39.5)(typescript@5.9.3)
 
-  packages/actrium/keel-guest-examples/counterapp:
-    dependencies:
-      askit:
-        specifier: file:../../../actrium-app-sdk
-        version: link:../../../actrium-app-sdk
-      dayjs:
-        specifier: ^1.11.19
-        version: 1.11.23
-      keel:
-        specifier: file:../../../keel
-        version: file:packages/keel(react-dom@19.2.8(react@19.0.0))(react-native-web@0.21.2(react-dom@19.2.8(react@19.0.0))(react@19.0.0))(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)
-      react:
-        specifier: ^19.0.0
-        version: 19.0.0
-    devDependencies:
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.0.0
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-
 packages:
 
   '@babel/code-frame@7.29.7':

@@ -36,7 +36,7 @@ Important paths:
 - `packages/actrium-app-sdk/`: Host/Guest bridge APIs;
 - `crates/actrium-core/`: shared Rust/native policy and bindings;
 - `macos/Actrium/Models/ActrPackageManifestReader.swift`: macOS package reader;
-- `packages/actrium/keel-guest-examples/counterapp/`: reusable Guest example;
+- [CounterApp](https://github.com/Actrium/actr-hub/tree/main/counterapp): reusable Guest and Service example in ACTR Hub;
 - `examples/actrium/echo/`: complete Loran + Actor + Actrium Echo demo.
 
 See [Actor Package manifest](docs/manifest-specification.md),
