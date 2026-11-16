@@ -241,8 +241,10 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
     func phase(for tabID: UUID, activeTabID: UUID?) -> ToolbarTabInteractionPhase {
         if interactionTabID == tabID {
             switch phase {
-            case .addressEditing, .draggingInactive, .draggingActive:
-                return phase
+            case .addressEditing:
+                return tabID == activeTabID ? .addressEditing : .inactive
+            case .draggingInactive, .draggingActive:
+                return tabID == activeTabID ? .draggingActive : .draggingInactive
             case .inactive, .active:
                 break
             }

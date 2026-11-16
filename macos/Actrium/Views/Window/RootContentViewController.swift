@@ -236,6 +236,7 @@ final class RootContentViewController: NSViewController {
     private var toolbarHostingView: NSHostingView<AnyView>!
     private var windowDragRegion: CompactToolbarWindowDragRegion!
     private var contentViewController: ContentViewController!
+    private var mouseUpMonitor: Any?
     private let sidebarLayoutState = SidebarLayoutState()
     private var layoutCancellables = Set<AnyCancellable>()
 
@@ -263,6 +264,12 @@ final class RootContentViewController: NSViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        if let mouseUpMonitor {
+            NSEvent.removeMonitor(mouseUpMonitor)
+        }
+    }
+
     // MARK: - Lifecycle
 
     override func loadView() {
@@ -281,7 +288,23 @@ final class RootContentViewController: NSViewController {
         setupContent()
         setupConstraints()
         observeWindowChromeStyle()
+        observeDragCompletion()
         applyAppearanceColors()
+    }
+
+    private func observeDragCompletion() {
+        mouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+            // SwiftUI can lose onEnded when a Tab moves between the grouped
+            // and ungrouped ForEach trees. Let its handler run first, then
+            // finish any drag still owned by this window.
+            Task { @MainActor [weak self] in
+                guard let self, self.toolbarInteraction.isDragging else { return }
+                self.toolbarInteraction.pointerSequenceEnded(
+                    activeTabID: self.viewModel.currentTabId
+                )
+            }
+            return event
+        }
     }
 
     fileprivate func applyAppearanceColors() {

@@ -97,6 +97,20 @@ struct CompactTabLayoutTests {
         #expect(ended.phase == .active)
     }
 
+    @Test @MainActor func dragPresentationHasOnlyOneActiveTab() {
+        let draggedTab = UUID()
+        let currentTab = UUID()
+        let interaction = ToolbarTabInteractionCoordinator()
+
+        #expect(interaction.beginDrag(tabID: draggedTab, activeTabID: draggedTab))
+        #expect(interaction.phase(for: draggedTab, activeTabID: currentTab) == .draggingInactive)
+        #expect(interaction.phase(for: currentTab, activeTabID: currentTab) == .active)
+
+        interaction.pointerSequenceEnded(activeTabID: currentTab)
+        #expect(!interaction.isDragging)
+        #expect(interaction.phase(for: draggedTab, activeTabID: currentTab) == .inactive)
+    }
+
     @Test func contentFocusRevealsOnlyClippedActiveTabs() {
         #expect(toolbarTabRevealAlignment(
             tabFrame: CGRect(x: 24, y: 2, width: 180, height: 32),
