@@ -13,6 +13,8 @@ export type HostHttpResponse<T = unknown> = {
   headers?: Record<string, string>;
   data?: T;
   message?: string;
+  rawBody?: string;
+  cause?: unknown;
 };
 
 function normalizeBody(body: unknown, headers: Record<string, string>): RequestInit['body'] {
@@ -33,13 +35,8 @@ function normalizeBody(body: unknown, headers: Record<string, string>): RequestI
   return JSON.stringify(body);
 }
 
-async function readResponse(response: Response): Promise<unknown> {
-  const contentType = response.headers.get('content-type') ?? '';
-  if (contentType.includes('application/json')) {
-    return response.json();
-  }
-
-  const text = await response.text();
+function parseResponse(text: string, contentType: string): unknown {
+  if (contentType.includes('application/json')) return JSON.parse(text);
   try {
     return JSON.parse(text);
   } catch {
@@ -57,20 +54,31 @@ export const HostHttpHandler = {
         body: normalizeBody(request.body, headers),
       });
 
-      const data = await readResponse(response);
-      return {
+      const metadata = {
         requestId: request.requestId,
-        success: response.ok,
         status: response.status,
         headers: Object.fromEntries(response.headers.entries()),
-        data: data as T,
-        message: response.statusText,
       };
+      let rawBody: string | undefined;
+      try {
+        rawBody = await response.text();
+        const data = parseResponse(rawBody, response.headers.get('content-type') ?? '') as T;
+        return { ...metadata, success: response.ok, data, rawBody, message: response.statusText };
+      } catch (error) {
+        return {
+          ...metadata,
+          success: false,
+          rawBody,
+          message: error instanceof Error ? error.message : String(error),
+          cause: error,
+        };
+      }
     } catch (error) {
       return {
         requestId: request.requestId,
         success: false,
         message: error instanceof Error ? error.message : String(error),
+        cause: error,
       };
     }
   },
