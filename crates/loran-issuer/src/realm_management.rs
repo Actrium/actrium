@@ -160,6 +160,9 @@ where
     Realm::discard_expired_pending().await?;
 
     match request.op {
+        ManagementOp::GetAdmission => {
+            Ok(membership::admission_info(&request.realm, config.max_members_per_realm()).await?)
+        }
         ManagementOp::CreateRealm => create_realm(profiles, config, &request).await,
         ManagementOp::PublishProfile => publish_profile(profiles, &request, &keys).await,
         ManagementOp::ReissueOwnerInvite => {

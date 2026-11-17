@@ -376,6 +376,7 @@ Discovery, Section 4.3):
 | `create_realm` | The request includes both selectors and the complete `packages` map. The optional `policy` defaults to invite-only. The AFP pins the selection and policy in the pending Realm and its first draft. |
 | `publish_profile` | Submit a signed Realm Profile in `profile`. The first submission activates the pending Realm and the response carries an owner invite (`owner_invite`) once; later submissions with a higher sequence are updates (including retirement). |
 | `reissue_owner_invite` | Issue a new owner invite (response `owner_invite`) and invalidate the Realm's earlier unused owner invites; used to recover when the owner has lost all its clients (Actr Realm Membership, Section 5). |
+| `get_admission` | A domain-signed request for one Realm returns its policy, active-member count, effective member cap and invite-free joins per minute. |
 | `draft_profile` | For Realms outside the AFP domain, return a draft at the accepted sequence plus one. The unsigned draft retains the accepted selection, `display_name` and `policy`, and uses the AFP's current `issuer` and `provider` (Section 6.1). Publication is a separate operation. |
 
 Realm management requests are used only for Realms outside the Actr Facility

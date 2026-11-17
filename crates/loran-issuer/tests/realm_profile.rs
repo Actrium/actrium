@@ -1077,6 +1077,29 @@ mod management {
         .unwrap();
         assert!(accepted["owner_invite"].is_string());
         assert_eq!(Realm::get(name).await.unwrap().unwrap().policy, policy);
+        let inquiry =
+            ManagementRequest::new(ManagementOp::GetAdmission, name, PROVIDER, "read-policy");
+        let summary = send(
+            &profiles,
+            &config,
+            &descriptor,
+            &signed(&inquiry, &domain, "rs-1"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            summary,
+            json!({"realm": name, "policy": policy, "active_members": 0,
+            "effective_max_members": 7, "open_joins_per_minute": 2})
+        );
+        let other_key = SigningKey::from_bytes(&[42; 32]);
+        let unsigned_by_domain =
+            ManagementRequest::new(ManagementOp::GetAdmission, name, PROVIDER, "wrong-signer");
+        let wire = serde_json::to_vec(&unsigned_by_domain.sign("rs-1", &other_key)).unwrap();
+        assert!(matches!(
+            send(&profiles, &config, &descriptor, &wire).await,
+            Err(ManagementError::Forbidden(_))
+        ));
     }
 
     #[tokio::test]

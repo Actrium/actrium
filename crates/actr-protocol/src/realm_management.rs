@@ -29,6 +29,7 @@ pub enum ManagementOp {
     ReissueOwnerInvite,
     RegisterPublisher,
     DraftProfile,
+    GetAdmission,
 }
 
 /// A Realm management request.

@@ -548,6 +548,25 @@ type InviteRow = (
     Option<i64>,
 );
 
+/// Admission settings and aggregate occupancy for an authenticated Realm domain.
+pub async fn admission_info(name: &str, platform_limit: u32) -> Result<Value, RealmError> {
+    let mut tx = get_database().get_pool().begin().await?;
+    let realm = Realm::get_on(&mut tx, name)
+        .await?
+        .ok_or(RealmError::NotFound)?;
+    let members: u32 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM realm_member WHERE realm=? AND status='active'")
+            .bind(name)
+            .fetch_one(&mut *tx)
+            .await?;
+    tx.commit().await?;
+    Ok(json!({
+        "realm": name, "policy": realm.policy, "active_members": members,
+        "effective_max_members": realm.policy.member_limit(platform_limit),
+        "open_joins_per_minute": realm.policy.open_join_limit(),
+    }))
+}
+
 /// Active memberships for the admin list, or for a single Realm.
 pub async fn active_member_counts(realm: Option<&str>) -> Result<Vec<(String, u32)>, sqlx::Error> {
     let mut query = sqlx::QueryBuilder::<Sqlite>::new(
