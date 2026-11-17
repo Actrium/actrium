@@ -268,9 +268,12 @@ impl RunCommand {
         // Honour `[hyper].storage_root` from the runtime config (already resolved
         // to an absolute path by the parser); otherwise HyperConfig defaults to
         // `<hyper_dir>/storage`.
-        let apply_storage_root = |cfg: HyperConfig| match &config.storage_root {
-            Some(root) => cfg.with_storage_root(root),
-            None => cfg,
+        let configure_hyper = |mut cfg: HyperConfig| {
+            if let Some(root) = &config.storage_root {
+                cfg = cfg.with_storage_root(root);
+            }
+            cfg.wasi_data_dir.clone_from(&config.wasi_data_dir);
+            cfg
         };
 
         if config.trust.is_empty() {
@@ -282,7 +285,7 @@ impl RunCommand {
                 Arc::new(StaticTrust::new(public_key).map_err(|e| {
                     ActrCliError::command_error(format!("Invalid public key: {}", e))
                 })?);
-            return Hyper::new(apply_storage_root(HyperConfig::new(hyper_dir, trust)))
+            return Hyper::new(configure_hyper(HyperConfig::new(hyper_dir, trust)))
                 .await
                 .map_err(|e| {
                     ActrCliError::command_error(format!("Failed to initialize Hyper: {}", e))
@@ -315,7 +318,7 @@ impl RunCommand {
             Arc::new(ChainTrust::new(providers))
         };
 
-        Hyper::new(apply_storage_root(HyperConfig::new(hyper_dir, trust)))
+        Hyper::new(configure_hyper(HyperConfig::new(hyper_dir, trust)))
             .await
             .map_err(|e| ActrCliError::command_error(format!("Failed to initialize Hyper: {}", e)))
     }

@@ -67,6 +67,10 @@ pub struct HyperConfig {
     /// [`WasmRuntimeLimits::default`] (safe finite defaults — hardening on by
     /// default). See [`WasmRuntimeLimits`].
     pub wasm_limits: Option<WasmRuntimeLimits>,
+
+    /// Existing absolute host directory exposed as `/data` to WASM workloads
+    /// loaded by this Hyper. By default workloads receive no directory.
+    pub wasi_data_dir: Option<PathBuf>,
 }
 
 /// Conflict-key dispatch concurrency knobs (design doc §4.2, §7).
@@ -319,6 +323,7 @@ impl std::fmt::Debug for HyperConfig {
             )
             .field("dispatch_concurrency", &self.dispatch_concurrency)
             .field("wasm_limits", &self.wasm_limits)
+            .field("wasi_data_dir", &self.wasi_data_dir)
             .finish()
     }
 }
@@ -558,6 +563,9 @@ pub(crate) async fn node_from_config_file_with_package(
 
     // Build HyperConfig with the resolved values.
     let mut hyper_config = HyperConfig::new(&data_dir, trust);
+    hyper_config
+        .wasi_data_dir
+        .clone_from(&runtime_config.wasi_data_dir);
     if let Some(root) = &hyper_section.storage_root {
         // A relative `storage_root` resolves against the config file's directory,
         // never the process CWD at open time. `base_dir` is absolute (and any
@@ -697,6 +705,7 @@ impl HyperConfig {
             mailbox_backpressure_threshold: None,
             dispatch_concurrency: None,
             wasm_limits: None,
+            wasi_data_dir: None,
         }
     }
 

@@ -206,6 +206,25 @@ Two TOML files, easily confused:
 | `manifest.toml` | developer | Project metadata, service `[package]`, proto exports, dependencies. Signed as part of `.actr`. |
 | `actr.toml` | operator | Runtime config: package path, signaling URL, realm, data dir. Consumed by `actr run`. |
 
+### WASM workload data
+
+Set `[hyper].wasi_data_dir` in `actr.toml` to expose an existing directory to a
+packaged WASM workload at `/data` with read and write access. Relative paths
+resolve against the directory containing the config file.
+
+```toml
+[hyper]
+wasi_data_dir = "./workload-data"
+```
+
+```sh
+mkdir -p "$PWD/workload-data"
+actr run --config actr.toml
+```
+
+Use a dedicated directory for each workload. Leaving the setting unset keeps
+the mount disabled. The directory cannot be a filesystem root.
+
 Commands that touch `manifest.toml` use `--manifest-path` / `-m`.
 Commands that touch `actr.toml` use `--config` / `-c`.
 

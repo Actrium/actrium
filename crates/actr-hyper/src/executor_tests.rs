@@ -356,7 +356,7 @@ impl actr_framework::Deliver for SerialSweepDeliver {
 async fn serial_wasm_idle_sweep_expires_deferred_reply() {
     let host = crate::wasm::WasmHost::compile(wasm_actor_fixture::WASM_ACTOR_FIXTURE)
         .expect("compile fixture component");
-    let workload = host.instantiate().await.expect("instantiate fixture");
+    let workload = host.instantiate(None).await.expect("instantiate fixture");
     let handle = spawn_runner_with_mode(Workload::Wasm(workload), RunnerMode::Serial, None);
     let delivered = SerialSweepDeliver::default();
     let captured = Arc::clone(&delivered.0);

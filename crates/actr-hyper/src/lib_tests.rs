@@ -248,6 +248,7 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
         package_path: None,
         web: None,
         storage_root: None,
+        wasi_data_dir: None,
     }
 }
 

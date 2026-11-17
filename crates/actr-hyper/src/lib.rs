@@ -1656,11 +1656,14 @@ async fn instantiate_wasm_component(
         .map_err(|e| {
             HyperError::Runtime(format!("failed to compile WASM component `{entry}`: {e}"))
         })?;
-        let mut instance = host.instantiate().await.map_err(|e| {
-            HyperError::Runtime(format!(
-                "failed to instantiate WASM component `{entry}`: {e}"
-            ))
-        })?;
+        let mut instance = host
+            .instantiate(inner.config.wasi_data_dir.as_deref())
+            .await
+            .map_err(|e| {
+                HyperError::Runtime(format!(
+                    "failed to instantiate WASM component `{entry}`: {e}"
+                ))
+            })?;
         instance
             .init(&actr_framework::guest::dynclib_abi::InitPayloadV1 {
                 version: actr_framework::guest::dynclib_abi::version::V1,

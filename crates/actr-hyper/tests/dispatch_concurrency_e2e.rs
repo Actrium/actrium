@@ -199,6 +199,7 @@ fn runtime_config(
         package_path: None,
         web: None,
         storage_root: None,
+        wasi_data_dir: None,
     }
 }
 

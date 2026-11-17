@@ -31,6 +31,7 @@
 //! for the execution path.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -40,7 +41,7 @@ use tokio::time::Instant;
 use wasmtime::component::types::ComponentItem;
 use wasmtime::component::{Component, ResourceTable};
 use wasmtime::{Config, Engine, OptLevel, RegallocAlgorithm};
-use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use crate::config::WasmRuntimeLimits;
 use crate::workload::{HostAbiFn, InvocationContext};
@@ -192,6 +193,37 @@ impl HostState {
             next_token: 1,
             limits: StoreResourceLimiter::new(limits),
         }
+    }
+
+    pub(super) fn preopen_data_dir(&mut self, directory: &Path) -> WasmResult<()> {
+        if !directory.is_absolute() {
+            return Err(WasmError::LoadFailed(
+                "WASI data directory must be an absolute path".into(),
+            ));
+        }
+        let directory = directory.canonicalize().map_err(|error| {
+            WasmError::LoadFailed(format!(
+                "cannot resolve WASI data directory `{}`: {error}",
+                directory.display()
+            ))
+        })?;
+        if directory.parent().is_none() {
+            return Err(WasmError::LoadFailed(
+                "WASI data directory cannot be a filesystem root".into(),
+            ));
+        }
+
+        let mut wasi = WasiCtxBuilder::new();
+        wasi.inherit_stdio()
+            .preopened_dir(&directory, "/data", FsPerms::ReadWrite)
+            .map_err(|error| {
+                WasmError::LoadFailed(format!(
+                    "cannot preopen WASI data directory `{}`: {error}",
+                    directory.display()
+                ))
+            })?;
+        self.wasi = wasi.build();
+        Ok(())
     }
 
     /// Allocate a fresh `ctx-token` and register a live invocation's
@@ -596,7 +628,10 @@ impl WasmHost {
     /// Builds a fresh [`Linker`] per instance (cheap) inside the V2
     /// instantiation helper, registers WASI p2 as well as the generated
     /// `actr:workload/host@0.6.0` linker, and runs `Component::instantiate_async`.
-    pub(crate) async fn instantiate(&self) -> WasmResult<WasmWorkloadV2> {
+    pub(crate) async fn instantiate(
+        &self,
+        wasi_data_dir: Option<&Path>,
+    ) -> WasmResult<WasmWorkloadV2> {
         let store_permit = acquire_store(&self.limits)?;
         probe_world(&self.component, &self.engine)?;
         WasmWorkloadV2::instantiate(
@@ -606,6 +641,7 @@ impl WasmHost {
             Arc::clone(&self.epoch_ticker),
             store_permit,
             self.uses_explicit_reply_boundary,
+            wasi_data_dir,
         )
         .await
     }

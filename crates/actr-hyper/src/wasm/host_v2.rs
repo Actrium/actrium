@@ -17,6 +17,8 @@
 //! borrows non-overlapping across suspension points. The shape is lifted
 //! directly from the Phase 0.75 `component-spike-runconcurrent` host.
 
+use std::path::{Path, PathBuf};
+
 use actr_framework::guest::dynclib_abi as guest_abi;
 use actr_framework::guest::dynclib_abi::{
     HostCallRawV1, HostCallV1, HostDiscoverV1, HostRegisterStreamV1, HostResolveDependencyV1,
@@ -696,6 +698,7 @@ async fn instantiate_parts_v2(
     engine: &Engine,
     component: &Component,
     limits: &WasmRuntimeLimits,
+    wasi_data_dir: Option<&Path>,
 ) -> WasmResult<(Store<HostState>, ActrWorkloadGuestV2)> {
     let _instantiate_permit = acquire_instantiate(limits)?;
     let mut linker: Linker<HostState> = Linker::new(engine);
@@ -713,7 +716,11 @@ async fn instantiate_parts_v2(
         ))
     })?;
 
-    let mut store = Store::new(engine, HostState::new(limits));
+    let mut state = HostState::new(limits);
+    if let Some(directory) = wasi_data_dir {
+        state.preopen_data_dir(directory)?;
+    }
+    let mut store = Store::new(engine, state);
     // issue #346: install the per-store limiter and initial fuel/epoch budget.
     store.limiter(|s| &mut s.limits);
     store
@@ -763,6 +770,7 @@ pub(crate) struct WasmWorkloadV2 {
     /// issue #346: resource limits retained for post-trap rebuild + per-entry
     /// fuel/epoch re-seed.
     limits: WasmRuntimeLimits,
+    wasi_data_dir: Option<PathBuf>,
     store: Option<Store<HostState>>,
     bindings: ActrWorkloadGuestV2,
     _epoch_ticker: Arc<EpochTicker>,
@@ -793,13 +801,16 @@ impl WasmWorkloadV2 {
         epoch_ticker: Arc<EpochTicker>,
         store_permit: StorePermit,
         uses_explicit_reply_boundary: bool,
+        wasi_data_dir: Option<&Path>,
     ) -> WasmResult<Self> {
-        let (store, bindings) = instantiate_parts_v2(engine, component, limits).await?;
+        let (store, bindings) =
+            instantiate_parts_v2(engine, component, limits, wasi_data_dir).await?;
         tracing::info!("wasm Component instantiated (v2 async world)");
         Ok(Self {
             engine: engine.clone(),
             component: component.clone(),
             limits: *limits,
+            wasi_data_dir: wasi_data_dir.map(Path::to_path_buf),
             store: Some(store),
             bindings,
             _epoch_ticker: epoch_ticker,
@@ -861,7 +872,14 @@ impl WasmWorkloadV2 {
              guest in-memory state is discarded (lifecycle/queue not replayed)"
         );
         drop(self.store.take());
-        match instantiate_parts_v2(&self.engine, &self.component, &self.limits).await {
+        match instantiate_parts_v2(
+            &self.engine,
+            &self.component,
+            &self.limits,
+            self.wasi_data_dir.as_deref(),
+        )
+        .await
+        {
             Ok((store, bindings)) => {
                 self.store = Some(store);
                 self.bindings = bindings;
