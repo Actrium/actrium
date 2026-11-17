@@ -11,15 +11,28 @@ import Foundation
 /// - writes are atomic (staging dir, then rename into place);
 /// - unfinished work stays in staging paths, never at the final path.
 ///
-/// The 6-day prototype scope (15-B B2) is the cache layout + digest dedupe;
-/// eviction / cleanup policy is deferred.
-enum ActrPackageCache {
+/// Cached packages are capped at 2 GiB and evicted least recently used first.
+nonisolated enum ActrPackageCache {
+    /// Test-only cache root. Production code always uses the system caches directory.
+    nonisolated(unsafe) static var rootOverrideForTesting: URL?
+
+    static let maxCacheBytes: Int64 = 2 * 1024 * 1024 * 1024
+
     /// Cache root: ~/Library/Caches/<bundle-id>/ (system-managed, purgeable).
     static var root: URL {
+        if let rootOverrideForTesting { return rootOverrideForTesting }
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let bundleID = Bundle.main.bundleIdentifier ?? "io.actrium.actro"
         return base.appendingPathComponent(bundleID, isDirectory: true)
+    }
+
+    private static var packagesRoot: URL {
+        root.appendingPathComponent("packages/sha256", isDirectory: true)
+    }
+
+    private static var extractedRoot: URL {
+        root.appendingPathComponent("extracted/sha256", isDirectory: true)
     }
 
     // MARK: - Paths
@@ -45,7 +58,46 @@ enum ActrPackageCache {
     /// Digest-addressed extraction directory.
     static func extractedURL(forDigest digest: String) -> URL {
         precondition(isValidDigest(digest), "cache paths require a 64-char lowercase hex digest")
-        return root.appendingPathComponent("extracted/sha256/\(digest)", isDirectory: true)
+        return extractedRoot.appendingPathComponent(digest, isDirectory: true)
+    }
+
+    private static func lastUsedURL(forDigest digest: String) -> URL {
+        archiveURL(forDigest: digest)
+            .deletingLastPathComponent()
+            .appendingPathComponent("last-used", isDirectory: false)
+    }
+
+    static func touchLastUsed(forDigest digest: String) {
+        let file = lastUsedURL(forDigest: digest)
+        try? FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let timestamp = String(Int64(Date().timeIntervalSince1970))
+        try? Data(timestamp.utf8).write(to: file, options: .atomic)
+    }
+
+    static func lastUsed(forDigest digest: String) -> Date {
+        let lastUsedFile = lastUsedURL(forDigest: digest)
+        if let data = try? Data(contentsOf: lastUsedFile),
+           let timestamp = String(data: data, encoding: .utf8).flatMap(TimeInterval.init) {
+            return Date(timeIntervalSince1970: timestamp)
+        }
+        if let attributes = try? FileManager.default.attributesOfItem(
+            atPath: archiveURL(forDigest: digest).path
+        ), let modificationDate = attributes[.modificationDate] as? Date {
+            return modificationDate
+        }
+        return .distantPast
+    }
+
+    static func digest(fromExtractedPath path: String) -> String? {
+        let candidate = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+        let digest = candidate.lastPathComponent
+        guard isValidDigest(digest),
+              candidate == extractedURL(forDigest: digest).standardizedFileURL
+        else { return nil }
+        return digest
     }
 
     // MARK: - Archive install
@@ -55,7 +107,10 @@ enum ActrPackageCache {
     static func installArchive(at sourceArchiveURL: URL, digest: String) throws -> URL {
         let fm = FileManager.default
         let destination = Self.archiveURL(forDigest: digest)
-        if fm.fileExists(atPath: destination.path) { return destination }
+        if fm.fileExists(atPath: destination.path) {
+            touchLastUsed(forDigest: digest)
+            return destination
+        }
 
         let destinationDir = destination.deletingLastPathComponent()
         try fm.createDirectory(at: destinationDir, withIntermediateDirectories: true)
@@ -70,6 +125,7 @@ enum ActrPackageCache {
             // Another writer landed the same digest first — reuse it.
             guard fm.fileExists(atPath: destination.path) else { throw error }
         }
+        touchLastUsed(forDigest: digest)
         return destination
     }
 
@@ -91,8 +147,14 @@ enum ActrPackageCache {
         let fm = FileManager.default
         let destination = extractedURL(forDigest: digest)
         if fm.fileExists(atPath: destination.path) {
-            try validate?(destination)
-            return destination
+            do {
+                try validate?(destination)
+                touchLastUsed(forDigest: digest)
+                return destination
+            } catch {
+                // A damaged cache entry must not permanently poison future loads.
+                try fm.removeItem(at: destination)
+            }
         }
 
         let parent = destination.deletingLastPathComponent()
@@ -113,7 +175,143 @@ enum ActrPackageCache {
             try? fm.removeItem(at: staging)
             throw error
         }
+        touchLastUsed(forDigest: digest)
         return destination
+    }
+
+    // MARK: - Size and eviction
+
+    /// Recursively measures archived packages and extracted files. Call off the
+    /// main actor for user-interface workflows.
+    static func cacheSize() -> Int64 {
+        directorySize(at: packagesRoot) + directorySize(at: extractedRoot)
+    }
+
+    /// Evicts least recently used cache entries until the cache is within the
+    /// requested limit. Open-package digests are never candidates.
+    static func evictIfNeeded(
+        protectedDigests: Set<String>,
+        maxBytes: Int64 = maxCacheBytes
+    ) -> Int64 {
+        var remainingBytes = cacheSize()
+        guard remainingBytes > maxBytes else { return 0 }
+
+        let candidates = cachedDigests()
+            .subtracting(protectedDigests)
+            .sorted {
+                let leftDate = lastUsed(forDigest: $0)
+                let rightDate = lastUsed(forDigest: $1)
+                return leftDate == rightDate ? $0 < $1 : leftDate < rightDate
+            }
+
+        var freedBytes: Int64 = 0
+        for digest in candidates where remainingBytes > maxBytes {
+            let removed = removeCachedPackage(digest: digest)
+            freedBytes += removed
+            remainingBytes -= removed
+        }
+        return freedBytes
+    }
+
+    /// Removes every unprotected cache entry and any interrupted staging work.
+    @discardableResult
+    static func clearAll(protectedDigests: Set<String>) -> Int64 {
+        var freedBytes: Int64 = 0
+        for digest in cachedDigests().subtracting(protectedDigests) {
+            freedBytes += removeCachedPackage(digest: digest)
+        }
+        freedBytes += removeStagingEntries()
+        return freedBytes
+    }
+
+    private static func cachedDigests() -> Set<String> {
+        let fm = FileManager.default
+        var digests = Set<String>()
+        for base in [packagesRoot, extractedRoot] {
+            guard let entries = try? fm.contentsOfDirectory(
+                at: base,
+                includingPropertiesForKeys: [.isDirectoryKey]
+            ) else { continue }
+            for entry in entries {
+                let digest = entry.lastPathComponent
+                guard isValidDigest(digest),
+                      (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                else { continue }
+                digests.insert(digest)
+            }
+        }
+        return digests
+    }
+
+    /// Deletes the archive, extraction, and matching URL memo entries as one
+    /// cache-entry operation. Individual filesystem failures do not stop a sweep.
+    private static func removeCachedPackage(digest: String) -> Int64 {
+        let fm = FileManager.default
+        let packageDirectory = archiveURL(forDigest: digest).deletingLastPathComponent()
+        let extractedDirectory = extractedURL(forDigest: digest)
+        let directories = [packageDirectory, extractedDirectory]
+        let sizeBefore = directories.reduce(Int64(0)) { $0 + directorySize(at: $1) }
+
+        for directory in directories where fm.fileExists(atPath: directory.path) {
+            try? fm.removeItem(at: directory)
+        }
+
+        let sizeAfter = directories.reduce(Int64(0)) { $0 + directorySize(at: $1) }
+        if !fm.fileExists(atPath: packageDirectory.path),
+           !fm.fileExists(atPath: extractedDirectory.path) {
+            let map = urlMap()
+            let filtered = map.filter { $0.value["digest"] != digest }
+            if filtered.count != map.count { saveURLMap(filtered) }
+        }
+        return max(0, sizeBefore - sizeAfter)
+    }
+
+    private static func removeStagingEntries() -> Int64 {
+        let fm = FileManager.default
+        var stagingEntries: [URL] = []
+        for base in [packagesRoot, extractedRoot] {
+            guard let enumerator = fm.enumerator(at: base, includingPropertiesForKeys: nil)
+            else { continue }
+            for case let entry as URL in enumerator where entry.lastPathComponent.hasPrefix(".staging-") {
+                stagingEntries.append(entry)
+            }
+        }
+
+        var freedBytes: Int64 = 0
+        for entry in stagingEntries.sorted(by: { $0.path.count > $1.path.count }) {
+            guard fm.fileExists(atPath: entry.path) else { continue }
+            let size = directorySize(at: entry)
+            do {
+                try fm.removeItem(at: entry)
+                freedBytes += size
+            } catch {
+                continue
+            }
+        }
+        return freedBytes
+    }
+
+    private static func directorySize(at url: URL) -> Int64 {
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return 0 }
+        guard isDirectory.boolValue else {
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+            return Int64(values?.fileSize ?? 0)
+        }
+        guard let enumerator = fm.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]
+        ) else { return 0 }
+
+        var total: Int64 = 0
+        for case let entry as URL in enumerator {
+            guard let values = try? entry.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true
+            else { continue }
+            total += Int64(values.fileSize ?? 0)
+        }
+        return total
     }
 
     // MARK: - Direct-link URL memo (B2: no re-download for a known link)
