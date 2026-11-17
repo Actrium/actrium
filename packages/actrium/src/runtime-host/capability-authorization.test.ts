@@ -55,13 +55,12 @@ const cameraDefinitions: FrontCapabilityDefinitions = {
 
 describe('capability authorization snapshot', () => {
   test('effective set excludes prompt capabilities and includes no-grant methods', () => {
-    expect(effectiveCapabilities(snapshot())).toEqual(['service.call', 'service.on']);
+    expect(effectiveCapabilities(snapshot())).toEqual(['service.call']);
   });
 
   test('effective set accepts a granted method-level capability', () => {
     expect(effectiveCapabilities(withGrant('granted'))).toEqual([
       'service.call',
-      'service.on',
       'host:clipboard.write',
     ]);
   });

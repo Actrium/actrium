@@ -46,7 +46,8 @@ export function verifyV1RuntimeGuest(
       const isService = moduleId.startsWith(V1_SERVICE_PREFIX);
       const hostId = isService ? 'host:service' : moduleId;
       // A fixed Service link also needs a transport adapter in this loader.
-      const supportedServiceOps = new Set(['call', 'on']);
+      // service.on remains unimplemented until a real event transport lands.
+      const supportedServiceOps = new Set(['call']);
       if (
         (isService && !supportedServiceOps.has(exportName)) ||
         !HOST_SUPPORTED_METHODS[hostId]?.has(exportName)
@@ -97,40 +98,36 @@ export function bindV1HostModules(
       const { name } = v1ServiceLink(moduleId, exportName);
       const id = v1ServiceDispatchId(moduleId, exportName);
       const original = contract.hostModules['host:service'].call;
-      modules[id] = {
-        call: rpc<ServiceCallInput, ServiceCallOutput>({
-          schema: {
-            ...original.schema,
-            parseInput: (value) => {
-              // Validate the wire payload and overwrite any Guest-supplied route.
-              const data = value !== null && typeof value === 'object' && !Array.isArray(value)
-                ? { ...value, route: name }
-                : value;
-              return original.schema!.parseInput!(data);
-            },
+      modules[id] ??= {};
+      hostModules[id] ??= {};
+      modules[id].call = rpc<ServiceCallInput, ServiceCallOutput>({
+        schema: {
+          ...original.schema,
+          parseInput: (value) => {
+            // Validate the wire payload and overwrite any Guest-supplied route.
+            const data = value !== null && typeof value === 'object' && !Array.isArray(value)
+              ? { ...value, route: name }
+              : value;
+            return original.schema!.parseInput!(data);
           },
-        }),
-      };
-      hostModules[id] = {
-        call: async (input: ServiceCallInput) => {
-          await authorize('service.call');
-          return implementations['host:service'].call(input);
         },
+      });
+      hostModules[id].call = async (input: ServiceCallInput) => {
+        await authorize('service.call');
+        return implementations['host:service'].call(input);
       };
     } else if (moduleId.startsWith(V1_SERVICE_PREFIX) && exportName === 'on') {
       const { name } = v1ServiceLink(moduleId, exportName);
       const id = v1ServiceDispatchId(moduleId, exportName);
       const original = contract.hostModules['host:service'].on;
-      modules[id] = {
-        on: subscription<ServiceEvent>({ schema: original.schema }),
-      };
-      hostModules[id] = {
-        on: (handler: (event: ServiceEvent) => void) => {
-          // host:service.on enforces capability/session authorization.
-          return implementations['host:service'].on((event) => {
-            if (event.event === name) handler(event);
-          });
-        },
+      modules[id] ??= {};
+      hostModules[id] ??= {};
+      modules[id].on = subscription<ServiceEvent>({ schema: original.schema });
+      hostModules[id].on = (handler: (event: ServiceEvent) => void) => {
+        // host:service.on enforces capability/session authorization.
+        return implementations['host:service'].on((event) => {
+          if (event.event === name) handler(event);
+        });
       };
     } else if (exportName && isHostModuleId(moduleId) && HOST_SUPPORTED_METHODS[moduleId]?.has(exportName)) {
       // Reuse the schema and implementation for each linked non-Service method.

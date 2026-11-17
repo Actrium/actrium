@@ -34,7 +34,7 @@ export type HostModules = HostModulesImplementation<ActriumContract>;
 
 /** Methods with a real Host implementation, excluding throwing placeholders. */
 export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
-  'host:service': new Set(['call', 'on']),
+  'host:service': new Set(['call']),
   'host:clipboard': new Set(['writeText']),
 };
 

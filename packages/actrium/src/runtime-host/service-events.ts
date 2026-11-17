@@ -113,42 +113,59 @@ export function createHttpServiceEventSource(
 
       const controller = new AbortController();
       let active = true;
+      let retryCount = 0;
 
       const consume = async () => {
-        try {
-          const response = await fetch(url.toString(), {
-            headers: { Accept: 'text/event-stream' },
-            signal: controller.signal,
-          });
-          if (!response.ok) {
-            throw new Error(`Service event endpoint returned HTTP ${response.status}`);
-          }
-          const reader = response.body?.getReader();
-          if (!reader) {
-            throw new Error('The environment does not expose a streaming response body.');
-          }
-
-          const decoder = new TextDecoder();
-          let buffer = '';
+        while (active) {
           try {
-            while (active) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              buffer += decoder.decode(value, { stream: true });
-              const chunks = buffer.split('\n\n');
-              buffer = chunks.pop() ?? '';
-              for (const chunk of chunks) {
-                const event = parseSseChunk(chunk, events);
-                if (event) handler(event);
-              }
+            const response = await fetch(url.toString(), {
+              headers: { Accept: 'text/event-stream' },
+              signal: controller.signal,
+            });
+            if (!response.ok) {
+              throw new Error(`Service event endpoint returned HTTP ${response.status}`);
             }
-          } finally {
-            reader.releaseLock();
-          }
-        } catch (error) {
-          if (active) {
+            const reader = response.body?.getReader();
+            if (!reader) {
+              throw new Error('The environment does not expose a streaming response body.');
+            }
+
+            retryCount = 0;
+            const decoder = new TextDecoder();
+            let buffer = '';
+            try {
+              while (active) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                // SSE frames may use LF or CRLF line endings.
+                const chunks = buffer.split(/\r?\n\r?\n/);
+                buffer = chunks.pop() ?? '';
+                for (const chunk of chunks) {
+                  const event = parseSseChunk(chunk, events);
+                  if (!event) continue;
+                  // A malformed event or a throwing guest callback must not
+                  // tear down the stream for subsequent events.
+                  try {
+                    handler(event);
+                  } catch (error) {
+                    console.warn('[Actrium] Service event handler failed:', error);
+                  }
+                }
+              }
+            } finally {
+              reader.releaseLock();
+            }
+          } catch (error) {
+            if (!active) break;
             console.warn('[Actrium] Service event stream failed:', error);
           }
+
+          if (!active) break;
+          // Reconnect with exponential backoff, capped at 30 seconds.
+          const delayMs = Math.min(1000 * 2 ** retryCount, 30_000);
+          retryCount = Math.min(retryCount + 1, 5);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
       };
 
