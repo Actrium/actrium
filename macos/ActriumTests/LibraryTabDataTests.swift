@@ -4,10 +4,11 @@ import Testing
 
 struct LibraryTabDataTests {
     @Test func historyIncludesOlderVisitsAndPreservesAddresses() throws {
+        let packageURL = try #require(ActriumAppURLScheme.appURL(filePath: "/tmp/front.actr"))
         let items = (0..<12).map { index in
             HistoryItem(
                 title: "Visit \(index)",
-                appURL: URL(string: index == 11 ? "actro:///tmp/front.actr" : "https://example.com/\(index)"),
+                appURL: index == 11 ? packageURL : URL(string: "https://example.com/\(index)"),
                 visitTime: Date(timeIntervalSince1970: TimeInterval(100 - index))
             )
         }
@@ -16,7 +17,7 @@ struct LibraryTabDataTests {
 
         #expect(rows.count == 12)
         #expect(rows.first?["id"] as? String == items.first?.id.uuidString)
-        #expect(rows.last?["appURL"] as? String == "actro:///tmp/front.actr")
+        #expect(rows.last?["appURL"] as? String == packageURL.absoluteString)
         #expect(rows.last?["visitTime"] as? Int == 89_000)
         #expect(config["bookmarks"] == nil)
     }

@@ -30,6 +30,5 @@ export function historySections(items: readonly HistoryItemData[], now = new Dat
 
 export function historySiteLabel(address?: string): string | undefined {
   if (!address) return undefined;
-  if (/^actro?:\/\//i.test(address)) return 'ACTR';
   return address.match(/^https?:\/\/(?:[^/?#]*@)?(\[[^\]]+\]|[^:/?#]+)/i)?.[1];
 }

@@ -326,14 +326,11 @@
     },
     "macos/Actrium/Views/MainContentView/BrowserViewModel.swift": {
       "actro": 1,
-      "actro://": 8,
+      "actro://": 7,
       "actro://...": 1,
-      "actro:///Users/example-dev-2/path/to/app": 1,
-      "actro:///absolute/path": 2,
-      "actro:///path": 2,
-      "actro:///path/to/app": 1,
-      "actro://bundleId": 2,
-      "actro://com.example.app": 1,
+      "actro:///absolute/path": 1,
+      "actro:///path": 1,
+      "actro://bundleId": 1,
       "actroSourcePath": 2
     },
     "macos/Actrium/Views/Sidebar/TabOutlineView.swift": {

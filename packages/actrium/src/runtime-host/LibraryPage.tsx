@@ -104,7 +104,7 @@ function LibraryRow({ item, colors, open, remove }: RowProps & { item: LibraryIt
         {isVisit ? (
           <View style={[styles.siteIcon, { backgroundColor: colors.pressed }]}>
             <Text style={[styles.initial, { color: colors.secondary }]}>
-              {historySiteLabel(address)?.[0].toLocaleUpperCase() ?? '·'}
+              {(historySiteLabel(address) ?? item.title).slice(0, 1).toLocaleUpperCase() || '·'}
             </Text>
           </View>
         ) : null}

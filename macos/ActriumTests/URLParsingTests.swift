@@ -64,7 +64,7 @@ struct URLParsingTests {
     @Test func actriumPackageURLsResolveTheCompleteBundleID() throws {
         let appID = "publisher.develenv.com/counterapp@0.1.0"
         let localURL = try #require(ActriumAppURLScheme.appURL(filePath: "/tmp/front.actr"))
-        let legacyURL = try #require(URL(string: "actro://com.example.app/"))
+        let legacyURL = ActriumAppURLScheme.appURL(bundleId: "com.example.app/")
 
         #expect(ActriumAppURLScheme.bundleId(from: ActriumAppURLScheme.appURL(bundleId: appID)) == appID)
         #expect(ActriumAppURLScheme.bundleId(from: legacyURL) == "com.example.app")

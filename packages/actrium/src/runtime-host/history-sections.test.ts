@@ -38,8 +38,8 @@ describe('historySiteLabel', () => {
     expect(historySiteLabel('http://[::1]:8080/path')).toBe('[::1]');
   });
 
-  test('labels ACTR visits without showing local paths', () => {
-    expect(historySiteLabel('actro:///tmp/front.actr')).toBe('ACTR');
+  test('leaves the site label empty for non-web addresses', () => {
+    expect(historySiteLabel('actr://example.com/instance')).toBeUndefined();
     expect(historySiteLabel()).toBeUndefined();
   });
 });

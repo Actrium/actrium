@@ -10,7 +10,8 @@ struct LibraryTabRendererTests {
         let pool = RendererProcessPool.shared
         let historyTabID = UUID()
         let bookmarksTabID = UUID()
-        let visit = HistoryItem(title: "Test visit", appURL: URL(string: "actro://publisher.develenv.com/counterapp@0.1.0"))
+        let packageURL = ActriumAppURLScheme.appURL(bundleId: "publisher.develenv.com/counterapp@0.1.0")
+        let visit = HistoryItem(title: "Test visit", appURL: packageURL)
         let bookmark = Bookmark(title: "Test bookmark", appURL: URL(string: "https://example.com/docs/start?tab=one"))
         var trees: [UUID: Actrium_Ipc_AccessibilityTree] = [:]
         let updates = NotificationCenter.default.publisher(for: .rendererAccessibilityUpdated).sink { notification in
