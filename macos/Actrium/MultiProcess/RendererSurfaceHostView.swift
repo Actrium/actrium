@@ -101,7 +101,7 @@ final class RendererSurfaceHostView: NSView {
 
     private func setup() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor(white: 0.10, alpha: 1).cgColor
+        layer?.backgroundColor = AppColors.workspaceBackground.cgColor
         layer?.masksToBounds = true
         caretLayer.backgroundColor = NSColor.controlAccentColor.cgColor
         caretLayer.zPosition = 1
@@ -167,6 +167,11 @@ final class RendererSurfaceHostView: NSView {
             self.coordinator?.allocatedServiceId = nil
             self.recoverRendererAfterCrash()
         }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        layer?.backgroundColor = AppColors.workspaceBackground.cgColor
     }
 
     func apply(config: [String: Any]) {

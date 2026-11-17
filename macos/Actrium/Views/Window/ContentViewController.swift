@@ -61,14 +61,17 @@ final class ContentViewController: NSViewController {
         hostingView = NSHostingView(rootView: contentView)
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
-        // Container view with rounded corners only on bottom (top connects to toolbar)
+        // Content body is inset from the toolbar and rounded on all sides.
         let container = DividerAwareContainerView()
         container.wantsLayer = true
         container.layer?.cornerRadius = cornerRadius
-        // CALayer corner constants use geometric minY/maxY; on macOS non-flipped layer
-        // bottom corners are MinY (not MaxY).
-        container.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        container.layer?.maskedCorners = [
+            .layerMinXMinYCorner, .layerMaxXMinYCorner,
+            .layerMinXMaxYCorner, .layerMaxXMaxYCorner,
+        ]
         container.layer?.masksToBounds = true
+        container.layer?.borderWidth = 1
+        container.layer?.borderColor = AppColors.bodyBorder.cgColor
         container.addSubview(hostingView)
 
         NSLayoutConstraint.activate([
@@ -85,8 +88,13 @@ final class ContentViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        // Set background color
-        view.layer?.backgroundColor = AppColors.contentBackground.cgColor
+        applyAppearanceColors()
+    }
+
+    func applyAppearanceColors() {
+        view.layer?.backgroundColor = AppColors.workspaceBackground.cgColor
+        view.layer?.borderColor = AppColors.bodyBorder.cgColor
+        view.needsDisplay = true
     }
 
     // MARK: - Divider Hit Passthrough

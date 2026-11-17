@@ -5,13 +5,64 @@ import AppKit
 
 /// Simple in-memory cache for favicons to avoid repeated network requests
 /// Uses a thread-safe dictionary for synchronous access from main thread
-private final class FaviconCache: @unchecked Sendable {
+final class FaviconCache: @unchecked Sendable {
     static let shared = FaviconCache()
+    private static let maximumFaviconBytes = 1_048_576
 
     private var cache: [String: NSImage] = [:]
     private let lock = NSLock()
+    private let session: URLSession
 
-    private init() {}
+    private init() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        session = URLSession(configuration: configuration)
+    }
+
+    private static func originKey(for pageURL: URL) -> String? {
+        guard let scheme = pageURL.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = pageURL.host?.lowercased(), !host.isEmpty else { return nil }
+        return "\(scheme)://\(host)\(pageURL.port.map { ":\($0)" } ?? "")"
+    }
+
+    func getSync(for pageURL: URL) -> NSImage? {
+        guard let key = Self.originKey(for: pageURL) else { return nil }
+        return getSync(key)
+    }
+
+    func image(for pageURL: URL) async -> NSImage? {
+        if let cached = getSync(for: pageURL) { return cached }
+        guard let key = Self.originKey(for: pageURL),
+              var components = URLComponents(url: pageURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.user = nil
+        components.password = nil
+        components.path = "/favicon.ico"
+        components.query = nil
+        components.fragment = nil
+        guard let url = components.url else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 12
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            guard (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
+                  response.expectedContentLength <= Self.maximumFaviconBytes else { return nil }
+            var data = Data()
+            data.reserveCapacity(min(max(Int(response.expectedContentLength), 0), Self.maximumFaviconBytes))
+            for try await byte in bytes {
+                guard data.count < Self.maximumFaviconBytes else { return nil }
+                data.append(byte)
+            }
+            guard let image = NSImage(data: data) else { return nil }
+            set(key, image: image)
+            return image
+        } catch {
+            return nil
+        }
+    }
 
     /// Synchronous get - safe to call from main thread without await
     func getSync(_ host: String) -> NSImage? {

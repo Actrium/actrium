@@ -385,9 +385,10 @@ final class ModeTransitionController: ObservableObject {
         }
 
         // 🔑 New scheme: the animation layer remains visible and disappears at the last minute
-        // opacity: Full 1, change when the animation is finished 0
+        // Fade into the already prepared destination near the end. A single
+        // final-frame hide makes small text differences look like a jump.
         // cornerRadius: Overview(10) → Focus(0) or Focus(0) → Overview(10)
-        let opacity: Double = totalProgress < 1.0 ? 1.0 : 0.0
+        let opacity = Self.animationLayerOpacity(at: totalProgress)
 
         let cornerRadius: CGFloat
         switch phase {
@@ -404,7 +405,7 @@ final class ModeTransitionController: ObservableObject {
         animationLayerView?.applyTransform(
             scale: currentScale,
             offset: currentOffset,
-            opacity: CGFloat(opacity),
+            opacity: opacity,
             cornerRadius: cornerRadius
         )
 
@@ -470,6 +471,15 @@ final class ModeTransitionController: ObservableObject {
     private func easeOutCubic(_ t: Double) -> Double {
         let t1 = 1.0 - t
         return 1.0 - t1 * t1 * t1
+    }
+
+    static func animationLayerOpacity(at progress: Double) -> CGFloat {
+        let start = ModeTransitionConstants.handoffStartProgress
+        guard progress > start else { return 1 }
+        guard progress < 1 else { return 0 }
+        let normalized = (progress - start) / (1 - start)
+        let smooth = normalized * normalized * (3 - 2 * normalized)
+        return CGFloat(1 - smooth)
     }
 
     private func completeTransition() {

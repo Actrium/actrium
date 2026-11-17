@@ -421,9 +421,9 @@ struct ActriumApp: App {
             // Tab management shortcuts
             CommandGroup(after: .newItem) {
                 Button("New Tab") {
-                    withAnimation {
-                        _ = focusedViewModel?.addNewTab()
-                    }
+                    // The tab strip animates insertion. A global transaction also
+                    // animates the renderer and address editor, stalling ⌘T.
+                    _ = focusedViewModel?.addNewTab()
                 }
                 .keyboardShortcut("t", modifiers: .command)
 
@@ -449,7 +449,7 @@ struct ActriumApp: App {
                 Divider()
 
                 Button("Focus Address Bar") {
-                    focusedViewModel?.shouldAutoFocusAddressBar = true
+                    focusedViewModel?.requestAddressBarFocus()
                 }
                 .keyboardShortcut("l", modifiers: .command)
 

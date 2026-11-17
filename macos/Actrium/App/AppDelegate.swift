@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     // MARK: - NSApplicationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppearanceManager.shared.apply()
         // Disable window state restoration
         UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
 

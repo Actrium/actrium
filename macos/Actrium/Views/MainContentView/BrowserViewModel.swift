@@ -45,8 +45,19 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// Stored here to survive view recreation when DevTools layout changes
     @Published var actriumMode: ActriumMode = .overview
 
-    /// Flag to trigger address bar focus (set by addNewTab, consumed by view)
-    @Published var shouldAutoFocusAddressBar: Bool = false
+    enum AddressBarFocusPresentation: Equatable {
+        case immediate
+        case afterTabStripSettles
+    }
+
+    @Published private(set) var addressBarFocusPresentation: AddressBarFocusPresentation = .immediate
+
+    /// Flag to trigger address bar focus (set by addNewTab, consumed by view).
+    @Published var shouldAutoFocusAddressBar: Bool = false {
+        didSet {
+            if !shouldAutoFocusAddressBar { addressBarFocusPresentation = .immediate }
+        }
+    }
 
     /// Current tab loading state (for web content)
     @Published var isCurrentTabLoading: Bool = false
@@ -123,7 +134,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let startTab = Tab(
             title: "Start Page",
             systemTabType: .startPage,
-            backgroundColor: "#1e1e1e" // Fixed dark color
+            backgroundColor: AppColors.nativeTabBackgroundHex
         )
         tabs.append(startTab)
         currentTabId = startTab.id
@@ -135,13 +146,20 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         browserDataRepository.saveSession(tabs: tabs, currentTabId: currentTabId)
     }
 
+    func requestAddressBarFocus(
+        presentation: AddressBarFocusPresentation = .immediate
+    ) {
+        addressBarFocusPresentation = presentation
+        shouldAutoFocusAddressBar = true
+    }
+
     @discardableResult
     func addNewTab(focusAddressBar: Bool = true) -> Tab {
         logger.debug("🆕 Start New Tab...")
         let newTab = Tab(
             title: "New Tab",
             systemTabType: .startPage,
-            backgroundColor: "#1e1e1e" // Fixed dark color
+            backgroundColor: AppColors.nativeTabBackgroundHex
         )
         tabs.append(newTab)
         currentTabId = newTab.id
@@ -152,10 +170,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         // New Tab Direct access. Focus Mode
         actriumMode = .focus(tabId: newTab.id)
         // Only a pure new blank Tab , and not focus when opening links
-        shouldAutoFocusAddressBar = focusAddressBar
+        if focusAddressBar {
+            requestAddressBarFocus(presentation: .afterTabStripSettles)
+        } else {
+            shouldAutoFocusAddressBar = false
+        }
 
         logger.notice(" New Tab Created: \(newTab.title), Location: \(self.tabs.count - 1)")
-        persistBrowserPageSession()
+        // A native Start Page has no restorable HTTP(S) URL. Persist after
+        // navigation instead of rewriting SQLite on the ⌘T path.
         return newTab
     }
 
@@ -178,7 +201,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             title: type.title,
             url: type.aboutURL,
             systemTabType: type,
-            backgroundColor: "#1e1e1e"  // Dark background for system tabs
+            backgroundColor: AppColors.nativeTabBackgroundHex
         )
         tabs.append(newTab)
         currentTabId = newTab.id
@@ -342,6 +365,32 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         if let oldId = oldGroupId, oldId != groupId {
             cleanupEmptyGroup(oldId)
         }
+        persistBrowserPageSession()
+    }
+
+    /// Keep pointer-driven toolbar moves in memory until mouse-up. Persisting
+    /// every crossed slot would stall the drag and could remove a group while
+    /// its last tab is passing through another section.
+    func moveTabInteractively(tabId: UUID, toIndex: Int, groupId: UUID?) {
+        guard let fromIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        tabs[fromIndex].groupId = groupId
+        let tab = tabs.remove(at: fromIndex)
+        tabs.insert(tab, at: min(max(0, toIndex), tabs.count))
+    }
+
+    func moveGroupInteractively(groupId: UUID, toIndex: Int) {
+        let movingTabs = tabs.filter { $0.groupId == groupId }
+        guard !movingTabs.isEmpty else { return }
+        tabs.removeAll { $0.groupId == groupId }
+        tabs.insert(contentsOf: movingTabs, at: min(max(0, toIndex), tabs.count))
+    }
+
+    func commitInteractiveTabReorder() {
+        let populatedGroupIDs = Set(tabs.compactMap(\.groupId))
+        tabGroups.removeAll { !populatedGroupIDs.contains($0.id) }
+        tabSlotPositions = Dictionary(
+            uniqueKeysWithValues: tabs.enumerated().map { ($0.element.id, $0.offset) }
+        )
         persistBrowserPageSession()
     }
 
