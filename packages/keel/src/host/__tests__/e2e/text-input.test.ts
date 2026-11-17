@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import type React from 'react';
+import { TextInput as RNTextInput } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { waitFor } from './helpers/test-utils';
 import { Engine } from '../../engine';
@@ -39,7 +40,7 @@ const guest = (factory: string) => `
 
 const cases = [
   { name: 'Web', Host: WebTextInput, field: 'input', factory: 'React.createElement' },
-  { name: 'Native', Host: NativeTextInput, field: 'TextInput', factory: 'jsx' },
+  { name: 'Native', Host: NativeTextInput, field: RNTextInput, factory: 'jsx' },
 ] as const;
 
 for (const { name, Host, field: tag, factory } of cases) {

@@ -7,8 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"
 
-# Bun does not load the package's bunfig.toml when tests run from src/.
-BUN_TEST_ARGS=("--timeout=30000" --preload "$ROOT_DIR/src/host/__tests__/setup.ts")
+BUN_TEST_ARGS=("--timeout=30000")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
