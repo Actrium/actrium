@@ -12,7 +12,12 @@
  */
 
 import React, { type CSSProperties, type ReactNode } from 'react';
-import { resolveTextInputValue, type TextInputEdit } from '../../shared/text-input';
+import {
+  getTextInputSync,
+  type TextInputEdit,
+  type TextInputSyncProps,
+  useTextInputValue,
+} from '../../shared/text-input';
 import { toWebStyle, type WebStyleInput, withBaseStyle } from './style';
 
 // RN containers are flexbox-column boxes; DOM blocks are not — give every container the
@@ -192,7 +197,6 @@ export interface WebTextInputProps {
   style?: WebStyleInput;
   testID?: string;
   value?: string;
-  valueEventCount?: number;
   defaultValue?: string;
   placeholder?: string;
   onChangeText?: (text: string) => void;
@@ -206,13 +210,13 @@ export interface WebTextInputProps {
 
 export const TextInput = React.forwardRef<
   HTMLInputElement | HTMLTextAreaElement,
-  WebTextInputProps
+  WebTextInputProps & TextInputSyncProps
 >(function TextInput(
   {
     style,
     testID,
     value,
-    valueEventCount,
+    __keelTextInput,
     defaultValue,
     placeholder,
     onChangeText,
@@ -226,35 +230,35 @@ export const TextInput = React.forwardRef<
   ref
 ) {
   const css = toWebStyle(style);
-  // Keep the browser's latest edit while waiting for the Guest to return its value.
-  const [edit, setEdit] = React.useState<TextInputEdit>({
-    text: value ?? defaultValue ?? '',
-    eventCount: 0,
-  });
-  // Assign each browser input event a revision before notifying the Guest.
+  const sync = getTextInputSync(__keelTextInput);
+  const { value: displayedValue, recordEdit } = useTextInputValue(
+    value,
+    sync?.eventCount,
+    defaultValue
+  );
   const eventCount = React.useRef(0);
-  const resolvedValue = resolveTextInputValue(value, valueEventCount, edit);
-  // Capture the edit before any Guest callbacks can schedule a render.
   const handleChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const next = { text: event.target.value, eventCount: ++eventCount.current };
-    // Unversioned controls keep their existing value semantics.
-    if (valueEventCount !== undefined) setEdit(next);
-    onChangeText?.(next.text);
-    onChange?.({ nativeEvent: next });
+    const edit = { text: event.target.value, eventCount: ++eventCount.current };
+    if (sync) {
+      recordEdit(edit);
+      sync.onEdit(edit);
+    } else {
+      onChangeText?.(edit.text);
+      onChange?.({ nativeEvent: edit });
+    }
   };
+  const changeHandler = sync || onChange || onChangeText ? handleChange : undefined;
   if (multiline) {
     return (
       <textarea
         ref={ref as React.Ref<HTMLTextAreaElement>}
         data-testid={testID}
-        value={resolvedValue}
+        value={displayedValue}
         defaultValue={defaultValue}
         placeholder={placeholder}
         readOnly={editable === false}
         maxLength={maxLength}
-        onChange={
-          onChangeText || onChange || valueEventCount !== undefined ? handleChange : undefined
-        }
+        onChange={changeHandler}
         style={css}
       />
     );
@@ -264,14 +268,12 @@ export const TextInput = React.forwardRef<
       ref={ref as React.Ref<HTMLInputElement>}
       type={secureTextEntry ? 'password' : 'text'}
       data-testid={testID}
-      value={resolvedValue}
+      value={displayedValue}
       defaultValue={defaultValue}
       placeholder={placeholder}
       readOnly={editable === false}
       maxLength={maxLength}
-      onChange={
-        onChangeText || onChange || valueEventCount !== undefined ? handleChange : undefined
-      }
+      onChange={changeHandler}
       onKeyDown={
         onSubmitEditing
           ? (e: React.KeyboardEvent<HTMLInputElement>) => {

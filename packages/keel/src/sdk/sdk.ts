@@ -673,8 +673,6 @@ export interface FlatListProps<T = unknown> extends ScrollViewProps {
  */
 export interface TextInputProps extends BaseProps {
   value?: string;
-  /** Start at zero, then pair each value with the eventCount from the edit it uses. */
-  valueEventCount?: number;
   defaultValue?: string;
   placeholder?: string;
   placeholderTextColor?: string;
@@ -683,6 +681,7 @@ export interface TextInputProps extends BaseProps {
   onFocus?: () => void;
   onBlur?: () => void;
   onSubmitEditing?: () => void;
+  submitBehavior?: 'submit' | 'blurAndSubmit' | 'newline';
   multiline?: boolean;
   numberOfLines?: number;
   maxLength?: number;

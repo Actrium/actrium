@@ -97,9 +97,13 @@ describe('keel/host/web thin-DOM components', () => {
   });
 
   it('TextInput keeps newer edits while accepting a clear based on the current edit', () => {
-    const onChange = mock();
-    const input = (value: string, valueEventCount: number) =>
-      React.createElement(C.TextInput, { value, valueEventCount, onChange, multiline: true });
+    const onEdit = mock();
+    const input = (value: string, eventCount: number) =>
+      React.createElement(C.TextInput, {
+        value,
+        __keelTextInput: { eventCount, onEdit },
+        multiline: true,
+      });
     let renderer!: import('react-test-renderer').ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(input('', 0));
@@ -109,13 +113,20 @@ describe('keel/host/web thin-DOM components', () => {
       field().props.onChange({ target: { value: '12' } });
       field().props.onChange({ target: { value: '123' } });
     });
-    expect(onChange).toHaveBeenLastCalledWith({ nativeEvent: { text: '123', eventCount: 2 } });
+    expect(onEdit).toHaveBeenLastCalledWith({ text: '123', eventCount: 2 });
     act(() => renderer.update(input('12', 1)));
     expect(field().props.value).toBe('123');
     act(() => renderer.update(input('', 1)));
     expect(field().props.value).toBe('123');
     act(() => renderer.update(input('', 2)));
     expect(field().props.value).toBe('');
+    act(() => renderer.update(input('12', 1)));
+    expect(field().props.value).toBe('');
+    act(() => renderer.update(input('replacement', 2)));
+    expect(field().props.value).toBe('replacement');
+    act(() => renderer.update(input('12', 1)));
+    expect(field().props.value).toBe('replacement');
+    act(() => renderer.unmount());
   });
 
   it('ScrollView → overflow:auto div', () => {
