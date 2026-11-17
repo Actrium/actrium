@@ -12,6 +12,7 @@
 		5C0B1A2D3E4F506172830001 /* Actr in Frameworks */ = {isa = PBXBuildFile; productRef = 5C0B1A2D3E4F506172830002 /* Actr */; };
 		36ED6B68B2DE67F2DB1523A7 /* libPods-ActriumRenderer.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1394BEA9FE9BE0BE89646222 /* libPods-ActriumRenderer.a */; };
 		457EEA1F5D65241F37B32E2D /* libPods-Actrium.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 68501CEF0142AD9A599B85C8 /* libPods-Actrium.a */; };
+		4CD4205E8A324EA5B01E8E1D /* RendererScrolling.mm in Sources */ = {isa = PBXBuildFile; fileRef = 4CD4205E8A324EA5B01E8E1C /* RendererScrolling.mm */; };
 		A90D97D7984E951158B896D0 /* libPods-ActriumTests.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DACA28DED8E4818311DAAB4D /* libPods-ActriumTests.a */; };
 		AA00110022003300AA00BB02 /* ActriumVault in Frameworks */ = {isa = PBXBuildFile; productRef = AA00110022003300AA00BB03 /* ActriumVault */; };
 		AB00110022003300AA00BB02 /* ActriumCore in Frameworks */ = {isa = PBXBuildFile; productRef = AB00110022003300AA00BB03 /* ActriumCore */; };
@@ -62,6 +63,7 @@
 /* Begin PBXFileReference section */
 		1394BEA9FE9BE0BE89646222 /* libPods-ActriumRenderer.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-ActriumRenderer.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		453DB22E380EBC5CF3E87FBC /* Pods-ActriumViewService.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ActriumViewService.debug.xcconfig"; path = "Target Support Files/Pods-ActriumViewService/Pods-ActriumViewService.debug.xcconfig"; sourceTree = "<group>"; };
+		4CD4205E8A324EA5B01E8E1C /* RendererScrolling.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = RendererScrolling.mm; path = ActriumViewService/RendererScrolling.mm; sourceTree = "<group>"; };
 		5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		63F53BFD7815C17CC828629D /* Pods-ActriumRenderer.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ActriumRenderer.debug.xcconfig"; path = "Target Support Files/Pods-ActriumRenderer/Pods-ActriumRenderer.debug.xcconfig"; sourceTree = "<group>"; };
 		68501CEF0142AD9A599B85C8 /* libPods-Actrium.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Actrium.a"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -204,6 +206,7 @@
 				B3E458B22EC731A40014D74C /* ActriumTests */,
 				B3E458BC2EC731A40014D74C /* ActriumUITests */,
 				B3312B1C2F066DB70018A0B4 /* ActriumViewService */,
+				4CD4205E8A324EA5B01E8E1C /* RendererScrolling.mm */,
 				B3E458A12EC731A30014D74C /* Products */,
 				5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */,
 				50AD95B7B3434865B5C8389F /* Pods */,
@@ -598,6 +601,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4CD4205E8A324EA5B01E8E1D /* RendererScrolling.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -667,6 +671,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = ActriumViewService/RendererScrolling.h;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -709,6 +714,7 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = ActriumViewService/RendererScrolling.h;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};

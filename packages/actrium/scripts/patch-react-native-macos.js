@@ -43,6 +43,24 @@ patchFile('scripts/codegen/generate-artifacts-executor/utils.js', (source) =>
   ),
 );
 
+patchFile('React/Fabric/Mounting/ComponentViews/ScrollView/RCTScrollViewComponentView.mm', (source) => {
+  const flexible =
+    '    _containerView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;';
+  const fixed = [
+    '    // Fabric sets the document size before laying out the viewport.',
+    '    // Keep AppKit from adding the viewport size to the scrollable content.',
+    '    _containerView.autoresizingMask = NSViewNotSizable;',
+  ].join('\n');
+
+  if (source.includes(fixed)) {
+    return source;
+  }
+  if (!source.includes(flexible)) {
+    throw new Error('Unable to patch the macOS Fabric ScrollView document autoresizing mask');
+  }
+  return source.replace(flexible, fixed);
+});
+
 const aliasPath = path.join(
   packageRoot,
   'src',
