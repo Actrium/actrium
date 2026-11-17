@@ -3,14 +3,8 @@ import { defineKeelContract, rpc, subscription } from 'keel/contract';
 /**
  * Host capabilities declared to Guests (v1 runtime spec, section 5.2/5.3).
  *
- * `host:service` is the only implemented module today. The other twelve
- * modules are declared so builds accept their imports and the Host-side
- * boundary schemas are defined, but every method is a fail-closed placeholder:
- * the Host implementation throws `host:<name>.<method> is not implemented` on
- * call. Guest-side TypeScript declarations for these modules are not generated
- * yet; see TODO M2-N6.
- * Declaring a module here does NOT make it available in the effective
- * capability set; see `HOST_SUPPORTED_CAPABILITIES` in `capability-model.ts`.
+ * The contract defines Host-side boundary schemas. The effective capability
+ * set only includes supported implementations (see `capability-model.ts`).
  *
  * The host fixes the Service target to the current Service ActorId; the Guest
  * never supplies an ActorId. Business routes stay opaque strings here and are
@@ -41,6 +35,8 @@ export type AssetsReadInput = { path: string };
 export type AssetsReadOutput = { base64: string };
 
 export type ClipboardWriteTextInput = { text: string };
+export type LocalStorageKeyInput = { key: string };
+export type LocalStorageSetInput = LocalStorageKeyInput & { value: string };
 
 export type NotificationsShowInput = { title: string; body?: string };
 
@@ -91,6 +87,14 @@ function requireString(value: unknown, label: string, allowEmpty = false): strin
     );
   }
   return value;
+}
+
+function parseLocalStorageKey(value: unknown): LocalStorageKeyInput {
+  const { key } = asObject(value, 'local storage input');
+  const text = requireString(key, 'local storage key', true);
+  // The broker enforces the exact UTF-8 byte limit before touching SQLite.
+  if (text.length > 1024) throw new Error('local storage key is too long');
+  return { key: text };
 }
 
 function optionalString(
@@ -363,6 +367,29 @@ export const contract = defineKeelContract({
             };
           },
         },
+      }),
+    },
+    'host:local-storage': {
+      getItem: rpc<LocalStorageKeyInput, string | null>({
+        schema: {
+          parseInput: parseLocalStorageKey,
+          parseOutput: (value) =>
+            value === null ? null : requireString(value, 'local storage result', true),
+        },
+      }),
+      setItem: rpc<LocalStorageSetInput, void>({
+        schema: {
+          parseInput: (value) => {
+            const { key } = parseLocalStorageKey(value);
+            const input = asObject(value, 'local storage input');
+            const text = requireString(input.value, 'local storage value', true);
+            if (text.length > 64 * 1024) throw new Error('local storage value is too large');
+            return { key, value: text };
+          },
+        },
+      }),
+      removeItem: rpc<LocalStorageKeyInput, void>({
+        schema: { parseInput: parseLocalStorageKey },
       }),
     },
     'host:notifications': {

@@ -26,6 +26,7 @@ import {
 import { contract } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
+import { bindNativeLocalStorage } from './local-storage';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
 import { callHttpService, callNativeService } from './service-call';
 import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
@@ -235,11 +236,19 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       logToNative(`[StandaloneGuestApp] service call ${request.route}`);
       return callHttpService(tab.serviceCallUrl, request);
     };
+    const localStorage = bindNativeLocalStorage(
+      NativeModules.GuestLocalStorage, tab.id, tab.localStorageDocumentId
+    );
+    if (v1?.ok && v1.linkage.links.some(([id]) => id === 'host:local-storage') && !localStorage) {
+      setError('Local storage is unavailable for this application.');
+      return;
+    }
     const hostModules = createHostModules({
       hasServiceCapability,
       callActor: callServiceActor,
       authorizeCapability: (capability) => authorizer.authorize(capability),
       writeClipboardText,
+      localStorage,
     });
     // Expose exactly the verified method and component set to this Guest Engine.
     const linked = v1?.ok ? v1 : undefined;
@@ -368,6 +377,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     tab.serviceCallUrl,
     tab.reloadKey,
     tab.capabilityManifestJSON,
+    tab.localStorageDocumentId,
     permissionsKey,
     capabilitySnapshotAvailable,
   ]);

@@ -285,13 +285,13 @@ describe('capability model data', () => {
   });
 
   test('only implemented capabilities count as host-supported', () => {
-    expect(HOST_SUPPORTED_CAPABILITIES.size).toBe(2);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('service.call')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:clipboard.write')).toBe(true);
-    for (const capability of FRONT_CAPABILITIES) {
-      if (HOST_SUPPORTED_CAPABILITIES.has(capability)) continue;
-      expect(FRONT_CAPABILITY_DEFINITIONS[capability].implemented).toBe(false);
-    }
+    expect(HOST_SUPPORTED_CAPABILITIES).toEqual(new Set([
+      'service.call',
+      'host:clipboard.write',
+      'host:local-storage.getItem',
+      'host:local-storage.setItem',
+      'host:local-storage.removeItem',
+    ]));
   });
 
   test('placeholder capabilities never enter the effective set', () => {

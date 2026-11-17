@@ -51,6 +51,21 @@ export const FRONT_CAPABILITY_SPECS = {
     hostModule: 'host:clipboard',
     hostMethod: 'writeText',
   },
+  'host:local-storage.getItem': {
+    module: 'host:local-storage',
+    hostModule: 'host:local-storage',
+    hostMethod: 'getItem',
+  },
+  'host:local-storage.setItem': {
+    module: 'host:local-storage',
+    hostModule: 'host:local-storage',
+    hostMethod: 'setItem',
+  },
+  'host:local-storage.removeItem': {
+    module: 'host:local-storage',
+    hostModule: 'host:local-storage',
+    hostMethod: 'removeItem',
+  },
   'host:notifications.show': {
     module: 'host:notifications',
     hostModule: 'host:notifications',

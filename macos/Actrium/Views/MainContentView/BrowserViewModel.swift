@@ -604,6 +604,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 rightPanelScript: rightPanelScript,
                 unifiedScript: unifiedScript,
                 capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
+                localStorageOrigin: manifestInfo.storageOrigin(devDirectory: isDirectory.boolValue ? resolvedURL : nil),
                 contractName: manifestInfo.contractName,
                 contractVersion: manifestInfo.contractVersion,
                 permissions: manifestInfo.permissions,
@@ -881,6 +882,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 // Clear web/RN content
                 tabs[index].unifiedScript = nil
                 tabs[index].capabilityManifestJSON = nil
+                tabs[index].localStorageOrigin = nil
                 tabs[index].leftPanelScript = nil
                 tabs[index].rightPanelScript = nil
                 tabs[index].guestScript = nil
@@ -946,6 +948,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             // Clear RN Relevant
             tabs[index].unifiedScript = nil
             tabs[index].capabilityManifestJSON = nil
+            tabs[index].localStorageOrigin = nil
             tabs[index].leftPanelScript = nil
             tabs[index].rightPanelScript = nil
             tabs[index].guestScript = nil
@@ -1270,6 +1273,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[tabIndex].contractVersion = manifestInfo.contractVersion
             tabs[tabIndex].permissions = manifestInfo.permissions
             tabs[tabIndex].capabilityManifestJSON = manifestInfo.capabilityManifestJSON
+            tabs[tabIndex].localStorageOrigin = manifestInfo.storageOrigin(
+                devDirectory: isDirectory.boolValue ? resolvedURL : nil
+            )
             tabs[tabIndex].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
             tabs[tabIndex].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
 
@@ -1353,6 +1359,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         tabs[tabIndex].title = realmDisplay
         tabs[tabIndex].url = URL(string: input)
         tabs[tabIndex].appId = nil
+        tabs[tabIndex].localStorageOrigin = nil
         tabs[tabIndex].systemTabType = nil
         tabs[tabIndex].htmlContent = nil
         tabs[tabIndex].unifiedScript = nil
@@ -1872,6 +1879,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].contractVersion = manifestInfo.contractVersion
             tabs[index].permissions = manifestInfo.permissions
             tabs[index].capabilityManifestJSON = manifestInfo.capabilityManifestJSON
+            tabs[index].localStorageOrigin = manifestInfo.storageOrigin(
+                devDirectory: isDirectory.boolValue ? resolvedURL : nil
+            )
             tabs[index].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
             tabs[index].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
             leftPanelVisibility[tabs[index].id] = manifestInfo.leftPanelDefaultVisible
@@ -2048,6 +2058,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
                     capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
+                    localStorageOrigin: manifestInfo.storageOrigin(
+                        devDirectory: isDirectory.boolValue ? resolvedURL : nil
+                    ),
                     leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                     rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                     themeColor: manifestInfo.themeColor,
@@ -2424,6 +2437,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
                         capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
+                        localStorageOrigin: manifestInfo.storageOrigin(devDirectory: directoryURL),
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                         themeColor: manifestInfo.themeColor
@@ -2539,6 +2553,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         contractVersion: Int? = nil,
         permissions: [String] = [],
         capabilityManifestJSON: String? = nil,
+        localStorageOrigin: String? = nil,
         leftPanelDefaultVisible: Bool = true,
         rightPanelDefaultVisible: Bool = false,
         themeColor: String? = nil,
@@ -2569,6 +2584,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].contractVersion = contractVersion
             tabs[index].permissions = permissions
             tabs[index].capabilityManifestJSON = capabilityManifestJSON
+            tabs[index].localStorageOrigin = localStorageOrigin
             tabs[index].leftPanelDefaultVisible = leftPanelDefaultVisible
             tabs[index].rightPanelDefaultVisible = rightPanelDefaultVisible
             if let themeColor { tabs[index].backgroundColor = themeColor }
@@ -2599,6 +2615,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             guestExtractedPath: guestExtractedPath,
             guestEntry: guestEntry,
             capabilityManifestJSON: capabilityManifestJSON,
+            localStorageOrigin: localStorageOrigin,
             contractName: contractName,
             contractVersion: contractVersion,
             permissions: permissions,

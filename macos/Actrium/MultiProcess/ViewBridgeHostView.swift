@@ -2381,6 +2381,9 @@ struct UnifiedReactNativeLayer: View {
         if let capabilityManifestJSON = tab.capabilityManifestJSON {
             config["capabilityManifestJSON"] = capabilityManifestJSON
         }
+        if let origin = tab.localStorageOrigin {
+            config["localStorageOrigin"] = origin
+        }
         if let capabilitySnapshotJSON {
             config["capabilitySnapshotJSON"] = capabilitySnapshotJSON
         }

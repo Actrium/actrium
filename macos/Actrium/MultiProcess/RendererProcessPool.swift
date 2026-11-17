@@ -39,7 +39,7 @@ extension Notification.Name {
 /// host multiple Tab roots while keeping different fingerprints process-isolated.
 @MainActor
 final class RendererProcessPool: ObservableObject {
-    static let shared = RendererProcessPool()
+    static let shared = RendererProcessPool(localStorage: RendererLocalStorage())
 
     nonisolated static let systemFingerprintPrefix = "system."
 
@@ -99,6 +99,7 @@ final class RendererProcessPool: ObservableObject {
 
     private var workers: [String: Worker] = [:]
     private var tabWorkerMap: [UUID: String] = [:]
+    private let localStorage: RendererLocalStorage
     private var fingerprintWorkerMap: [String: String] = [:]
     private var systemWorkerId: String?
     private var viewportRequestId: UInt32 = 1
@@ -106,7 +107,8 @@ final class RendererProcessPool: ObservableObject {
     private var consecutivePrewarmFailures = 0
     private var prewarmRetryWorkItem: DispatchWorkItem?
 
-    private init() {
+    init(localStorage: RendererLocalStorage) {
+        self.localStorage = localStorage
         setupMemoryPressureHandling()
     }
 
@@ -165,6 +167,7 @@ final class RendererProcessPool: ObservableObject {
     }
 
     func releaseRenderer(for tabId: UUID) {
+        localStorage.remove(tabId)
         guard let workerId = tabWorkerMap.removeValue(forKey: tabId),
               let worker = workers[workerId] else {
             return
@@ -210,7 +213,12 @@ final class RendererProcessPool: ObservableObject {
             throw RendererProcessPoolError.rendererExited("Tab has no allocated renderer")
         }
         try await waitUntilReady(worker)
+        try Task.checkCancellation()
+        guard self.worker(for: tabId) === worker else {
+            throw RendererProcessPoolError.rendererExited("Tab changed renderer")
+        }
 
+        let config = localStorage.prepare(tabId: tabId, config: config)
         guard JSONSerialization.isValidJSONObject(config),
               let data = try? JSONSerialization.data(withJSONObject: config),
               let json = String(data: data, encoding: .utf8) else {
@@ -527,6 +535,25 @@ final class RendererProcessPool: ObservableObject {
         }
 
         worker.connection.onHostEvent = { [weak self, weak worker] name, userInfoJSON, tab in
+            if name == GuestLocalStorageCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker else { return }
+                let connection = worker.connection
+                Task {
+                    guard self.worker(for: tabId) === worker else { return }
+                    do {
+                        if let reply = try await self.localStorage.reply(to: userInfoJSON, tabId: tabId),
+                           self.worker(for: tabId) === worker {
+                            try connection.sendHostEvent(
+                                name: GuestLocalStorageCall.responseEvent, userInfoJSON: reply, tabId: tab
+                            )
+                        }
+                    } catch {
+                        AppLogger.reactNative.warning("Renderer local storage request could not be handled.")
+                    }
+                }
+                return
+            }
             if name == RealmServiceCall.requestEvent {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker,
@@ -643,6 +670,7 @@ final class RendererProcessPool: ObservableObject {
         let affectedTabs = worker.tabs
         for tabId in affectedTabs {
             tabWorkerMap.removeValue(forKey: tabId)
+            localStorage.remove(tabId)
         }
         if let fingerprint = worker.fingerprint {
             fingerprintWorkerMap.removeValue(forKey: fingerprint)

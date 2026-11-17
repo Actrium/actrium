@@ -46,6 +46,18 @@ RCT_EXTERN_METHOD(requestGrant:(NSString *)tabId capability:(NSString *)capabili
 
 @end
 
+@interface RCT_EXTERN_MODULE(GuestLocalStorage, NSObject)
+
+RCT_EXTERN_METHOD(perform:(NSString *)tabId
+                  documentId:(NSString *)documentId
+                  operation:(NSString *)operation
+                  key:(NSString *)key
+                  value:(NSString * _Nullable)value
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+@end
+
 // MARK: - StartPageModule
 
 @interface RCT_EXTERN_MODULE(StartPageModule, NSObject)

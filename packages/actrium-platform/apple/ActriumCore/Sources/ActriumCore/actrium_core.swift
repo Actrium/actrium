@@ -561,6 +561,165 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 }
 
 
+
+
+/**
+ * A profile database. Callers supply an origin from the authorized Host document.
+ */
+public protocol GuestLocalStorageProtocol: AnyObject, Sendable {
+
+    func getItem(origin: String, key: String) throws  -> String?
+
+    func removeItem(origin: String, key: String) throws
+
+    func setItem(origin: String, key: String, value: String) throws
+
+}
+/**
+ * A profile database. Callers supply an origin from the authorized Host document.
+ */
+open class GuestLocalStorage: GuestLocalStorageProtocol, @unchecked Sendable {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_actrium_core_fn_clone_guestlocalstorage(self.pointer, $0) }
+    }
+public convenience init(path: String) {
+    let pointer =
+        try! rustCall() {
+    uniffi_actrium_core_fn_constructor_guestlocalstorage_new(
+        FfiConverterString.lower(path),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_actrium_core_fn_free_guestlocalstorage(pointer, $0) }
+    }
+
+
+
+
+open func getItem(origin: String, key: String)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_get_item(self.uniffiClonePointer(),
+        FfiConverterString.lower(origin),
+        FfiConverterString.lower(key),$0
+    )
+})
+}
+
+open func removeItem(origin: String, key: String)throws   {try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_remove_item(self.uniffiClonePointer(),
+        FfiConverterString.lower(origin),
+        FfiConverterString.lower(key),$0
+    )
+}
+}
+
+open func setItem(origin: String, key: String, value: String)throws   {try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_set_item(self.uniffiClonePointer(),
+        FfiConverterString.lower(origin),
+        FfiConverterString.lower(key),
+        FfiConverterString.lower(value),$0
+    )
+}
+}
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGuestLocalStorage: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = GuestLocalStorage
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> GuestLocalStorage {
+        return GuestLocalStorage(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: GuestLocalStorage) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GuestLocalStorage {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: GuestLocalStorage, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGuestLocalStorage_lift(_ pointer: UnsafeMutableRawPointer) throws -> GuestLocalStorage {
+    return try FfiConverterTypeGuestLocalStorage.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGuestLocalStorage_lower(_ value: GuestLocalStorage) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeGuestLocalStorage.lower(value)
+}
+
+
+
+
 public struct ActiveTabInfo {
     public var id: String
     public var name: String
@@ -7377,6 +7536,106 @@ extension CoreError: Foundation.LocalizedError {
 
 
 
+
+public enum GuestLocalStorageError: Swift.Error {
+
+
+
+    case InvalidKey(message: String)
+
+    case InvalidValue(message: String)
+
+    case QuotaExceeded(message: String)
+
+    case DatabaseFailure(message: String)
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGuestLocalStorageError: FfiConverterRustBuffer {
+    typealias SwiftType = GuestLocalStorageError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GuestLocalStorageError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+
+
+
+        case 1: return .InvalidKey(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 2: return .InvalidValue(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 3: return .QuotaExceeded(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 4: return .DatabaseFailure(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: GuestLocalStorageError, into buf: inout [UInt8]) {
+        switch value {
+
+
+
+
+        case .InvalidKey(_ /* message is ignored*/):
+            writeInt(&buf, Int32(1))
+        case .InvalidValue(_ /* message is ignored*/):
+            writeInt(&buf, Int32(2))
+        case .QuotaExceeded(_ /* message is ignored*/):
+            writeInt(&buf, Int32(3))
+        case .DatabaseFailure(_ /* message is ignored*/):
+            writeInt(&buf, Int32(4))
+
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGuestLocalStorageError_lift(_ buf: RustBuffer) throws -> GuestLocalStorageError {
+    return try FfiConverterTypeGuestLocalStorageError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGuestLocalStorageError_lower(_ value: GuestLocalStorageError) -> RustBuffer {
+    return FfiConverterTypeGuestLocalStorageError.lower(value)
+}
+
+
+extension GuestLocalStorageError: Equatable, Hashable {}
+
+
+
+
+extension GuestLocalStorageError: Foundation.LocalizedError {
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+}
+
+
+
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -11276,6 +11535,18 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_func_verify_realm_front_package() != 30025) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_get_item() != 63346) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_remove_item() != 23454) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_set_item() != 45632) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_constructor_guestlocalstorage_new() != 18051) {
         return InitializationResult.apiChecksumMismatch
     }
 

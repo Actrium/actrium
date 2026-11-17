@@ -53,6 +53,8 @@ export type TabConfig = {
   capabilityManifestJSON?: string;
   /** Native-owned authorization snapshot consumed by the Keel Host. */
   capabilitySnapshotJSON?: string;
+  /** Broker-owned token for the currently loaded local storage document. */
+  localStorageDocumentId?: string;
   // Legacy: Double Engine Structure
   guestScript?: string;
   leftPanelScript?: string;

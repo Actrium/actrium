@@ -3,11 +3,14 @@ import type { HostModulesImplementation } from 'keel/contract';
 import type {
   ActriumContract,
   ClipboardWriteTextInput,
+  LocalStorageKeyInput,
+  LocalStorageSetInput,
   ServiceCallInput,
   ServiceEvent,
   ServiceTellInput,
 } from './contract';
 import type { FrontCapability } from './capabilities';
+import type { LocalStorageCall } from './local-storage';
 
 export type ServiceCallRequest = ServiceCallInput;
 
@@ -35,6 +38,7 @@ export type HostModules = HostModulesImplementation<ActriumContract>;
 export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
   'host:service': new Set(['call']),
   'host:clipboard': new Set(['writeText']),
+  'host:local-storage': new Set(['getItem', 'setItem', 'removeItem']),
 };
 
 /** Modules with a real Host implementation, not just a contract declaration. */
@@ -67,19 +71,21 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
  * against the contract at Engine construction time, so a missing capability
  * fails closed before the Guest bundle runs.
  *
- * `host:service` and `host:clipboard.write` are implemented. Every other
- * module is a deliberate placeholder: its methods throw
- * `host:<name>.<method> is not implemented` instead of returning `undefined`,
- * so a call cannot be mistaken for success. Placeholder capabilities also stay
- * out of `HOST_SUPPORTED_CAPABILITIES`.
+ * Placeholder methods throw and stay out of the supported capability sets.
  */
 export function createHostModules(options: {
   hasServiceCapability: boolean;
   callActor: ActorCall;
   authorizeCapability: (capability: FrontCapability) => Promise<void>;
   writeClipboardText: (text: string) => Promise<void>;
+  localStorage?: LocalStorageCall;
 }): HostModules {
   let requestSequence = 0;
+  const localStorage: LocalStorageCall = async (operation, input) => {
+    await options.authorizeCapability(`host:local-storage.${operation}`);
+    if (!options.localStorage) throw new Error('The host local storage module is unavailable.');
+    return options.localStorage(operation, input);
+  };
 
   return {
     'host:service': {
@@ -121,6 +127,15 @@ export function createHostModules(options: {
       writeText: async (input: ClipboardWriteTextInput) => {
         await options.authorizeCapability('host:clipboard.write');
         await options.writeClipboardText(input.text);
+      },
+    },
+    'host:local-storage': {
+      getItem: (input: LocalStorageKeyInput) => localStorage('getItem', input),
+      setItem: async (input: LocalStorageSetInput) => {
+        await localStorage('setItem', input);
+      },
+      removeItem: async (input: LocalStorageKeyInput) => {
+        await localStorage('removeItem', input);
       },
     },
     'host:notifications': {

@@ -97,6 +97,19 @@ final class RendererProcessController {
     private let arguments: Arguments
     private let connection: IPCHelperConnection
     private var serviceCalls: [UUID: (RealmServiceReply) -> Void] = [:]
+    private lazy var localStorage = RendererLocalStorageClient(connection: connection)
+
+    static func callLocalStorage(
+        _ call: GuestLocalStorageCall, tabId: String,
+        reply: @escaping (GuestLocalStorageReply) -> Void
+    ) {
+        guard let controller = RendererProcessLifetime.shared.controller,
+              controller.surfaces[tabId] != nil else {
+            reply(GuestLocalStorageReply(id: call.id, error: "The local storage tab is unavailable."))
+            return
+        }
+        controller.localStorage.send(call, tabId: tabId, reply: reply)
+    }
 
     static func callRealmService(
         tabId: String,
@@ -178,6 +191,10 @@ final class RendererProcessController {
 
     private func configureIPC() {
         connection.onHostEvent = { [weak self] name, json, tabId in
+            if name == GuestLocalStorageCall.responseEvent {
+                self?.localStorage.receive(json: json, tabId: tabId)
+                return
+            }
             if name == "com.actrium.rendererKeyboardFocus" {
                 guard let focused = Bool(json) else { return }
                 // Apply focus on the same queue as input so the next key

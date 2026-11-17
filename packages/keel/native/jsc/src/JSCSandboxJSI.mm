@@ -1073,25 +1073,6 @@ void *JSCSandboxContext::wrapFunctionForSandbox(jsi::Runtime &rt,
               result = it->second->call(*hostRt);
             } else {
               NSLog(@"[JSCSandbox] fn_%d: calling Host function with %zu args, hostRt=%p", funcId, jsiArgs.size(), (void*)hostRt);
-              
-              // DEBUG: Try JSON.stringify on the first arg to see what Host Runtime sees
-              try {
-                jsi::Function stringify = hostRt->global()
-                    .getPropertyAsObject(*hostRt, "JSON")
-                    .getPropertyAsFunction(*hostRt, "stringify");
-                jsi::Value jsonStr = stringify.call(*hostRt, jsiArgs[0]);
-                if (jsonStr.isString()) {
-                  std::string str = jsonStr.asString(*hostRt).utf8(*hostRt);
-                  // Truncate to avoid log spam
-                  if (str.length() > 500) {
-                    str = str.substr(0, 500) + "...";
-                  }
-                  NSLog(@"[JSCSandbox] fn_%d: JSON.stringify(arg[0])=%s", funcId, str.c_str());
-                }
-              } catch (const std::exception& e) {
-                NSLog(@"[JSCSandbox] fn_%d: JSON.stringify failed: %s", funcId, e.what());
-              }
-              
               result = it->second->call(
                   *hostRt, (const jsi::Value *)jsiArgs.data(), jsiArgs.size());
             }
