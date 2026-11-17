@@ -162,6 +162,7 @@ if (globalThis.console) {
 mock.module('react-native', () => ({
   View: 'View',
   Text: 'Text',
+  TextInput: 'TextInput',
   Image: 'Image',
   ScrollView: 'ScrollView',
   TouchableOpacity: 'TouchableOpacity',

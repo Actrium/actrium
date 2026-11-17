@@ -94,6 +94,8 @@ Guest 模块提供了用于在 Keel 沙箱内构建动态 UI 的组件、hooks �
 | `multiline` | `boolean` | `false` | 输入是否支持多行。 |
 | `maxLength` | `number` | `undefined` | 允许的最大字符数。 |
 
+受控输入沿用 React Native 的 `value` 和 `onChangeText` 写法。Guest 的旧值迟到时，Keel 会保留 Host 上更新的输入。
+
 ### Button
 
 基础按钮。映射到 React Native 的 `Button`。
