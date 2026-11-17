@@ -195,7 +195,7 @@ impl HostState {
         }
     }
 
-    pub(super) fn preopen_data_dir(&mut self, directory: &Path) -> WasmResult<()> {
+    pub(super) fn preopen_data_dir(directory: &Path) -> WasmResult<WasiCtx> {
         if !directory.is_absolute() {
             return Err(WasmError::LoadFailed(
                 "WASI data directory must be an absolute path".into(),
@@ -222,8 +222,14 @@ impl HostState {
                     directory.display()
                 ))
             })?;
-        self.wasi = wasi.build();
-        Ok(())
+        Ok(wasi.build())
+    }
+
+    pub(super) fn set_wasi_filesystem(
+        &mut self,
+        filesystem: wasmtime_wasi::filesystem::WasiFilesystemCtx,
+    ) {
+        *self.wasi.filesystem() = filesystem;
     }
 
     /// Allocate a fresh `ctx-token` and register a live invocation's

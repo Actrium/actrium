@@ -17,7 +17,7 @@
 //! borrows non-overlapping across suspension points. The shape is lifted
 //! directly from the Phase 0.75 `component-spike-runconcurrent` host.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use actr_framework::guest::dynclib_abi as guest_abi;
 use actr_framework::guest::dynclib_abi::{
@@ -35,6 +35,7 @@ use actr_protocol::{
 };
 use wasmtime::component::{Accessor, Component, HasData, Linker};
 use wasmtime::{AsContextMut, Engine, Store};
+use wasmtime_wasi::{WasiCtxBuilder, filesystem::WasiFilesystemCtx};
 
 use super::component_bindings_v2::ActrWorkloadGuestV2;
 use super::component_bindings_v2::actr::workload::host::{Host as HostImportsV2, HostWithStore};
@@ -692,15 +693,33 @@ fn wit_payload_type_to_proto(payload_type: WitPayloadType) -> PayloadType {
 // Instantiation
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Cancelling a queued blocking task does not immediately drop its captures.
+// Keep the reservation outside the task until the worker claims it.
+struct CancelQueuedOpen {
+    abort: tokio::task::AbortHandle,
+    permit: Arc<Mutex<Option<QuotaPermit>>>,
+}
+
+impl Drop for CancelQueuedOpen {
+    fn drop(&mut self) {
+        self.abort.abort();
+        self.permit
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+    }
+}
+
 /// Build a fresh async-world [`Store`] + component instance. Registers WASI
 /// p2 and the Accessor-based `actr:workload/host` (0.6.0) linker imports.
 async fn instantiate_parts_v2(
     engine: &Engine,
     component: &Component,
     limits: &WasmRuntimeLimits,
-    wasi_data_dir: Option<&Path>,
+    filesystem: &WasiFilesystemCtx,
+    deadline: tokio::time::Instant,
+    _instantiate_permit: QuotaPermit,
 ) -> WasmResult<(Store<HostState>, ActrWorkloadGuestV2)> {
-    let _instantiate_permit = acquire_instantiate(limits)?;
     let mut linker: Linker<HostState> = Linker::new(engine);
     wasmtime_wasi::p2::add_to_linker_async(&mut linker).map_err(|e| {
         WasmError::LoadFailed(format!("failed to register WASI p2 linker imports: {e}"))
@@ -717,9 +736,7 @@ async fn instantiate_parts_v2(
     })?;
 
     let mut state = HostState::new(limits);
-    if let Some(directory) = wasi_data_dir {
-        state.preopen_data_dir(directory)?;
-    }
+    state.set_wasi_filesystem(filesystem.clone());
     let mut store = Store::new(engine, state);
     // issue #346: install the per-store limiter and initial fuel/epoch budget.
     store.limiter(|s| &mut s.limits);
@@ -730,9 +747,9 @@ async fn instantiate_parts_v2(
         .set_fuel(limits.fuel_per_invocation)
         .map_err(|e| WasmError::LoadFailed(format!("set fuel: {e}")))?;
     store.set_epoch_deadline(epoch_deadline_ticks(limits));
-    let bindings = match crate::timer::timeout(
+    let bindings = match crate::timer::timeout_at(
         crate::timer::ids::WASM_INSTANTIATION,
-        limits.invocation_timeout,
+        deadline,
         ActrWorkloadGuestV2::instantiate_async(&mut store, component, &linker),
     )
     .await
@@ -770,8 +787,8 @@ pub(crate) struct WasmWorkloadV2 {
     /// issue #346: resource limits retained for post-trap rebuild + per-entry
     /// fuel/epoch re-seed.
     limits: WasmRuntimeLimits,
-    wasi_data_dir: Option<PathBuf>,
     store: Option<Store<HostState>>,
+    wasi_filesystem: WasiFilesystemCtx,
     bindings: ActrWorkloadGuestV2,
     _epoch_ticker: Arc<EpochTicker>,
     _store_permit: StorePermit,
@@ -803,15 +820,62 @@ impl WasmWorkloadV2 {
         uses_explicit_reply_boundary: bool,
         wasi_data_dir: Option<&Path>,
     ) -> WasmResult<Self> {
-        let (store, bindings) =
-            instantiate_parts_v2(engine, component, limits, wasi_data_dir).await?;
+        let permit = acquire_instantiate(limits)?;
+        let deadline = tokio::time::Instant::now() + limits.invocation_timeout;
+        let (wasi, permit) = if let Some(directory) = wasi_data_dir {
+            let directory = directory.to_path_buf();
+            let reservation = Arc::new(Mutex::new(Some(permit)));
+            let worker_reservation = Arc::clone(&reservation);
+            let task = tokio::task::spawn_blocking(move || {
+                let permit = worker_reservation
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .take()
+                    .ok_or_else(|| WasmError::LoadFailed("WASI directory open cancelled".into()))?;
+                let wasi = HostState::preopen_data_dir(&directory)?;
+                Ok::<_, WasmError>((wasi, permit))
+            });
+            let _cancel = CancelQueuedOpen {
+                abort: task.abort_handle(),
+                permit: reservation,
+            };
+            match crate::timer::timeout_at(crate::timer::ids::WASM_INSTANTIATION, deadline, task)
+                .await
+            {
+                Ok(Ok(result)) => result?,
+                Ok(Err(error)) => {
+                    return Err(WasmError::LoadFailed(format!(
+                        "WASI directory open task failed: {error}"
+                    )));
+                }
+                Err(_) => {
+                    record_timeout();
+                    return Err(WasmError::InvocationTimeout(limits.invocation_timeout));
+                }
+            }
+        } else {
+            (WasiCtxBuilder::new().inherit_stdio().build(), permit)
+        };
+        let mut wasi = wasi;
+        // Cloning the filesystem context retains the preopened directory handles
+        // across Store rebuilds without retaining guest resources.
+        let wasi_filesystem = wasi.filesystem().clone();
+        let (store, bindings) = instantiate_parts_v2(
+            engine,
+            component,
+            limits,
+            &wasi_filesystem,
+            deadline,
+            permit,
+        )
+        .await?;
         tracing::info!("wasm Component instantiated (v2 async world)");
         Ok(Self {
             engine: engine.clone(),
             component: component.clone(),
             limits: *limits,
-            wasi_data_dir: wasi_data_dir.map(Path::to_path_buf),
             store: Some(store),
+            wasi_filesystem,
             bindings,
             _epoch_ticker: epoch_ticker,
             _store_permit: store_permit,
@@ -871,12 +935,17 @@ impl WasmWorkloadV2 {
             "rebuilding poisoned wasm store (v2) after a prior guest trap; \
              guest in-memory state is discarded (lifecycle/queue not replayed)"
         );
+        // Keep the poisoned Store intact when quota denial must be retried.
+        let permit = acquire_instantiate(&self.limits)?;
+        let deadline = tokio::time::Instant::now() + self.limits.invocation_timeout;
         drop(self.store.take());
         match instantiate_parts_v2(
             &self.engine,
             &self.component,
             &self.limits,
-            self.wasi_data_dir.as_deref(),
+            &self.wasi_filesystem,
+            deadline,
+            permit,
         )
         .await
         {

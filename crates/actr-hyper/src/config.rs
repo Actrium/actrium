@@ -10,6 +10,30 @@ use crate::error::HyperError;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::verify::TrustProvider;
 
+/// Controls the host directory exposed to a WASM workload at `/data`.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, Default)]
+pub enum WasiDataDir {
+    /// Use the node runtime configuration, if present.
+    #[default]
+    Inherit,
+    /// Do not expose a directory, even if runtime configuration requests one.
+    Disabled,
+    /// Expose this existing absolute directory instead of the runtime setting.
+    Directory(PathBuf),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WasiDataDir {
+    pub(crate) fn resolve<'a>(&'a self, runtime: Option<&'a Path>) -> Option<&'a Path> {
+        match self {
+            Self::Inherit => runtime,
+            Self::Disabled => None,
+            Self::Directory(path) => Some(path),
+        }
+    }
+}
+
 /// Hyper initialization configuration.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
@@ -68,9 +92,8 @@ pub struct HyperConfig {
     /// default). See [`WasmRuntimeLimits`].
     pub wasm_limits: Option<WasmRuntimeLimits>,
 
-    /// Existing absolute host directory exposed as `/data` to WASM workloads
-    /// loaded by this Hyper. By default workloads receive no directory.
-    pub wasi_data_dir: Option<PathBuf>,
+    /// Override the node runtime configuration's `/data` directory grant.
+    pub wasi_data_dir: WasiDataDir,
 }
 
 /// Conflict-key dispatch concurrency knobs (design doc §4.2, §7).
@@ -563,9 +586,6 @@ pub(crate) async fn node_from_config_file_with_package(
 
     // Build HyperConfig with the resolved values.
     let mut hyper_config = HyperConfig::new(&data_dir, trust);
-    hyper_config
-        .wasi_data_dir
-        .clone_from(&runtime_config.wasi_data_dir);
     if let Some(root) = &hyper_section.storage_root {
         // A relative `storage_root` resolves against the config file's directory,
         // never the process CWD at open time. `base_dir` is absolute (and any
@@ -705,7 +725,7 @@ impl HyperConfig {
             mailbox_backpressure_threshold: None,
             dispatch_concurrency: None,
             wasm_limits: None,
-            wasi_data_dir: None,
+            wasi_data_dir: WasiDataDir::Inherit,
         }
     }
 

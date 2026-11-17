@@ -272,7 +272,6 @@ impl RunCommand {
             if let Some(root) = &config.storage_root {
                 cfg = cfg.with_storage_root(root);
             }
-            cfg.wasi_data_dir.clone_from(&config.wasi_data_dir);
             cfg
         };
 
