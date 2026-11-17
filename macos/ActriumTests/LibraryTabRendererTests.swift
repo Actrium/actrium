@@ -62,6 +62,41 @@ struct LibraryTabRendererTests {
         #expect(hasLabel(bookmark.title, in: bookmarksTabID))
     }
 
+    @Test func historyPagerRequestsOlderRowsFromTheMatchingTab() async throws {
+        let pool = RendererProcessPool.shared
+        let tabID = UUID()
+        let olderVisit = HistoryItem(title: "Older visit")
+        let history = (0..<LibraryTabData.historyPageSize).map { HistoryItem(title: "Recent visit \($0)") }
+            + [olderVisit]
+        var nodes: [Actrium_Ipc_AccessibilityNode] = []
+        var requestedPage: Int?
+        let updates = NotificationCenter.default.publisher(for: .rendererAccessibilityUpdated).sink { notification in
+            guard let tree = notification.userInfo?["tree"] as? Actrium_Ipc_AccessibilityTree,
+                  tree.tabID == tabID.uuidString else { return }
+            nodes = tree.nodes
+        }
+        let requests = NotificationCenter.default.publisher(for: XPCNotificationBridge.setHistoryPage).sink { notification in
+            guard notification.userInfo?["tabId"] as? UUID == tabID else { return }
+            requestedPage = notification.userInfo?["page"] as? Int
+        }
+        defer {
+            updates.cancel()
+            requests.cancel()
+            pool.releaseRenderer(for: tabID)
+        }
+
+        _ = try pool.allocateRenderer(for: tabID, fingerprint: "system.history")
+        try await render(.history, tabID: tabID, history: history)
+        try await waitForUpdate(tabID) { nodes.contains { $0.label == "Older history" } }
+        let older = try #require(nodes.first { $0.label == "Older history" })
+        click(older, in: tabID)
+        try await waitForUpdate(tabID) { requestedPage == 1 }
+
+        try await render(.history, tabID: tabID, history: history, historyPage: 1)
+        try await waitForUpdate(tabID) { nodes.contains { $0.label == olderVisit.title } }
+        #expect(!nodes.contains { $0.label == "Recent visit 0" })
+    }
+
     private func verifyOpenAction(
         _ link: Actrium_Ipc_AccessibilityNode,
         in tabID: UUID,
@@ -84,7 +119,8 @@ struct LibraryTabRendererTests {
         _ type: SystemTabType,
         tabID: UUID,
         history: [HistoryItem] = [],
-        bookmarks: [Bookmark] = []
+        bookmarks: [Bookmark] = [],
+        historyPage: Int = 0
     ) async throws {
         var config: [String: Any] = [
             "tabId": tabID.uuidString,
@@ -93,7 +129,9 @@ struct LibraryTabRendererTests {
             "containerWidth": 800,
             "containerHeight": 500,
         ]
-        for (key, value) in LibraryTabData.configuration(for: type, history: history, bookmarks: bookmarks) {
+        for (key, value) in LibraryTabData.configuration(
+            for: type, history: history, bookmarks: bookmarks, historyPage: historyPage
+        ) {
             config[key] = value
         }
         try await RendererProcessPool.shared.prepareTab(tabId: tabID, config: config)

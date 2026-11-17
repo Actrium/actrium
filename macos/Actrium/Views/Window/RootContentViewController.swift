@@ -130,6 +130,7 @@ enum CompactToolbarLayout {
             toolbarWidth
                 - horizontalPadding * 2
                 - leadingReserve(isFullScreen: isFullScreen)
+                // One space on each side of the strip, plus the gaps between buttons.
                 - itemSpacing * (actionCount + 1)
                 - buttonSize * actionCount
         )

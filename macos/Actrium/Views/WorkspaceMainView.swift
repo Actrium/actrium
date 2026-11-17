@@ -355,7 +355,8 @@ struct WorkspaceMainView: View {
                                 libraryData: LibraryTabData.configuration(
                                     for: tab.systemTabType,
                                     history: historyVM.allItems,
-                                    bookmarks: bookmarkVM.bookmarks
+                                    bookmarks: bookmarkVM.bookmarks,
+                                    historyPage: tab.historyPageIndex
                                 )
                             )
                         }

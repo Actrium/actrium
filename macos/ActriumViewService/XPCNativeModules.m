@@ -60,8 +60,9 @@ RCT_EXTERN_METHOD(openURL:(NSString *)urlString)
 
 RCT_EXTERN_METHOD(openHistoryItem:(NSString *)tabId :(NSString *)itemId)
 RCT_EXTERN_METHOD(deleteHistoryItem:(NSString *)tabId :(NSString *)itemId)
-RCT_EXTERN_METHOD(restoreGroup:(NSString *)groupId)
-RCT_EXTERN_METHOD(clearHistory)
+RCT_EXTERN_METHOD(restoreGroup:(NSString *)tabId :(NSString *)groupId)
+RCT_EXTERN_METHOD(clearHistory:(NSString *)tabId)
+RCT_EXTERN_METHOD(setHistoryPage:(NSString *)tabId :(NSNumber *)page)
 
 @end
 

@@ -145,20 +145,26 @@ class HistoryModule: NSObject {
     }
 
     @objc
-    func restoreGroup(_ groupId: String) {
-        NSLog("[HistoryModule] Restore group: \(groupId)")
-
-        NativeHostTransport.post(
+    func restoreGroup(_ tabId: String, _ groupId: String) {
+        RendererProcessController.sendHostEvent(
             name: "com.actro.restoreHistoryGroup",
-            userInfo: ["groupId": groupId]
+            userInfo: ["groupId": groupId],
+            tabId: tabId
         )
     }
 
     @objc
-    func clearHistory() {
-        NSLog("[HistoryModule] Clear all history")
+    func clearHistory(_ tabId: String) {
+        RendererProcessController.sendHostEvent(name: "com.actro.clearHistory", tabId: tabId)
+    }
 
-        NativeHostTransport.post(name: "com.actro.clearHistory")
+    @objc
+    func setHistoryPage(_ tabId: String, _ page: NSNumber) {
+        RendererProcessController.sendHostEvent(
+            name: "com.actrium.setHistoryPage",
+            userInfo: ["page": page],
+            tabId: tabId
+        )
     }
 
     @objc

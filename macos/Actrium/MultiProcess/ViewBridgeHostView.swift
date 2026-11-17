@@ -2072,7 +2072,7 @@ struct UnifiedReactNativeLayer: View {
     let isDropTarget: Bool        // Whether to drag or drop target (green solid border)
     let coordinator: ViewBridgeCoordinator
 
-    let libraryData: [String: [[String: Any]]]
+    let libraryData: [String: Any]
 
     init(
         tab: Tab,
@@ -2086,7 +2086,7 @@ struct UnifiedReactNativeLayer: View {
         isDragSource: Bool = false,
         isDropTarget: Bool = false,
         coordinator: ViewBridgeCoordinator,
-        libraryData: [String: [[String: Any]]]
+        libraryData: [String: Any]
     ) {
         self.tab = tab
         self.fingerprint = fingerprint

@@ -566,6 +566,8 @@ final class RendererProcessPool: ObservableObject {
                 localName = XPCNotificationBridge.restoreHistoryGroup
             case "com.actro.clearHistory":
                 localName = XPCNotificationBridge.clearHistory
+            case "com.actrium.setHistoryPage":
+                localName = XPCNotificationBridge.setHistoryPage
             case "com.actro.openURLFromStartPage":
                 localName = XPCNotificationBridge.openURLFromStartPage
             case "com.actrium.capabilityPermissionRequest":
@@ -577,13 +579,14 @@ final class RendererProcessPool: ObservableObject {
 
             var userInfo: [AnyHashable: Any]?
             if let data = userInfoJSON.data(using: .utf8),
-               let decoded = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               !decoded.isEmpty {
+               let decoded = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 userInfo = decoded
             }
             switch localName {
             case XPCNotificationBridge.openBookmark, XPCNotificationBridge.deleteBookmark,
-                 XPCNotificationBridge.openHistoryItem, XPCNotificationBridge.deleteHistoryItem:
+                 XPCNotificationBridge.openHistoryItem, XPCNotificationBridge.deleteHistoryItem,
+                 XPCNotificationBridge.clearHistory, XPCNotificationBridge.restoreHistoryGroup,
+                 XPCNotificationBridge.setHistoryPage:
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       worker.id == self.systemWorkerId,
                       self.worker(for: tabId) === worker,
@@ -596,7 +599,7 @@ final class RendererProcessPool: ObservableObject {
             NotificationCenter.default.post(
                 name: localName,
                 object: nil,
-                userInfo: userInfo
+                userInfo: userInfo?.isEmpty == false ? userInfo : nil
             )
         }
 

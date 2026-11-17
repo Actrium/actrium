@@ -1,11 +1,11 @@
 import React, { useMemo } from 'react';
 import { NativeModules, Pressable, SectionList, StyleSheet, Text, View, useColorScheme } from 'react-native';
 import { historySections, historySiteLabel } from './history-sections';
-import type { BookmarkData, HistoryItemData } from './types';
+import type { BookmarkData, HistoryItemData, HistoryPageData } from './types';
 
 type LibraryItem = HistoryItemData | BookmarkData;
 type LibraryPageProps = { tabId: string } & (
-  | { kind: 'history'; items: readonly HistoryItemData[] }
+  | { kind: 'history'; items: readonly HistoryItemData[]; page?: HistoryPageData }
   | { kind: 'bookmarks'; items: readonly BookmarkData[] }
 );
 
@@ -18,15 +18,26 @@ const dark: typeof light = {
   border: '#383941', pressed: '#34353c', remove: '#ff9ea8',
 };
 
-function itemActions(kind: LibraryPageProps['kind'], tabId: string) {
+type ItemActions = {
+  open?: (id: string) => void;
+  remove?: (id: string) => void;
+  setPage?: (index: number) => void;
+};
+
+function itemActions(kind: LibraryPageProps['kind'], tabId: string): ItemActions {
   if (kind === 'history') {
     const native = NativeModules.HistoryModule;
+    if (!native) return {};
     return {
       open: (id: string) => native.openHistoryItem(tabId, id),
       remove: (id: string) => native.deleteHistoryItem(tabId, id),
+      setPage: typeof native.setHistoryPage === 'function'
+        ? (index: number) => native.setHistoryPage(tabId, index)
+        : undefined,
     };
   }
   const native = NativeModules.BookmarksModule;
+  if (!native) return {};
   return {
     open: (id: string) => native.openBookmark(tabId, id),
     remove: (id: string) => native.deleteBookmark(tabId, id),
@@ -38,6 +49,7 @@ export function LibraryPage(props: LibraryPageProps) {
   const colors = useColorScheme() === 'dark' ? dark : light;
   const isHistory = kind === 'history';
   const title = isHistory ? 'History' : 'Bookmarks';
+  const page = isHistory ? props.page : undefined;
   const emptyMessage = isHistory ? 'No history yet' : 'No bookmarks yet';
   const card = { backgroundColor: colors.background, borderColor: colors.border };
   const sections = useMemo(() => {
@@ -48,14 +60,20 @@ export function LibraryPage(props: LibraryPageProps) {
 
   return (
     <SectionList<LibraryItem, { title?: string }>
+      key={page?.index}
       style={[styles.page, { backgroundColor: colors.pageBackground }]}
       contentContainerStyle={styles.content}
       sections={sections}
       keyExtractor={item => item.id}
       stickySectionHeadersEnabled={false}
       ListHeaderComponent={
-        <View accessible accessibilityRole="header" accessibilityLabel={title}>
-          <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+        <View style={styles.pageHeader}>
+          <View accessible accessibilityRole="header" accessibilityLabel={title}>
+            <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+          </View>
+          {page && page.count > 1 && actions.setPage ? (
+            <HistoryPageControls page={page} setPage={actions.setPage} colors={colors} />
+          ) : null}
         </View>
       }
       ListEmptyComponent={
@@ -80,7 +98,27 @@ export function LibraryPage(props: LibraryPageProps) {
   );
 }
 
-type RowProps = { colors: typeof light; open: (id: string) => void; remove: (id: string) => void };
+function HistoryPageControls({
+  page, setPage, colors,
+}: { page: HistoryPageData; setPage: (index: number) => void; colors: typeof light }) {
+  const newerAvailable = page.index > 0;
+  const olderAvailable = page.index + 1 < page.count;
+  return (
+    <View style={styles.pageControls}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Newer history" disabled={!newerAvailable}
+        onPress={() => setPage(page.index - 1)} style={!newerAvailable && styles.disabled}>
+        <Text style={{ color: colors.text }}>Newer</Text>
+      </Pressable>
+      <Text style={{ color: colors.secondary }}>{page.index + 1} / {page.count}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Older history" disabled={!olderAvailable}
+        onPress={() => setPage(page.index + 1)} style={!olderAvailable && styles.disabled}>
+        <Text style={{ color: colors.text }}>Older</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+type RowProps = { colors: typeof light; open?: (id: string) => void; remove?: (id: string) => void };
 
 function LibraryRow({ item, colors, open, remove }: RowProps & { item: LibraryItem }) {
   const visitTime = 'visitTime' in item ? item.visitTime : undefined;
@@ -97,8 +135,8 @@ function LibraryRow({ item, colors, open, remove }: RowProps & { item: LibraryIt
         accessibilityLabel={item.title}
         accessibilityHint={address}
         accessibilityRole="link"
-        disabled={!address}
-        onPress={() => open(item.id)}
+        disabled={!address || !open}
+        onPress={open && (() => open(item.id))}
         style={({ pressed }) => [styles.open, pressed && { backgroundColor: colors.pressed }]}
       >
         {isVisit ? (
@@ -113,20 +151,21 @@ function LibraryRow({ item, colors, open, remove }: RowProps & { item: LibraryIt
           {address ? <Text style={[styles.url, { color: colors.secondary }]}>{address}</Text> : null}
         </View>
       </Pressable>
-      <RemoveButton title={item.title} colors={colors} onPress={() => remove(item.id)} subdued={isVisit} />
+      <RemoveButton title={item.title} colors={colors} onPress={remove && (() => remove(item.id))} subdued={isVisit} />
     </View>
   );
 }
 
 function RemoveButton({
   title, colors, onPress, subdued = false,
-}: { title: string; colors: typeof light; onPress: () => void; subdued?: boolean }) {
+}: { title: string; colors: typeof light; onPress?: () => void; subdued?: boolean }) {
   return (
     <Pressable
       accessibilityLabel={`Remove ${title}`}
       accessibilityRole="button"
+      disabled={!onPress}
       onPress={onPress}
-      style={({ pressed }) => [styles.remove, pressed && { backgroundColor: colors.pressed }]}
+      style={({ pressed }) => [styles.remove, !onPress && styles.disabled, pressed && { backgroundColor: colors.pressed }]}
     >
       <Text style={{ color: subdued ? colors.secondary : colors.remove }}>Remove</Text>
     </Pressable>
@@ -136,7 +175,10 @@ function RemoveButton({
 const styles = StyleSheet.create({
   page: { flex: 1 },
   content: { width: '100%', maxWidth: 1120, alignSelf: 'center', paddingHorizontal: 24, paddingVertical: 24 },
-  title: { fontSize: 26, fontWeight: '700', marginBottom: 18 },
+  pageHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
+  title: { fontSize: 26, fontWeight: '700' },
+  pageControls: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  disabled: { opacity: 0.45 },
   emptyCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, paddingHorizontal: 22 },
   empty: { fontSize: 14, paddingVertical: 12 },
   cardSides: { borderLeftWidth: StyleSheet.hairlineWidth, borderRightWidth: StyleSheet.hairlineWidth },

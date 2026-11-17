@@ -183,8 +183,17 @@ private struct ContentAreaView: View {
             historyVM.deleteItem(item)
         }
         // Handle clear history from XPC service
-        .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.clearHistory)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.clearHistory)) { notification in
+            guard activeLibraryTabMatches(notification, page: .history) else { return }
             historyVM.clearHistory()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.setHistoryPage)) { notification in
+            guard activeLibraryTabMatches(notification, page: .history),
+                  let page = notification.userInfo?["page"] as? Int,
+                  (0..<LibraryTabData.historyPageCount(itemCount: historyVM.allItems.count)).contains(page),
+                  let index = viewModel.tabs.firstIndex(where: { $0.id == viewModel.currentTabId }),
+                  viewModel.tabs[index].historyPageIndex != page else { return }
+            viewModel.tabs[index].historyPageIndex = page
         }
         // Handle internal URI navigation (e.g., actro://bookmarks/tags/{tagId})
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.actro.openURI"))) { notification in
@@ -208,10 +217,15 @@ private struct ContentAreaView: View {
     }
 
     private func libraryItemID(in notification: Notification, page: SystemTabType, key: String) -> UUID? {
-        guard let currentTab = viewModel.currentTab, currentTab.systemTabType == page,
-              let tabID = notification.userInfo?["tabId"] as? UUID, tabID == currentTab.id,
+        guard activeLibraryTabMatches(notification, page: page),
               let itemID = notification.userInfo?[key] as? String else { return nil }
         return UUID(uuidString: itemID)
+    }
+
+    private func activeLibraryTabMatches(_ notification: Notification, page: SystemTabType) -> Bool {
+        guard let currentTab = viewModel.currentTab, currentTab.systemTabType == page,
+              let tabID = notification.userInfo?["tabId"] as? UUID else { return false }
+        return tabID == currentTab.id
     }
 
     // MARK: - Pending Group Transfer

@@ -13,7 +13,7 @@ struct LibraryTabDataTests {
             )
         }
         let config = LibraryTabData.configuration(for: .history, history: items, bookmarks: [])
-        let rows = try #require(config["historyItems"])
+        let rows = try #require(config["historyItems"] as? [[String: Any]])
 
         #expect(rows.count == 12)
         #expect(rows.first?["id"] as? String == items.first?.id.uuidString)
@@ -30,7 +30,7 @@ struct LibraryTabDataTests {
         )
         let history = [HistoryItem(title: "Private visit")]
         let config = LibraryTabData.configuration(for: .bookmarks, history: history, bookmarks: [bookmark])
-        let rows = try #require(config["bookmarks"])
+        let rows = try #require(config["bookmarks"] as? [[String: Any]])
 
         #expect(rows.first?["id"] as? String == bookmark.id.uuidString)
         #expect(rows.first?["appURL"] as? String == "https://example.com/path")
@@ -45,7 +45,25 @@ struct LibraryTabDataTests {
         let history = LibraryTabData.configuration(for: .history, history: [], bookmarks: [])
         let bookmarks = LibraryTabData.configuration(for: .bookmarks, history: [], bookmarks: [])
 
-        #expect(history["historyItems"]?.isEmpty == true)
-        #expect(bookmarks["bookmarks"]?.isEmpty == true)
+        #expect((history["historyItems"] as? [[String: Any]])?.isEmpty == true)
+        #expect((bookmarks["bookmarks"] as? [[String: Any]])?.isEmpty == true)
+    }
+
+    @Test func historySnapshotsBoundEachPayloadAndClampStalePageIndices() throws {
+        let pageSize = LibraryTabData.historyPageSize
+        let history = (0..<(pageSize * 2 + 1)).map { HistoryItem(title: "Visit \($0)") }
+
+        let first = LibraryTabData.configuration(for: .history, history: history, bookmarks: [])
+        let middle = LibraryTabData.configuration(for: .history, history: history, bookmarks: [], historyPage: 1)
+        let last = LibraryTabData.configuration(for: .history, history: history, bookmarks: [], historyPage: Int.max)
+        let firstRows = try #require(first["historyItems"] as? [[String: Any]])
+        let middleRows = try #require(middle["historyItems"] as? [[String: Any]])
+        let lastRows = try #require(last["historyItems"] as? [[String: Any]])
+
+        #expect(firstRows.count == pageSize)
+        #expect(middleRows.count == pageSize)
+        #expect(middleRows.first?["id"] as? String == history[pageSize].id.uuidString)
+        #expect(lastRows.map { $0["id"] as? String } == [history.last?.id.uuidString])
+        #expect(last["historyPage"] as? [String: Int] == ["index": 2, "count": 3])
     }
 }

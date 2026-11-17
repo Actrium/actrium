@@ -38,7 +38,7 @@ struct XPCTabConfig {
     let leftPanelVisible: Bool
     let rightPanelVisible: Bool
     let permissions: [String]
-    let libraryData: [String: [[String: Any]]]
+    let libraryData: [String: Any]
     let reloadKey: Int
     let serviceCallUrl: String?
 

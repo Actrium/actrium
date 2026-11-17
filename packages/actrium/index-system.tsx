@@ -31,7 +31,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform, StyleSheet, DeviceEventEmitter, LayoutChangeEvent } from 'react-native';
 import { StandaloneGuestApp } from './src/runtime-host/StandaloneGuestApp';
 import { LibraryPage } from './src/runtime-host/LibraryPage';
-import type { BookmarkData, HistoryGroupData, HistoryItemData, SystemAppType } from './src/runtime-host/types';
+import type { BookmarkData, HistoryGroupData, HistoryItemData, HistoryPageData, SystemAppType } from './src/runtime-host/types';
 
 // System apps share one Renderer runtime and are already present in this
 // bundle. Resolve them synchronously on first use: React.lazy's Promise state
@@ -109,6 +109,7 @@ interface SystemAppProps {
     bookmarks?: BookmarkData[];
     recentHistory?: HistoryItemData[];
     historyItems?: HistoryItemData[];
+    historyPage?: HistoryPageData;
     historyGroups?: HistoryGroupData[];
     reloadKey?: number;
   };
@@ -137,7 +138,7 @@ const SystemAppContent: React.FC<{ tab: NonNullable<SystemAppProps['tab']> }> = 
         </View>
       );
     case 'history':
-      return <LibraryPage kind="history" tabId={tab.id} items={tab.historyItems ?? []} />;
+      return <LibraryPage kind="history" tabId={tab.id} items={tab.historyItems ?? []} page={tab.historyPage} />;
     case 'bookmarks':
       return <LibraryPage kind="bookmarks" tabId={tab.id} items={tab.bookmarks ?? []} />;
     case 'bookmarkTags':
