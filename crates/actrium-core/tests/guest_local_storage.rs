@@ -16,7 +16,12 @@ fn opens_the_existing_swift_database_in_place() {
     .unwrap();
     old.execute(
         "INSERT INTO guest_local_storage (origin, key, value, size) VALUES (?1, ?2, ?3, ?4)",
-        params![origin, "\0key", "雪\0🌲", "\0key".len() + "雪\0🌲".len()],
+        params![
+            origin,
+            "\0key",
+            "\u{96ea}\0🌲",
+            "\0key".len() + "\u{96ea}\0🌲".len()
+        ],
     )
     .unwrap();
     drop(old);
@@ -28,7 +33,7 @@ fn opens_the_existing_swift_database_in_place() {
             .get_item(origin.into(), "\0key".into())
             .unwrap()
             .as_deref(),
-        Some("雪\0🌲")
+        Some("\u{96ea}\0🌲")
     );
     assert_eq!(
         store.get_item("dev:other".into(), "\0key".into()).unwrap(),
@@ -92,7 +97,7 @@ fn validates_utf8_limits_and_propagates_database_failures() {
         .join("storage.sqlite");
     let store = GuestLocalStorage::new(path.to_str().unwrap().into());
     assert!(matches!(
-        store.get_item("one".into(), "雪".repeat(342)),
+        store.get_item("one".into(), "\u{96ea}".repeat(342)),
         Err(GuestLocalStorageError::InvalidKey)
     ));
     assert!(matches!(

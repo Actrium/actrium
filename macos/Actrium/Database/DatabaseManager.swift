@@ -35,10 +35,14 @@ final class DatabaseManager {
         logger.notice("Initialized at: \(path)")
     }
 
+    static func appDataDirectory(in applicationSupport: URL) -> URL {
+        applicationSupport.appendingPathComponent("Actro", isDirectory: true)
+    }
+
     private func getDatabasePath() -> String {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appFolder = appSupport.appendingPathComponent("Actro", isDirectory: true)
+        let appFolder = Self.appDataDirectory(in: appSupport)
 
         // Create directory if needed
         if !fileManager.fileExists(atPath: appFolder.path) {

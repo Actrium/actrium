@@ -103,7 +103,7 @@ final class RendererLocalStorage {
         let support = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
         )
-        let folder = support.appendingPathComponent("Actro", isDirectory: true)
+        let folder = DatabaseManager.appDataDirectory(in: support)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let store = GuestLocalStorage(path: folder.appendingPathComponent("guest-local-storage.sqlite").path)
         database = store
