@@ -129,7 +129,7 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `provider.id` | Actr Facility Provider ID: the Actr Facility Provider's canonical DNS authority. It never changes during the Realm's life. |
 | `provider.signaling` | Signaling endpoints. Entries sharing a `control_plane_id` are replicas or failover entries of one Actr Facility Provider control plane, not a federation. |
 | `provider.ice` | STUN and TURN endpoints. TURN entries name the `credential_audience` for short-lived TURN credentials. |
-| `policy` | Join policy of the Realm. |
+| `policy` | `membership` is `invite-only` (default) or `open`. Optional positive integers `open_joins_per_minute` and `max_members` limit admissions. See [Realm Membership](realm-membership.md#41-redemption). |
 | `issued_at` | RFC 3339 time the Realm Profile was signed. It is informational; Realm Profiles do not expire. |
 | `signature` | Detached signature by a Realm signing key. |
 
@@ -373,7 +373,7 @@ Discovery, Section 4.3):
 
 | `op` | Purpose |
 | --- | --- |
-| `create_realm` | The request includes both selectors and the complete `packages` map. The AFP creates a pending Realm and returns that selection in its unsigned draft. |
+| `create_realm` | The request includes both selectors and the complete `packages` map. The optional `policy` defaults to invite-only. The AFP pins the selection and policy in the pending Realm and its first draft. |
 | `publish_profile` | Submit a signed Realm Profile in `profile`. The first submission activates the pending Realm and the response carries an owner invite (`owner_invite`) once; later submissions with a higher sequence are updates (including retirement). |
 | `reissue_owner_invite` | Issue a new owner invite (response `owner_invite`) and invalidate the Realm's earlier unused owner invites; used to recover when the owner has lost all its clients (Actr Realm Membership, Section 5). |
 | `draft_profile` | For Realms outside the AFP domain, return a draft at the accepted sequence plus one. The unsigned draft retains the accepted selection, `display_name` and `policy`, and uses the AFP's current `issuer` and `provider` (Section 6.1). Publication is a separate operation. |

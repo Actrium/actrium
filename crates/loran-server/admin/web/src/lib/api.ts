@@ -41,6 +41,7 @@ export interface PublicNodeNameResponse {
 }
 
 export interface AdminCapabilities {
+  max_members_per_realm: number;
   realm_writes_enabled: boolean;
   superv_managed: boolean;
 }
@@ -77,7 +78,17 @@ export interface NodeInfo {
 
 export type RealmStatus = "pending" | "active" | "retired";
 
+export interface RealmPolicy {
+  membership: "invite-only" | "open";
+  open_joins_per_minute?: number | null;
+  max_members?: number | null;
+}
+
 export interface RealmInfo {
+  policy: RealmPolicy;
+  active_members: number;
+  effective_max_members: number;
+  admission_writable: boolean;
   realm: string;
   /** false = suspended by the operator */
   enabled: boolean;
@@ -240,6 +251,7 @@ export const api = {
   /** A Realm under the Provider domain needs the Service and Front selection of its first Realm Profile. */
   createRealm: (data: {
     realm: string;
+    policy?: RealmPolicy;
     enabled?: boolean;
     display_name?: string;
     primary_package?: string;
@@ -261,6 +273,12 @@ export const api = {
     request<RealmMutationResponse>(`/realms/${encodeURIComponent(realm)}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    }),
+
+  setRealmPolicy: (realm: string, policy: RealmPolicy) =>
+    request<RealmMutationResponse>(`/realms/${encodeURIComponent(realm)}/admission`, {
+      method: "PUT",
+      body: JSON.stringify(policy),
     }),
 
   retireRealm: (realm: string) =>

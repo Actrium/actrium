@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RealmConfig {
-    /// Development admission policy for every active Realm hosted by this AFP.
+    /// Legacy configuration. Only reusable_invite still changes invite redemption.
     #[serde(default)]
     pub dev_join: DevJoinConfig,
     /// Maximum number of pending and active Realms this instance hosts.
@@ -47,10 +47,10 @@ pub struct RealmConfig {
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct DevJoinConfig {
-    /// off (default), open (no invite), or reusable_invite.
+    /// Reusable invitation redemption is opt-in. The legacy open value is ignored.
     #[serde(default)]
     pub mode: DevJoinMode,
-    /// Role of new members admitted without an invite. Owner is never implicit.
+    /// Read for compatibility with older configurations. Open admission grants Viewer.
     #[serde(default)]
     pub default_role: DevJoinRole,
 }
@@ -70,15 +70,6 @@ pub enum DevJoinRole {
     #[default]
     Editor,
     Viewer,
-}
-
-impl DevJoinRole {
-    pub fn role(self) -> actr_protocol::realm_membership::Role {
-        match self {
-            Self::Editor => actr_protocol::realm_membership::Role::Editor,
-            Self::Viewer => actr_protocol::realm_membership::Role::Viewer,
-        }
-    }
 }
 
 impl RealmConfig {

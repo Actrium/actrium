@@ -190,7 +190,7 @@ impl RealmMembershipClient {
     /// Retries use this same signer and a fresh envelope nonce. The invite
     /// is never logged, included in an error, or persisted by this client.
     /// Missing, invalid or foreign invitations probe open admission without forwarding their text.
-    /// The AFP must explicitly enable open mode; valid invitations retain normal redemption.
+    /// The target Realm must explicitly enable open membership; valid invitations retain normal redemption.
     pub async fn join(&self, invite: &str, label: &str) -> Result<Value, MembershipClientError> {
         let (invite, rejection) = if invite.trim().is_empty() {
             (None, None)
@@ -324,7 +324,7 @@ impl RealmMembershipClient {
                         | "conflict"
                 )
                 | (410, "invite_expired" | "invite_used" | "invite_revoked")
-                | (429, "quota")
+                | (429, "quota" | "join_rate_limited")
         );
         if definitive {
             Err(MembershipClientError::Rejected {

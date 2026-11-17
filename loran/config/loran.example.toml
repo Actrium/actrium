@@ -62,10 +62,8 @@ uri = "actr://realm.example.com"
 # max_clients_per_member = 20       # unrevoked Realm client keys of a member
 # max_open_invites_per_realm = 100  # unused, unexpired invites of a Realm
 
-# Development admission for all active Realms hosted by this AFP. SIGHUP reloads it.
-[realm.dev_join]
-mode = "off"                 # off / open / reusable_invite
-default_role = "editor"       # editor / viewer; used only by open admission
+# Choose invite-only or open for each Realm in Loran Admin > Realms.
+# max_members_per_realm above caps both invitations and invite-free admissions.
 
 # Recording pipeline (logging + tracing)
 [recording]

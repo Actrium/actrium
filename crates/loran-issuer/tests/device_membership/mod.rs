@@ -52,7 +52,7 @@ fn refused(result: Result<serde_json::Value, MembershipClientError>, expected: &
 
 #[tokio::test]
 #[serial]
-async fn development_open_admission_works_across_realms_and_issues_actor_credentials() {
+async fn open_admission_is_per_realm_and_issues_actor_credentials() {
     use actr_protocol::realm_membership::{MembershipOp, MembershipRequest};
     use base64::Engine as _;
     use platform::config::{
@@ -63,6 +63,13 @@ async fn development_open_admission_works_across_realms_and_issues_actor_credent
     seed_realm(TEST_REALM, None).await;
     let other = "open-other@acme.com";
     seed_realm(other, None).await;
+    let open_policy = actr_protocol::realm_profile::RealmPolicy {
+        membership: actr_protocol::realm_profile::MembershipMode::Open,
+        ..Default::default()
+    };
+    platform::realm::Realm::set_unsigned_policy(TEST_REALM, open_policy)
+        .await
+        .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let config = RealmConfig {
@@ -87,7 +94,7 @@ async fn development_open_admission_works_across_realms_and_issues_actor_credent
     let a = device(&endpoint, TEST_REALM);
     let b = device(&endpoint, other);
     let joined = a.join("", "invite-free").await.unwrap();
-    assert_eq!(joined["role"], "editor");
+    assert_eq!(joined["role"], "viewer");
     assert_eq!(joined, a.join("", "retry").await.unwrap());
     // Raw clients may supply any string; signature and nonce checks still run.
     let unknown = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([42u8; 32]);
@@ -105,7 +112,7 @@ async fn development_open_admission_works_across_realms_and_issues_actor_credent
         let document = request.sign(&key);
         let (status, reply) = post_membership(raw_app.clone(), document.clone()).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(reply["role"], "editor");
+        assert_eq!(reply["role"], "viewer");
         let (status, _) = post_membership(raw_app.clone(), document.clone()).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         let mut changed = document;
@@ -129,7 +136,7 @@ async fn development_open_admission_works_across_realms_and_issues_actor_credent
             .join(&used.invite, "used invite")
             .await
             .unwrap()["role"],
-        "editor"
+        "viewer"
     );
     let expired = invite(TEST_REALM).await;
     sqlx::query("UPDATE realm_invite SET expires_at=1 WHERE invite_id=?")
@@ -142,7 +149,7 @@ async fn development_open_admission_works_across_realms_and_issues_actor_credent
             .join(&expired.invite, "expired invite")
             .await
             .unwrap()["role"],
-        "editor"
+        "viewer"
     );
     let revoked = invite(TEST_REALM).await;
     membership::revoke_invite(&owner(TEST_REALM).await, &revoked.invite_id)
@@ -153,7 +160,7 @@ async fn development_open_admission_works_across_realms_and_issues_actor_credent
             .join(&revoked.invite, "revoked invite")
             .await
             .unwrap()["role"],
-        "editor"
+        "viewer"
     );
     let foreign = invite(other).await;
     assert_eq!(
@@ -180,7 +187,11 @@ async fn development_open_admission_works_across_realms_and_issues_actor_credent
             .unwrap()["role"],
         "owner"
     );
-    assert_eq!(b.join("", "another realm").await.unwrap()["role"], "editor");
+    refused(b.join("", "invitation required").await, "invalid_request");
+    assert_eq!(
+        b.join(&foreign.invite, "invited").await.unwrap()["role"],
+        "editor"
+    );
     assert!(a.members().await.unwrap()["members"].is_array());
     let registration = IssuerClient::new(&endpoint)
         .with_client_key(a.client_key())
@@ -200,10 +211,13 @@ async fn development_open_admission_works_across_realms_and_issues_actor_credent
         device(&endpoint, "missing@acme.com")
             .join("", "missing")
             .await,
-        "realm_unavailable",
+        "invalid_request",
     );
     server.abort();
-    // A fresh normal router retains default one-time admission.
+    // A persisted edit closes admission even after restarting the router.
+    platform::realm::Realm::set_unsigned_policy(TEST_REALM, Default::default())
+        .await
+        .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let app = create_test_router(&env).await;

@@ -18,7 +18,7 @@ use axum::{
 };
 use chrono::Utc;
 use platform::realm::membership::{self, Code, MembershipError, Signer};
-use platform::realm::{RealmError, RealmProfileRecord};
+use platform::realm::{MembershipMode, Realm, RealmError, RealmProfileRecord};
 use serde_json::{Value, json};
 
 use crate::handlers::{IssuerState, expected_provider_id};
@@ -42,12 +42,17 @@ pub(crate) async fn post_membership(
             }
             let status =
                 StatusCode::from_u16(error.code.status()).unwrap_or(StatusCode::BAD_REQUEST);
-            (
-                status,
-                no_store,
-                Json(json!({ "error": error.code.as_str(), "message": error.message })),
-            )
-                .into_response()
+            let mut body = json!({ "error": error.code.as_str(), "message": error.message });
+            if let Some(seconds) = error.retry_after_secs {
+                body["retry_after_secs"] = json!(seconds);
+            }
+            let mut response = (status, no_store, Json(body)).into_response();
+            if let Some(seconds) = error.retry_after_secs {
+                response
+                    .headers_mut()
+                    .insert(header::RETRY_AFTER, seconds.into());
+            }
+            response
         }
     }
 }
@@ -145,7 +150,7 @@ async fn use_nonce(nonce: &str, expires_at: i64) -> Result<(), MembershipError> 
     }
 }
 
-/// Verify key possession before invitation redemption or development open admission.
+/// Verify key possession before redemption or invite-free Realm admission.
 /// Normal admission looks up the invite before recording a nonce.
 async fn join(
     state: &IssuerState,
@@ -163,7 +168,9 @@ async fn join(
             format!("label has more than {MAX_LABEL_CHARS} characters"),
         );
     }
-    let open = state.dev_join.mode == platform::config::realm::DevJoinMode::Open;
+    let open = Realm::get(&request.realm)
+        .await?
+        .is_some_and(|realm| realm.policy.membership == MembershipMode::Open);
     if open {
         use_nonce(&request.nonce, expires_at).await?;
     }
@@ -192,7 +199,7 @@ async fn join(
             &public_key,
             &label,
             state.limits,
-            state.dev_join.mode,
+            state.invite_mode,
         )
         .await
     }
@@ -212,14 +219,7 @@ async fn join(
                         | Code::MemberRemoved
                 ) =>
         {
-            membership::join_open(
-                &request.realm,
-                &public_key,
-                &label,
-                state.dev_join.default_role,
-                state.limits,
-            )
-            .await
+            membership::join_open(&request.realm, &public_key, &label, state.limits).await
         }
         result => result,
     }
@@ -279,8 +279,8 @@ async fn update_realm(
         None => ProfileChange {
             selection: request.selection.clone(),
             display_name: request.display_name.clone(),
-            retire: false,
             owner: Some(signer.clone()),
+            ..Default::default()
         },
     };
     profiles

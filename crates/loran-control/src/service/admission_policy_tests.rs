@@ -38,17 +38,13 @@ async fn supervised_config_saves_cannot_change_admission_but_standalone_saves_ca
         .unwrap()
         .with_config_path(path.clone())
         .with_running_config(config.clone());
-    assert_eq!(
-        service
-            .get_service_detail_direct("issuer")
-            .await
-            .unwrap()
-            .config
-            .unwrap()["dev_join_writable"],
-        false
-    );
+    let denied = service
+        .set_realm_policy_direct("realm@example.com", Default::default())
+        .await
+        .unwrap_err();
+    assert_eq!(denied.code(), tonic::Code::PermissionDenied);
     let mut changed = config.clone();
-    changed.realm.dev_join.mode = DevJoinMode::Open;
+    changed.realm.dev_join.mode = DevJoinMode::ReusableInvite;
     let error = service
         .save_config_file_direct(&changed.to_toml().unwrap(), true)
         .await
@@ -56,6 +52,16 @@ async fn supervised_config_saves_cannot_change_admission_but_standalone_saves_ca
     assert_eq!(error.code(), tonic::Code::PermissionDenied);
     assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), original);
     changed.realm.dev_join = config.realm.dev_join;
+    changed.realm.max_members_per_realm = Some(123);
+    assert_eq!(
+        service
+            .save_config_file_direct(&changed.to_toml().unwrap(), true)
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::PermissionDenied
+    );
+    changed.realm.max_members_per_realm = config.realm.max_members_per_realm;
     changed.realm.dev_join.default_role = DevJoinRole::Viewer;
     assert_eq!(
         service
@@ -78,16 +84,8 @@ async fn supervised_config_saves_cannot_change_admission_but_standalone_saves_ca
         .await
         .unwrap();
     let standalone = service.with_running_config(config.clone());
-    assert_eq!(
-        standalone
-            .get_service_detail_direct("issuer")
-            .await
-            .unwrap()
-            .config
-            .unwrap()["dev_join_writable"],
-        true
-    );
-    config.realm.dev_join.mode = DevJoinMode::Open;
+    assert!(standalone.manages_admission("realm@example.com"));
+    config.realm.dev_join.mode = DevJoinMode::ReusableInvite;
     standalone
         .save_config_file_direct(&config.to_toml().unwrap(), false)
         .await
@@ -98,7 +96,7 @@ async fn supervised_config_saves_cannot_change_admission_but_standalone_saves_ca
             .realm
             .dev_join
             .mode,
-        DevJoinMode::Open
+        DevJoinMode::ReusableInvite
     );
     tokio::fs::remove_file(path).await.unwrap();
 }

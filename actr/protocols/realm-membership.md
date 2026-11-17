@@ -88,7 +88,7 @@ no `requester`.
 
 | `op` | Fields | Who may send it | Effect |
 | --- | --- | --- | --- |
-| `join` | `invite` (the secret), `public_key`, optional `label` | Whoever holds the invite, signing with the new key | Redeems the invite and registers the key; responds `{realm, member_id, role, key_id}` |
+| `join` | `public_key`, optional `label`, `invite` (required for invite-only Realms) | The new device signs with its Realm key | Registers the key and responds `{realm, member_id, role, key_id}` |
 | `create_invite` | `role` (`editor`/`viewer`) or `member_id`, plus `invite_expires_at` | New-member invite: the owner; client invite: the owner, or a member for itself | Responds `{invite_id, invite, expires_at}`, where `invite` is the text form, returned only this once |
 | `revoke_invite` | `invite_id` | The owner, or whoever issued the invite | The unused invite stops working |
 | `list_members` | none | Any member | The owner gets all members, clients and unused invites; other members get only their own record, clients and the invites they issued |
@@ -134,6 +134,13 @@ the answer is `invite_used`.
 - An invite with a `member_id` registers a new client for that member, which
   **MUST** still be `active`.
 
+A Realm with signed `policy.membership = "open"` may also admit a new device without
+a redeemable invitation. It registers a new Viewer after verifying the device signature.
+A valid invitation retains its role. Each active member counts once, including members
+admitted by invitation. The first owner has a reserved place. Only successful new
+invite-free admissions count towards the rolling 60-second limit (default 10).
+Same-key retries return the existing membership. Rejected attempts consume no place.
+
 ### 4.2 Owner protection
 
 - The owner **MUST NOT** revoke its own last unrevoked Realm client key,
@@ -159,6 +166,7 @@ The Actr Facility Provider returns errors as JSON `{"error": "<code>", "message"
 | 409 | `invite_realm_mismatch` | The invite belongs to another Realm |
 | 409 | `owner_last_client`, `owner_must_transfer`, `conflict` | Owner protection, key already registered, or target in the wrong state |
 | 410 | `invite_expired`, `invite_used`, `invite_revoked` | The invite has expired, has been used, or has been revoked |
+| 429 | `join_rate_limited` | The Realm reached its invite-free join rate. `Retry-After` and `retry_after_secs` give the delay in seconds. |
 | 429 | `quota` | Too many members, clients or unused invites |
 
 `realm_unavailable` is returned only after the requester has proven that it

@@ -170,7 +170,10 @@ async fn signs_verifiable_profiles_for_the_provider_domain() {
         first.provider.signaling[0].control_plane_id,
         "provider.example/v1"
     );
-    assert_eq!(first.policy.membership, "invite-only");
+    assert_eq!(
+        first.policy.membership,
+        actr_protocol::realm_profile::MembershipMode::InviteOnly
+    );
     let current = platform::realm::RealmIssuerKey::current(&name)
         .await
         .unwrap()
@@ -1017,6 +1020,63 @@ mod management {
         send(&profiles, &config, &descriptor, &document)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn external_creation_pins_admission_until_the_first_signed_profile() {
+        let (profiles, _dir) = setup().await;
+        let (domain, descriptor) = acme();
+        let config = RealmConfig::default();
+        let name = "open@acme.com";
+        let mut request = create(name, "open-create", None);
+        let policy: actr_protocol::realm_profile::RealmPolicy = serde_json::from_value(
+            json!({"membership":"open", "open_joins_per_minute":2, "max_members":7}),
+        )
+        .unwrap();
+        request.policy = Some(policy);
+        let created = send(
+            &profiles,
+            &config,
+            &descriptor,
+            &signed(&request, &domain, "rs-1"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(created["profile"]["policy"], json!(policy));
+        let changed = create(name, "changed-retry", None);
+        assert!(matches!(
+            send(
+                &profiles,
+                &config,
+                &descriptor,
+                &signed(&changed, &domain, "rs-1")
+            )
+            .await,
+            Err(ManagementError::Conflict(_))
+        ));
+        let mut draft = created["profile"].clone();
+        draft["policy"] = json!({"membership":"invite-only"});
+        assert!(matches!(
+            send(
+                &profiles,
+                &config,
+                &descriptor,
+                &publish(name, "changed-profile", draft, &domain)
+            )
+            .await,
+            Err(ManagementError::Conflict(_))
+        ));
+        let accepted = send(
+            &profiles,
+            &config,
+            &descriptor,
+            &publish(name, "open-profile", created["profile"].clone(), &domain),
+        )
+        .await
+        .unwrap();
+        assert!(accepted["owner_invite"].is_string());
+        assert_eq!(Realm::get(name).await.unwrap().unwrap().policy, policy);
     }
 
     #[tokio::test]

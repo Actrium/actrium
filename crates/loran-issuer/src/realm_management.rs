@@ -321,12 +321,22 @@ async fn create_realm(
             "create_realm requires primary_package, front_package and packages".into(),
         )
     })?;
+    let policy = request.policy.unwrap_or_default();
+    if policy
+        .max_members
+        .is_some_and(|n| n.get() > config.max_members_per_realm())
+    {
+        return Err(ManagementError::Invalid(
+            "max_members exceeds the AFP member limit".into(),
+        ));
+    }
     let requester = request.requester.clone().unwrap_or_default();
 
     let created = Realm {
         name: name.to_string(),
         status: RealmStatus::Pending,
         requester: requester.clone(),
+        policy,
         pending_expires_at: Some(Utc::now().timestamp() as u64 + config.pending_ttl_secs()),
         ..Default::default()
     }
@@ -342,6 +352,11 @@ async fn create_realm(
                 return Err(ManagementError::Conflict(format!(
                     "Realm {name} already exists"
                 )));
+            }
+            if existing.status == RealmStatus::Pending && existing.policy != policy {
+                return Err(ManagementError::Conflict(
+                    "creation retry changes the admission policy".into(),
+                ));
             }
             if existing.status == RealmStatus::Active {
                 return Ok(json!({ "realm": name, "status": "active" }));

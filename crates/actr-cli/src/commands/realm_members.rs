@@ -35,7 +35,7 @@ pub struct JoinArgs {
     /// Realm invite text (`-` reads stdin); ignored when --realm is supplied
     #[arg(value_name = "INVITE", required_unless_present = "realm")]
     pub invite: Option<String>,
-    /// Target Realm for development open admission; optional INVITE text is ignored
+    /// Target Realm for invite-free admission; optional INVITE text is ignored
     #[arg(long, value_name = "NAME", required_unless_present = "invite")]
     pub realm: Option<String>,
     /// Key file to write the new Realm client key to
@@ -407,7 +407,7 @@ async fn send_with(
                     410,
                     Some("invite_expired" | "invite_used" | "invite_revoked")
                 )
-                | (429, Some("quota"))
+                | (429, Some("quota" | "join_rate_limited"))
         );
         return Err(if definitive {
             SendError::Refused(error)

@@ -9,43 +9,44 @@ const REALM: &str = "k7m2q9xh@acme.com";
 #[serial]
 async fn open_admission_is_idempotent_and_enforces_revocation_and_quotas() {
     let owner = realm_with_owner().await;
+    Realm::set_unsigned_policy(
+        REALM,
+        RealmPolicy {
+            membership: MembershipMode::Open,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
     let public_key = key(2);
     let (a, b) = tokio::join!(
-        join_open(REALM, &public_key, "a", DevJoinRole::Editor, LIMITS),
-        join_open(REALM, &public_key, "b", DevJoinRole::Editor, LIMITS),
+        join_open(REALM, &public_key, "a", LIMITS),
+        join_open(REALM, &public_key, "b", LIMITS),
     );
     let joined = a.unwrap();
     assert_eq!(joined, b.unwrap());
-    let again = join_open(REALM, &key(2), "retry", DevJoinRole::Viewer, LIMITS)
-        .await
-        .unwrap();
+    let again = join_open(REALM, &key(2), "retry", LIMITS).await.unwrap();
     assert_eq!(again, joined);
-    assert_eq!(again["role"], "editor");
-    let viewer = join_open(REALM, &key(3), "viewer", DevJoinRole::Viewer, LIMITS)
-        .await
-        .unwrap();
+    assert_eq!(again["role"], "viewer");
+    let viewer = join_open(REALM, &key(3), "viewer", LIMITS).await.unwrap();
     assert_eq!(viewer["role"], "viewer");
     assert_eq!(
-        code(join_open(REALM, &key(4), "", DevJoinRole::Editor, LIMITS).await),
+        code(join_open(REALM, &key(4), "", LIMITS).await),
         Code::Quota
     );
     revoke_client(&owner, &client_key_id(&key(2)))
         .await
         .unwrap();
     assert_eq!(
-        code(join_open(REALM, &key(2), "", DevJoinRole::Editor, LIMITS).await),
+        code(join_open(REALM, &key(2), "", LIMITS).await),
         Code::ClientRevoked
     );
     remove_member(&owner, viewer["member_id"].as_str().unwrap())
         .await
         .unwrap();
-    assert!(
-        join_open(REALM, &key(3), "", DevJoinRole::Editor, LIMITS)
-            .await
-            .is_err()
-    );
+    assert!(join_open(REALM, &key(3), "", LIMITS).await.is_err());
     assert_eq!(
-        code(join_open("missing@acme.com", &key(5), "", DevJoinRole::Editor, LIMITS).await),
+        code(join_open("missing@acme.com", &key(5), "", LIMITS).await),
         Code::RealmUnavailable
     );
     sqlx::query("UPDATE realm SET status = 'retired' WHERE name = ?")
@@ -54,8 +55,37 @@ async fn open_admission_is_idempotent_and_enforces_revocation_and_quotas() {
         .await
         .unwrap();
     assert_eq!(
-        code(join_open(REALM, &key(1), "", DevJoinRole::Editor, LIMITS).await),
+        code(join_open(REALM, &key(1), "", LIMITS).await),
         Code::RealmUnavailable
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn open_join_rate_is_rolling_and_retries_do_not_consume_it() {
+    let owner = realm_with_owner().await;
+    let policy = RealmPolicy {
+        membership: MembershipMode::Open,
+        open_joins_per_minute: std::num::NonZeroU32::new(1),
+        ..Default::default()
+    };
+    Realm::set_unsigned_policy(REALM, policy).await.unwrap();
+    let first = join_open(REALM, &key(2), "", LIMITS).await.unwrap();
+    assert_eq!(join_open(REALM, &key(2), "", LIMITS).await.unwrap(), first);
+    remove_member(&owner, first["member_id"].as_str().unwrap())
+        .await
+        .unwrap();
+    let refused = join_open(REALM, &key(3), "", LIMITS).await.unwrap_err();
+    assert_eq!(refused.code, Code::JoinRateLimited);
+    assert!((1..=60).contains(&refused.retry_after_secs.unwrap()));
+    sqlx::query("UPDATE realm_open_join SET admitted_at = admitted_at - 60 WHERE realm=?")
+        .bind(REALM)
+        .execute(get_database().get_pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        join_open(REALM, &key(3), "", LIMITS).await.unwrap()["role"],
+        "viewer"
     );
 }
 
