@@ -1,15 +1,20 @@
 import Foundation
 import SwiftUI
 
+enum CompactToolbarAction: CaseIterable, Hashable {
+    case newTab
+    case history
+    case bookmarks
+    case overview
+}
+
 struct CompactToolbarInteractionFrames {
     let tabStrip: CGRect
-    let newTabButton: CGRect
-    let overviewButton: CGRect
+    let buttons: [CompactToolbarAction: CGRect]
 
     func containsInteractivePoint(_ point: CGPoint) -> Bool {
         tabStrip.contains(point)
-            || newTabButton.contains(point)
-            || overviewButton.contains(point)
+            || buttons.values.contains(where: { $0.contains(point) })
     }
 }
 
@@ -19,12 +24,11 @@ func compactToolbarInteractionFrames(
     isFullScreen: Bool,
     tabStripWidth: CGFloat
 ) -> CompactToolbarInteractionFrames {
-    let tabLeading = bounds.minX + (isFullScreen ? CGFloat(4) : CGFloat(78)) + 16
-    let height = bounds.height
-    return CompactToolbarInteractionFrames(
-        tabStrip: CGRect(x: tabLeading, y: bounds.minY, width: tabStripWidth, height: height),
-        newTabButton: CGRect(x: bounds.maxX - 76, y: bounds.minY, width: 30, height: height),
-        overviewButton: CGRect(x: bounds.maxX - 38, y: bounds.minY, width: 30, height: height)
+    CompactToolbarInteractionFrames(
+        tabStrip: CompactToolbarLayout.tabStripFrame(
+            in: bounds, isFullScreen: isFullScreen, contentWidth: tabStripWidth
+        ),
+        buttons: CompactToolbarLayout.actionButtonFrames(in: bounds)
     )
 }
 

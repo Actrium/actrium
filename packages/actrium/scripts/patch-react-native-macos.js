@@ -61,6 +61,18 @@ patchFile('React/Fabric/Mounting/ComponentViews/ScrollView/RCTScrollViewComponen
   return source.replace(flexible, fixed);
 });
 
+// RuntimeApp surface props can contain browsing history and bookmarks.
+patchFile('Libraries/ReactNative/AppRegistryImpl.js', (source) => {
+  const logGuard = "if (appKey !== 'LogBox') {";
+  const redactedGuard = "if (appKey !== 'LogBox' && appKey !== 'RuntimeApp') {";
+  const unpatched = source.split(logGuard).length - 1;
+  const patched = source.split(redactedGuard).length - 1;
+  if (unpatched + patched !== 2) {
+    throw new Error('React Native macOS AppRegistry logging changed. Update the RuntimeApp props redaction.');
+  }
+  return source.replaceAll(logGuard, redactedGuard);
+});
+
 const aliasPath = path.join(
   packageRoot,
   'src',

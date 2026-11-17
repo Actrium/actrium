@@ -922,7 +922,7 @@ final class ViewBridgeCoordinator {
 
         // Use coordinator Complete storage tab Configure
         let unifiedScriptPreview = tabConfig?.unifiedScript.map { String($0.prefix(50)) + "..." } ?? "nil"
-        ipcLog("📋 sendBootstrapTabConfig: tabConfig=\(tabConfig != nil ? "SET" : "NIL"), systemAppType=\(tabConfig?.systemAppType ?? "nil"), unifiedScript=\(unifiedScriptPreview), isOverviewMode=\(isOverviewMode), bookmarks=\(tabConfig?.bookmarks.count ?? 0), history=\(tabConfig?.recentHistory.count ?? 0)")
+        ipcLog("📋 sendBootstrapTabConfig: tabConfig=\(tabConfig != nil ? "SET" : "NIL"), systemAppType=\(tabConfig?.systemAppType ?? "nil"), unifiedScript=\(unifiedScriptPreview), isOverviewMode=\(isOverviewMode)")
 
         // 🔑 If tabConfig Not set yet. Mark it as to be sent. Wait. tabConfig Set and then send
         guard let tabConfig = self.tabConfig else {
@@ -952,9 +952,7 @@ final class ViewBridgeCoordinator {
             config["rightPanelVisible"] = tabConfig.rightPanelVisible
             config["permissions"] = tabConfig.permissions
             config["reloadKey"] = tabConfig.reloadKey
-            // 🔑 StartPage Data required
-            if !tabConfig.bookmarks.isEmpty { config["bookmarks"] = tabConfig.bookmarks }
-            if !tabConfig.recentHistory.isEmpty { config["recentHistory"] = tabConfig.recentHistory }
+            for (key, value) in tabConfig.libraryData { config[key] = value }
         }
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: config),
@@ -2074,9 +2072,7 @@ struct UnifiedReactNativeLayer: View {
     let isDropTarget: Bool        // Whether to drag or drop target (green solid border)
     let coordinator: ViewBridgeCoordinator
 
-    // System app data (for StartPageApp)
-    var bookmarks: [[String: Any]] = []
-    var recentHistory: [[String: Any]] = []
+    let libraryData: [String: [[String: Any]]]
 
     init(
         tab: Tab,
@@ -2090,8 +2086,7 @@ struct UnifiedReactNativeLayer: View {
         isDragSource: Bool = false,
         isDropTarget: Bool = false,
         coordinator: ViewBridgeCoordinator,
-        bookmarks: [[String: Any]] = [],
-        recentHistory: [[String: Any]] = []
+        libraryData: [String: [[String: Any]]]
     ) {
         self.tab = tab
         self.fingerprint = fingerprint
@@ -2104,8 +2099,7 @@ struct UnifiedReactNativeLayer: View {
         self.isDragSource = isDragSource
         self.isDropTarget = isDropTarget
         self.coordinator = coordinator
-        self.bookmarks = bookmarks
-        self.recentHistory = recentHistory
+        self.libraryData = libraryData
         // Note: coordinator setup moved to onAppear to avoid redundant side effects
         // during SwiftUI body re-evaluation (init called multiple times per tab)
     }
@@ -2275,8 +2269,7 @@ struct UnifiedReactNativeLayer: View {
                 leftPanelVisible: tab.leftPanelDefaultVisible,
                 rightPanelVisible: tab.rightPanelDefaultVisible,
                 permissions: tab.permissions,
-                bookmarks: bookmarks,
-                recentHistory: recentHistory,
+                libraryData: libraryData,
                 reloadKey: tab.reloadNonce,
                 serviceCallUrl: tab.serviceCallUrl
             )
@@ -2327,8 +2320,7 @@ struct UnifiedReactNativeLayer: View {
                 leftPanelVisible: tab.leftPanelDefaultVisible,
                 rightPanelVisible: tab.rightPanelDefaultVisible,
                 permissions: tab.permissions,
-                bookmarks: bookmarks,
-                recentHistory: recentHistory,
+                libraryData: libraryData,
                 reloadKey: tab.reloadNonce,
                 serviceCallUrl: tab.serviceCallUrl
             )
@@ -2368,10 +2360,9 @@ struct UnifiedReactNativeLayer: View {
             "leftPanelVisible": tab.leftPanelDefaultVisible,
             "rightPanelVisible": tab.rightPanelDefaultVisible,
             "permissions": tab.permissions,
-            "bookmarks": bookmarks,
-            "recentHistory": recentHistory,
             "reloadKey": tab.reloadNonce
         ]
+        for (key, value) in libraryData { config[key] = value }
         if let systemAppType = tab.systemTabType?.rawValue {
             config[RuntimeBridgeContract.systemAppType] = systemAppType
         }
@@ -2618,19 +2609,12 @@ struct UnifiedReactNativeLayer: View {
             tabConfig["legacyActorBridge"] = true
         }
 
-        // Add system app data (for StartPageApp)
-        if !bookmarks.isEmpty {
-            tabConfig["bookmarks"] = bookmarks
-        }
-        if !recentHistory.isEmpty {
-            tabConfig["recentHistory"] = recentHistory
-        }
+        for (key, value) in libraryData { tabConfig[key] = value }
 
-        NSLog("📤 [sendTabConfig] tab=%@ service=%@ size=%.0fx%.0f systemAppType=%@ bookmarks=%d history=%d",
+        NSLog("📤 [sendTabConfig] tab=%@ service=%@ size=%.0fx%.0f systemAppType=%@",
               tabIdShort, serviceId.components(separatedBy: ".").last ?? "",
               currentSize.width, currentSize.height,
-              tab.systemTabType?.rawValue ?? "nil",
-              bookmarks.count, recentHistory.count)
+              tab.systemTabType?.rawValue ?? "nil")
 
         coordinator.rendererHostView?.apply(config: tabConfig)
     }

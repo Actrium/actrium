@@ -58,8 +58,8 @@ RCT_EXTERN_METHOD(openURL:(NSString *)urlString)
 
 @interface RCT_EXTERN_MODULE(HistoryModule, NSObject)
 
-RCT_EXTERN_METHOD(openHistoryItem:(NSString *)itemId :(NSString *)appURL)
-RCT_EXTERN_METHOD(deleteHistoryItem:(NSString *)itemId)
+RCT_EXTERN_METHOD(openHistoryItem:(NSString *)tabId :(NSString *)itemId)
+RCT_EXTERN_METHOD(deleteHistoryItem:(NSString *)tabId :(NSString *)itemId)
 RCT_EXTERN_METHOD(restoreGroup:(NSString *)groupId)
 RCT_EXTERN_METHOD(clearHistory)
 
@@ -69,8 +69,8 @@ RCT_EXTERN_METHOD(clearHistory)
 
 @interface RCT_EXTERN_MODULE(BookmarksModule, NSObject)
 
-RCT_EXTERN_METHOD(openBookmark:(NSString *)bookmarkId :(NSString *)appURL)
-RCT_EXTERN_METHOD(deleteBookmark:(NSString *)bookmarkId)
+RCT_EXTERN_METHOD(openBookmark:(NSString *)tabId :(NSString *)bookmarkId)
+RCT_EXTERN_METHOD(deleteBookmark:(NSString *)tabId :(NSString *)bookmarkId)
 
 @end
 

@@ -15,6 +15,11 @@ enum ActriumAppURLScheme {
         URL(string: "\(primary)://\(bundleId)")!
     }
 
+    static func bundleId(from url: URL) -> String? {
+        guard isSupported(url.scheme), let host = url.host, !host.isEmpty else { return nil }
+        return url.path == "/" ? host : host + url.path
+    }
+
     static func appURL(filePath: String) -> URL? {
         URL(string: "\(primary)://\(filePath)")
     }

@@ -581,6 +581,18 @@ final class RendererProcessPool: ObservableObject {
                !decoded.isEmpty {
                 userInfo = decoded
             }
+            switch localName {
+            case XPCNotificationBridge.openBookmark, XPCNotificationBridge.deleteBookmark,
+                 XPCNotificationBridge.openHistoryItem, XPCNotificationBridge.deleteHistoryItem:
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      worker.id == self.systemWorkerId,
+                      self.worker(for: tabId) === worker,
+                      var scopedInfo = userInfo else { return }
+                scopedInfo["tabId"] = tabId
+                userInfo = scopedInfo
+            default:
+                break
+            }
             NotificationCenter.default.post(
                 name: localName,
                 object: nil,

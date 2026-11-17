@@ -352,8 +352,11 @@ struct WorkspaceMainView: View {
                                 isDragSource: draggingTabId == tab.id,
                                 isDropTarget: dropTargetTabId == tab.id,
                                 coordinator: viewBridgeCoordinatorManager.coordinator(for: tab.id),
-                                bookmarks: bookmarksForRN,
-                                recentHistory: recentHistoryForRN
+                                libraryData: LibraryTabData.configuration(
+                                    for: tab.systemTabType,
+                                    history: historyVM.allItems,
+                                    bookmarks: bookmarkVM.bookmarks
+                                )
                             )
                         }
                     }
@@ -1144,32 +1147,6 @@ struct WorkspaceMainView: View {
         tab.unifiedScript != nil ||
         tab.leftPanelScript != nil ||
         tab.guestScript != nil
-    }
-
-    // MARK: - Data Conversion for React Native
-
-    /// Convert bookmarks to dictionary array for RN layer
-    private var bookmarksForRN: [[String: Any]] {
-        bookmarkVM.bookmarks.map { bookmark in
-            [
-                "id": bookmark.id.uuidString,
-                "title": bookmark.title,
-                "appURL": bookmark.appURL?.absoluteString ?? "",
-                "createdAt": Int(bookmark.createdAt.timeIntervalSince1970 * 1000)
-            ] as [String: Any]
-        }
-    }
-
-    /// Convert recent history to dictionary array for RN layer
-    private var recentHistoryForRN: [[String: Any]] {
-        historyVM.recentItems.map { item in
-            [
-                "id": item.id.uuidString,
-                "title": item.title,
-                "appURL": item.appURL?.absoluteString ?? "",
-                "visitTime": Int(item.visitTime.timeIntervalSince1970 * 1000)
-            ] as [String: Any]
-        }
     }
 
     // MARK: - Transform Calculations

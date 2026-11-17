@@ -38,8 +38,7 @@ struct XPCTabConfig {
     let leftPanelVisible: Bool
     let rightPanelVisible: Bool
     let permissions: [String]
-    let bookmarks: [[String: Any]]
-    let recentHistory: [[String: Any]]
+    let libraryData: [String: [[String: Any]]]
     let reloadKey: Int
     let serviceCallUrl: String?
 
@@ -54,10 +53,9 @@ struct XPCTabConfig {
             "leftPanelVisible": leftPanelVisible,
             "rightPanelVisible": rightPanelVisible,
             "permissions": permissions,
-            "bookmarks": bookmarks,
-            "recentHistory": recentHistory,
             "reloadKey": reloadKey
         ]
+        for (key, value) in libraryData { dict[key] = value }
         if let systemAppType = systemAppType {
             dict[RuntimeBridgeContract.systemAppType] = systemAppType
         }

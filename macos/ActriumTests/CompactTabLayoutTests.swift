@@ -12,11 +12,50 @@ struct CompactTabLayoutTests {
             tabStripWidth: 640
         )
         #expect(frames.tabStrip.minX == 94)
-        #expect(frames.containsInteractivePoint(CGPoint(x: 300, y: 2)))
-        #expect(frames.containsInteractivePoint(CGPoint(x: 300, y: 43)))
-        #expect(frames.containsInteractivePoint(CGPoint(x: 1140, y: 22)))
-        #expect(frames.containsInteractivePoint(CGPoint(x: 1180, y: 22)))
+        #expect(frames.containsInteractivePoint(CGPoint(x: 300, y: 6)))
+        #expect(frames.containsInteractivePoint(CGPoint(x: 300, y: 40)))
+        #expect(!frames.containsInteractivePoint(CGPoint(x: 300, y: 2)))
         #expect(!frames.containsInteractivePoint(CGPoint(x: 900, y: 22)))
+    }
+
+    @Test func headerButtonsKeepTheirOrderAndReserveSpaceInANarrowWindow() throws {
+        let frames = compactToolbarInteractionFrames(
+            in: CGRect(x: 0, y: 0, width: 640, height: 45),
+            isFullScreen: false,
+            tabStripWidth: 640
+        )
+        let newTab = try #require(frames.buttons[.newTab])
+        let history = try #require(frames.buttons[.history])
+        let bookmarks = try #require(frames.buttons[.bookmarks])
+        let overview = try #require(frames.buttons[.overview])
+
+        #expect(frames.tabStrip.maxX < newTab.minX)
+        #expect(newTab.maxX < history.minX)
+        #expect(history.maxX < bookmarks.minX)
+        #expect(bookmarks.maxX < overview.minX)
+        for frame in [newTab, history, bookmarks, overview] {
+            #expect(frames.containsInteractivePoint(CGPoint(x: frame.midX, y: frame.midY)))
+            #expect(!frames.containsInteractivePoint(CGPoint(x: frame.midX, y: 2)))
+        }
+        #expect(!frames.containsInteractivePoint(CGPoint(x: (history.maxX + bookmarks.minX) / 2, y: history.midY)))
+    }
+
+    @Test @MainActor func headerActionsCreateOrRefocusTheMatchingSystemTab() {
+        let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
+        for type: SystemTabType in [.history, .bookmarks] {
+            let first = viewModel.openSystemTab(type)
+            _ = viewModel.addNewTab(focusAddressBar: false)
+            viewModel.requestAddressBarFocus()
+            let tabIDs = viewModel.tabs.map(\.id)
+            let selected = viewModel.openSystemTab(type)
+
+            #expect(selected.id == first.id)
+            #expect(viewModel.tabs.map(\.id) == tabIDs)
+            #expect(viewModel.currentTab?.url == type.aboutURL)
+            #expect(viewModel.currentTabId == first.id)
+            #expect(viewModel.actriumMode == .focus(tabId: first.id))
+            #expect(!viewModel.shouldAutoFocusAddressBar)
+        }
     }
 
     @Test func draggedTabUsesNearestLegalLandingSlot() {

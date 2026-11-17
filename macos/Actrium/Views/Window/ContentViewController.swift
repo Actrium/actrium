@@ -108,6 +108,17 @@ final class ContentViewController: NSViewController {
 
 // MARK: - SwiftUI Content Area
 
+private struct SystemPageSelection: Equatable {
+    let tabID: UUID
+    let type: SystemTabType
+
+    init?(tab: Tab?) {
+        guard let tab, let type = tab.systemTabType else { return nil }
+        tabID = tab.id
+        self.type = type
+    }
+}
+
 /// SwiftUI view for main content area with XPC notification handling
 private struct ContentAreaView: View {
     @ObservedObject var viewModel: BrowserViewModel
@@ -139,38 +150,36 @@ private struct ContentAreaView: View {
             // Apply debug configuration (only once)
             applyDebugConfigIfNeeded()
         }
+        .onChange(of: SystemPageSelection(tab: viewModel.currentTab), initial: true) { _, selection in
+            switch selection?.type {
+            case .history: historyVM.loadAll()
+            case .bookmarks: bookmarkVM.loadAll()
+            default: break
+            }
+        }
         // Handle bookmark open from XPC service
         .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openBookmark)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let urlString = userInfo["url"] as? String else { return }
-            viewModel.navigateCurrentTab(to: urlString)
-
-            // Mark bookmark as used if we can find it
-            if let bookmarkId = userInfo["bookmarkId"] as? String,
-               let uuid = UUID(uuidString: bookmarkId),
-               let bookmark = bookmarkVM.bookmarks.first(where: { $0.id == uuid }) {
-                bookmarkVM.markAsUsed(bookmark)
-            }
+            guard let id = libraryItemID(in: notification, page: .bookmarks, key: "bookmarkId"),
+                  let bookmark = bookmarkVM.bookmarks.first(where: { $0.id == id }),
+                  let url = bookmark.appURL else { return }
+            viewModel.openURLInNewTab(url)
+            bookmarkVM.markAsUsed(bookmark)
         }
         // Handle history item open from XPC service
         .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openHistoryItem)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let urlString = userInfo["url"] as? String else { return }
-            viewModel.navigateCurrentTab(to: urlString)
+            guard let id = libraryItemID(in: notification, page: .history, key: "itemId"),
+                  let url = historyVM.allItems.first(where: { $0.id == id })?.appURL else { return }
+            viewModel.openURLInNewTab(url)
         }
         // Handle bookmark delete from XPC service
         .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.deleteBookmark)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let bookmarkId = userInfo["bookmarkId"] as? String,
-                  let uuid = UUID(uuidString: bookmarkId) else { return }
-            bookmarkVM.removeBookmark(id: uuid)
+            guard let id = libraryItemID(in: notification, page: .bookmarks, key: "bookmarkId") else { return }
+            bookmarkVM.removeBookmark(id: id)
         }
         // Handle history item delete from XPC service
         .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.deleteHistoryItem)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let itemId = userInfo["itemId"] as? String,
-                  let uuid = UUID(uuidString: itemId),
-                  let item = historyVM.recentItems.first(where: { $0.id == uuid }) else { return }
+            guard let id = libraryItemID(in: notification, page: .history, key: "itemId"),
+                  let item = historyVM.allItems.first(where: { $0.id == id }) else { return }
             historyVM.deleteItem(item)
         }
         // Handle clear history from XPC service
@@ -196,6 +205,13 @@ private struct ContentAreaView: View {
                   let urlString = userInfo["url"] as? String else { return }
             viewModel.navigateCurrentTab(to: urlString)
         }
+    }
+
+    private func libraryItemID(in notification: Notification, page: SystemTabType, key: String) -> UUID? {
+        guard let currentTab = viewModel.currentTab, currentTab.systemTabType == page,
+              let tabID = notification.userInfo?["tabId"] as? UUID, tabID == currentTab.id,
+              let itemID = notification.userInfo?[key] as? String else { return nil }
+        return UUID(uuidString: itemID)
     }
 
     // MARK: - Pending Group Transfer
