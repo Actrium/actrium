@@ -8,6 +8,7 @@ import type {
   ServiceTellInput,
 } from './contract';
 import type { FrontCapability } from './capabilities';
+import type { ServiceEventSource } from './service-events';
 
 export type ServiceCallRequest = ServiceCallInput;
 
@@ -33,7 +34,7 @@ export type HostModules = HostModulesImplementation<ActriumContract>;
 
 /** Methods with a real Host implementation, excluding throwing placeholders. */
 export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
-  'host:service': new Set(['call']),
+  'host:service': new Set(['call', 'on']),
   'host:clipboard': new Set(['writeText']),
 };
 
@@ -75,7 +76,9 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
  */
 export function createHostModules(options: {
   hasServiceCapability: boolean;
+  hasServiceOnCapability?: boolean;
   callActor: ActorCall;
+  serviceEventSource?: ServiceEventSource;
   authorizeCapability: (capability: FrontCapability) => Promise<void>;
   writeClipboardText: (text: string) => Promise<void>;
 }): HostModules {
@@ -108,8 +111,16 @@ export function createHostModules(options: {
       tell: async (_input: ServiceTellInput) => {
         throw notImplemented('host:service', 'tell');
       },
-      on: (_handler: (event: ServiceEvent) => void) => {
-        throw notImplemented('host:service', 'on');
+      on: (handler: (event: ServiceEvent) => void) => {
+        if (!options.hasServiceOnCapability) {
+          throw new Error(
+            'The application does not declare the service.on capability.'
+          );
+        }
+        if (!options.serviceEventSource) {
+          throw new Error('Service event source is not available.');
+        }
+        return options.serviceEventSource.subscribe(handler);
       },
     },
     'host:assets': {

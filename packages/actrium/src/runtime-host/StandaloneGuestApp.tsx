@@ -28,6 +28,13 @@ import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
 import { callHttpService, callNativeService } from './service-call';
+import {
+  createHttpServiceEventSource,
+  createNativeServiceEventSource,
+  serviceEventsFromManifest,
+  type CapabilityManifestV1,
+  type ServiceEventSource,
+} from './service-events';
 import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
 import type { TabConfig } from './types';
 
@@ -150,6 +157,10 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     tab.permissions ?? [],
     'service.call'
   );
+  const hasServiceOnCapability = hasDeclaredCapability(
+    tab.permissions ?? [],
+    'service.on'
+  );
   const permissionsKey = [...(tab.permissions ?? [])].sort().join(',');
   const capabilitySnapshot = React.useMemo(
     () =>
@@ -235,9 +246,32 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       logToNative(`[StandaloneGuestApp] service call ${request.route}`);
       return callHttpService(tab.serviceCallUrl, request);
     };
+
+    let serviceEventSource: ServiceEventSource | undefined;
+    if (hasServiceOnCapability && capabilityManifestJSON) {
+      try {
+        const manifest = JSON.parse(capabilityManifestJSON) as CapabilityManifestV1;
+        const events = serviceEventsFromManifest(manifest);
+        if (events.length > 0) {
+          serviceEventSource = tab.serviceEventsUrl
+            ? createHttpServiceEventSource(tab.serviceEventsUrl, events)
+            : createNativeServiceEventSource(
+                NativeModules.RealmService,
+                tab.id,
+                events
+              );
+        }
+      } catch {
+        // Verification below will surface the malformed manifest; keep the
+        // source undefined so the engine can still load non-event guests.
+      }
+    }
+
     const hostModules = createHostModules({
       hasServiceCapability,
+      hasServiceOnCapability,
       callActor: callServiceActor,
+      serviceEventSource,
       authorizeCapability: (capability) => authorizer.authorize(capability),
       writeClipboardText,
     });
@@ -363,9 +397,11 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     // reloadKey still forces a clean reload when the package changes.
     guestScript,
     hasServiceCapability,
+    hasServiceOnCapability,
     tab.id,
     tab.legacyActorBridge,
     tab.serviceCallUrl,
+    tab.serviceEventsUrl,
     tab.reloadKey,
     tab.capabilityManifestJSON,
     permissionsKey,

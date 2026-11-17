@@ -4,17 +4,22 @@ import { createHostModuleDispatch } from 'keel/contract';
 import { contract } from './contract';
 import type { FrontCapability } from './capabilities';
 import { createHostModules, type HostModules } from './host-modules';
+import { createTestServiceEventSource } from './service-events';
 
 const input = { route: 'echo.EchoService.Echo', payloadBase64: 'AAEC' };
 
 function createTestHostModules(options?: {
   hasServiceCapability?: boolean;
+  hasServiceOnCapability?: boolean;
+  serviceEventSource?: ReturnType<typeof createTestServiceEventSource>['source'];
   authorizeCapability?: (capability: FrontCapability) => Promise<void>;
   writeClipboardText?: (text: string) => Promise<void>;
 }): HostModules {
   return createHostModules({
     hasServiceCapability: options?.hasServiceCapability ?? true,
+    hasServiceOnCapability: options?.hasServiceOnCapability ?? true,
     callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
+    serviceEventSource: options?.serviceEventSource,
     authorizeCapability: options?.authorizeCapability ?? (async () => {}),
     writeClipboardText: options?.writeClipboardText ?? (async () => {}),
   });
@@ -103,15 +108,55 @@ describe('host:service implementation', () => {
     );
   });
 
-  test('fails closed for tell and on until implemented', async () => {
+  test('fails closed for tell until implemented', async () => {
     const hostModules = createTestHostModules();
 
     await expect(hostModules['host:service'].tell(input)).rejects.toThrow(
       'not implemented'
     );
+  });
+
+  test('rejects service.on without the service.on capability', () => {
+    const hostModules = createTestHostModules({
+      hasServiceOnCapability: false,
+      serviceEventSource: createTestServiceEventSource(['notes.v1.changed'])
+        .source,
+    });
+
     expect(() => hostModules['host:service'].on(() => {})).toThrow(
-      'not implemented'
+      'service.on capability'
     );
+  });
+
+  test('rejects service.on when no event source is available', () => {
+    const hostModules = createTestHostModules({
+      serviceEventSource: undefined,
+    });
+
+    expect(() => hostModules['host:service'].on(() => {})).toThrow(
+      'Service event source is not available'
+    );
+  });
+
+  test('delivers service events through the event source', () => {
+    const { source, emit } = createTestServiceEventSource([
+      'notes.v1.changed',
+    ]);
+    const hostModules = createTestHostModules({ serviceEventSource: source });
+
+    const received: { event: string; payloadBase64: string }[] = [];
+    const unsubscribe = hostModules['host:service'].on((event) => {
+      received.push(event);
+    });
+
+    emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
+    expect(received).toEqual([
+      { event: 'notes.v1.changed', payloadBase64: 'AAEC' },
+    ]);
+
+    unsubscribe();
+    emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
+    expect(received).toHaveLength(1);
   });
 });
 
