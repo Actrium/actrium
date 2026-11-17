@@ -107,6 +107,9 @@ if [ ! -f "$REACT_NATIVE_CLI" ]; then
     exit 1
 fi
 
+# Apply the runtime log redaction even when dependency installation skipped lifecycle scripts.
+node scripts/patch-react-native-macos.js --runtime-props-only
+
 copy_assets_for_xcode() {
     local assets_dir="$GENERATED_ASSETS_DIR/assets"
     if [ -z "${TARGET_BUILD_DIR:-}" ] || [ -z "${UNLOCALIZED_RESOURCES_FOLDER_PATH:-}" ]; then

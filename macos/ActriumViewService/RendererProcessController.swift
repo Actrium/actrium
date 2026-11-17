@@ -21,7 +21,11 @@ final class RendererProcessController {
     /// that case the legacy distributed-notification fallback must not run,
     /// even if the Broker has already disconnected.
     @discardableResult
-    nonisolated static func sendHostEvent(name: String, userInfo: [String: Any] = [:]) -> Bool {
+    nonisolated static func sendHostEvent(
+        name: String,
+        userInfo: [String: Any] = [:],
+        tabId: String = ""
+    ) -> Bool {
         guard isRendererProcess else { return false }
         guard JSONSerialization.isValidJSONObject(userInfo),
               let data = try? JSONSerialization.data(withJSONObject: userInfo),
@@ -34,7 +38,7 @@ final class RendererProcessController {
         DispatchQueue.main.async {
             guard let controller = RendererProcessLifetime.shared.controller else { return }
             do {
-                try controller.connection.sendHostEvent(name: name, userInfoJSON: json)
+                try controller.connection.sendHostEvent(name: name, userInfoJSON: json, tabId: tabId)
             } catch {
                 NSLog("ActriumRenderer host event failed: %@ (%@)", name, error.localizedDescription)
             }
