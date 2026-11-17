@@ -650,28 +650,10 @@ private final class RendererTabSurface {
 
         case .scroll:
             guard let hitView = hitTest(at: location) else { return }
-            let scrollView = sequence(first: hitView, next: \.superview)
-                .compactMap { $0 as? NSScrollView }
-                .first { candidate in
-                    guard let rnScrollView = candidate as? RCTUIScrollView else { return true }
-                    return rnScrollView.isScrollEnabled
-                }
-            guard let scrollView else { return }
-
-            // An offscreen window cannot route a CGEvent-backed NSEvent to its
-            // content. NSClipView scrolling also posts the bounds notification
-            // that drives RN's native scrollViewDidScroll delegate path.
-            let clipView = scrollView.contentView
-            let origin = clipView.bounds.origin
-            let target = NSPoint(
-                x: origin.x - input.scrollDeltaX,
-                y: origin.y - input.scrollDeltaY
-            )
-            let constrainedTarget = clipView.constrainBoundsRect(
-                NSRect(origin: target, size: clipView.bounds.size)
-            ).origin
-            clipView.scroll(to: constrainedTarget)
-            commit()
+            let delta = NSPoint(x: input.scrollDeltaX, y: input.scrollDeltaY)
+            if ActriumScrollRendererContent(hitView, delta) {
+                commit()
+            }
 
         case .keyDown, .keyUp:
             guard window.hasHostKeyboardFocus,
