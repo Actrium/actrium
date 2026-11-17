@@ -138,7 +138,7 @@ describe('host:service implementation', () => {
     );
   });
 
-  test('delivers service events through the event source', () => {
+  test('delivers service events through the event source after authorization', async () => {
     const { source, emit } = createTestServiceEventSource([
       'notes.v1.changed',
     ]);
@@ -149,6 +149,11 @@ describe('host:service implementation', () => {
       received.push(event);
     });
 
+    // Authorization resolves on the next microtask; events before that are dropped.
+    emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
+    expect(received).toEqual([]);
+
+    await Promise.resolve();
     emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
     expect(received).toEqual([
       { event: 'notes.v1.changed', payloadBase64: 'AAEC' },
@@ -157,6 +162,27 @@ describe('host:service implementation', () => {
     unsubscribe();
     emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
     expect(received).toHaveLength(1);
+  });
+
+  test('unsubscribes when service.on authorization is rejected', async () => {
+    const { source, emit } = createTestServiceEventSource([
+      'notes.v1.changed',
+    ]);
+    const hostModules = createTestHostModules({
+      serviceEventSource: source,
+      authorizeCapability: async () => {
+        throw new Error('permission_denied');
+      },
+    });
+
+    const received: { event: string; payloadBase64: string }[] = [];
+    hostModules['host:service'].on((event) => {
+      received.push(event);
+    });
+
+    await Promise.resolve();
+    emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
+    expect(received).toEqual([]);
   });
 });
 

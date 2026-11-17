@@ -1,6 +1,8 @@
 import type { CapabilityManifestV1 } from './capability-verify';
 import type { ServiceEvent } from './contract';
 
+export type { CapabilityManifestV1 };
+
 export type ServiceEventHandler = (event: ServiceEvent) => void;
 
 /**
@@ -92,11 +94,11 @@ export function createTestServiceEventSource(events: string[]): {
 /**
  * Create an event source backed by an HTTP Server-Sent Events endpoint.
  *
- * The source opens an `EventSource` against `eventsUrl` and listens for events
- * whose `type` matches one of the allowed event names. The event `data` must be
- * a JSON object with `{ payloadBase64: string }`. This is a v1 transport option
- * for Service deployments that expose an SSE endpoint; the native WebRTC path
- * is preferred for attached Realm Services.
+ * The source fetches `eventsUrl` and parses the `text/event-stream` body. Each
+ * SSE event's `event:` field names the event; the `data:` field must be a JSON
+ * object with a `payloadBase64` string. This uses `fetch` with a streaming
+ * response body instead of `EventSource`, so it also works in React Native
+ * environments that expose `response.body`.
  */
 export function createHttpServiceEventSource(
   eventsUrl: string,
@@ -104,46 +106,89 @@ export function createHttpServiceEventSource(
 ): ServiceEventSource {
   return {
     subscribe(handler) {
-      if (typeof EventSource === 'undefined') {
-        throw new Error(
-          'Server-Sent Events are not available in this environment.'
-        );
-      }
-
       const url = new URL(eventsUrl, typeof location !== 'undefined' ? location.href : undefined);
       for (const event of events) {
         url.searchParams.append('event', event);
       }
 
-      const eventSource = new EventSource(url.toString());
-      const listeners = new Map<string, (messageEvent: MessageEvent) => void>();
+      const controller = new AbortController();
+      let active = true;
 
-      for (const event of events) {
-        const listener = (messageEvent: MessageEvent) => {
-          let data: unknown;
-          try {
-            data = JSON.parse(String(messageEvent.data));
-          } catch {
-            return;
+      const consume = async () => {
+        try {
+          const response = await fetch(url.toString(), {
+            headers: { Accept: 'text/event-stream' },
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            throw new Error(`Service event endpoint returned HTTP ${response.status}`);
           }
-          const payloadBase64 =
-            data && typeof data === 'object' && 'payloadBase64' in data
-              ? String((data as { payloadBase64: unknown }).payloadBase64)
-              : '';
-          handler({ event, payloadBase64 });
-        };
-        listeners.set(event, listener);
-        eventSource.addEventListener(event, listener);
-      }
+          const reader = response.body?.getReader();
+          if (!reader) {
+            throw new Error('The environment does not expose a streaming response body.');
+          }
+
+          const decoder = new TextDecoder();
+          let buffer = '';
+          try {
+            while (active) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const chunks = buffer.split('\n\n');
+              buffer = chunks.pop() ?? '';
+              for (const chunk of chunks) {
+                const event = parseSseChunk(chunk, events);
+                if (event) handler(event);
+              }
+            }
+          } finally {
+            reader.releaseLock();
+          }
+        } catch (error) {
+          if (active) {
+            console.warn('[Actrium] Service event stream failed:', error);
+          }
+        }
+      };
+
+      void consume();
 
       return () => {
-        for (const [event, listener] of listeners) {
-          eventSource.removeEventListener(event, listener);
-        }
-        eventSource.close();
+        active = false;
+        controller.abort();
       };
     },
   };
+}
+
+/** Parse one `text/event-stream` chunk into a ServiceEvent, or return null. */
+function parseSseChunk(chunk: string, allowedEvents: string[]): ServiceEvent | null {
+  let eventName: string | undefined;
+  const dataLines: string[] = [];
+
+  for (const line of chunk.split('\n')) {
+    if (line.startsWith('event:')) {
+      eventName = line.slice(6).trim();
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trim());
+    }
+    // Ignore `id:`, `retry:` and comments for the v1 service event subset.
+  }
+
+  if (!eventName || !allowedEvents.includes(eventName) || dataLines.length === 0) {
+    return null;
+  }
+
+  try {
+    const data = JSON.parse(dataLines.join('\n')) as { payloadBase64?: unknown };
+    if (typeof data.payloadBase64 !== 'string' || data.payloadBase64.length === 0) {
+      return null;
+    }
+    return { event: eventName, payloadBase64: data.payloadBase64 };
+  } catch {
+    return null;
+  }
 }
 
 /**

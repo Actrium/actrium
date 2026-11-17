@@ -267,11 +267,29 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       }
     }
 
+    // Track every service event subscription so engine reload/tab close can
+    // tear them down even if the Guest forgets to unsubscribe.
+    const eventSubscriptions: (() => void)[] = [];
+    const trackedServiceEventSource: ServiceEventSource | undefined =
+      serviceEventSource
+        ? {
+            subscribe(handler) {
+              const unsubscribe = serviceEventSource!.subscribe(handler);
+              eventSubscriptions.push(unsubscribe);
+              return () => {
+                unsubscribe();
+                const index = eventSubscriptions.indexOf(unsubscribe);
+                if (index >= 0) eventSubscriptions.splice(index, 1);
+              };
+            },
+          }
+        : undefined;
+
     const hostModules = createHostModules({
       hasServiceCapability,
       hasServiceOnCapability,
       callActor: callServiceActor,
-      serviceEventSource,
+      serviceEventSource: trackedServiceEventSource,
       authorizeCapability: (capability) => authorizer.authorize(capability),
       writeClipboardText,
     });
@@ -387,6 +405,8 @@ export const StandaloneGuestApp: React.FC<Props> = ({
 
     return () => {
       disposed = true;
+      for (const unsubscribe of eventSubscriptions) unsubscribe();
+      eventSubscriptions.length = 0;
       unsubscribeEvents();
       unsubscribeUpdate();
       engine.destroy();

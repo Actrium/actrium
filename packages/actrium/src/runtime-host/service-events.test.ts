@@ -149,13 +149,77 @@ describe('createNativeServiceEventSource', () => {
 });
 
 describe('createHttpServiceEventSource', () => {
-  test('fails closed when EventSource is not available', () => {
-    const source = createHttpServiceEventSource('https://example.com/events', [
-      'a',
-    ]);
+  test('subscribes via fetch and parses SSE events', async () => {
+    const chunks = [
+      'event: a\ndata: {"payloadBase64":"AAEC"}\n\n',
+      'event: b\ndata: {"payloadBase64":"AQID"}\n\n',
+      'event: ignored\ndata: {"payloadBase64":"BAD"}\n\n',
+    ];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            for (const chunk of chunks) {
+              controller.enqueue(new TextEncoder().encode(chunk));
+            }
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+      )) as typeof fetch;
 
-    expect(() => source.subscribe(() => {})).toThrow(
-      'Server-Sent Events are not available'
-    );
+    try {
+      const source = createHttpServiceEventSource('https://example.com/events', ['a', 'b']);
+      const received: { event: string; payloadBase64: string }[] = [];
+      const unsubscribe = source.subscribe((event) => received.push(event));
+
+      // Allow the async stream consumer to finish.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(received).toEqual([
+        { event: 'a', payloadBase64: 'AAEC' },
+        { event: 'b', payloadBase64: 'AQID' },
+      ]);
+      unsubscribe();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('rejects events with missing or invalid payloadBase64', async () => {
+    const chunks = [
+      'event: a\ndata: {}\n\n',
+      'event: a\ndata: {"payloadBase64":123}\n\n',
+      'event: a\ndata: {"payloadBase64":""}\n\n',
+    ];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            for (const chunk of chunks) {
+              controller.enqueue(new TextEncoder().encode(chunk));
+            }
+            controller.close();
+          },
+        }),
+        { status: 200 }
+      )) as typeof fetch;
+
+    try {
+      const source = createHttpServiceEventSource('https://example.com/events', ['a']);
+      const received: { event: string; payloadBase64: string }[] = [];
+      const unsubscribe = source.subscribe((event) => received.push(event));
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(received).toEqual([]);
+      unsubscribe();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

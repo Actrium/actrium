@@ -120,7 +120,31 @@ export function createHostModules(options: {
         if (!options.serviceEventSource) {
           throw new Error('Service event source is not available.');
         }
-        return options.serviceEventSource.subscribe(handler);
+
+        // Gate the subscription with authorization. Until authorization
+        // resolves, events are dropped. If it rejects, the subscription is
+        // torn down immediately. Continuous revocation handling (unsubscribing
+        // when the session or snapshot later loses service.on) is a follow-up.
+        let allowed = false;
+        let disposed = false;
+        const unsubscribe = options.serviceEventSource.subscribe((event) => {
+          if (allowed && !disposed) handler(event);
+        });
+        void options.authorizeCapability('service.on').then(
+          () => {
+            if (!disposed) allowed = true;
+          },
+          () => {
+            disposed = true;
+            unsubscribe();
+          }
+        );
+
+        return () => {
+          disposed = true;
+          allowed = false;
+          unsubscribe();
+        };
       },
     },
     'host:assets': {
