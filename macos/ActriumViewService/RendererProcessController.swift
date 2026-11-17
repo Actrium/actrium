@@ -173,7 +173,16 @@ final class RendererProcessController {
     }
 
     private func configureIPC() {
-        connection.onHostEvent = { [weak self] name, json, _ in
+        connection.onHostEvent = { [weak self] name, json, tabId in
+            if name == "com.actrium.rendererKeyboardFocus" {
+                guard let focused = Bool(json) else { return }
+                // Apply focus on the same queue as input so the next key
+                // event can reach the restored editor.
+                DispatchQueue.main.async {
+                    self?.surfaces[tabId]?.setKeyboardFocus(focused)
+                }
+                return
+            }
             guard name == RealmServiceCall.responseEvent,
                   let response = try? JSONDecoder().decode(RealmServiceReply.self, from: Data(json.utf8)) else {
                 return
@@ -379,15 +388,6 @@ final class RendererProcessController {
         try? connection.sendAccessibilityTree(surface.accessibilityTree())
     }
 
-    func publishCaret(tabId: String, rect: CGRect?) {
-        guard let encoded = try? JSONEncoder().encode(rect) else { return }
-        try? connection.sendHostEvent(
-            name: "com.actrium.rendererCaret",
-            userInfoJSON: String(decoding: encoded, as: UTF8.self),
-            tabId: tabId
-        )
-    }
-
     private func destroyTab(_ tabId: String) {
         surfaces.removeValue(forKey: tabId)?.close()
         reactNativeHost.destroyRendererEntry(tabId: tabId)
@@ -446,12 +446,10 @@ private final class RendererTabSurface {
     let tabId: String
     let entry: TabViewControllerEntry
     let container: ResizableContainerView
-    let window: NSWindow
+    let window: RendererWindow
     let context: RendererCAContext
     private var generation: UInt64 = 0
     private var hasCommitted = false
-    private weak var focusedEditor: NSTextView?
-    private var lastCaretRect: CGRect?
     private var accessibilityObservers: [NSObjectProtocol] = []
     private var accessibilityPublishWork: DispatchWorkItem?
     private var pressedRecognizers: [UInt32: [NSGestureRecognizer]] = [:]
@@ -524,8 +522,13 @@ private final class RendererTabSurface {
             hasCommitted = true
         }
         context.attachWindowLayerTree(for: container)
-        publishCaret()
         CATransaction.flush()
+    }
+
+    func setKeyboardFocus(_ focused: Bool) {
+        guard window.hasHostKeyboardFocus != focused else { return }
+        window.setHostKeyboardFocus(focused)
+        commit()
     }
 
     func close() {
@@ -625,7 +628,6 @@ private final class RendererTabSurface {
                 if input.button == 0, let textInput {
                     textInputPresses.insert(input.button)
                     focusTextInput(textInput, at: location, modifiers: modifiers)
-                    publishCaret()
                     // AppKit adds the field editor to the offscreen view
                     // hierarchy on focus. Republish after that update.
                     DispatchQueue.main.async { [weak self] in
@@ -645,7 +647,6 @@ private final class RendererTabSurface {
                 }
             }
             window.sendEvent(event)
-            if input.type == .mouseDown { publishCaret() }
 
         case .scroll:
             guard let hitView = hitTest(at: location) else { return }
@@ -673,7 +674,8 @@ private final class RendererTabSurface {
             commit()
 
         case .keyDown, .keyUp:
-            guard let event = NSEvent.keyEvent(
+            guard window.hasHostKeyboardFocus,
+                  let event = NSEvent.keyEvent(
                 with: input.type == .keyDown ? .keyDown : .keyUp,
                 location: location,
                 modifierFlags: modifiers,
@@ -693,11 +695,6 @@ private final class RendererTabSurface {
             } else {
                 window.sendEvent(event)
             }
-            if input.type == .keyDown {
-                // Fabric publishes content changes after mounting. A caret
-                // movement alone does not need to flush the remote surface.
-                publishCaret()
-            }
 
         case .mouseEntered, .mouseExited, .UNRECOGNIZED(_):
             break
@@ -714,46 +711,11 @@ private final class RendererTabSurface {
         // Renderer mouse-up arrives on the main queue over IPC.
         let focused = window.makeFirstResponder(view)
         let editor = (view as? NSTextField)?.currentEditor() as? NSTextView ?? view as? NSTextView
-        focusedEditor = focused ? editor : nil
         guard focused, let editor, !modifiers.contains(.shift) else { return }
         let point = editor.convert(location, from: nil)
         let index = editor.characterIndexForInsertion(at: point)
         guard index != NSNotFound, index <= (editor.string as NSString).length else { return }
         editor.setSelectedRange(NSRange(location: index, length: 0))
-    }
-
-    private func publishCaret() {
-        let rect = caretRect()
-        guard rect != lastCaretRect else { return }
-        lastCaretRect = rect
-        RendererProcessLifetime.shared.controller?.publishCaret(tabId: tabId, rect: rect)
-    }
-
-    private func caretRect() -> CGRect? {
-        guard let editor = focusedEditor, window.firstResponder === editor, editor.isEditable,
-              editor.selectedRange().length == 0 else {
-            return nil
-        }
-        let screenRect = editor.firstRect(forCharacterRange: editor.selectedRange(), actualRange: nil)
-        let localRect: NSRect
-        if editor.string.isEmpty {
-            // AppKit can return an empty character rectangle for an empty field.
-            let origin = editor.textContainerOrigin
-            let inset = editor.textContainer?.lineFragmentPadding ?? 0
-            let lineHeight = editor.font.map {
-                editor.layoutManager?.defaultLineHeight(for: $0) ?? $0.pointSize
-            } ?? NSFont.systemFontSize
-            let height = min(editor.bounds.height, lineHeight)
-            let rect = NSRect(x: origin.x + inset, y: editor.bounds.midY - height / 2,
-                              width: 2, height: height)
-            localRect = container.convert(rect, from: editor)
-        } else {
-            guard screenRect.height > 0 else {
-                return nil
-            }
-            localRect = container.convert(window.convertFromScreen(screenRect), from: nil)
-        }
-        return CGRect(x: localRect.minX, y: localRect.minY, width: 2, height: localRect.height)
     }
 
     private func forwardMouse(_ event: NSEvent, to recognizers: [NSGestureRecognizer]) {

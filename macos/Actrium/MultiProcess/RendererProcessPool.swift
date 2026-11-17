@@ -32,7 +32,6 @@ extension Notification.Name {
     static let rendererProcessCrashed = Notification.Name("rendererProcessCrashed")
     static let rendererViewportApplied = Notification.Name("rendererViewportApplied")
     static let rendererAccessibilityUpdated = Notification.Name("rendererAccessibilityUpdated")
-    static let rendererCaretUpdated = Notification.Name("rendererCaretUpdated")
 }
 
 /// Browser-style broker for a dynamically sized pool of homogeneous Renderer
@@ -264,6 +263,19 @@ final class RendererProcessPool: ObservableObject {
         var tabEvent = event
         tabEvent.tabID = tabId.uuidString
         try? worker.connection.sendInputEvent(tabEvent)
+    }
+
+    func setKeyboardFocus(_ focused: Bool, for tabId: UUID) {
+        guard let worker = worker(for: tabId), worker.isReady else { return }
+        do {
+            try worker.connection.sendHostEvent(
+                name: "com.actrium.rendererKeyboardFocus",
+                userInfoJSON: String(focused),
+                tabId: tabId.uuidString
+            )
+        } catch {
+            AppLogger.reactNative.warning("Renderer keyboard focus update failed: \(error.localizedDescription)")
+        }
     }
 
     func requestAccessibilityTree(for tabId: UUID) {
@@ -515,19 +527,6 @@ final class RendererProcessPool: ObservableObject {
         }
 
         worker.connection.onHostEvent = { [weak self, weak worker] name, userInfoJSON, tab in
-            if name == "com.actrium.rendererCaret" {
-                guard let self, let worker, let tabId = UUID(uuidString: tab),
-                      self.worker(for: tabId) === worker else { return }
-                var userInfo: [String: Any] = ["tabId": tabId]
-                if userInfoJSON != "null" {
-                    guard let rect = try? JSONDecoder().decode(CGRect.self, from: Data(userInfoJSON.utf8)) else { return }
-                    userInfo["rect"] = rect
-                }
-                NotificationCenter.default.post(
-                    name: .rendererCaretUpdated, object: nil, userInfo: userInfo
-                )
-                return
-            }
             if name == RealmServiceCall.requestEvent {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker,

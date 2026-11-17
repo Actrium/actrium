@@ -2,12 +2,52 @@ import AppKit
 import Darwin
 import QuartzCore
 
-/// A background renderer window must look active to native text controls.
-/// NSTextView uses the key-window state to install its insertion indicator;
-/// activating the helper NSApplication itself would steal focus from the Host.
+/// The renderer stays offscreen. AppKit sees a key window only while the host
+/// routes keyboard input here, so the native editor can own the insertion indicator.
 final class RendererWindow: NSWindow {
+    private(set) var hasHostKeyboardFocus = false
+    private weak var suspendedInput: NSView?
+    private var suspendedSelection = NSRange()
+
     override var canBecomeKey: Bool { true }
-    override var isKeyWindow: Bool { true }
+    override var isKeyWindow: Bool { hasHostKeyboardFocus }
+
+    func setHostKeyboardFocus(_ focused: Bool) {
+        guard hasHostKeyboardFocus != focused else { return }
+        hasHostKeyboardFocus = focused
+        if focused {
+            restoreTextInput()
+        } else {
+            suspendTextInput()
+        }
+    }
+
+    private func suspendTextInput() {
+        guard let editor = firstResponder as? NSTextView, editor.isEditable else { return }
+        // NSTextField can reuse its window's field editor for another field.
+        // Keep the control and selection so we can reacquire the correct editor.
+        suspendedInput = editor.isFieldEditor ? editor.delegate as? NSTextField : editor
+        suspendedSelection = editor.selectedRange()
+        makeFirstResponder(nil)
+    }
+
+    private func restoreTextInput() {
+        guard let input = suspendedInput else { return }
+        suspendedInput = nil
+        guard input.window === self, !input.isHiddenOrHasHiddenAncestor else { return }
+        if let field = input as? NSTextField {
+            guard field.isEnabled, field.isEditable else { return }
+        }
+        if let textView = input as? NSTextView {
+            guard textView.isEditable else { return }
+        }
+        guard makeFirstResponder(input), let editor = firstResponder as? NSTextView,
+              suspendedSelection.location != NSNotFound else { return }
+        // The guest may update its text while the Tab is inactive.
+        let length = (editor.string as NSString).length
+        let start = min(suspendedSelection.location, length)
+        editor.setSelectedRange(NSRange(location: start, length: min(suspendedSelection.length, length - start)))
+    }
 }
 
 /// Dynamic wrapper for the private CAContext used for cross-process hosting.
