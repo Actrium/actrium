@@ -868,7 +868,6 @@ private final class RendererTabSurface {
                 return
             } else if input.type == .mouseUp {
                 if textInputPresses.remove(input.button) != nil {
-                    dragSelectionAnchor = nil
                     return
                 }
                 if let recognizers = pressedRecognizers.removeValue(forKey: input.button) {
@@ -1095,10 +1094,25 @@ private final class RendererTabSurface {
         let point = editor.convert(location, from: nil)
         let index = editor.characterIndexForInsertion(at: point)
         guard index != NSNotFound, index <= (editor.string as NSString).length else { return }
-        dragSelectionAnchor = index
-        guard !modifiers.contains(.shift) else { return }
-        editor.setSelectedRange(NSRange(location: index, length: 0))
-        publishCaret()
+        if modifiers.contains(.shift) {
+            // Shift+click/drag extends the selection; the mouse-down and
+            // mouse-up paths consume the event, so AppKit's own extension
+            // never runs. The base is the existing selection's anchor when a
+            // selection is live, and the caret otherwise — the stored anchor
+            // goes stale as soon as the caret moves (keyboard, undo), so a
+            // collapsed selection must not reuse it.
+            let current = editor.selectedRange()
+            let base = (current.length > 0 ? dragSelectionAnchor : nil)
+                ?? current.upperBound
+            let range = NSRange(location: min(base, index), length: abs(index - base))
+            editor.setSelectedRange(range)
+            publishCaret()
+            commit()
+        } else {
+            dragSelectionAnchor = index
+            editor.setSelectedRange(NSRange(location: index, length: 0))
+            publishCaret()
+        }
     }
 
     /// Publishes the caret rect to the Host so native IME UI (candidate
