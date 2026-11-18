@@ -296,6 +296,8 @@ final class RootContentViewController: NSViewController {
 
     fileprivate func applyAppearanceColors() {
         (view as? MainWindowRootView)?.applyWindowChromeStyle(WindowChromeManager.shared.style)
+        // The Header renders directly on the (now opaque) chrome surface; it
+        // no longer paints a solid color of its own.
         toolbarHostingView?.layer?.backgroundColor = NSColor.clear.cgColor
         contentViewController?.applyAppearanceColors()
         view.needsDisplay = true
@@ -1603,9 +1605,12 @@ struct MainWindowTabsView: View {
         _ tab: Tab,
         accordionPresentation: ToolbarAccordionTabPresentation = .identity
     ) -> some View {
-        if accordionPresentation.isObscured {
+        if accordionPresentation.isObscured, tab.id != viewModel.currentTabId {
             // Only the lower, actually obscured Tab loses its editing
             // affordances. The incoming Tab above it remains fully usable.
+            // The active Tab is exempt: folding at a scroll edge must never
+            // swap its presentation, so its style stays identical while the
+            // strip scrolls.
             inactiveTab(tab, accordionPresentation: accordionPresentation)
                 .transition(.identity)
         } else {
@@ -1677,13 +1682,6 @@ struct MainWindowTabsView: View {
                 .allowsHitTesting(false)
 
             activeAddressRegion(for: tab)
-
-            HoverIconButton(
-                symbol: "xmark",
-                help: "Close Tab"
-            ) {
-                viewModel.closeTab(id: tab.id)
-            }
         }
         .padding(.horizontal, 6)
         .frame(height: 32)
@@ -1715,8 +1713,23 @@ struct MainWindowTabsView: View {
                     ? AppColors.windowChromeActiveTabPlateColor
                     : AppColors.windowChromeTabPlateColor
             )
-            if !isActive {
-                shape.fill(Color.primary.opacity(0.035))
+            if isActive {
+                // Glass edge reflection: a specular gradient tracing the plate
+                // border — bright along the top edge, fading toward the bottom,
+                // the way light catches the rim of a glass surface.
+                shape.stroke(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .white.opacity(0.9), location: 0),
+                            .init(color: .white.opacity(0.4), location: 0.4),
+                            .init(color: .white.opacity(0.08), location: 1),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
+                .allowsHitTesting(false)
             }
             if isEditing {
                 shape.fill(AppColors.addressEditingSurfaceColor)
@@ -1790,7 +1803,8 @@ struct MainWindowTabsView: View {
         for tab: Tab,
         presentation: ToolbarAccordionTabPresentation
     ) -> some View {
-        if let edge = presentation.edge, presentation.stackDepth > 0 {
+        if let edge = presentation.edge, presentation.stackDepth > 0,
+           tab.id != viewModel.currentTabId {
             let offsets = toolbarAccordionStackOffsets(
                 stackDepth: presentation.stackDepth
             )
@@ -1995,8 +2009,38 @@ struct MainWindowTabsView: View {
                         toggleBookmark()
                     }
                     activeShareButton(for: tab)
+                    HoverIconButton(
+                        symbol: "xmark",
+                        help: "Close Tab"
+                    ) {
+                        viewModel.closeTab(id: tab.id)
+                    }
                 }
                 .padding(.leading, 6)
+                .background {
+                    // The action plate fades in from the trailing address text:
+                    // transparent at the leading edge, fully the active Tab plate
+                    // color from 10% onward. Sitting above the address field, it
+                    // also occludes the text when the Tab is narrow.
+                    LinearGradient(
+                        stops: [
+                            .init(
+                                color: AppColors.windowChromeActiveTabPlateColor.opacity(0),
+                                location: 0
+                            ),
+                            .init(
+                                color: AppColors.windowChromeActiveTabPlateColor,
+                                location: 0.1
+                            ),
+                            .init(
+                                color: AppColors.windowChromeActiveTabPlateColor,
+                                location: 1
+                            ),
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                }
             }
         }
         .contentShape(Rectangle())
