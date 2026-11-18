@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn wasi_preopen_rejects_replaced_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = temp.path().canonicalize().unwrap();
+    let path = base.join("data");
+    std::fs::create_dir(&path).unwrap();
+    let expected = HostState::open_expected_data_dir(&path).unwrap();
+    assert!(HostState::validated_data_preopen(&path, &expected).is_ok());
+
+    std::fs::rename(&path, base.join("original")).unwrap();
+    std::fs::create_dir(&path).unwrap();
+
+    let result = HostState::validated_data_preopen(&path, &expected);
+    assert!(
+        matches!(result, Err(WasmError::LoadFailed(message)) if message.contains("changed before preopen"))
+    );
+}
+
+#[test]
+fn wasi_preopen_rejects_filesystem_root() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().canonicalize().unwrap();
+    let root = path.ancestors().last().unwrap();
+    let result = HostState::preopen_data_dir(root);
+    assert!(
+        matches!(result, Err(WasmError::LoadFailed(message)) if message.contains("filesystem root"))
+    );
+}
+
+#[test]
 fn compile_rejects_non_wasm_bytes() {
     let err = WasmHost::compile(b"definitely not a wasm component").unwrap_err();
     assert!(matches!(err, WasmError::LoadFailed(_)));

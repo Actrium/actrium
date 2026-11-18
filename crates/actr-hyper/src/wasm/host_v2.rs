@@ -35,7 +35,7 @@ use actr_protocol::{
 };
 use wasmtime::component::{Accessor, Component, HasData, Linker};
 use wasmtime::{AsContextMut, Engine, Store};
-use wasmtime_wasi::{WasiCtxBuilder, filesystem::WasiFilesystemCtx};
+use wasmtime_wasi::filesystem::WasiFilesystemCtx;
 
 use super::component_bindings_v2::ActrWorkloadGuestV2;
 use super::component_bindings_v2::actr::workload::host::{Host as HostImportsV2, HostWithStore};
@@ -51,7 +51,7 @@ use super::component_bindings_v2::actr::workload::types::{
 use super::error::{WasmError, WasmResult};
 use super::host::{HostState, epoch_deadline_ticks};
 use super::runtime_limits::{
-    EpochTicker, QuotaPermit, StorePermit, acquire_instantiate, acquire_invocation,
+    EpochTicker, QuotaPermit, StorePermit, acquire_instantiate, acquire_invocation, acquire_store,
     quota_release_snapshot, record_instantiate_failure, record_timeout,
     wait_for_quota_release_after,
 };
@@ -68,7 +68,7 @@ use futures_util::stream::{FuturesUnordered, StreamExt as _};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Semaphore, SemaphorePermit, mpsc, oneshot};
 use tracing::Instrument as _;
 
 /// Reserved guest return value for a successful EXPLICIT dispatch whose reply
@@ -693,20 +693,60 @@ fn wit_payload_type_to_proto(payload_type: WitPayloadType) -> PayloadType {
 // Instantiation
 // ─────────────────────────────────────────────────────────────────────────────
 
+// A stalled host filesystem must not consume the quota for creating or rebuilding Stores.
+const MAX_CONCURRENT_WASI_PREOPENS: usize = 4;
+static WASI_PREOPEN_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_WASI_PREOPENS);
+const WASI_PREOPEN_QUOTA: &str = "concurrent WASI data directory opens";
+
 // Cancelling a queued blocking task does not immediately drop its captures.
 // Keep the reservation outside the task until the worker claims it.
 struct CancelQueuedOpen {
     abort: tokio::task::AbortHandle,
-    permit: Arc<Mutex<Option<QuotaPermit>>>,
+    permit: Arc<Mutex<Option<SemaphorePermit<'static>>>>,
 }
 
 impl Drop for CancelQueuedOpen {
     fn drop(&mut self) {
-        self.abort.abort();
         self.permit
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .take();
+        self.abort.abort();
+    }
+}
+
+async fn run_wasi_preopen(
+    slots: &'static Semaphore,
+    deadline: tokio::time::Instant,
+    timeout: Duration,
+    open: impl FnOnce() -> WasmResult<WasiFilesystemCtx> + Send + 'static,
+) -> WasmResult<WasiFilesystemCtx> {
+    let permit = slots
+        .try_acquire()
+        .map_err(|_| WasmError::ResourceLimitExceeded(WASI_PREOPEN_QUOTA))?;
+    let reservation = Arc::new(Mutex::new(Some(permit)));
+    let worker_reservation = Arc::clone(&reservation);
+    let task = tokio::task::spawn_blocking(move || {
+        let _permit = worker_reservation
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+            .ok_or_else(|| WasmError::LoadFailed("WASI directory open cancelled".into()))?;
+        open()
+    });
+    let _cancel = CancelQueuedOpen {
+        abort: task.abort_handle(),
+        permit: reservation,
+    };
+    match crate::timer::timeout_at(crate::timer::ids::WASM_INSTANTIATION, deadline, task).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => Err(WasmError::LoadFailed(format!(
+            "WASI directory open task failed: {error}"
+        ))),
+        Err(_) => {
+            record_timeout();
+            Err(WasmError::InvocationTimeout(timeout))
+        }
     }
 }
 
@@ -816,50 +856,26 @@ impl WasmWorkloadV2 {
         component: &Component,
         limits: &WasmRuntimeLimits,
         epoch_ticker: Arc<EpochTicker>,
-        store_permit: StorePermit,
         uses_explicit_reply_boundary: bool,
         wasi_data_dir: Option<&Path>,
     ) -> WasmResult<Self> {
-        let permit = acquire_instantiate(limits)?;
-        let deadline = tokio::time::Instant::now() + limits.invocation_timeout;
-        let (wasi, permit) = if let Some(directory) = wasi_data_dir {
+        let timeout = limits.invocation_timeout;
+        let deadline = tokio::time::Instant::now() + timeout;
+        let wasi_filesystem = if let Some(directory) = wasi_data_dir {
             let directory = directory.to_path_buf();
-            let reservation = Arc::new(Mutex::new(Some(permit)));
-            let worker_reservation = Arc::clone(&reservation);
-            let task = tokio::task::spawn_blocking(move || {
-                let permit = worker_reservation
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .take()
-                    .ok_or_else(|| WasmError::LoadFailed("WASI directory open cancelled".into()))?;
-                let wasi = HostState::preopen_data_dir(&directory)?;
-                Ok::<_, WasmError>((wasi, permit))
-            });
-            let _cancel = CancelQueuedOpen {
-                abort: task.abort_handle(),
-                permit: reservation,
-            };
-            match crate::timer::timeout_at(crate::timer::ids::WASM_INSTANTIATION, deadline, task)
-                .await
-            {
-                Ok(Ok(result)) => result?,
-                Ok(Err(error)) => {
-                    return Err(WasmError::LoadFailed(format!(
-                        "WASI directory open task failed: {error}"
-                    )));
-                }
-                Err(_) => {
-                    record_timeout();
-                    return Err(WasmError::InvocationTimeout(limits.invocation_timeout));
-                }
-            }
+            run_wasi_preopen(&WASI_PREOPEN_SLOTS, deadline, timeout, move || {
+                HostState::preopen_data_dir(&directory)
+            })
+            .await?
         } else {
-            (WasiCtxBuilder::new().inherit_stdio().build(), permit)
+            WasiFilesystemCtx::default()
         };
-        let mut wasi = wasi;
-        // Cloning the filesystem context retains the preopened directory handles
-        // across Store rebuilds without retaining guest resources.
-        let wasi_filesystem = wasi.filesystem().clone();
+        if tokio::time::Instant::now() >= deadline {
+            record_timeout();
+            return Err(WasmError::InvocationTimeout(timeout));
+        }
+        let store_permit = acquire_store(limits)?;
+        let permit = acquire_instantiate(limits)?;
         let (store, bindings) = instantiate_parts_v2(
             engine,
             component,
@@ -2779,5 +2795,89 @@ mod resident_tests {
         fuel = budget.admission_target(0, 1, SLICE);
         budget.record_admission(1);
         assert_eq!(fuel, SLICE);
+    }
+}
+
+#[cfg(test)]
+mod preopen_tests {
+    use super::*;
+    use std::sync::mpsc as blocking_channel;
+    use tokio::time::{Instant, advance};
+
+    const TEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+    #[test]
+    fn queued_wasi_preopen_timeout_releases_slot_before_worker_is_available() {
+        static SLOTS: Semaphore = Semaphore::const_new(1);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .start_paused(true)
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (ready, started) = oneshot::channel();
+            let (unblock, blocked) = blocking_channel::channel::<()>();
+            let occupying = tokio::task::spawn_blocking(move || {
+                ready.send(()).unwrap();
+                let _ = blocked.recv();
+            });
+            started.await.unwrap();
+
+            let (called, call) = oneshot::channel();
+            let open =
+                run_wasi_preopen(&SLOTS, Instant::now() + TEST_TIMEOUT, TEST_TIMEOUT, || {
+                    let _ = called.send(());
+                    Ok(WasiFilesystemCtx::default())
+                });
+            tokio::pin!(open);
+            assert!(futures_util::poll!(&mut open).is_pending());
+            assert_eq!(SLOTS.available_permits(), 0);
+            advance(TEST_TIMEOUT + Duration::from_millis(1)).await;
+            assert!(matches!(open.await, Err(WasmError::InvocationTimeout(_))));
+            assert_eq!(SLOTS.available_permits(), 1);
+
+            drop(unblock);
+            occupying.await.unwrap();
+            assert!(call.await.is_err());
+        });
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn started_wasi_preopen_timeout_keeps_only_its_own_slot() {
+        static SLOTS: Semaphore = Semaphore::const_new(1);
+        let (ready, started) = oneshot::channel();
+        let (unblock, blocked) = blocking_channel::channel::<()>();
+        let task = tokio::spawn(run_wasi_preopen(
+            &SLOTS,
+            Instant::now() + TEST_TIMEOUT,
+            TEST_TIMEOUT,
+            move || {
+                ready.send(()).unwrap();
+                let _ = blocked.recv();
+                Ok(WasiFilesystemCtx::default())
+            },
+        ));
+        started.await.unwrap();
+        advance(TEST_TIMEOUT + Duration::from_millis(1)).await;
+        assert!(matches!(
+            task.await.unwrap(),
+            Err(WasmError::InvocationTimeout(_))
+        ));
+        assert_eq!(SLOTS.available_permits(), 0);
+        assert!(matches!(
+            run_wasi_preopen(&SLOTS, Instant::now() + TEST_TIMEOUT, TEST_TIMEOUT, || {
+                unreachable!("a second open must not start while the only slot is held")
+            })
+            .await,
+            Err(WasmError::ResourceLimitExceeded(WASI_PREOPEN_QUOTA)),
+        ));
+        let limits = WasmRuntimeLimits::default();
+        let _store = acquire_store(&limits).expect("directory open must not block Store admission");
+        let _instantiate =
+            acquire_instantiate(&limits).expect("directory open must not block instantiation");
+
+        drop(unblock);
+        let _released = SLOTS.acquire().await.unwrap();
     }
 }

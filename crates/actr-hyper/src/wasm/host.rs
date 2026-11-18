@@ -31,16 +31,21 @@
 //! for the execution path.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::fs::File;
+use std::path::{Component as PathComponent, Path};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use actr_framework::{Deliver, ReplyOutcome};
+use cap_primitives::ambient_authority;
+use cap_primitives::fs::{open_ambient_dir, open_dir_nofollow};
 use tokio::time::Instant;
 use wasmtime::component::types::ComponentItem;
 use wasmtime::component::{Component, ResourceTable};
 use wasmtime::{Config, Engine, OptLevel, RegallocAlgorithm};
+use wasmtime_wasi::filesystem::{Descriptor, WasiFilesystemCtx, WasiFilesystemCtxView};
+use wasmtime_wasi::p2::bindings::filesystem::preopens::Host as WasiPreopens;
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use crate::config::WasmRuntimeLimits;
@@ -48,7 +53,7 @@ use crate::workload::{HostAbiFn, InvocationContext};
 
 use super::host_v2::WasmWorkloadV2;
 use super::runtime_limits::{
-    EpochTicker, StoreResourceLimiter, acquire_compile, acquire_store, record_compile_failure,
+    EpochTicker, StoreResourceLimiter, acquire_compile, record_compile_failure,
     record_resource_denial,
 };
 use crate::wasm::error::{WasmError, WasmResult};
@@ -182,6 +187,46 @@ impl std::fmt::Debug for HostState {
     }
 }
 
+#[cfg(unix)]
+fn directory_identity(file: &File) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = file.metadata()?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+fn directory_identity(file: &File) -> std::io::Result<(u64, [u8; 16])> {
+    use std::mem::{MaybeUninit, size_of};
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx,
+    };
+
+    let mut info = MaybeUninit::<FILE_ID_INFO>::uninit();
+    // SAFETY: file owns the handle and the buffer matches the requested information class.
+    let success = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileIdInfo,
+            info.as_mut_ptr().cast(),
+            size_of::<FILE_ID_INFO>() as u32,
+        )
+    };
+    if success == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: a successful call initializes the complete FILE_ID_INFO.
+    let info = unsafe { info.assume_init() };
+    if info.FileId.Identifier == [0; 16] {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "filesystem returned no directory identifier",
+        ));
+    }
+    Ok((info.VolumeSerialNumber, info.FileId.Identifier))
+}
+
 impl HostState {
     pub(crate) fn new(limits: &WasmRuntimeLimits) -> Self {
         Self {
@@ -195,7 +240,7 @@ impl HostState {
         }
     }
 
-    pub(super) fn preopen_data_dir(directory: &Path) -> WasmResult<WasiCtx> {
+    pub(super) fn preopen_data_dir(directory: &Path) -> WasmResult<WasiFilesystemCtx> {
         if !directory.is_absolute() {
             return Err(WasmError::LoadFailed(
                 "WASI data directory must be an absolute path".into(),
@@ -207,22 +252,93 @@ impl HostState {
                 directory.display()
             ))
         })?;
-        if directory.parent().is_none() {
+        let expected = Self::open_expected_data_dir(&directory)?;
+        Self::validated_data_preopen(&directory, &expected)
+    }
+
+    fn open_expected_data_dir(directory: &Path) -> WasmResult<File> {
+        let root = directory
+            .ancestors()
+            .last()
+            .expect("a path is its own ancestor");
+        if directory == root {
             return Err(WasmError::LoadFailed(
                 "WASI data directory cannot be a filesystem root".into(),
             ));
         }
+        let relative = directory.strip_prefix(root).expect("root is a path prefix");
+        let open_error = |error| {
+            WasmError::LoadFailed(format!(
+                "cannot open WASI data directory `{}`: {error}",
+                directory.display()
+            ))
+        };
+        // Walk from the root by handle so a replaced component cannot redirect the expected open.
+        let root = open_ambient_dir(root, ambient_authority()).map_err(open_error)?;
+        let mut current = root.try_clone().map_err(open_error)?;
+        for component in relative.components() {
+            let PathComponent::Normal(name) = component else {
+                return Err(WasmError::LoadFailed(
+                    "WASI data directory must have a canonical path".into(),
+                ));
+            };
+            current = open_dir_nofollow(&current, Path::new(name)).map_err(open_error)?;
+        }
+        if directory_identity(&current).map_err(open_error)?
+            == directory_identity(&root).map_err(open_error)?
+        {
+            return Err(WasmError::LoadFailed(
+                "WASI data directory cannot be a filesystem root".into(),
+            ));
+        }
+        Ok(current)
+    }
 
+    fn validated_data_preopen(directory: &Path, expected: &File) -> WasmResult<WasiFilesystemCtx> {
         let mut wasi = WasiCtxBuilder::new();
-        wasi.inherit_stdio()
-            .preopened_dir(&directory, "/data", FsPerms::ReadWrite)
+        wasi.preopened_dir(directory, "/data", FsPerms::ReadWrite)
             .map_err(|error| {
                 WasmError::LoadFailed(format!(
                     "cannot preopen WASI data directory `{}`: {error}",
                     directory.display()
                 ))
             })?;
-        Ok(wasi.build())
+        let mut wasi = wasi.build();
+        let filesystem = wasi.filesystem();
+        let mut table = ResourceTable::new();
+        // P2 exposes the descriptor backed by Wasmtime's already opened directory.
+        let preopens = WasiPreopens::get_directories(&mut WasiFilesystemCtxView {
+            ctx: filesystem,
+            table: &mut table,
+        })
+        .map_err(|error| WasmError::LoadFailed(format!("cannot inspect WASI preopen: {error}")))?;
+        let [(resource, _)] = preopens.as_slice() else {
+            return Err(WasmError::LoadFailed(
+                "expected exactly one WASI data preopen".into(),
+            ));
+        };
+        let Descriptor::Dir(opened) = table.get(resource).map_err(|error| {
+            WasmError::LoadFailed(format!("cannot read WASI descriptor: {error}"))
+        })?
+        else {
+            return Err(WasmError::LoadFailed(
+                "WASI data preopen is not a directory".into(),
+            ));
+        };
+        let identify_error = |error| {
+            WasmError::LoadFailed(format!(
+                "cannot identify opened WASI data directory: {error}"
+            ))
+        };
+        if directory_identity(&opened.dir).map_err(identify_error)?
+            != directory_identity(expected).map_err(identify_error)?
+        {
+            return Err(WasmError::LoadFailed(format!(
+                "WASI data directory `{}` changed before preopen",
+                directory.display()
+            )));
+        }
+        Ok(std::mem::take(filesystem))
     }
 
     pub(super) fn set_wasi_filesystem(
@@ -638,14 +754,12 @@ impl WasmHost {
         &self,
         wasi_data_dir: Option<&Path>,
     ) -> WasmResult<WasmWorkloadV2> {
-        let store_permit = acquire_store(&self.limits)?;
         probe_world(&self.component, &self.engine)?;
         WasmWorkloadV2::instantiate(
             &self.engine,
             &self.component,
             &self.limits,
             Arc::clone(&self.epoch_ticker),
-            store_permit,
             self.uses_explicit_reply_boundary,
             wasi_data_dir,
         )
