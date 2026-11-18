@@ -407,6 +407,60 @@ describe('createHttpServiceEventSource', () => {
     }
   });
 
+  test('does not deliver an old SSE batch to a replacement generation', async () => {
+    const originalFetch = globalThis.fetch;
+    const encoder = new TextEncoder();
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    let fetchCalls = 0;
+    globalThis.fetch = (async () => {
+      fetchCalls += 1;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controllers.push(controller);
+            if (fetchCalls === 1) {
+              controller.enqueue(encoder.encode(
+                'event: a\ndata: {"payloadBase64":"AAEC"}\n\n' +
+                'event: a\ndata: {"payloadBase64":"AQID"}\n\n'
+              ));
+            }
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+      );
+    }) as unknown as typeof fetch;
+
+    let unsubscribeFirst: (() => void) | undefined;
+    let unsubscribeReplacement: (() => void) | undefined;
+    try {
+      const source = createHttpServiceEventSource('https://example.com/events', ['a']);
+      const first: string[] = [];
+      const replacement: string[] = [];
+      unsubscribeFirst = source.subscribe((event) => {
+        first.push(event.payloadBase64);
+        unsubscribeFirst?.();
+        unsubscribeReplacement = source.subscribe((replacementEvent) => {
+          replacement.push(replacementEvent.payloadBase64);
+        });
+      });
+
+      await waitFor(() => fetchCalls === 2 && controllers.length === 2 && first.length === 1);
+      expect(first).toEqual(['AAEC']);
+      expect(replacement).toEqual([]);
+
+      controllers[1]!.enqueue(
+        encoder.encode('event: a\ndata: {"payloadBase64":"AwQ="}\n\n')
+      );
+      await waitFor(() => replacement.length === 1);
+      expect(replacement).toEqual(['AwQ=']);
+      expect(first).toEqual(['AAEC']);
+    } finally {
+      unsubscribeReplacement?.();
+      unsubscribeFirst?.();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('rejects events with missing or invalid payloadBase64', async () => {
     const chunks = [
       'event: a\ndata: {}\n\n',

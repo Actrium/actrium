@@ -326,11 +326,15 @@ export function createHttpServiceEventSource(
           }, stableConnectionMs);
         };
         const acceptText = (text: string) => {
-          if (settled) return;
+          if (settled || !active) return;
           buffer += text;
           const chunks = buffer.split(/\r?\n\r?\n/);
           buffer = chunks.pop() ?? '';
           for (const chunk of chunks) {
+            // A handler can synchronously close this connection and start a new
+            // generation. Never deliver the rest of this old batch to its
+            // replacement handlers or advance their resume state.
+            if (settled || !active) break;
             const frame = parseSseChunk(chunk);
             if (frame.hasData && frame.id !== undefined) lastEventId = frame.id;
             if (!frame.eventName || !events.includes(frame.eventName)) continue;
@@ -343,7 +347,7 @@ export function createHttpServiceEventSource(
             retryCount = 0;
             deliver([...handlers.keys()], frame.event);
           }
-          if (buffer.length > maxBufferedCharacters) {
+          if (!settled && active && buffer.length > maxBufferedCharacters) {
             finish({
               retry: true,
               error: new Error(
