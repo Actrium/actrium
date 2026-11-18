@@ -288,10 +288,15 @@ describe('capability model data', () => {
     expect(HOST_SUPPORTED_CAPABILITIES).toEqual(new Set([
       'service.call',
       'host:clipboard.write',
+      'host:file-import.pick',
       'host:local-storage.getItem',
       'host:local-storage.setItem',
       'host:local-storage.removeItem',
     ]));
+    for (const capability of FRONT_CAPABILITIES) {
+      if (HOST_SUPPORTED_CAPABILITIES.has(capability)) continue;
+      expect(FRONT_CAPABILITY_DEFINITIONS[capability].implemented).toBe(false);
+    }
   });
 
   test('placeholder capabilities never enter the effective set', () => {

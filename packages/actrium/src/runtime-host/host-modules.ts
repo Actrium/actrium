@@ -5,6 +5,8 @@ import type {
   ClipboardWriteTextInput,
   LocalStorageKeyInput,
   LocalStorageSetInput,
+  FileImportPickInput,
+  FileImportPickOutput,
   ServiceCallInput,
   ServiceEvent,
   ServiceTellInput,
@@ -39,6 +41,7 @@ export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>
   'host:service': new Set(['call']),
   'host:clipboard': new Set(['writeText']),
   'host:local-storage': new Set(['getItem', 'setItem', 'removeItem']),
+  'host:file-import': new Set(['pick']),
 };
 
 /** Modules with a real Host implementation, not just a contract declaration. */
@@ -79,6 +82,7 @@ export function createHostModules(options: {
   authorizeCapability: (capability: FrontCapability) => Promise<void>;
   writeClipboardText: (text: string) => Promise<void>;
   localStorage?: LocalStorageCall;
+  pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
 }): HostModules {
   let requestSequence = 0;
   const localStorage: LocalStorageCall = async (operation, input) => {
@@ -169,8 +173,10 @@ export function createHostModules(options: {
       },
     },
     'host:file-import': {
-      pick: async () => {
-        throw notImplemented('host:file-import', 'pick');
+      pick: async (input) => {
+        if (!options.pickFiles) throw new Error('The host file picker is unavailable.');
+        await options.authorizeCapability('host:file-import.pick');
+        return options.pickFiles(input);
       },
     },
     'host:file-export': {

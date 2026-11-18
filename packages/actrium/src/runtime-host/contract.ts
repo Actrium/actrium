@@ -56,7 +56,11 @@ export type ExternalLinkOpenInput = { url: string };
 export type NavigateInput = { path: string; mode?: 'push' | 'replace' };
 
 export type FileImportFile = { name: string; base64: string };
-export type FileImportPickInput = { accept?: string[]; multiple?: boolean };
+export type FileImportPickInput = {
+  source?: 'files' | 'photos';
+  accept?: string[];
+  multiple?: boolean;
+};
 export type FileImportPickOutput = { files: FileImportFile[] };
 
 export type FileExportSaveInput = { name: string; base64: string };
@@ -537,6 +541,9 @@ export const contract = defineKeelContract({
           parseInput: (value) => {
             const input = asObject(value, 'file-import.pick input');
             return {
+              source: input.source === undefined ? undefined : requireEnum(
+                input.source, 'file-import.pick input.source', ['files', 'photos'] as const
+              ),
               accept:
                 input.accept === undefined
                   ? undefined

@@ -152,6 +152,12 @@ final class CapabilityPermissionStore {
         touchRevision()
     }
 
+    func hasGrant(tabId: UUID, appId: String?, capability: String) -> Bool {
+        grantStatuses(
+            tabId: tabId, appId: normalizedAppId(appId, fallback: tabId), declaredCapabilities: [capability]
+        )[capability] == "granted"
+    }
+
     /// A declaration covers a method when it is the exact method id or the
     /// module alias (`host:clipboard` covers `host:clipboard.write`).
     private func declarationCovers(
