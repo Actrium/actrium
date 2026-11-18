@@ -9,6 +9,7 @@ export const V1_COMPONENTS = [
   'Button',
   'FlatList',
   'ImageAsset',
+  'Supramark',
   'Switch',
 ] as const;
 

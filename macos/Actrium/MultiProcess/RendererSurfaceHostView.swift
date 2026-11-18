@@ -795,7 +795,7 @@ final class RendererSurfaceHostView: NSView {
     }
 
     /// Forwards a non-text key (arrow, enter, backspace, ...) to the Renderer.
-    func sendCommandKey(keyCode: UInt32) {
+    func sendCommandKey(keyCode: UInt32, modifiers: NSEvent.ModifierFlags) {
         guard let tabId else { return }
         // interpretKeyEvents on the render side derives editing commands from
         // the event's characters; an empty string produces no command.
@@ -813,7 +813,7 @@ final class RendererSurfaceHostView: NSView {
         var down = Actrium_Ipc_InputEvent()
         down.type = .keyDown
         down.keyCode = keyCode
-        down.modifiers = 0
+        down.modifiers = encodedModifiers(modifiers)
         if let chars = characters[keyCode] {
             down.characters = chars
         }
@@ -867,6 +867,7 @@ final class IMECompositionView: NSTextView {
 
     private var forwardingMarkedText: String = ""
     private var forwardingMarkedSelection: NSRange = NSRange(location: 0, length: 0)
+    private var interpretingModifiers: NSEvent.ModifierFlags = []
 
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: 1, height: 1), textContainer: nil)
@@ -956,6 +957,9 @@ final class IMECompositionView: NSTextView {
             surfaceView?.forwardKey(event, type: .keyUp)
             return
         }
+        let previousModifiers = interpretingModifiers
+        interpretingModifiers = flags
+        defer { interpretingModifiers = previousModifiers }
         interpretKeyEvents([event])
     }
 
@@ -1000,7 +1004,9 @@ final class IMECompositionView: NSTextView {
                forwardingMarkedText.isEmpty {
                 return
             }
-            surfaceView?.sendCommandKey(keyCode: keyCode)
+            // The renderer distinguishes Return from Shift-Return using the original modifiers.
+            let modifiers = keyCode == 36 ? interpretingModifiers : []
+            surfaceView?.sendCommandKey(keyCode: keyCode, modifiers: modifiers)
             return
         }
         super.doCommand(by: aSelector)

@@ -108,6 +108,7 @@ export {
   Share,
   StatusBar,
   StyleSheet,
+  Supramark,
   Switch,
   Text,
   TextInput,

@@ -89,11 +89,11 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
   let engine: Engine | undefined;
   try {
     await Bun.write(path.join(root, 'guest.tsx'), `
-      import { View } from 'keel/guest';
+      import { Supramark, View } from 'keel/guest';
       import { writeText } from 'host:clipboard';
       import { call as echo } from 'host:service/${route}';
       void echo({ payloadBase64: '' }).then(() => writeText({ text: 'Echo received' }));
-      export default function App() { return <><View>Hello</View>{'Standalone text'}</>; }
+      export default function App() { return <><View>Hello</View>{'Standalone text'}<Supramark markdown="# Hello" /></>; }
     `);
     const command = [
       Bun.argv[0], keelCli, 'build', 'guest.tsx',
@@ -102,14 +102,18 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
       '--contract', fileURLToPath(new URL('./contract.ts', import.meta.url)),
       ...(minify ? [] : ['--no-minify']),
     ];
-    const result = Bun.spawnSync(command, { cwd: root, stderr: 'pipe' });
+    const result = Bun.spawnSync(command, { cwd: root, stdout: 'pipe', stderr: 'pipe' });
     // Surface the CLI diagnostics if building the integration fixture failed.
-    if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+    if (result.exitCode !== 0) throw new Error(result.stderr.toString() || result.stdout.toString());
     const bundle = await Bun.file(path.join(root, 'workload/guest.js')).text();
     const signedProfile = await Bun.file(path.join(root, 'workload/capabilities.json')).text();
     const verified = verifyV1RuntimeGuest(bundle, signedProfile, declarations);
     if (!verified.ok) throw new Error(verified.details.join(' '));
-    expect(verified.manifest.components).toEqual(['View']);
+    expect(verified.manifest.components).toEqual(['Supramark', 'View']);
+    const profileWithoutSupramark = JSON.stringify({ ...verified.manifest, components: ['View'] });
+    expect(verifyV1RuntimeGuest(bundle, profileWithoutSupramark, declarations)).toMatchObject({
+      ok: false, code: 'capability_mismatch',
+    });
 
     const calls: string[] = [];
     const clipboard = Promise.withResolvers<string>();
@@ -125,6 +129,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
     });
     // Stand in for the Host's native renderer without registering a Text component.
     const ProtocolText = () => null;
+    const HostSupramark = () => null;
     engine = new Engine({
       sandbox: 'node-vm',
       ...bindV1HostModules(verified.linkage, implementations, authorize),
@@ -132,7 +137,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
       textNodeRenderer: ProtocolText,
       requireWhitelist: verified.manifest.imports.filter((id) => !id.startsWith('host:')),
     });
-    engine.register({ View: () => null });
+    engine.register({ Supramark: HostSupramark, View: () => null });
     const receiver = engine.createReceiver();
     await engine.loadBundle(bundle);
     expect(await clipboard.promise).toBe('Echo received');
@@ -143,6 +148,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
         children: [
           { props: { children: { type: ProtocolText, props: { children: 'Hello' } } } },
           { type: ProtocolText, props: { children: 'Standalone text' } },
+          { type: HostSupramark, props: { markdown: '# Hello' } },
         ],
       },
     });
@@ -154,7 +160,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
         { op: 'CREATE', id: 999, type: 'Text', props: {} },
       ],
     }).failed).toBe(2);
-    expect(receiver.getStats().nodeCount).toBe(3);
+    expect(receiver.getStats().nodeCount).toBe(4);
   } finally {
     engine?.destroy();
     fs.rmSync(root, { recursive: true, force: true });
