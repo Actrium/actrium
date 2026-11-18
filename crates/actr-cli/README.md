@@ -223,10 +223,13 @@ actr run --config actr.toml
 ```
 
 Use a dedicated directory for each workload. Leaving the setting unset keeps
-the mount disabled. The directory cannot be a filesystem root. Embedded hosts
-using `Node::from_hyper` inherit this setting by default; `HyperConfig` can
-explicitly disable it with `WasiDataDir::Disabled` or replace it with
-`WasiDataDir::Directory` using an absolute path.
+the mount disabled. The directory cannot be a filesystem root. On macOS, the
+host process also needs read and search permissions on each ancestor of the
+resolved directory so it can validate the mount.
+
+Embedded hosts using `Node::from_hyper` inherit this setting by default.
+`HyperConfig` can explicitly disable it with `WasiDataDir::Disabled` or
+replace it with `WasiDataDir::Directory` using an absolute path.
 
 Commands that touch `manifest.toml` use `--manifest-path` / `-m`.
 Commands that touch `actr.toml` use `--config` / `-c`.

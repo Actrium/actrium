@@ -93,6 +93,8 @@ pub struct HyperConfig {
     pub wasm_limits: Option<WasmRuntimeLimits>,
 
     /// Override the node runtime configuration's `/data` directory grant.
+    /// On macOS, the resolved directory's ancestors must be readable and
+    /// searchable by the host process.
     pub wasi_data_dir: WasiDataDir,
 }
 
