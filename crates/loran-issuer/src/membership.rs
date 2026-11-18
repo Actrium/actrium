@@ -150,8 +150,8 @@ async fn use_nonce(nonce: &str, expires_at: i64) -> Result<(), MembershipError> 
     }
 }
 
-/// Verify key possession before redemption or invite-free Realm admission.
-/// Normal admission looks up the invite before recording a nonce.
+/// An active, open Realm records the signed request's nonce before either join path.
+/// All other joins require a matching invitation before recording the nonce.
 async fn join(
     state: &IssuerState,
     request: &MembershipRequest,
@@ -170,7 +170,7 @@ async fn join(
     }
     let open = Realm::get(&request.realm)
         .await?
-        .is_some_and(|realm| realm.policy.membership == MembershipMode::Open);
+        .is_some_and(|realm| realm.is_active() && realm.policy.membership == MembershipMode::Open);
     if open {
         use_nonce(&request.nonce, expires_at).await?;
     }

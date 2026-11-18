@@ -90,16 +90,18 @@ Actr Facility Provider 先检查角色，再查找目标：无权执行的请求
 ### 4.1 兑换规则
 
 Actr Facility Provider 在单个事务中兑换邀请：记录邀请已用，按邀请建立新成员或定位目标成员，登记 key。两个并发兑换
-最多一个成功；超过限额（`quota`）时邀请不被消耗。同一把 key 重复兑换同一邀请（响应丢失后的重试），只要
-该 key 仍未撤销、成员仍为 `active`，就返回首次的结果，否则返回 `invite_used`。
+最多一个成功；超过限额（`quota`）时邀请不被消耗。若兑换成功后响应丢失，
+AFP 在重试时检查请求是否由原先未撤销的 key 签名，以及成员是否仍为 `active`。
+任一条件不满足时返回 `invite_used`。通过这些检查后，Realm 可用时返回首次的结果，不可用时返回 `realm_unavailable`。
 
 - 带 `role` 的邀请建立新成员。`owner` 角色的邀请（owner 邀请）只由 Realm 签名 key 持有方或 Actr Facility Provider
   运营者签发（第 5 节）：Realm 尚无 owner 时建立 owner；已有 owner 时，新 key 成为该 owner 成员的客户端，
   owner 原有的全部客户端 key 撤销。
 - 带 `member_id` 的邀请为该成员登记新客户端，目标成员 **MUST** 仍为 `active`。
 
-当签名 Profile 中的 `policy.membership` 为 `open`，持有效邀请的设备按邀请角色加入。没有可兑换邀请时，
-Issuer 验证新设备签名后将其登记为 Viewer。两种方式共用活跃成员上限，首位 Owner 预留一个名额。
+免邀请加入要求 Realm 处于 `active` 状态、已启用且未过期，并且签名 Profile 中的 `policy.membership` 为 `open`。
+持有效邀请的设备按邀请角色加入。没有可兑换邀请时，Issuer 验证新设备签名后将其登记为 Viewer。
+两种方式共用活跃成员上限，首位 Owner 预留一个名额。
 最近 60 秒内成功免邀请加入的新成员计入限频，默认每分钟 10 人。同一设备重试返回已有成员身份。
 
 ### 4.2 owner 保护

@@ -630,7 +630,6 @@ pub async fn join_with_mode(
     if revoked_at.is_some() {
         return fail(Code::InviteRevoked, "the invite was revoked");
     }
-    let policy = check_realm_active(&mut tx, realm).await?;
     if used_at.is_some() {
         // A retry of the same redemption returns its result.
         if used_by_key.as_deref() == Some(key_id.as_str())
@@ -638,6 +637,7 @@ pub async fn join_with_mode(
             && !key.revoked
             && key.member_active
         {
+            check_realm_active(&mut tx, realm).await?;
             return Ok(json!({
                 "realm": realm, "member_id": key.member_id,
                 "role": key.role.as_str(), "key_id": key_id,
@@ -648,6 +648,7 @@ pub async fn join_with_mode(
     if expires_at <= now {
         return fail(Code::InviteExpired, "the invite expired");
     }
+    let policy = check_realm_active(&mut tx, realm).await?;
     let member_limit = policy.member_limit(limits.max_members);
     let reusable = mode == DevJoinMode::ReusableInvite && role.as_deref() != Some("owner");
     if reusable && let Some(key) = client_key_on(&mut tx, realm, &key_id).await? {

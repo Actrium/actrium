@@ -52,6 +52,94 @@ fn refused(result: Result<serde_json::Value, MembershipClientError>, expected: &
 
 #[tokio::test]
 #[serial]
+async fn inactive_open_realms_require_an_invite_before_recording_a_nonce() -> anyhow::Result<()> {
+    use actr_protocol::realm_membership::MembershipOp;
+    use base64::Engine as _;
+    use platform::realm::{MembershipMode, Realm, RealmPolicy, RealmStatus};
+
+    let mut env = setup_test_environment().await;
+    let app = create_test_router(&env).await;
+    let open = RealmPolicy {
+        membership: MembershipMode::Open,
+        ..Default::default()
+    };
+    let fixture = |id: &str| Realm {
+        name: format!("{id}@example.com"),
+        policy: open,
+        ..Default::default()
+    };
+    let pending = Realm {
+        status: RealmStatus::Pending,
+        ..fixture("pending-join")
+    }
+    .insert(None)
+    .await?;
+    let expired = Realm {
+        expires_at: Some(1),
+        ..fixture("expired-join")
+    }
+    .insert(None)
+    .await?;
+    let retired = fixture("retired-join").insert(None).await?;
+    Realm::retire(&retired.name).await?;
+    Realm::set_unsigned_policy(TEST_REALM, open).await?;
+    let invitation = invite(TEST_REALM).await;
+    Realm::set_enabled(TEST_REALM, false).await?;
+
+    let key = key_for("lifecycle-device");
+    let public_key = base64::prelude::BASE64_STANDARD.encode(key.verifying_key().to_bytes());
+    let pool = platform::storage::db::get_database().get_pool();
+    let invite_only = Realm::create("invite-only-lifecycle@example.com".into()).await?;
+    for input in [None, Some("malformed")] {
+        let join_request = |name: &str| {
+            let mut request = membership_request(MembershipOp::Join, name);
+            request.public_key = Some(public_key.clone());
+            request.invite = input.map(str::to_owned);
+            request
+        };
+        let missing = join_request("absent-lifecycle@example.com");
+        let expected = post_membership(app.clone(), missing.sign(&key)).await;
+        assert_eq!(expected.0, StatusCode::BAD_REQUEST);
+        assert_eq!(expected.1["error"], "invalid_request");
+
+        for name in [
+            pending.name.as_str(),
+            &expired.name,
+            &retired.name,
+            TEST_REALM,
+            &invite_only.name,
+        ] {
+            let request = join_request(name);
+            assert_eq!(
+                post_membership(app.clone(), request.sign(&key)).await,
+                expected,
+                "{name}"
+            );
+            let recorded: bool =
+                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM realm_mgmt_nonce WHERE nonce=?)")
+                    .bind(&request.nonce)
+                    .fetch_one(pool)
+                    .await?;
+            assert!(!recorded, "{name}");
+        }
+    }
+
+    let (status, reply) =
+        join_over_http(&app, TEST_REALM, &invitation.invite, "lifecycle-device").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(reply["error"], "realm_unavailable");
+    Realm::set_enabled(TEST_REALM, true).await?;
+    let (status, reply) =
+        join_over_http(&app, TEST_REALM, &invitation.invite, "lifecycle-device").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(reply["role"], "editor");
+
+    env.shutdown_signer().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
 async fn open_admission_is_per_realm_and_issues_actor_credentials() {
     use actr_protocol::realm_membership::{MembershipOp, MembershipRequest};
     use base64::Engine as _;

@@ -309,6 +309,11 @@ async fn invites_are_single_use_and_distinguish_their_failures() {
         .await
         .unwrap();
     assert_eq!(code(redeem(&again, 2).await), Code::Conflict);
+
+    Realm::set_enabled(REALM, false).await.unwrap();
+    assert_eq!(code(redeem(&expired, 3).await), Code::InviteExpired);
+    assert_eq!(code(redeem(&invite, 3).await), Code::InviteUsed);
+    assert_eq!(code(redeem(&invite, 2).await), Code::RealmUnavailable);
 }
 
 #[tokio::test]

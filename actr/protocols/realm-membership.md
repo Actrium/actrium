@@ -121,10 +121,11 @@ after issuance.
 The Actr Facility Provider redeems an invite in a single transaction: it marks the
 invite used, creates the new member or finds the target member, and registers
 the key. Of two concurrent redemptions at most one succeeds; when a quota would be
-exceeded (`quota`) the invite is not consumed. Redeeming the same invite again
-with the same key (a retry after a lost response) returns the first result as
-long as the key is still unrevoked and the member still `active`; otherwise
-the answer is `invite_used`.
+exceeded (`quota`) the invite is not consumed. On a retry of a completed
+redemption, the AFP checks that the request uses the original unrevoked key and
+that the member is still `active`. If either check fails, it returns `invite_used`.
+An authenticated retry returns the original result in an active Realm and
+`realm_unavailable` if the Realm is inactive.
 
 - An invite with a `role` creates a new member. Invites with the `owner` role
   (owner invites) are issued only by the Realm signing key holder or the Actr Facility
@@ -134,8 +135,9 @@ the answer is `invite_used`.
 - An invite with a `member_id` registers a new client for that member, which
   **MUST** still be `active`.
 
-A Realm with signed `policy.membership = "open"` may also admit a new device without
-a redeemable invitation. It registers a new Viewer after verifying the device signature.
+An active, enabled and unexpired Realm with signed `policy.membership = "open"`
+may also admit a new device without a redeemable invitation. It registers a new
+Viewer after verifying the device signature.
 A valid invitation retains its role. Each active member counts once, including members
 admitted by invitation. The first owner has a reserved place. Only successful new
 invite-free admissions count towards the rolling 60-second limit (default 10).
