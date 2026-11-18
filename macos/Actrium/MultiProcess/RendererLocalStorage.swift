@@ -65,6 +65,8 @@ final class RendererLocalStorage {
             return GuestLocalStorageReply(id: call.id, error: "Local storage access was denied.")
         }
         do {
+            // Accepted database operations may finish after revocation.
+            // Reject subsequent calls and prevent replies from reaching a replaced document.
             let value = try await execute(call, origin: document.origin)
             guard documents[tabId]?.id == document.id else {
                 return GuestLocalStorageReply(id: call.id, error: "The local storage document changed.")

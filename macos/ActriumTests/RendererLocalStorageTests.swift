@@ -104,6 +104,39 @@ struct RendererLocalStorageTests {
         #expect(denied.error != nil)
     }
 
+    @Test func anAcceptedWriteCompletesAfterItsDocumentIsRevoked() async throws {
+        let database = PausedLocalStorage(path: ":memory:")
+        let broker = RendererLocalStorage(database: database)
+        let tabId = UUID()
+        let permissions = ["host:local-storage.getItem", "host:local-storage.setItem"]
+        let original = broker.prepare(tabId: tabId, config: configuration(origin: "app-a", permissions: permissions))
+        let originalId = try document(in: original)
+        let write = Task { try await request(broker, tabId, originalId, .setItem, value: "accepted") }
+        defer { database.resumeWrite.signal() }
+        let timeout = Task {
+            try await Task.sleep(for: .seconds(5))
+            database.writeStarted.continuation.finish()
+        }
+        defer { timeout.cancel() }
+        var started = database.writeStarted.stream.makeAsyncIterator()
+        let event = await started.next()
+        try #require(event != nil)
+
+        broker.remove(tabId)
+        let replacement = broker.prepare(tabId: tabId, config: configuration(origin: "app-b", permissions: permissions))
+        let replacementId = try document(in: replacement)
+        database.resumeWrite.signal()
+        let reply = try await write.value
+        #expect(reply.error == "The local storage document changed.")
+        #expect(try database.getItem(origin: "app-a", key: "theme") == "accepted")
+        #expect(try database.getItem(origin: "app-b", key: "theme") == nil)
+        let denied = try await request(broker, tabId, originalId, .setItem, value: "denied")
+        #expect(denied.error == "Local storage access was denied.")
+        let current = try await request(broker, tabId, replacementId, .getItem)
+        #expect(current.value == nil && current.error == nil)
+        #expect(try database.getItem(origin: "app-a", key: "theme") == "accepted")
+    }
+
     @Test func panelChangesPreserveTheLatestStorageConfig() throws {
         let tabId = UUID()
         let coordinator = ViewBridgeCoordinator()
@@ -225,4 +258,17 @@ struct RendererLocalStorageTests {
           await store.setItem({key: 'report', value: theme + '/' + missing});
         })();
         """
+}
+
+private final class PausedLocalStorage: GuestLocalStorage, @unchecked Sendable {
+    let writeStarted = AsyncStream<Void>.makeStream()
+    let resumeWrite = DispatchSemaphore(value: 0)
+
+    override func setItem(origin: String, key: String, value: String) throws {
+        writeStarted.continuation.yield(())
+        guard resumeWrite.wait(timeout: .now() + 5) == .success else {
+            throw GuestLocalStorageError.DatabaseFailure(message: "The test write was never resumed.")
+        }
+        try super.setItem(origin: origin, key: key, value: value)
+    }
 }
