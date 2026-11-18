@@ -196,6 +196,26 @@ enum ActrPackageDownloadService {
         return destination
     }
 
+    /// Removes temporary package downloads left behind by an interrupted run.
+    /// Only files created by `download(from:)` are eligible.
+    nonisolated static func cleanupOrphanedTemporaryDownloads(
+        in directory: URL = FileManager.default.temporaryDirectory
+    ) {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey]
+        ) else { return }
+
+        for entry in entries {
+            guard entry.lastPathComponent.hasPrefix("actr-pkg-"),
+                  entry.pathExtension == "actr",
+                  (try? entry.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+            else { continue }
+            try? fm.removeItem(at: entry)
+        }
+    }
+
     /// Computes the SHA-256 digest of a file off the main actor.
     nonisolated static func sha256Digest(of url: URL) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in

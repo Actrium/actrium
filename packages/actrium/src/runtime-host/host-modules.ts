@@ -8,6 +8,10 @@ import type {
   ServiceCallInput,
   ServiceEvent,
   ServiceTellInput,
+  SpeechInterimHandler,
+  SpeechRecognizeInput,
+  SpeechRecognizeOutput,
+  SpeechStateHandler,
 } from './contract';
 import type { FrontCapability } from './capabilities';
 import type { ServiceEventSource } from './service-events';
@@ -38,6 +42,7 @@ export type HostModules = HostModulesImplementation<ActriumContract>;
 export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
   'host:service': new Set(['call', 'on']),
   'host:clipboard': new Set(['writeText']),
+  'host:speech': new Set(['recognize', 'onInterimResult', 'stop', 'onStateChange']),
   'host:file-import': new Set(['pick']),
 };
 
@@ -71,8 +76,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
  * against the contract at Engine construction time, so a missing capability
  * fails closed before the Guest bundle runs.
  *
- * `host:service` and `host:clipboard.write` are implemented. Every other
- * module is a deliberate placeholder: its methods throw
+ * Capabilities without an implementation expose placeholders that throw
  * `host:<name>.<method> is not implemented` instead of returning `undefined`,
  * so a call cannot be mistaken for success. Placeholder capabilities also stay
  * out of `HOST_SUPPORTED_CAPABILITIES`.
@@ -91,8 +95,21 @@ export function createHostModules(options: {
   trackServiceEventSubscription?: (cleanup: () => void) => () => void;
   writeClipboardText: (text: string) => Promise<void>;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
+  recognizeSpeech?: (
+    input: SpeechRecognizeInput, onInterim?: SpeechInterimHandler, onState?: SpeechStateHandler
+  ) => Promise<SpeechRecognizeOutput>;
+  stopSpeech?: () => Promise<void>;
 }): HostModules {
   let requestSequence = 0;
+  let cancelSpeechAuthorization: (() => void) | undefined;
+  const speechListeners = new Set<SpeechInterimHandler>();
+  const speechStateListeners = new Set<SpeechStateHandler>();
+  const emitSpeechInterim: SpeechInterimHandler = (result) => {
+    for (const listener of speechListeners) listener(result);
+  };
+  const emitSpeechState: SpeechStateHandler = (state) => {
+    for (const listener of speechStateListeners) listener(state);
+  };
 
   return {
     'host:service': {
@@ -202,6 +219,37 @@ export function createHostModules(options: {
     'host:microphone': {
       record: async () => {
         throw notImplemented('host:microphone', 'record');
+      },
+    },
+    'host:speech': {
+      recognize: async (input) => {
+        if (!options.recognizeSpeech) throw new Error('Speech recognition is unavailable.');
+        if (cancelSpeechAuthorization) throw new Error('Speech recognition is already in progress.');
+        const cancellation = new Error('Speech recognition was cancelled.');
+        let cancel!: () => void;
+        const interrupted = new Promise<never>((_, reject) => { cancel = () => reject(cancellation); });
+        cancelSpeechAuthorization = cancel;
+        try {
+          await Promise.race([options.authorizeCapability('host:speech.recognize'), interrupted]);
+          if (cancelSpeechAuthorization !== cancel) throw cancellation;
+        } finally {
+          if (cancelSpeechAuthorization === cancel) cancelSpeechAuthorization = undefined;
+        }
+        return options.recognizeSpeech(input, speechListeners.size ? emitSpeechInterim : undefined, emitSpeechState);
+      },
+      onInterimResult: (handler) => {
+        speechListeners.add(handler);
+        return () => { speechListeners.delete(handler); };
+      },
+      stop: () => {
+        const cancel = cancelSpeechAuthorization;
+        if (!cancel) return options.stopSpeech?.();
+        cancelSpeechAuthorization = undefined;
+        cancel();
+      },
+      onStateChange: (handler) => {
+        speechStateListeners.add(handler);
+        return () => { speechStateListeners.delete(handler); };
       },
     },
     'host:location': {

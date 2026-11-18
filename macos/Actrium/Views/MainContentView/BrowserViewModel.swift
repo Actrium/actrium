@@ -250,6 +250,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     func closeTab(id: UUID) {
+        TabSnapshotCacheManager.shared.invalidate(tabId: id)
+        WebViewHolderManager.shared.remove(tabId: id)
+        ViewBridgeHostViewManager.shared.remove(tabId: id)
         RealmServiceBindings.shared.remove(id)
         CapabilityPermissionStore.shared.clearSessionGrants(tabId: id)
         // Get the slot position of the tab being closed
@@ -603,6 +606,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 leftPanelScript: leftPanelScript,
                 rightPanelScript: rightPanelScript,
                 unifiedScript: unifiedScript,
+                guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
+                guestEntry: !isDirectory.boolValue && unifiedScript != nil
+                    ? manifestInfo.unifiedScript
+                    : nil,
                 capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                 contractName: manifestInfo.contractName,
                 contractVersion: manifestInfo.contractVersion,
@@ -1128,6 +1135,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     private func performPackageDownload(_ active: ActivePackageDownload) async {
         do {
             let localURL = try await ActrPackageDownloadService.download(from: active.pending.url)
+            defer { try? FileManager.default.removeItem(at: localURL) }
             if activePackageDownload?.id == active.id {
                 activePackageDownload?.phase = .verifying
             }
@@ -1140,9 +1148,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             // remember the link → digest mapping so re-opening the same link skips
             // the download; the import pipeline reuses the cached extraction.
             let cachedArchiveURL = try ActrPackageCache.installArchive(at: localURL, digest: digest)
-            // installArchive copies into the cache; the download scratch file
-            // is no longer needed.
-            try? FileManager.default.removeItem(at: localURL)
             ActrPackageCache.rememberDownloadURL(active.pending.url, digest: digest)
 
             // Hand over to the existing import pipeline (manifest → runtime tab).
@@ -1273,12 +1278,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[tabIndex].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
             tabs[tabIndex].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
 
-            // Replace any previous package's extracted guest source: the
-            // renderer must only execute bytes from the newly loaded package
-            // (same shape as the archive/dev-directory branch above).
-            let usesExtractedEntry = !isDirectory.boolValue && unifiedScript != nil
-            tabs[tabIndex].guestExtractedPath = usesExtractedEntry ? rootDir.path : nil
-            tabs[tabIndex].guestEntry = usesExtractedEntry ? manifestInfo.unifiedScript : nil
+            // Archive-backed tabs retain their digest source for cache protection.
+            // Only unified packages expose an entry to the renderer.
+            tabs[tabIndex].guestExtractedPath = isDirectory.boolValue ? nil : rootDir.path
+            tabs[tabIndex].guestEntry = !isDirectory.boolValue && unifiedScript != nil
+                ? manifestInfo.unifiedScript
+                : nil
 
             // Update panel visibility
             leftPanelVisibility[tabs[tabIndex].id] = manifestInfo.leftPanelDefaultVisible
@@ -1594,6 +1599,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 if let binding { RealmServiceBindings.shared.attach(binding, to: replacingTabId) }
                 objectWillChange.send()
                 persistBrowserPageSession()
+                schedulePackageCacheEviction()
             } catch {
                 guard tabs.contains(where: {
                     $0.id == replacingTabId && $0.url == URL(string: address)
@@ -1867,6 +1873,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].leftPanelScript = leftPanelScript
             tabs[index].rightPanelScript = rightPanelScript
             tabs[index].guestScript = guestScript
+            tabs[index].guestExtractedPath = isDirectory.boolValue ? nil : rootDir.path
+            tabs[index].guestEntry = !isDirectory.boolValue && unifiedScript != nil
+                ? manifestInfo.unifiedScript
+                : nil
             tabs[index].appId = manifestInfo.appId
             tabs[index].contractName = manifestInfo.contractName
             tabs[index].contractVersion = manifestInfo.contractVersion
@@ -1928,6 +1938,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     // MARK: - .actr Apply Load
+
+    private func schedulePackageCacheEviction() {
+        guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else { return }
+        let protectedDigests = appDelegate.protectedPackageDigests()
+        Task.detached(priority: .utility) {
+            _ = ActrPackageCache.evictIfNeeded(protectedDigests: protectedDigests)
+        }
+    }
 
     /// From Local .actr Package to create a new tab and load basic information.
     /// - Parameter presentInstanceCreation: archive imports present the instance
@@ -2069,17 +2087,19 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         permissions: manifestInfo.permissions
                     )
                 }
+                schedulePackageCacheEviction()
                 return newTab
             }
             // Legacy: Double Engine Structure
             else if leftPanelScript != nil || rightPanelScript != nil {
                 logger.debug("🔄 [BrowserViewModel] Use Legacy Double Engine Structure")
-                return appendRuntimeTab(
+                let newTab = appendRuntimeTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
                     appId: manifestInfo.appId,
                     leftPanelScript: leftPanelScript,
                     rightPanelScript: rightPanelScript,
+                    guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
@@ -2089,14 +2109,17 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     themeColor: manifestInfo.themeColor,
                     replacingTabId: replacingTabId
                 )
+                schedulePackageCacheEviction()
+                return newTab
             } else if let script = guestScript {
                 // Old architecture: one compatible guest.js
                 logger.debug("🔄 [BrowserViewModel] Use compatible mode (guestScript)")
-                return appendRuntimeTab(
+                let newTab = appendRuntimeTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
                     appId: manifestInfo.appId,
                     guestScript: script,
+                    guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
@@ -2104,6 +2127,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     themeColor: manifestInfo.themeColor,
                     replacingTabId: replacingTabId
                 )
+                schedulePackageCacheEviction()
+                return newTab
             } else {
                 // No script, display application information page
                 let html = renderACTRInfoHTML(
@@ -2112,13 +2137,16 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     description: manifestInfo.description ?? "No description provided.",
                     sourcePath: resolvedURL.path
                 )
-                return appendRuntimeTab(
+                let newTab = appendRuntimeTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
                     appId: manifestInfo.appId,
                     htmlContent: html,
+                    guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
                     replacingTabId: replacingTabId
                 )
+                schedulePackageCacheEviction()
+                return newTab
             }
         } catch {
             // 15-B B8: signature failures get a dedicated, actionable error page
@@ -2130,6 +2158,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     title: resolvedURL.deletingPathExtension().lastPathComponent,
                     sourceURL: resolvedURL,
                     htmlContent: errorHTML,
+                    guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
                     replacingTabId: replacingTabId
                 )
             }
@@ -2144,6 +2173,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 title: resolvedURL.deletingPathExtension().lastPathComponent,
                 sourceURL: resolvedURL,
                 htmlContent: fallbackHTML,
+                guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
                 replacingTabId: replacingTabId
             )
         }

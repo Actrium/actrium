@@ -36,6 +36,36 @@ extension Notification.Name {
     static let rendererTextInputFocusChanged = Notification.Name("rendererTextInputFocusChanged")
 }
 
+enum RendererProcessState: String, Sendable, Equatable {
+    case starting
+    case ready
+    case terminating
+}
+
+struct RendererProcessSnapshot: Identifiable, Sendable, Equatable {
+    let id: String
+    let pid: pid_t
+    let fingerprint: String?
+    let tabIDs: Set<UUID>
+    let state: RendererProcessState
+}
+
+struct RendererProcessPoolSnapshot: Sendable, Equatable {
+    let processes: [RendererProcessSnapshot]
+
+    init(processes: [RendererProcessSnapshot] = []) {
+        self.processes = processes.sorted { $0.id < $1.id }
+    }
+
+    func process(for tabID: UUID) -> RendererProcessSnapshot? {
+        processes.first { $0.tabIDs.contains(tabID) }
+    }
+
+    func state(for tabID: UUID) -> RendererProcessState? {
+        process(for: tabID)?.state
+    }
+}
+
 /// Browser-style broker for a dynamically sized pool of homogeneous Renderer
 /// processes. A worker is selected by application fingerprint, and one worker can
 /// host multiple Tab roots while keeping different fingerprints process-isolated.
@@ -98,6 +128,7 @@ final class RendererProcessPool: ObservableObject {
     }
 
     @Published private(set) var runningProcessCount = 0
+    @Published private(set) var snapshot = RendererProcessPoolSnapshot()
 
     private var workers: [String: Worker] = [:]
     private var tabWorkerMap: [UUID: String] = [:]
@@ -192,6 +223,7 @@ final class RendererProcessPool: ObservableObject {
         worker.tabs.remove(tabId)
         worker.surfaces.removeValue(forKey: tabId)
         worker.lastUsedAt = Date()
+        publishSnapshot()
 
         // System applications deliberately keep their shared renderer. Ordinary
         // renderers retain the fingerprint for fast same-app reuse and are the
@@ -476,6 +508,7 @@ final class RendererProcessPool: ObservableObject {
 
         workers[id] = worker
         runningProcessCount = workers.count
+        publishSnapshot()
         NSLog(
             "Renderer launched: id=%@ pid=%d fingerprint=%@",
             id,
@@ -496,7 +529,7 @@ final class RendererProcessPool: ObservableObject {
             #if DEBUG
             MetroManager.shared.reBroadcastConfig()
             #endif
-            self.objectWillChange.send()
+            self.publishSnapshot()
         }
 
         worker.connection.onTabSurfaceUpdated = { [weak worker] tabIdString, contextId in
@@ -764,6 +797,7 @@ final class RendererProcessPool: ObservableObject {
         }
         workers.removeValue(forKey: worker.id)
         runningProcessCount = workers.count
+        publishSnapshot()
 
         // Publish the crash only after every Broker lookup has stopped pointing
         // at the dead process. Observers may synchronously request a replacement.
@@ -787,6 +821,7 @@ final class RendererProcessPool: ObservableObject {
     private func terminate(_ worker: Worker, reason: String) {
         guard !worker.isTerminating else { return }
         worker.isTerminating = true
+        publishSnapshot()
         worker.connection.terminate(reason: reason)
         if worker.process.isRunning {
             worker.process.terminate()
@@ -799,6 +834,29 @@ final class RendererProcessPool: ObservableObject {
         worker.tabs.insert(tabId)
         worker.lastUsedAt = Date()
         tabWorkerMap[tabId] = worker.id
+        publishSnapshot()
+    }
+
+    private func publishSnapshot() {
+        snapshot = RendererProcessPoolSnapshot(
+            processes: workers.values.map { worker in
+                let state: RendererProcessState
+                if worker.isTerminating {
+                    state = .terminating
+                } else if worker.isReady {
+                    state = .ready
+                } else {
+                    state = .starting
+                }
+                return RendererProcessSnapshot(
+                    id: worker.id,
+                    pid: worker.process.processIdentifier,
+                    fingerprint: worker.fingerprint,
+                    tabIDs: worker.tabs,
+                    state: state
+                )
+            }
+        )
     }
 
     private func worker(for tabId: UUID) -> Worker? {
@@ -874,6 +932,7 @@ final class RendererProcessPool: ObservableObject {
         }
         workers.removeValue(forKey: victim.id)
         runningProcessCount = workers.count
+        publishSnapshot()
         terminate(victim, reason: "Reclaimed idle Renderer capacity")
     }
 
@@ -896,6 +955,7 @@ final class RendererProcessPool: ObservableObject {
                 self.terminate(worker, reason: "Memory pressure")
             }
             self.runningProcessCount = self.workers.count
+            self.publishSnapshot()
         }
         source.resume()
         memoryPressureSource = source

@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import Combine
 
 // MARK: - Apps Manager Window Controller
 
@@ -69,10 +68,6 @@ struct AppsManagerView: View {
     @ObservedObject private var diagnosticsStore = RendererDiagnosticsStore.shared
     @ObservedObject private var devTools = DevToolsManager.shared
     @State private var selectedRowId: UUID?
-    @State private var refreshTrigger: Bool = false
-
-    // Timer for periodic refresh
-    private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -91,9 +86,6 @@ struct AppsManagerView: View {
         }
         .frame(minWidth: 500, minHeight: 300)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onReceive(timer) { _ in
-            refreshTrigger.toggle()
-        }
     }
 
     // MARK: - Header
@@ -145,7 +137,6 @@ struct AppsManagerView: View {
             }
         }
         .listStyle(.plain)
-        .id(refreshTrigger) // Force refresh
     }
 
     // MARK: - Footer
@@ -163,7 +154,8 @@ struct AppsManagerView: View {
 
             // End task button
             Button(action: endSelectedProcess) {
-                Text("End Task")
+                let selectedRow = rows.first { $0.id == selectedRowId }
+                Text(selectedRow?.isLegacy == true ? "End Task" : "Close Tab")
             }
             .disabled(selectedRowId == nil)
             .keyboardShortcut(.delete, modifiers: [])
@@ -183,18 +175,18 @@ struct AppsManagerView: View {
             return rows
         }
 
-        // Add all tabs (Apps)
+        // Add all tabs (Apps), preferring the legacy record when one exists.
         for tab in viewModel.tabs {
             let tabId = tab.id
+            let name = tab.title.isEmpty ? "New Tab" : tab.title
 
-            // Get process info for this tab
             if let processInfo = diagnosticsStore.processInfo(for: tabId) {
                 let metrics = processInfo.pid.flatMap {
-                    diagnosticsStore.getProcessMetrics(pid: $0)
+                    diagnosticsStore.metrics(for: $0)
                 }
-
-                let memoryMB = Double(metrics?.memory ?? 0) / 1_048_576.0
-                let cpuTime = Double(metrics?.cpuTime ?? 0) / 1_000_000_000.0
+                let memoryMB = metrics?.memoryBytes.map {
+                    Double($0) / 1_048_576.0
+                }
 
                 let statusText: String
                 switch processInfo.state {
@@ -207,23 +199,50 @@ struct AppsManagerView: View {
 
                 rows.append(ProcessRowData(
                     id: tabId,
-                    name: tab.title.isEmpty ? "New Tab" : tab.title,
-                    subtitle: processInfo.pid.map { "PID \($0)" } ?? "Renderer",
-                    pid: processInfo.pid ?? 0,
+                    name: name,
+                    subtitle: "Legacy renderer",
+                    pid: processInfo.pid,
                     memoryMB: memoryMB,
-                    cpuPercent: cpuTime,
-                    status: statusText
+                    cpuPercent: metrics?.cpuPercent,
+                    status: statusText,
+                    isLegacy: true
                 ))
-            } else {
-                // No process data yet (tab hasn't spawned renderer)
+            } else if let process = diagnosticsStore.poolProcess(for: tabId) {
+                let metrics = diagnosticsStore.metrics(for: process.pid)
+                let memoryMB = metrics?.memoryBytes.map {
+                    Double($0) / 1_048_576.0
+                }
+                let statusText: String
+                switch process.state {
+                case .ready: statusText = "Ready"
+                case .starting: statusText = "Starting"
+                case .terminating: statusText = "Terminating"
+                }
+                let tabCount = process.tabIDs.count
+                let subtitle = tabCount > 1
+                    ? "Shared renderer · \(tabCount) tabs"
+                    : "Pooled renderer"
+
                 rows.append(ProcessRowData(
                     id: tabId,
-                    name: tab.title.isEmpty ? "New Tab" : tab.title,
+                    name: name,
+                    subtitle: subtitle,
+                    pid: process.pid,
+                    memoryMB: memoryMB,
+                    cpuPercent: metrics?.cpuPercent,
+                    status: statusText,
+                    isLegacy: false
+                ))
+            } else {
+                rows.append(ProcessRowData(
+                    id: tabId,
+                    name: name,
                     subtitle: nil,
-                    pid: 0,
-                    memoryMB: 0,
-                    cpuPercent: 0,
-                    status: "Pending"
+                    pid: nil,
+                    memoryMB: nil,
+                    cpuPercent: nil,
+                    status: "Unallocated",
+                    isLegacy: false
                 ))
             }
         }
@@ -259,14 +278,22 @@ private struct ProcessRowView: View {
             // App name & icon
             HStack(spacing: 8) {
                 processIcon
-                Text(row.name)
-                    .font(.system(size: 12))
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(row.name)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                    if let subtitle = row.subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             // PID
-            Text(row.pid > 0 ? "\(row.pid)" : "—")
+            Text(row.pid.map { String($0) } ?? "N/A")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.secondary)
                 .frame(width: 60, alignment: .trailing)
@@ -277,7 +304,7 @@ private struct ProcessRowView: View {
                 .frame(width: 80, alignment: .trailing)
 
             // CPU
-            Text(row.cpuPercent > 0 ? String(format: "%.1f%%", row.cpuPercent) : "—")
+            Text(row.cpuPercent.map { String(format: "%.1f%%", $0) } ?? "N/A")
                 .font(.system(size: 11, design: .monospaced))
                 .frame(width: 60, alignment: .trailing)
 
@@ -309,24 +336,23 @@ private struct ProcessRowView: View {
 
     private func statusColor(for status: String) -> Color {
         switch status.lowercased() {
-        case "running": return .green
+        case "running", "ready": return .green
         case "starting", "launching": return .orange
         case "crashed": return .red
-        case "ended", "terminated": return .gray
+        case "ended", "terminated", "terminating": return .gray
         case "idle": return .yellow
         default: return .secondary
         }
     }
 
-    private func formatMemory(_ mb: Double) -> String {
+    private func formatMemory(_ mb: Double?) -> String {
+        guard let mb else { return "N/A" }
         if mb >= 1024 {
             return String(format: "%.1f GB", mb / 1024)
         } else if mb >= 1 {
             return String(format: "%.1f MB", mb)
-        } else if mb > 0 {
-            return String(format: "%.0f KB", mb * 1024)
         } else {
-            return "—"
+            return String(format: "%.0f KB", mb * 1024)
         }
     }
 }
@@ -337,18 +363,11 @@ struct ProcessRowData: Identifiable, Hashable {
     let id: UUID
     let name: String
     let subtitle: String?
-    let pid: pid_t
-    let memoryMB: Double
-    let cpuPercent: Double
+    let pid: pid_t?
+    let memoryMB: Double?
+    let cpuPercent: Double?
     let status: String
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
-
-    static func == (lhs: ProcessRowData, rhs: ProcessRowData) -> Bool {
-        lhs.id == rhs.id
-    }
+    let isLegacy: Bool
 }
 
 // MARK: - Preview

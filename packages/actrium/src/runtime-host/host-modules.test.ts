@@ -18,6 +18,7 @@ function createTestHostModules(options?: {
   trackServiceEventSubscription?: (cleanup: () => void) => () => void;
   writeClipboardText?: (text: string) => Promise<void>;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
+  recognizeSpeech?: Parameters<typeof createHostModules>[0]['recognizeSpeech'];
 }): HostModules {
   return createHostModules({
     hasServiceCapability: options?.hasServiceCapability ?? true,
@@ -29,6 +30,7 @@ function createTestHostModules(options?: {
     trackServiceEventSubscription: options?.trackServiceEventSubscription,
     writeClipboardText: options?.writeClipboardText ?? (async () => {}),
     pickFiles: options?.pickFiles,
+    recognizeSpeech: options?.recognizeSpeech,
   });
 }
 
@@ -330,6 +332,75 @@ describe('host:file-import implementation', () => {
     });
     await expect(modules['host:file-import'].pick({})).rejects.toThrow('permission_denied');
     expect(opened).toBe(false);
+  });
+});
+
+describe('host:speech implementation', () => {
+  test('stopping a request during Guest authorization prevents capture after late approval', async () => {
+    const grant = Promise.withResolvers<void>();
+    let recognitions = 0;
+    const modules = createTestHostModules({
+      authorizeCapability: () => grant.promise,
+      recognizeSpeech: async () => { recognitions += 1; return { text: 'hello' }; },
+    });
+    const outcome = Promise.resolve(modules['host:speech'].recognize({})).then(
+      (result) => ({ result }),
+      (error: unknown) => ({ error }),
+    );
+    await modules['host:speech'].stop();
+    grant.resolve();
+    expect(await outcome).toMatchObject({ error: { message: 'Speech recognition was cancelled.' } });
+    expect(recognitions).toBe(0);
+    await expect(modules['host:speech'].recognize({})).resolves.toEqual({ text: 'hello' });
+  });
+
+  test('sends interim results only to subscribers on the Guest that started the session', async () => {
+    const first = createTestHostModules({
+      recognizeSpeech: async (_input, interim) => {
+        interim?.({ text: 'interim' });
+        return { text: 'final' };
+      },
+    });
+    const second = createTestHostModules();
+    const own: unknown[] = [];
+    const other: unknown[] = [];
+    const unsubscribe = first['host:speech'].onInterimResult((result) => own.push(result));
+    second['host:speech'].onInterimResult((result) => other.push(result));
+
+    await expect(first['host:speech'].recognize({})).resolves.toEqual({ text: 'final' });
+    expect(own).toEqual([{ text: 'interim' }]);
+    expect(other).toEqual([]);
+    unsubscribe?.();
+    await first['host:speech'].recognize({});
+    expect(own).toHaveLength(1);
+  });
+
+  test('validates the request, authorizes the Guest and returns only text', async () => {
+    const calls: unknown[] = [];
+    const dispatch = createHostModuleDispatch(contract, createTestHostModules({
+      authorizeCapability: async (capability) => { calls.push(capability); },
+      recognizeSpeech: async (input) => {
+        calls.push(input);
+        return { text: '\u4f60\u597d', nativeDetails: 'internal' };
+      },
+    }));
+
+    expect(() => dispatch['host:speech'].recognize({ locale: 'invalid/locale' })).toThrow('locale');
+    expect(() => dispatch['host:speech'].recognize([])).toThrow('must be an object');
+    expect(calls).toEqual([]);
+    await expect(dispatch['host:speech'].recognize({ locale: 'zh-CN' })).resolves.toEqual({ text: '\u4f60\u597d' });
+    expect(calls).toEqual(['host:speech.recognize', { locale: 'zh-CN' }]);
+  });
+
+  test('does not start the recognizer when authorization fails', async () => {
+    let started = false;
+    const modules = createTestHostModules({
+      authorizeCapability: async () => { throw new Error('permission_denied'); },
+      recognizeSpeech: async () => { started = true; return { text: 'hello' }; },
+    });
+
+    await expect(modules['host:speech'].recognize({})).rejects.toThrow('permission_denied');
+    expect(started).toBe(false);
   });
 });
 

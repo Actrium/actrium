@@ -39,6 +39,14 @@ test('requires the package declaration for a linked file import picker', () => {
   expect(verifyV1RuntimeGuest(bundle, profile, []).ok).toBe(false);
 });
 
+test('requires the package declaration for linked speech recognition', () => {
+  const linked: V1Linkage = { ...linkage, links: [['host:speech', 'recognize']] };
+  const profile = JSON.stringify(createV1CapabilityManifest(linked, contract));
+  const bundle = writeV1Bundle(linked, 'module.exports = {};');
+  expect(verifyV1RuntimeGuest(bundle, profile, ['host:speech.recognize']).ok).toBe(true);
+  expect(verifyV1RuntimeGuest(bundle, profile, ['host:microphone.record']).ok).toBe(false);
+});
+
 test('exposes only linked Host methods and pins the route on the Host', async () => {
   const calls: string[] = [];
   const grants: string[] = [];
