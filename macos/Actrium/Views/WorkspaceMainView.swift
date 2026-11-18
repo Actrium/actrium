@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 
 extension Notification.Name {
     static let toggleFocusOverviewRequested = Notification.Name("toggleFocusOverviewRequested")
+    static let ensureActiveTabVisibleRequested = Notification.Name("ensureActiveTabVisibleRequested")
 }
 
 // MARK: - Main View
@@ -138,7 +139,7 @@ struct WorkspaceMainView: View {
 
             ZStack(alignment: .topTrailing) {
                 // Safari Style: Deep Grey Content Regional Background (not extended to toolbar)
-                Color(nsColor: NSColor(white: 0.12, alpha: 1.0))
+                AppColors.workspaceBackgroundColor
 
                 // Actrium View - Include All Tab Card
                 // ViewBridge Always. Actrium Inside, smooth animation through snapshots
@@ -190,27 +191,28 @@ struct WorkspaceMainView: View {
                 .contentShape(Rectangle())
                 // The address bar exit focus has been wired by global mouse events (mouseEventMonitor)
 
-                // Focus Under Mode Native Content Layer (By)actrium Changed)
-                // Native SwiftUI views need to render at viewportSize in Focus mode,
-                // otherwise they would be scaled up (blurry) by actrium transform
-                if case .focus(let focusedTabId) = viewModel.actriumMode,
-                   let focusedTab = viewModel.tabs.first(where: { $0.id == focusedTabId }),
-                   case .native(let nativeType) = focusedTab.contentType {
-                    switch nativeType {
-                    case .startPage:
-                        StartPageView(
-                            bookmarks: bookmarkVM.bookmarks,
-                            recentHistory: historyVM.recentItems,
-                            containerSize: safeViewportSize,
-                            isCompactMode: false,
-                            onNavigate: { url in
-                                viewModel.navigateCurrentTab(to: url.absoluteString)
-                            }
-                        )
-                        .frame(width: safeViewportSize.width, height: safeViewportSize.height)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                // Keep every native tab mounted; switching changes visibility
+                // and hit testing without discarding the tab's SwiftUI state.
+                ZStack(alignment: .topLeading) {
+                    ForEach(viewModel.tabs) { tab in
+                        if case .native(let nativeType) = tab.contentType {
+                            PersistentNativeTabLayer(
+                                tab: tab,
+                                nativeType: nativeType,
+                                isFocused: viewModel.actriumMode == .focus(tabId: tab.id),
+                                viewportSize: safeViewportSize,
+                                bookmarkVM: bookmarkVM,
+                                historyVM: historyVM,
+                                onNavigate: { url in
+                                    guard viewModel.currentTabId == tab.id else { return }
+                                    viewModel.navigateCurrentTab(to: url.absoluteString)
+                                }
+                            )
+                        }
                     }
                 }
+                .frame(width: safeViewportSize.width, height: safeViewportSize.height)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                 // Focus Under Mode Web Content Layer (By)actrium Changed)
                 // scaleEffect Yeah. NSViewRepresentable It's not working, so... Web Content needs independent rendering
@@ -263,6 +265,12 @@ struct WorkspaceMainView: View {
                             },
                             onProgressChanged: { progress in
                                 viewModel.loadingProgress = progress
+                            },
+                            onContentFocused: {
+                                NotificationCenter.default.post(
+                                    name: .ensureActiveTabVisibleRequested,
+                                    object: viewModel
+                                )
                             }
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -344,8 +352,12 @@ struct WorkspaceMainView: View {
                                 isDragSource: draggingTabId == tab.id,
                                 isDropTarget: dropTargetTabId == tab.id,
                                 coordinator: viewBridgeCoordinatorManager.coordinator(for: tab.id),
-                                bookmarks: bookmarksForRN,
-                                recentHistory: recentHistoryForRN
+                                libraryData: LibraryTabData.configuration(
+                                    for: tab.systemTabType,
+                                    history: historyVM.allItems,
+                                    bookmarks: bookmarkVM.bookmarks,
+                                    historyPage: tab.historyPageIndex
+                                )
                             )
                         }
                     }
@@ -550,9 +562,7 @@ struct WorkspaceMainView: View {
                     }
 
                     Button(action: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-                            _ = viewModel.addNewTab()
-                        }
+                        _ = viewModel.addNewTab()
                     }) {
                         Image(systemName: "plus")
                     }
@@ -680,6 +690,10 @@ struct WorkspaceMainView: View {
 
                 if shouldNotifyDismiss {
                     NotificationCenter.default.post(name: NSNotification.Name("com.actro.dismissAddressBarFocus"), object: nil)
+                    NotificationCenter.default.post(
+                        name: .ensureActiveTabVisibleRequested,
+                        object: viewModel
+                    )
                 }
 
                 // Old logic:SwiftUI toolbar Address Bar
@@ -926,7 +940,19 @@ struct WorkspaceMainView: View {
         // 🔑 Intercept Current Focus Under Mode Tab Content snapshot (large chart)
         // This is... Focus → Overview Animation Starts
         // Note:applyBlur=false Ensure that the settings are synchronized and are available immediately from the start of the animation
-        let focusSnapshot = captureViewportSnapshot(viewportSize: viewportSize)
+        // Native Start Pages render live in overview. Capturing the entire
+        // window for them blocks the main thread during the transition.
+        let focusSnapshot: NSImage?
+        if let tab = viewModel.tabs.first(where: { $0.id == currentTabId }) {
+            switch tab.contentType {
+            case .native, .empty:
+                focusSnapshot = nil
+            case .web, .reactNative:
+                focusSnapshot = captureViewportSnapshot(viewportSize: viewportSize)
+            }
+        } else {
+            focusSnapshot = nil
+        }
         if let snapshot = focusSnapshot {
             TabSnapshotCacheManager.shared.setFocusSnapshot(snapshot, for: currentTabId, applyBlur: false)
 
@@ -1013,20 +1039,16 @@ struct WorkspaceMainView: View {
         let toolbarHeight = windowSize.height - viewportSize.height
         let isFlipped = contentView.isFlipped
 
-        // Exclude Top 1px It's... toolbar Separator
-        let separatorHeight: CGFloat = 1
-
         // I'm a visualist. y Coordinates:
         // - Not flipped (Bottom Left Point of Origin): y = 0 (The eye is at the bottom.), the top segment is to be removed. height
-        // - flipped (Top Left Point of Origin): y = toolbarHeight + 1 (Skip the partition line)
-        let viewportY: CGFloat = isFlipped ? (toolbarHeight + separatorHeight) : 0
-        let captureHeight: CGFloat = viewportSize.height - separatorHeight
+        // - flipped (Top Left Point of Origin): y = toolbarHeight
+        let viewportY: CGFloat = isFlipped ? toolbarHeight : 0
 
         let captureRect = CGRect(
             x: sidebarWidth,
             y: viewportY,
             width: viewportSize.width,
-            height: captureHeight
+            height: viewportSize.height
         )
 
         NSLog("📸 captureViewportSnapshot: windowSize=%.0fx%.0f, viewportSize=%.0fx%.0f, toolbarHeight=%.0f, isFlipped=%d, captureRect=(%.0f,%.0f,%.0f,%.0f)",
@@ -1044,14 +1066,10 @@ struct WorkspaceMainView: View {
         contentView.cacheDisplay(in: captureRect, to: bitmapRep)
         let captureTime = CACurrentMediaTime()
 
-        // Create Full viewportSize , and stretch full when drawing (excluded) 1px Almost invisible)
+        // Keep the bitmap at its native dimensions. Redrawing with lockFocus
+        // adds main-thread work and stretches the transition by one point.
         let image = NSImage(size: viewportSize)
-        image.lockFocus()
-        if let ctx = NSGraphicsContext.current {
-            ctx.imageInterpolation = .high
-            bitmapRep.draw(in: NSRect(origin: .zero, size: viewportSize))
-        }
-        image.unlockFocus()
+        image.addRepresentation(bitmapRep)
 
         let endTime = CACurrentMediaTime()
         NSLog("📸 captureViewportSnapshot: %.1fms (cache: %.1fms)",
@@ -1130,32 +1148,6 @@ struct WorkspaceMainView: View {
         tab.unifiedScript != nil ||
         tab.leftPanelScript != nil ||
         tab.guestScript != nil
-    }
-
-    // MARK: - Data Conversion for React Native
-
-    /// Convert bookmarks to dictionary array for RN layer
-    private var bookmarksForRN: [[String: Any]] {
-        bookmarkVM.bookmarks.map { bookmark in
-            [
-                "id": bookmark.id.uuidString,
-                "title": bookmark.title,
-                "appURL": bookmark.appURL?.absoluteString ?? "",
-                "createdAt": Int(bookmark.createdAt.timeIntervalSince1970 * 1000)
-            ] as [String: Any]
-        }
-    }
-
-    /// Convert recent history to dictionary array for RN layer
-    private var recentHistoryForRN: [[String: Any]] {
-        historyVM.recentItems.map { item in
-            [
-                "id": item.id.uuidString,
-                "title": item.title,
-                "appURL": item.appURL?.absoluteString ?? "",
-                "visitTime": Int(item.visitTime.timeIntervalSince1970 * 1000)
-            ] as [String: Any]
-        }
     }
 
     // MARK: - Transform Calculations
@@ -1255,7 +1247,7 @@ struct WorkspaceMainView: View {
     private static let addButtonUUID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     /// Cache [+] Button Image and its Dimensions (avoid each time) body Recreated during assessment)
-    private static var cachedAddButtonImage: (image: NSImage, size: CGSize)?
+    private static var cachedAddButtonImage: (image: NSImage, size: CGSize, appearanceName: String)?
 
     private func buildVirtualGridCards(
         tabs: [Tab],
@@ -1310,10 +1302,13 @@ struct WorkspaceMainView: View {
     /// - Returns: Image after Rendering
     private func createAddButtonImage(width: CGFloat, height: CGFloat) -> NSImage {
         let size = CGSize(width: width, height: height)
+        let appearanceName = NSApplication.shared.effectiveAppearance.name.rawValue
 
         // Check Cache: If size equal, return the cache image directly
         if let cached = Self.cachedAddButtonImage,
-           abs(cached.size.width - size.width) < 1 && abs(cached.size.height - size.height) < 1 {
+           abs(cached.size.width - size.width) < 1,
+           abs(cached.size.height - size.height) < 1,
+           cached.appearanceName == appearanceName {
             return cached.image
         }
 
@@ -1324,13 +1319,13 @@ struct WorkspaceMainView: View {
         let rect = NSRect(origin: .zero, size: size)
         let cornerRadius = CardStyle.cornerRadius
 
-        // Background: Dark grey (Match NSColor(white: 0.15, alpha: 1.0))
+        // Match the native Overview card surface in the current appearance.
         let backgroundPath = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
-        NSColor(white: 0.15, alpha: 1.0).setFill()
+        AppColors.overviewCardBackground.setFill()
         backgroundPath.fill()
 
         // Border: White 0.15 Transparency
-        NSColor.white.withAlphaComponent(0.15).setStroke()
+        AppColors.separator.setStroke()
         backgroundPath.lineWidth = 1.0
         backgroundPath.stroke()
 
@@ -1349,14 +1344,14 @@ struct WorkspaceMainView: View {
                 height: plusImage.size.height
             )
             // Set White 0.5 Transparency
-            NSColor.white.withAlphaComponent(0.5).set()
-            plusImage.draw(in: plusRect, from: .zero, operation: .sourceOver, fraction: 0.5)
+            NSColor.secondaryLabelColor.set()
+            plusImage.draw(in: plusRect, from: .zero, operation: .sourceOver, fraction: 1)
         }
 
         image.unlockFocus()
 
         // Cache newly created images
-        Self.cachedAddButtonImage = (image: image, size: size)
+        Self.cachedAddButtonImage = (image: image, size: size, appearanceName: appearanceName)
 
         return image
     }
@@ -1467,6 +1462,36 @@ struct WorkspaceMainView: View {
         return (positions, cardWidth, cardHeight, actriumSize)
     }
 
+}
+
+private struct PersistentNativeTabLayer: View {
+    let tab: Tab
+    let nativeType: NativeContentType
+    let isFocused: Bool
+    let viewportSize: CGSize
+    @ObservedObject var bookmarkVM: BookmarkViewModel
+    @ObservedObject var historyVM: HistoryViewModel
+    let onNavigate: (URL) -> Void
+
+    var body: some View {
+        Group {
+            switch nativeType {
+            case .startPage:
+                StartPageView(
+                    bookmarks: bookmarkVM.bookmarks,
+                    recentHistory: historyVM.recentItems,
+                    containerSize: viewportSize,
+                    isCompactMode: false,
+                    onNavigate: onNavigate
+                )
+            }
+        }
+        .frame(width: viewportSize.width, height: viewportSize.height)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .opacity(isFocused ? 1 : 0)
+        .allowsHitTesting(isFocused)
+        .accessibilityHidden(!isFocused)
+    }
 }
 
 // MARK: - Actrium View
@@ -1887,7 +1912,7 @@ private struct AddressBarLeftIcon: View {
             Circle()
                 .trim(from: 0, to: 0.7)
                 .stroke(
-                    Color.white.opacity(0.7),
+                    Color.secondary,
                     style: StrokeStyle(lineWidth: 1.2, lineCap: .round)
                 )
                 .frame(width: 12, height: 12)
@@ -1936,7 +1961,7 @@ private struct AddressBarContainer<BookmarkContent: View>: View {
                 // Edit Status: Magnifying Mirror + Input Box + Right button
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundStyle(Color.white.opacity(0.7))
+                        .foregroundStyle(.secondary)
                         .frame(width: 16, height: 16)
 
                     FocusableTextField(
@@ -1951,7 +1976,7 @@ private struct AddressBarContainer<BookmarkContent: View>: View {
                     // Keep Right button
                     Button(action: { showingBookmarkPopover.toggle() }) {
                         Image(systemName: isBookmarked ? "star.fill" : "star")
-                            .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.7))
+                            .foregroundColor(isBookmarked ? .yellow : .secondary)
                     }
                     .buttonStyle(.borderless)
                     .help(isBookmarked ? "Edit Bookmark" : "Add Bookmark")
@@ -1961,7 +1986,7 @@ private struct AddressBarContainer<BookmarkContent: View>: View {
 
                     Button(action: refreshAction) {
                         Image(systemName: "arrow.clockwise")
-                            .foregroundColor(.white.opacity(0.7))
+                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.borderless)
                     .help("Refresh")
@@ -1972,7 +1997,7 @@ private struct AddressBarContainer<BookmarkContent: View>: View {
                     AddressBarLeftIcon(state: leftIconState, action: toggleLeftPanel)
 
                     Text(titleText)
-                        .foregroundColor(.white)
+                        .foregroundStyle(.primary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
@@ -1986,7 +2011,7 @@ private struct AddressBarContainer<BookmarkContent: View>: View {
                     // Star button for bookmarking
                     Button(action: { showingBookmarkPopover.toggle() }) {
                         Image(systemName: isBookmarked ? "star.fill" : "star")
-                            .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.7))
+                            .foregroundColor(isBookmarked ? .yellow : .secondary)
                     }
                     .buttonStyle(.borderless)
                     .help(isBookmarked ? "Edit Bookmark" : "Add Bookmark")
@@ -2171,6 +2196,11 @@ private struct TabPanel: View {
     // Aligning title bar height - Use shared styles
     private var floatingTitleBarHeight: CGFloat { CardStyle.titleBarHeight }
 
+    private var tabBackgroundColor: Color {
+        if case .native = tab.contentType { return AppColors.overviewCardBackgroundColor }
+        return Color(hslString: tab.backgroundColor)
+    }
+
     var body: some View {
         let _ = NSLog("🔄 [TABCARD-BODY] TabPanel.body: tabId=%@, isFocused=%d", tab.id.uuidString, isFocused ? 1 : 0)
 
@@ -2190,10 +2220,15 @@ private struct TabPanel: View {
             .overlay {
                 if !isFocused {
                     RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
-                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                        .stroke(AppColors.separatorColor, lineWidth: CardStyle.borderWidth)
                 }
             }
-            .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
+            .shadow(
+                color: isFocused ? .clear : Color.black.opacity(Double(CardStyle.shadowOpacity)),
+                radius: CardStyle.shadowRadius,
+                x: CardStyle.shadowOffset.width,
+                y: CardStyle.shadowOffset.height
+            )
             // Only the card's main subject responded. onTapGesture(excluding title bar)
             .contentShape(Rectangle())
             .onTapGesture {
@@ -2256,16 +2291,16 @@ private struct TabPanel: View {
         ZStack(alignment: .top) {
             // Card Subject
             ZStack {
-                Color(hslString: tab.backgroundColor)
+                tabBackgroundColor
                 Image(systemName: "globe")
                     .font(.system(size: 32))
-                    .foregroundColor(.white.opacity(0.3))
+                    .foregroundStyle(Color.secondary.opacity(0.5))
             }
             .frame(width: cardWidth, height: cardHeight)
             .cornerRadius(CardStyle.cornerRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
-                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                    .stroke(AppColors.separatorColor, lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.5), radius: 10, x: 0, y: 5)
 
@@ -2316,7 +2351,7 @@ private struct TabPanel: View {
                 // Overview Mode: Transparent background, RN Contents Display
                 Color.clear
             } else {
-                Color(hslString: tab.backgroundColor)
+                tabBackgroundColor
             }
 
             // Multi-state rendering: based on contentType Select Rendering Engine
@@ -2424,17 +2459,17 @@ private struct NewTabPanel: View {
     var body: some View {
         ZStack {
             Rectangle()
-                .fill(Color(nsColor: NSColor(white: 0.15, alpha: 1.0)))
+                .fill(AppColors.overviewCardBackgroundColor)
 
             Image(systemName: "plus")
                 .font(.system(size: 48))
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundStyle(.secondary)
         }
         .frame(width: cardWidth, height: cardHeight)
         .cornerRadius(CardStyle.cornerRadius)
         .overlay(
             RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
-                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                .stroke(AppColors.separatorColor, lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
         .contentShape(Rectangle())

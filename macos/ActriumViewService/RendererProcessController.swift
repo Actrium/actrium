@@ -21,7 +21,11 @@ final class RendererProcessController {
     /// that case the legacy distributed-notification fallback must not run,
     /// even if the Broker has already disconnected.
     @discardableResult
-    nonisolated static func sendHostEvent(name: String, userInfo: [String: Any] = [:]) -> Bool {
+    nonisolated static func sendHostEvent(
+        name: String,
+        userInfo: [String: Any] = [:],
+        tabId: String = ""
+    ) -> Bool {
         guard isRendererProcess else { return false }
         guard JSONSerialization.isValidJSONObject(userInfo),
               let data = try? JSONSerialization.data(withJSONObject: userInfo),
@@ -34,7 +38,7 @@ final class RendererProcessController {
         DispatchQueue.main.async {
             guard let controller = RendererProcessLifetime.shared.controller else { return }
             do {
-                try controller.connection.sendHostEvent(name: name, userInfoJSON: json)
+                try controller.connection.sendHostEvent(name: name, userInfoJSON: json, tabId: tabId)
             } catch {
                 NSLog("ActriumRenderer host event failed: %@ (%@)", name, error.localizedDescription)
             }
@@ -96,6 +100,32 @@ final class RendererProcessController {
     private var serviceEventSubscriptions: [UUID: (RealmServiceEventReply) -> Void] = [:]
     private var serviceEventTabs: [UUID: String] = [:]
     private var cancelledServiceEventSubscriptions: Set<UUID> = []
+    private var fileImports: [String: (id: UUID, reloadKey: Int, reply: (GuestFileImportReply) -> Void)] = [:]
+
+    static func pickFiles(
+        _ call: GuestFileImportCall, tabId: String, reply: @escaping (GuestFileImportReply) -> Void
+    ) {
+        guard let controller = RendererProcessLifetime.shared.controller,
+              controller.surfaces[tabId] != nil, controller.fileImports[tabId] == nil else {
+            reply(GuestFileImportReply(id: call.id, error: "The picker tab is unavailable or already selecting files."))
+            return
+        }
+        do {
+            let data = try JSONEncoder().encode(call)
+            try controller.connection.sendHostEvent(
+                name: GuestFileImportCall.requestEvent, userInfoJSON: String(decoding: data, as: UTF8.self), tabId: tabId
+            )
+            controller.fileImports[tabId] = (call.id, call.reloadKey, reply)
+            let requestId = call.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(GuestFileImportCall.timeoutSeconds)) {
+                [weak controller] in
+                guard let controller, controller.fileImports[tabId]?.id == requestId else { return }
+                controller.cancelFileImport(tabId, message: "The file selection timed out.")
+            }
+        } catch {
+            reply(GuestFileImportReply(id: call.id, error: "Could not contact the file picker."))
+        }
+    }
 
     static func callRealmService(
         tabId: String,
@@ -233,7 +263,20 @@ final class RendererProcessController {
     }
 
     private func configureIPC() {
-        connection.onHostEvent = { [weak self] name, json, _ in
+        connection.onHostEvent = { [weak self] name, json, tabId in
+            if name == GuestFileImportCall.responseEvent {
+                self?.receiveFileImport(json, tabId: tabId)
+                return
+            }
+            if name == "com.actrium.rendererKeyboardFocus" {
+                guard let focused = Bool(json) else { return }
+                // Apply focus on the same queue as input so the next key
+                // event can reach the restored editor.
+                DispatchQueue.main.async {
+                    self?.surfaces[tabId]?.setKeyboardFocus(focused)
+                }
+                return
+            }
             if name == RealmServiceCall.responseEvent,
                let response = try? JSONDecoder().decode(RealmServiceReply.self, from: Data(json.utf8)) {
                 self?.serviceCalls.removeValue(forKey: response.id)?(response)
@@ -353,6 +396,9 @@ final class RendererProcessController {
             config = decoded
         }
 
+        if let pending = fileImports[tabId], pending.reloadKey != Int(request.reloadKey) {
+            cancelFileImport(tabId)
+        }
         config["tabId"] = tabId
         if config["title"] == nil {
             config["title"] = request.title
@@ -460,18 +506,22 @@ final class RendererProcessController {
         try? connection.sendAccessibilityTree(surface.accessibilityTree())
     }
 
-    func publishCaret(tabId: String, rect: CGRect?) {
-        guard let encoded = try? JSONEncoder().encode(rect) else { return }
-        try? connection.sendHostEvent(
-            name: "com.actrium.rendererCaret",
-            userInfoJSON: String(decoding: encoded, as: UTF8.self),
-            tabId: tabId
-        )
-    }
-
     private func destroyTab(_ tabId: String) {
+        cancelFileImport(tabId)
         surfaces.removeValue(forKey: tabId)?.close()
         reactNativeHost.destroyRendererEntry(tabId: tabId)
+    }
+
+    private func cancelFileImport(_ tabId: String, message: String = "The picker document changed or closed.") {
+        if let pending = fileImports.removeValue(forKey: tabId) {
+            pending.reply(GuestFileImportReply(id: pending.id, error: message))
+        }
+    }
+
+    private func receiveFileImport(_ json: String, tabId: String) {
+        guard let response = try? JSONDecoder().decode(GuestFileImportReply.self, from: Data(json.utf8)),
+              fileImports[tabId]?.id == response.id else { return }
+        fileImports.removeValue(forKey: tabId)?.reply(response)
     }
 
     private func terminate(reason: String) {
@@ -527,12 +577,10 @@ private final class RendererTabSurface {
     let tabId: String
     let entry: TabViewControllerEntry
     let container: ResizableContainerView
-    let window: NSWindow
+    let window: RendererWindow
     let context: RendererCAContext
     private var generation: UInt64 = 0
     private var hasCommitted = false
-    private weak var focusedEditor: NSTextView?
-    private var lastCaretRect: CGRect?
     private var accessibilityObservers: [NSObjectProtocol] = []
     private var accessibilityPublishWork: DispatchWorkItem?
     private var pressedRecognizers: [UInt32: [NSGestureRecognizer]] = [:]
@@ -605,8 +653,13 @@ private final class RendererTabSurface {
             hasCommitted = true
         }
         context.attachWindowLayerTree(for: container)
-        publishCaret()
         CATransaction.flush()
+    }
+
+    func setKeyboardFocus(_ focused: Bool) {
+        guard window.hasHostKeyboardFocus != focused else { return }
+        window.setHostKeyboardFocus(focused)
+        commit()
     }
 
     func close() {
@@ -706,7 +759,6 @@ private final class RendererTabSurface {
                 if input.button == 0, let textInput {
                     textInputPresses.insert(input.button)
                     focusTextInput(textInput, at: location, modifiers: modifiers)
-                    publishCaret()
                     // AppKit adds the field editor to the offscreen view
                     // hierarchy on focus. Republish after that update.
                     DispatchQueue.main.async { [weak self] in
@@ -726,35 +778,17 @@ private final class RendererTabSurface {
                 }
             }
             window.sendEvent(event)
-            if input.type == .mouseDown { publishCaret() }
 
         case .scroll:
             guard let hitView = hitTest(at: location) else { return }
-            let scrollView = sequence(first: hitView, next: \.superview)
-                .compactMap { $0 as? NSScrollView }
-                .first { candidate in
-                    guard let rnScrollView = candidate as? RCTUIScrollView else { return true }
-                    return rnScrollView.isScrollEnabled
-                }
-            guard let scrollView else { return }
-
-            // An offscreen window cannot route a CGEvent-backed NSEvent to its
-            // content. NSClipView scrolling also posts the bounds notification
-            // that drives RN's native scrollViewDidScroll delegate path.
-            let clipView = scrollView.contentView
-            let origin = clipView.bounds.origin
-            let target = NSPoint(
-                x: origin.x - input.scrollDeltaX,
-                y: origin.y - input.scrollDeltaY
-            )
-            let constrainedTarget = clipView.constrainBoundsRect(
-                NSRect(origin: target, size: clipView.bounds.size)
-            ).origin
-            clipView.scroll(to: constrainedTarget)
-            commit()
+            let delta = NSPoint(x: input.scrollDeltaX, y: input.scrollDeltaY)
+            if ActriumScrollRendererContent(hitView, delta) {
+                commit()
+            }
 
         case .keyDown, .keyUp:
-            guard let event = NSEvent.keyEvent(
+            guard window.hasHostKeyboardFocus,
+                  let event = NSEvent.keyEvent(
                 with: input.type == .keyDown ? .keyDown : .keyUp,
                 location: location,
                 modifierFlags: modifiers,
@@ -774,11 +808,6 @@ private final class RendererTabSurface {
             } else {
                 window.sendEvent(event)
             }
-            if input.type == .keyDown {
-                // Fabric publishes content changes after mounting. A caret
-                // movement alone does not need to flush the remote surface.
-                publishCaret()
-            }
 
         case .mouseEntered, .mouseExited, .UNRECOGNIZED(_):
             break
@@ -795,46 +824,11 @@ private final class RendererTabSurface {
         // Renderer mouse-up arrives on the main queue over IPC.
         let focused = window.makeFirstResponder(view)
         let editor = (view as? NSTextField)?.currentEditor() as? NSTextView ?? view as? NSTextView
-        focusedEditor = focused ? editor : nil
         guard focused, let editor, !modifiers.contains(.shift) else { return }
         let point = editor.convert(location, from: nil)
         let index = editor.characterIndexForInsertion(at: point)
         guard index != NSNotFound, index <= (editor.string as NSString).length else { return }
         editor.setSelectedRange(NSRange(location: index, length: 0))
-    }
-
-    private func publishCaret() {
-        let rect = caretRect()
-        guard rect != lastCaretRect else { return }
-        lastCaretRect = rect
-        RendererProcessLifetime.shared.controller?.publishCaret(tabId: tabId, rect: rect)
-    }
-
-    private func caretRect() -> CGRect? {
-        guard let editor = focusedEditor, window.firstResponder === editor, editor.isEditable,
-              editor.selectedRange().length == 0 else {
-            return nil
-        }
-        let screenRect = editor.firstRect(forCharacterRange: editor.selectedRange(), actualRange: nil)
-        let localRect: NSRect
-        if editor.string.isEmpty {
-            // AppKit can return an empty character rectangle for an empty field.
-            let origin = editor.textContainerOrigin
-            let inset = editor.textContainer?.lineFragmentPadding ?? 0
-            let lineHeight = editor.font.map {
-                editor.layoutManager?.defaultLineHeight(for: $0) ?? $0.pointSize
-            } ?? NSFont.systemFontSize
-            let height = min(editor.bounds.height, lineHeight)
-            let rect = NSRect(x: origin.x + inset, y: editor.bounds.midY - height / 2,
-                              width: 2, height: height)
-            localRect = container.convert(rect, from: editor)
-        } else {
-            guard screenRect.height > 0 else {
-                return nil
-            }
-            localRect = container.convert(window.convertFromScreen(screenRect), from: nil)
-        }
-        return CGRect(x: localRect.minX, y: localRect.minY, width: 2, height: localRect.height)
     }
 
     private func forwardMouse(_ event: NSEvent, to recognizers: [NSGestureRecognizer]) {

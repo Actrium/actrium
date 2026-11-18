@@ -61,14 +61,17 @@ final class ContentViewController: NSViewController {
         hostingView = NSHostingView(rootView: contentView)
         hostingView.translatesAutoresizingMaskIntoConstraints = false
 
-        // Container view with rounded corners only on bottom (top connects to toolbar)
+        // Content body is inset from the toolbar and rounded on all sides.
         let container = DividerAwareContainerView()
         container.wantsLayer = true
         container.layer?.cornerRadius = cornerRadius
-        // CALayer corner constants use geometric minY/maxY; on macOS non-flipped layer
-        // bottom corners are MinY (not MaxY).
-        container.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        container.layer?.maskedCorners = [
+            .layerMinXMinYCorner, .layerMaxXMinYCorner,
+            .layerMinXMaxYCorner, .layerMaxXMaxYCorner,
+        ]
         container.layer?.masksToBounds = true
+        container.layer?.borderWidth = 1
+        container.layer?.borderColor = AppColors.bodyBorder.cgColor
         container.addSubview(hostingView)
 
         NSLayoutConstraint.activate([
@@ -85,8 +88,13 @@ final class ContentViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        // Set background color
-        view.layer?.backgroundColor = AppColors.contentBackground.cgColor
+        applyAppearanceColors()
+    }
+
+    func applyAppearanceColors() {
+        view.layer?.backgroundColor = AppColors.workspaceBackground.cgColor
+        view.layer?.borderColor = AppColors.bodyBorder.cgColor
+        view.needsDisplay = true
     }
 
     // MARK: - Divider Hit Passthrough
@@ -99,6 +107,17 @@ final class ContentViewController: NSViewController {
 }
 
 // MARK: - SwiftUI Content Area
+
+private struct SystemPageSelection: Equatable {
+    let tabID: UUID
+    let type: SystemTabType
+
+    init?(tab: Tab?) {
+        guard let tab, let type = tab.systemTabType else { return nil }
+        tabID = tab.id
+        self.type = type
+    }
+}
 
 /// SwiftUI view for main content area with XPC notification handling
 private struct ContentAreaView: View {
@@ -131,43 +150,50 @@ private struct ContentAreaView: View {
             // Apply debug configuration (only once)
             applyDebugConfigIfNeeded()
         }
+        .onChange(of: SystemPageSelection(tab: viewModel.currentTab), initial: true) { _, selection in
+            switch selection?.type {
+            case .history: historyVM.loadAll()
+            case .bookmarks: bookmarkVM.loadAll()
+            default: break
+            }
+        }
         // Handle bookmark open from XPC service
         .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openBookmark)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let urlString = userInfo["url"] as? String else { return }
-            viewModel.navigateCurrentTab(to: urlString)
-
-            // Mark bookmark as used if we can find it
-            if let bookmarkId = userInfo["bookmarkId"] as? String,
-               let uuid = UUID(uuidString: bookmarkId),
-               let bookmark = bookmarkVM.bookmarks.first(where: { $0.id == uuid }) {
-                bookmarkVM.markAsUsed(bookmark)
-            }
+            guard let id = libraryItemID(in: notification, page: .bookmarks, key: "bookmarkId"),
+                  let bookmark = bookmarkVM.bookmarks.first(where: { $0.id == id }),
+                  let url = bookmark.appURL else { return }
+            viewModel.openURLInNewTab(url)
+            bookmarkVM.markAsUsed(bookmark)
         }
         // Handle history item open from XPC service
         .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.openHistoryItem)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let urlString = userInfo["url"] as? String else { return }
-            viewModel.navigateCurrentTab(to: urlString)
+            guard let id = libraryItemID(in: notification, page: .history, key: "itemId"),
+                  let url = historyVM.allItems.first(where: { $0.id == id })?.appURL else { return }
+            viewModel.openURLInNewTab(url)
         }
         // Handle bookmark delete from XPC service
         .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.deleteBookmark)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let bookmarkId = userInfo["bookmarkId"] as? String,
-                  let uuid = UUID(uuidString: bookmarkId) else { return }
-            bookmarkVM.removeBookmark(id: uuid)
+            guard let id = libraryItemID(in: notification, page: .bookmarks, key: "bookmarkId") else { return }
+            bookmarkVM.removeBookmark(id: id)
         }
         // Handle history item delete from XPC service
         .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.deleteHistoryItem)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let itemId = userInfo["itemId"] as? String,
-                  let uuid = UUID(uuidString: itemId),
-                  let item = historyVM.recentItems.first(where: { $0.id == uuid }) else { return }
+            guard let id = libraryItemID(in: notification, page: .history, key: "itemId"),
+                  let item = historyVM.allItems.first(where: { $0.id == id }) else { return }
             historyVM.deleteItem(item)
         }
         // Handle clear history from XPC service
-        .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.clearHistory)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.clearHistory)) { notification in
+            guard activeLibraryTabMatches(notification, page: .history) else { return }
             historyVM.clearHistory()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: XPCNotificationBridge.setHistoryPage)) { notification in
+            guard activeLibraryTabMatches(notification, page: .history),
+                  let page = notification.userInfo?["page"] as? Int,
+                  (0..<LibraryTabData.historyPageCount(itemCount: historyVM.allItems.count)).contains(page),
+                  let index = viewModel.tabs.firstIndex(where: { $0.id == viewModel.currentTabId }),
+                  viewModel.tabs[index].historyPageIndex != page else { return }
+            viewModel.tabs[index].historyPageIndex = page
         }
         // Handle internal URI navigation (e.g., actro://bookmarks/tags/{tagId})
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.actro.openURI"))) { notification in
@@ -188,6 +214,18 @@ private struct ContentAreaView: View {
                   let urlString = userInfo["url"] as? String else { return }
             viewModel.navigateCurrentTab(to: urlString)
         }
+    }
+
+    private func libraryItemID(in notification: Notification, page: SystemTabType, key: String) -> UUID? {
+        guard activeLibraryTabMatches(notification, page: page),
+              let itemID = notification.userInfo?[key] as? String else { return nil }
+        return UUID(uuidString: itemID)
+    }
+
+    private func activeLibraryTabMatches(_ notification: Notification, page: SystemTabType) -> Bool {
+        guard let currentTab = viewModel.currentTab, currentTab.systemTabType == page,
+              let tabID = notification.userInfo?["tabId"] as? UUID else { return false }
+        return tabID == currentTab.id
     }
 
     // MARK: - Pending Group Transfer

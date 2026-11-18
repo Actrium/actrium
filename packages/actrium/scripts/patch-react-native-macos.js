@@ -2,10 +2,12 @@ const fs = require('fs');
 const path = require('path');
 
 const packageRoot = path.join(__dirname, '..', 'node_modules', 'react-native-macos');
+const runtimePropsOnly = process.argv.includes('--runtime-props-only');
 
-function patchFile(relativePath, patcher) {
+function patchFile(relativePath, patcher, required = false) {
   const filePath = path.join(packageRoot, relativePath);
   if (!fs.existsSync(filePath)) {
+    if (required) throw new Error(`Missing React Native macOS source: ${filePath}`);
     return;
   }
 
@@ -15,6 +17,20 @@ function patchFile(relativePath, patcher) {
     fs.writeFileSync(filePath, after);
   }
 }
+
+// RuntimeApp surface props can contain browsing history and bookmarks.
+patchFile('Libraries/ReactNative/AppRegistryImpl.js', (source) => {
+  const logGuard = "if (appKey !== 'LogBox') {";
+  const redactedGuard = "if (appKey !== 'LogBox' && appKey !== 'RuntimeApp') {";
+  const unpatched = source.split(logGuard).length - 1;
+  const patched = source.split(redactedGuard).length - 1;
+  if (unpatched + patched !== 2) {
+    throw new Error('React Native macOS AppRegistry logging changed. Update the RuntimeApp props redaction.');
+  }
+  return source.replaceAll(logGuard, redactedGuard);
+}, runtimePropsOnly);
+
+if (runtimePropsOnly) process.exit(0);
 
 patchFile('ReactCommon/hermes/executor/HermesExecutorFactory.cpp', (source) => {
   if (source.includes('#include <thread>')) {
@@ -42,6 +58,24 @@ patchFile('scripts/codegen/generate-artifacts-executor/utils.js', (source) =>
     "if (dependency === REACT_NATIVE || dependency === 'react-native') {",
   ),
 );
+
+patchFile('React/Fabric/Mounting/ComponentViews/ScrollView/RCTScrollViewComponentView.mm', (source) => {
+  const flexible =
+    '    _containerView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;';
+  const fixed = [
+    '    // Fabric sets the document size before laying out the viewport.',
+    '    // Keep AppKit from adding the viewport size to the scrollable content.',
+    '    _containerView.autoresizingMask = NSViewNotSizable;',
+  ].join('\n');
+
+  if (source.includes(fixed)) {
+    return source;
+  }
+  if (!source.includes(flexible)) {
+    throw new Error('Unable to patch the macOS Fabric ScrollView document autoresizing mask');
+  }
+  return source.replace(flexible, fixed);
+});
 
 const aliasPath = path.join(
   packageRoot,

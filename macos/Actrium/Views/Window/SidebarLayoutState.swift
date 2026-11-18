@@ -8,6 +8,7 @@ final class SidebarLayoutState: ObservableObject {
     @Published private(set) var isSidebarCollapsed: Bool = false
     @Published private(set) var isWindowFullScreen: Bool = false
     @Published private(set) var windowWidth: CGFloat = 1200
+    @Published private(set) var tabStripWidth: CGFloat = 300
 
     let collapsedToolbarWidth: CGFloat = 78
 
@@ -42,5 +43,11 @@ final class SidebarLayoutState: ObservableObject {
     func updateWindowFullScreen(_ isFullScreen: Bool) {
         guard isWindowFullScreen != isFullScreen else { return }
         isWindowFullScreen = isFullScreen
+    }
+
+    func updateTabStripWidth(_ width: CGFloat) {
+        let normalized = max(0, width)
+        guard abs(tabStripWidth - normalized) > changeEpsilon else { return }
+        tabStripWidth = normalized
     }
 }

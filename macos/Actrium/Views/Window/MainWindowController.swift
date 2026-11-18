@@ -2,41 +2,26 @@ import AppKit
 import SwiftUI
 import Combine
 
-// MARK: - Custom Window (titlebar double-click zoom support)
+// MARK: - Compact Toolbar Window
 
-/// NSWindow subclass that restores double-click-to-zoom on the titlebar
-/// when a custom toolbar overlay intercepts mouse events.
+/// The compact toolbar owns pointer gestures; only its explicit chrome mask
+/// can start a window move.
 final class ActriumWindow: NSWindow {
+    weak var toolbarInteraction: ToolbarTabInteractionCoordinator?
+    var activeTabIDProvider: (() -> UUID?)?
+
+    func performExplicitWindowDrag(with event: NSEvent) {
+        guard event.type == .leftMouseDown else { return }
+        let wasMovable = isMovable
+        isMovable = true
+        defer { isMovable = wasMovable }
+        performDrag(with: event)
+    }
 
     override func sendEvent(_ event: NSEvent) {
-        guard event.type == .leftMouseUp, event.clickCount == 2,
-              event.locationInWindow.y >= contentLayoutRect.maxY else {
-            super.sendEvent(event)
-            return
-        }
-
-        // Skip interactive controls (address bar, buttons, etc.)
-        if let cv = contentView {
-            let pt = cv.convert(event.locationInWindow, from: nil)
-            if let hit = cv.hitTest(pt), hit is NSControl {
-                super.sendEvent(event)
-                return
-            }
-        }
-
-        // Let the system handle the event first (it may trigger zoom internally)
-        let frameBefore = frame
         super.sendEvent(event)
-
-        // Only zoom ourselves if the system didn't already do it
-        guard frame == frameBefore else { return }
-
-        let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
-        switch action {
-        case "Minimize": miniaturize(nil)
-        case "None":     break
-        default:         zoom(nil)
-        }
+        guard event.type == .leftMouseUp else { return }
+        toolbarInteraction?.pointerSequenceEnded(activeTabID: activeTabIDProvider?())
     }
 }
 
@@ -50,6 +35,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let bookmarkVM: BookmarkViewModel
 
     private var rootViewController: RootContentViewController!
+    private let toolbarInteraction = ToolbarTabInteractionCoordinator()
     private var cancellables = Set<AnyCancellable>()
     private var fullScreenTitleLabel: NSTextField?
     private let fullScreenTrafficLightLeftInset: CGFloat = 18
@@ -77,6 +63,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
         super.init(window: window)
 
+        window.toolbarInteraction = toolbarInteraction
+        window.activeTabIDProvider = { [weak viewModel] in viewModel?.currentTabId }
+
         configureWindow(window)
         setupContentViewController()
         bindWindowTitle()
@@ -97,6 +86,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.title = resolvedWindowTitle()
         window.backgroundColor = .clear
+        window.isMovable = false
+        window.isMovableByWindowBackground = false
 
         // Hide titlebar separator line
         window.titlebarSeparatorStyle = .none
@@ -151,7 +142,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         rootViewController = RootContentViewController(
             viewModel: viewModel,
             historyVM: historyVM,
-            bookmarkVM: bookmarkVM
+            bookmarkVM: bookmarkVM,
+            toolbarInteraction: toolbarInteraction
         )
 
         // Set as window's content view controller

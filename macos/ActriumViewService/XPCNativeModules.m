@@ -54,6 +54,18 @@ RCT_EXTERN_METHOD(requestGrant:(NSString *)tabId capability:(NSString *)capabili
 
 @end
 
+@interface RCT_EXTERN_MODULE(GuestFileImport, NSObject)
+
+RCT_EXTERN_METHOD(pick:(NSString *)tabId
+                  reloadKey:(NSNumber *)reloadKey
+                  source:(NSString *)source
+                  accept:(NSArray *)accept
+                  multiple:(BOOL)multiple
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+@end
+
 // MARK: - StartPageModule
 
 @interface RCT_EXTERN_MODULE(StartPageModule, NSObject)
@@ -66,10 +78,11 @@ RCT_EXTERN_METHOD(openURL:(NSString *)urlString)
 
 @interface RCT_EXTERN_MODULE(HistoryModule, NSObject)
 
-RCT_EXTERN_METHOD(openHistoryItem:(NSString *)itemId :(NSString *)appURL)
-RCT_EXTERN_METHOD(deleteHistoryItem:(NSString *)itemId)
-RCT_EXTERN_METHOD(restoreGroup:(NSString *)groupId)
-RCT_EXTERN_METHOD(clearHistory)
+RCT_EXTERN_METHOD(openHistoryItem:(NSString *)tabId :(NSString *)itemId)
+RCT_EXTERN_METHOD(deleteHistoryItem:(NSString *)tabId :(NSString *)itemId)
+RCT_EXTERN_METHOD(restoreGroup:(NSString *)tabId :(NSString *)groupId)
+RCT_EXTERN_METHOD(clearHistory:(NSString *)tabId)
+RCT_EXTERN_METHOD(setHistoryPage:(NSString *)tabId :(NSNumber *)page)
 
 @end
 
@@ -77,8 +90,8 @@ RCT_EXTERN_METHOD(clearHistory)
 
 @interface RCT_EXTERN_MODULE(BookmarksModule, NSObject)
 
-RCT_EXTERN_METHOD(openBookmark:(NSString *)bookmarkId :(NSString *)appURL)
-RCT_EXTERN_METHOD(deleteBookmark:(NSString *)bookmarkId)
+RCT_EXTERN_METHOD(openBookmark:(NSString *)tabId :(NSString *)bookmarkId)
+RCT_EXTERN_METHOD(deleteBookmark:(NSString *)tabId :(NSString *)bookmarkId)
 
 @end
 

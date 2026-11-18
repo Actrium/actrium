@@ -45,8 +45,19 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// Stored here to survive view recreation when DevTools layout changes
     @Published var actriumMode: ActriumMode = .overview
 
-    /// Flag to trigger address bar focus (set by addNewTab, consumed by view)
-    @Published var shouldAutoFocusAddressBar: Bool = false
+    enum AddressBarFocusPresentation: Equatable {
+        case immediate
+        case afterTabStripSettles
+    }
+
+    @Published private(set) var addressBarFocusPresentation: AddressBarFocusPresentation = .immediate
+
+    /// Flag to trigger address bar focus (set by addNewTab, consumed by view).
+    @Published var shouldAutoFocusAddressBar: Bool = false {
+        didSet {
+            if !shouldAutoFocusAddressBar { addressBarFocusPresentation = .immediate }
+        }
+    }
 
     /// Current tab loading state (for web content)
     @Published var isCurrentTabLoading: Bool = false
@@ -109,13 +120,17 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// History view model reference for recording ACTR app visits
     weak var historyVM: HistoryViewModel?
     private let browserDataRepository = BrowserDataRepository.shared
+    private let saveBrowserSession: ([Tab], UUID?) -> Void
 
     var currentTab: Tab? {
         guard let currentTabId = currentTabId else { return nil }
         return tabs.first(where: { $0.id == currentTabId })
     }
 
-    init() {
+    init(saveBrowserSession: @escaping ([Tab], UUID?) -> Void = { tabs, currentTabId in
+        BrowserDataRepository.shared.saveSession(tabs: tabs, currentTabId: currentTabId)
+    }) {
+        self.saveBrowserSession = saveBrowserSession
         // Initialize slot positions first
         initializeSlotPositions()
 
@@ -123,7 +138,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let startTab = Tab(
             title: "Start Page",
             systemTabType: .startPage,
-            backgroundColor: "#1e1e1e" // Fixed dark color
+            backgroundColor: AppColors.nativeTabBackgroundHex
         )
         tabs.append(startTab)
         currentTabId = startTab.id
@@ -132,7 +147,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     private func persistBrowserPageSession() {
-        browserDataRepository.saveSession(tabs: tabs, currentTabId: currentTabId)
+        saveBrowserSession(tabs, currentTabId)
+    }
+
+    func requestAddressBarFocus(
+        presentation: AddressBarFocusPresentation = .immediate
+    ) {
+        addressBarFocusPresentation = presentation
+        shouldAutoFocusAddressBar = true
     }
 
     @discardableResult
@@ -141,7 +163,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let newTab = Tab(
             title: "New Tab",
             systemTabType: .startPage,
-            backgroundColor: "#1e1e1e" // Fixed dark color
+            backgroundColor: AppColors.nativeTabBackgroundHex
         )
         tabs.append(newTab)
         currentTabId = newTab.id
@@ -152,10 +174,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         // New Tab Direct access. Focus Mode
         actriumMode = .focus(tabId: newTab.id)
         // Only a pure new blank Tab , and not focus when opening links
-        shouldAutoFocusAddressBar = focusAddressBar
+        if focusAddressBar {
+            requestAddressBarFocus(presentation: .afterTabStripSettles)
+        } else {
+            shouldAutoFocusAddressBar = false
+        }
 
         logger.notice(" New Tab Created: \(newTab.title), Location: \(self.tabs.count - 1)")
-        persistBrowserPageSession()
+        // A native Start Page has no restorable HTTP(S) URL. Persist after
+        // navigation instead of rewriting SQLite on the ⌘T path.
         return newTab
     }
 
@@ -163,13 +190,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// Returns the existing tab if already open, otherwise creates a new one
     @discardableResult
     func openSystemTab(_ type: SystemTabType) -> Tab {
+        defer { persistBrowserPageSession() }
+        shouldAutoFocusAddressBar = false
         // Check if a system tab of this type is already open
         if let existingTab = tabs.first(where: { $0.systemTabType == type }) {
             // Switch to existing tab
             currentTabId = existingTab.id
             actriumMode = .focus(tabId: existingTab.id)
             logger.debug("🔄 Switch to an existing system label: \(type.title)")
-            persistBrowserPageSession()
             return existingTab
         }
 
@@ -178,7 +206,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             title: type.title,
             url: type.aboutURL,
             systemTabType: type,
-            backgroundColor: "#1e1e1e"  // Dark background for system tabs
+            backgroundColor: AppColors.nativeTabBackgroundHex
         )
         tabs.append(newTab)
         currentTabId = newTab.id
@@ -186,7 +214,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         actriumMode = .focus(tabId: newTab.id)
 
         logger.notice("📱 Created System Label: \(type.title) (\(type.aboutURL.absoluteString)), Location: \(self.tabs.count - 1)")
-        persistBrowserPageSession()
         return newTab
     }
 
@@ -234,7 +261,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         // If this is the last tab, exit application after closing
         if tabs.count == 1 {
             logger.debug("🚪 Close last tab, apply the exit is about to be completed")
-            browserDataRepository.saveSession(tabs: [], currentTabId: nil)
+            saveBrowserSession([], nil)
             NSApplication.shared.terminate(nil)
             return
         }
@@ -342,6 +369,32 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         if let oldId = oldGroupId, oldId != groupId {
             cleanupEmptyGroup(oldId)
         }
+        persistBrowserPageSession()
+    }
+
+    /// Keep pointer-driven toolbar moves in memory until mouse-up. Persisting
+    /// every crossed slot would stall the drag and could remove a group while
+    /// its last tab is passing through another section.
+    func moveTabInteractively(tabId: UUID, toIndex: Int, groupId: UUID?) {
+        guard let fromIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        tabs[fromIndex].groupId = groupId
+        let tab = tabs.remove(at: fromIndex)
+        tabs.insert(tab, at: min(max(0, toIndex), tabs.count))
+    }
+
+    func moveGroupInteractively(groupId: UUID, toIndex: Int) {
+        let movingTabs = tabs.filter { $0.groupId == groupId }
+        guard !movingTabs.isEmpty else { return }
+        tabs.removeAll { $0.groupId == groupId }
+        tabs.insert(contentsOf: movingTabs, at: min(max(0, toIndex), tabs.count))
+    }
+
+    func commitInteractiveTabReorder() {
+        let populatedGroupIDs = Set(tabs.compactMap(\.groupId))
+        tabGroups.removeAll { !populatedGroupIDs.contains($0.id) }
+        tabSlotPositions = Dictionary(
+            uniqueKeysWithValues: tabs.enumerated().map { ($0.element.id, $0.offset) }
+        )
         persistBrowserPageSession()
     }
 
@@ -731,6 +784,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     /// Navigation Current Tab To Assign URL Or apply ID
+    func openURLInNewTab(_ url: URL) {
+        // These flows manage their own tabs when they recover an instance or import a package.
+        if !ActrInstanceAddress.isLocalInstanceURL(url), !ActrPackageLinkPolicy.isPackageDownloadURL(url) {
+            addNewTab(focusAddressBar: false)
+        }
+        navigateCurrentTab(to: url.absoluteString)
+    }
+
     /// Unified navigation portal - Process all types of input
     /// - If the input is about: URLNavigator to the corresponding system application
     /// - If the input is actro:// URLLoad Actrium Apply
@@ -833,29 +894,21 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 return
             }
 
-            // Check if it's an actro:// URL for Actrium apps.
-            // Legacy app-scheme links are still accepted as aliases.
-            // Two formats supported:
-            // - actro://bundleId - lookup by bundleId in database
-            // - actro:///absolute/path - local file path (three slashes)
+            // Resolve registered package IDs and absolute package paths.
             if ActriumAppURLScheme.isSupported(url.scheme) {
                 var sourcePath: String?
 
-                // Check if it's a local path (actro:///path/to/app)
-                // URL parsing: actro:///path -> host is nil/empty, path is /path
-                if let host = url.host, !host.isEmpty {
-                    // bundleId mode: actro://com.example.app - lookup in database
-                    logger.notice("📱 [navigateCurrentTab] Navigator to Actrium Apply (bundleId): \(host)")
+                if let bundleId = ActriumAppURLScheme.bundleId(from: url) {
+                    logger.notice("📱 [navigateCurrentTab] Navigator to Actrium Apply (bundleId): \(bundleId)")
                     let appRepo = AppRepository()
-                    if let app = appRepo.getByBundleId(host) {
+                    if let app = appRepo.getByBundleId(bundleId) {
                         sourcePath = app.sourcePath
-                        appRepo.updateLastUsed(bundleId: host)
+                        appRepo.updateLastUsed(bundleId: bundleId)
                     } else {
-                        logger.warning("⚠️ [navigateCurrentTab] No applications found: \(host)")
+                        logger.warning("⚠️ [navigateCurrentTab] No applications found: \(bundleId)")
                         return
                     }
                 } else {
-                    // local path mode: actro:///Users/example-dev-2/path/to/app
                     sourcePath = url.path
                     logger.notice("📂 [navigateCurrentTab] Navigator to Local Actrium Apply: \(sourcePath ?? "")")
                 }
@@ -2251,8 +2304,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     /// actro://<bundleId> resolves via AppRepository; actro:///path is a direct path.
     private func actroSourcePath(for url: URL) -> String? {
-        if let host = url.host, !host.isEmpty {
-            return AppRepository().getByBundleId(host)?.sourcePath
+        if let bundleId = ActriumAppURLScheme.bundleId(from: url) {
+            return AppRepository().getByBundleId(bundleId)?.sourcePath
         }
         return url.path
     }

@@ -51,9 +51,19 @@ final class RendererSurfaceHostView: NSView {
     weak var coordinator: ViewBridgeCoordinator?
     var tabId: UUID?
     var fingerprint = ""
-    var allowsInput = true
+    var allowsInput = true {
+        didSet {
+            guard allowsInput != oldValue else { return }
+            if allowsInput {
+                scheduleKeyboardFocusRestore()
+            } else if let window, window.firstResponder === self {
+                window.makeFirstResponder(nil)
+            }
+        }
+    }
 
     private var hostLayer: CALayer?
+    private var restoresKeyboardFocus = false
     private var contextId: UInt32 = 0
     private var trackingAreaReference: NSTrackingArea?
     private var surfaceObserver: NSObjectProtocol?
@@ -65,8 +75,6 @@ final class RendererSurfaceHostView: NSView {
     private var lastSentSize: CGSize?
     private var recoveryAttempt = 0
     private var accessibilityObserver: NSObjectProtocol?
-    private var caretObserver: NSObjectProtocol?
-    private let caretLayer = CALayer()
     private var accessibilityElements: [RemoteAccessibilityElement] = []
     private var accessibilityById: [UInt64: RemoteAccessibilityElement] = [:]
     private var accessibilityTree = Actrium_Ipc_AccessibilityTree()
@@ -94,35 +102,12 @@ final class RendererSurfaceHostView: NSView {
         if let accessibilityObserver {
             NotificationCenter.default.removeObserver(accessibilityObserver)
         }
-        if let caretObserver {
-            NotificationCenter.default.removeObserver(caretObserver)
-        }
     }
 
     private func setup() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor(white: 0.10, alpha: 1).cgColor
+        layer?.backgroundColor = AppColors.workspaceBackground.cgColor
         layer?.masksToBounds = true
-        caretLayer.backgroundColor = NSColor.controlAccentColor.cgColor
-        caretLayer.zPosition = 1
-        caretLayer.isHidden = true
-        layer?.addSublayer(caretLayer)
-        caretObserver = NotificationCenter.default.addObserver(
-            forName: .rendererCaretUpdated, object: nil, queue: .main
-        ) { [weak self] notification in
-            guard let self, let tabId = self.tabId, notification.userInfo?["tabId"] as? UUID == tabId else { return }
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            defer { CATransaction.commit() }
-            guard let rect = notification.userInfo?["rect"] as? CGRect, self.window?.firstResponder === self,
-                  rect.width > 0, rect.height > 0, self.bounds.intersects(rect) else {
-                self.caretLayer.isHidden = true
-                return
-            }
-            self.caretLayer.frame = self.convertToLayer(rect)
-            self.caretLayer.isHidden = false
-        }
-
         surfaceObserver = NotificationCenter.default.addObserver(
             forName: .rendererSurfaceUpdated,
             object: nil,
@@ -167,6 +152,11 @@ final class RendererSurfaceHostView: NSView {
             self.coordinator?.allocatedServiceId = nil
             self.recoverRendererAfterCrash()
         }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        layer?.backgroundColor = AppColors.workspaceBackground.cgColor
     }
 
     func apply(config: [String: Any]) {
@@ -269,6 +259,7 @@ final class RendererSurfaceHostView: NSView {
     }
 
     override func prepareForReuse() {
+        allowsInput = false
         super.prepareForReuse()
         configureTask?.cancel()
         configureTask = nil
@@ -312,6 +303,8 @@ final class RendererSurfaceHostView: NSView {
         layer?.addSublayer(newLayer)
         hostLayer = newLayer
         contextId = newContextId
+        // The host may have gained focus before the new surface became ready.
+        syncKeyboardFocus()
         if let tabId {
             NSLog(
                 "Renderer surface installed: tab=%@ context=%u",
@@ -323,7 +316,6 @@ final class RendererSurfaceHostView: NSView {
 
     private func showPlaceholder() {
         contextId = 0
-        caretLayer.isHidden = true
         hostLayer?.removeFromSuperlayer()
         hostLayer = nil
     }
@@ -397,11 +389,75 @@ final class RendererSurfaceHostView: NSView {
         trackingAreaReference = area
     }
 
-    override var acceptsFirstResponder: Bool { true }
-    override func resignFirstResponder() -> Bool {
-        caretLayer.isHidden = true
-        return super.resignFirstResponder()
+    override var acceptsFirstResponder: Bool { allowsInput }
+
+    override func becomeFirstResponder() -> Bool {
+        guard allowsInput, super.becomeFirstResponder() else { return false }
+        restoresKeyboardFocus = true
+        sendKeyboardFocus(window?.isKeyWindow == true)
+        return true
     }
+
+    override func resignFirstResponder() -> Bool {
+        guard super.resignFirstResponder() else { return false }
+        sendKeyboardFocus(false)
+        return true
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if let window, window !== newWindow {
+            if window.firstResponder === self { sendKeyboardFocus(false) }
+            let center = NotificationCenter.default
+            center.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: window)
+            center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: window)
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        let center = NotificationCenter.default
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            center.addObserver(self, selector: #selector(windowKeyStatusChanged(_:)), name: name, object: window)
+        }
+        syncKeyboardFocus()
+        scheduleKeyboardFocusRestore()
+    }
+
+    @objc private func windowKeyStatusChanged(_ notification: Notification) {
+        guard window?.firstResponder === self else { return }
+        syncKeyboardFocus()
+    }
+
+    private func syncKeyboardFocus() {
+        sendKeyboardFocus(allowsInput && window?.isKeyWindow == true && window?.firstResponder === self)
+    }
+
+    private func sendKeyboardFocus(_ focused: Bool) {
+        guard let tabId else { return }
+        RendererProcessPool.shared.setKeyboardFocus(focused, for: tabId)
+    }
+
+    private func scheduleKeyboardFocusRestore() {
+        guard restoresKeyboardFocus else { return }
+        // SwiftUI can update the incoming Tab before it disables the outgoing
+        // Tab. Wait for both updates and recheck eligibility before claiming focus.
+        DispatchQueue.main.async { [weak self] in
+            self?.restoreKeyboardFocus()
+        }
+    }
+
+    private func restoreKeyboardFocus() {
+        guard allowsInput, let window, !isHiddenOrHasHiddenAncestor else { return }
+        let responder = window.firstResponder
+        // An ancestor can be the default responder after AppKit removes the
+        // old surface. Leave explicit responders such as the address editor alone.
+        let ancestorHasFocus = (responder as? NSView).map { isDescendant(of: $0) } ?? false
+        guard responder == nil || responder === window || ancestorHasFocus else { return }
+        window.makeFirstResponder(self)
+    }
+
     override var isFlipped: Bool { true }
 
     override func isAccessibilityElement() -> Bool { true }
@@ -579,7 +635,8 @@ final class RendererSurfaceHostView: NSView {
         _ event: NSEvent,
         type: Actrium_Ipc_InputEvent.EventType
     ) {
-        guard allowsInput, let tabId else { return }
+        guard allowsInput, let window, window.isKeyWindow,
+              window.firstResponder === self, let tabId else { return }
         var input = Actrium_Ipc_InputEvent()
         input.type = type
         input.keyCode = UInt32(event.keyCode)

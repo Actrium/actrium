@@ -6,6 +6,34 @@ import Testing
 struct URLParsingTests {
     private let vm = BrowserViewModel()
 
+    @Test func libraryLinksLoadInNewTabsAndKeepTheSourcePage() throws {
+        let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
+        let address = try #require(URL(string: "https://example.com/docs/start?tab=one"))
+        for page: SystemTabType in [.history, .bookmarks] {
+            let source = viewModel.openSystemTab(page)
+            let count = viewModel.tabs.count
+            viewModel.openURLInNewTab(address)
+
+            #expect(viewModel.tabs.count == count + 1)
+            #expect(viewModel.currentTabId != source.id)
+            #expect(viewModel.currentTab?.url == address)
+            #expect(viewModel.tabs.first { $0.id == source.id }?.url == page.aboutURL)
+        }
+    }
+
+    @Test func packageLinksKeepTheirExistingConfirmationFlow() throws {
+        let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
+        let source = viewModel.openSystemTab(.history)
+        let address = try #require(URL(string: "https://example.com/\(UUID())/front.actr"))
+        let tabIDs = viewModel.tabs.map(\.id)
+
+        viewModel.openURLInNewTab(address)
+
+        #expect(viewModel.pendingPackageDownload?.url == address)
+        #expect(viewModel.tabs.map(\.id) == tabIDs)
+        #expect(viewModel.currentTabId == source.id)
+    }
+
     // MARK: - Full URL Pass-through
 
     @Test func parseURL_httpURL_passesThrough() {
@@ -31,6 +59,16 @@ struct URLParsingTests {
     @Test func actriumArchiveURL_isNotMisclassifiedAsLocalPath() {
         #expect(vm.isLocalFilePath("actro:///tmp/example.actr") == false)
         #expect(vm.parseURL("actro:///tmp/example.actr")?.path == "/tmp/example.actr")
+    }
+
+    @Test func actriumPackageURLsResolveTheCompleteBundleID() throws {
+        let appID = "publisher.develenv.com/counterapp@0.1.0"
+        let localURL = try #require(ActriumAppURLScheme.appURL(filePath: "/tmp/front.actr"))
+        let legacyURL = ActriumAppURLScheme.appURL(bundleId: "com.example.app/")
+
+        #expect(ActriumAppURLScheme.bundleId(from: ActriumAppURLScheme.appURL(bundleId: appID)) == appID)
+        #expect(ActriumAppURLScheme.bundleId(from: legacyURL) == "com.example.app")
+        #expect(ActriumAppURLScheme.bundleId(from: localURL) == nil)
     }
 
     @Test func plainArchivePath_isStillRecognizedAsLocalPath() {

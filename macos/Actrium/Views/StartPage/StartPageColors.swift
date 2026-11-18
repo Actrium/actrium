@@ -27,25 +27,24 @@ enum StartPageColors {
     }
 
     /// Background color for the start page
-    static let background = Color(hex: "#1e1e1e")!
+    static var background: Color { AppColors.workspaceBackgroundColor }
 
     /// Section title color
-    static let sectionTitle = Color.white.opacity(0.9)
+    static var sectionTitle: Color { Color.primary.opacity(0.9) }
 
     /// Favorite item title color
-    static let favoriteTitle = Color.white.opacity(0.7)
+    static var favoriteTitle: Color { Color.primary.opacity(0.75) }
 
     /// History item title color
-    static let historyTitle = Color.white.opacity(0.5)
+    static var historyTitle: Color { Color.secondary }
 
     /// History icon background
-    static let historyIconBackground = Color.white.opacity(0.1)
+    static var historyIconBackground: Color { Color.primary.opacity(0.08) }
 
     /// History icon text color
-    static let historyIconText = Color.white.opacity(0.6)
+    static var historyIconText: Color { Color.secondary }
 
     /// Empty state text colors
-    static let emptyTitle = Color.white.opacity(0.4)
-    static let emptySubtitle = Color.white.opacity(0.3)
+    static var emptyTitle: Color { Color.secondary }
+    static var emptySubtitle: Color { Color.secondary.opacity(0.75) }
 }
-

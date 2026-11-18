@@ -11,6 +11,11 @@ export type HistoryItemData = {
   visitTime: number; // timestamp
 };
 
+export type HistoryPageData = {
+  index: number;
+  count: number;
+};
+
 // History group (closed tab group)
 export type HistoryGroupData = {
   id: string;

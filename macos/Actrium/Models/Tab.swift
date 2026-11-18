@@ -143,6 +143,7 @@ struct Tab: Identifiable {
 
     /// Reload counter passed to React Native as a remount key.
     var reloadNonce: Int
+    var historyPageIndex = 0
 
     /// Whether the left panel is visible by default.
     var leftPanelDefaultVisible: Bool

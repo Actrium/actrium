@@ -183,45 +183,44 @@ class StartPageModule: NSObject {
 class HistoryModule: NSObject {
 
     @objc
-    func openHistoryItem(_ itemId: String, _ appURL: String?) {
-        guard let urlString = appURL else {
-            NSLog("[HistoryModule] URL is nil")
-            return
-        }
-
-        NSLog("[HistoryModule] Opening history item: \(itemId), url: \(urlString)")
-
-        NativeHostTransport.post(
+    func openHistoryItem(_ tabId: String, _ itemId: String) {
+        RendererProcessController.sendHostEvent(
             name: "com.actro.openHistoryItem",
-            userInfo: ["itemId": itemId, "url": urlString]
+            userInfo: ["itemId": itemId],
+            tabId: tabId
         )
     }
 
     @objc
-    func deleteHistoryItem(_ itemId: String) {
-        NSLog("[HistoryModule] Delete history item: \(itemId)")
-
-        NativeHostTransport.post(
+    func deleteHistoryItem(_ tabId: String, _ itemId: String) {
+        RendererProcessController.sendHostEvent(
             name: "com.actro.deleteHistoryItem",
-            userInfo: ["itemId": itemId]
+            userInfo: ["itemId": itemId],
+            tabId: tabId
         )
     }
 
     @objc
-    func restoreGroup(_ groupId: String) {
-        NSLog("[HistoryModule] Restore group: \(groupId)")
-
-        NativeHostTransport.post(
+    func restoreGroup(_ tabId: String, _ groupId: String) {
+        RendererProcessController.sendHostEvent(
             name: "com.actro.restoreHistoryGroup",
-            userInfo: ["groupId": groupId]
+            userInfo: ["groupId": groupId],
+            tabId: tabId
         )
     }
 
     @objc
-    func clearHistory() {
-        NSLog("[HistoryModule] Clear all history")
+    func clearHistory(_ tabId: String) {
+        RendererProcessController.sendHostEvent(name: "com.actro.clearHistory", tabId: tabId)
+    }
 
-        NativeHostTransport.post(name: "com.actro.clearHistory")
+    @objc
+    func setHistoryPage(_ tabId: String, _ page: NSNumber) {
+        RendererProcessController.sendHostEvent(
+            name: "com.actrium.setHistoryPage",
+            userInfo: ["page": page],
+            tabId: tabId
+        )
     }
 
     @objc
@@ -242,27 +241,20 @@ class HistoryModule: NSObject {
 class BookmarksModule: NSObject {
 
     @objc
-    func openBookmark(_ bookmarkId: String, _ appURL: String?) {
-        guard let urlString = appURL else {
-            NSLog("[BookmarksModule] URL is nil")
-            return
-        }
-
-        NSLog("[BookmarksModule] Opening bookmark: \(bookmarkId), url: \(urlString)")
-
-        NativeHostTransport.post(
+    func openBookmark(_ tabId: String, _ bookmarkId: String) {
+        RendererProcessController.sendHostEvent(
             name: "com.actro.openBookmark",
-            userInfo: ["bookmarkId": bookmarkId, "url": urlString]
+            userInfo: ["bookmarkId": bookmarkId],
+            tabId: tabId
         )
     }
 
     @objc
-    func deleteBookmark(_ bookmarkId: String) {
-        NSLog("[BookmarksModule] Delete bookmark: \(bookmarkId)")
-
-        NativeHostTransport.post(
+    func deleteBookmark(_ tabId: String, _ bookmarkId: String) {
+        RendererProcessController.sendHostEvent(
             name: "com.actro.deleteBookmark",
-            userInfo: ["bookmarkId": bookmarkId]
+            userInfo: ["bookmarkId": bookmarkId],
+            tabId: tabId
         )
     }
 

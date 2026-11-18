@@ -30,7 +30,8 @@ try {
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform, StyleSheet, DeviceEventEmitter, LayoutChangeEvent } from 'react-native';
 import { StandaloneGuestApp } from './src/runtime-host/StandaloneGuestApp';
-import type { SystemAppType } from './src/runtime-host/types';
+import { LibraryPage } from './src/runtime-host/LibraryPage';
+import type { BookmarkData, HistoryGroupData, HistoryItemData, HistoryPageData, SystemAppType } from './src/runtime-host/types';
 
 // System apps share one Renderer runtime and are already present in this
 // bundle. Resolve them synchronously on first use: React.lazy's Promise state
@@ -105,10 +106,11 @@ interface SystemAppProps {
     capabilitySnapshotJSON?: string;
     permissions?: string[];
     backgroundColor: string;
-    bookmarks?: any[];
-    recentHistory?: any[];
-    historyItems?: any[];
-    historyGroups?: any[];
+    bookmarks?: BookmarkData[];
+    recentHistory?: HistoryItemData[];
+    historyItems?: HistoryItemData[];
+    historyPage?: HistoryPageData;
+    historyGroups?: HistoryGroupData[];
     reloadKey?: number;
   };
   containerWidth?: number;
@@ -125,7 +127,8 @@ const SystemPlaceholder: React.FC<{ appType: string }> = ({ appType }) => (
   </View>
 );
 
-const SystemAppContent: React.FC<{ appType: string }> = ({ appType }) => {
+const SystemAppContent: React.FC<{ tab: NonNullable<SystemAppProps['tab']> }> = ({ tab }) => {
+  const appType: string | undefined = tab.systemAppType;
   switch (appType) {
     case 'loading':
       return (
@@ -135,7 +138,9 @@ const SystemAppContent: React.FC<{ appType: string }> = ({ appType }) => {
         </View>
       );
     case 'history':
+      return <LibraryPage kind="history" tabId={tab.id} items={tab.historyItems ?? []} page={tab.historyPage} />;
     case 'bookmarks':
+      return <LibraryPage kind="bookmarks" tabId={tab.id} items={tab.bookmarks ?? []} />;
     case 'bookmarkTags':
     case 'settings':
     case 'globalSearch':
@@ -236,7 +241,7 @@ const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
   return (
     <View style={styles.container} onLayout={handleLayout}>
       <ErrorBoundary>
-        <SystemAppContent appType={tab.systemAppType} />
+        <SystemAppContent tab={tab} />
       </ErrorBoundary>
     </View>
   );

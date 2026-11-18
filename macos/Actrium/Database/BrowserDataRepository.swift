@@ -312,7 +312,9 @@ final class BrowserDataRepository {
 
     func removeHistory(item: HistoryItem) {
         guard let url = item.appURL, Self.isBrowserPageURL(url) else { return }
-        _ = database?.deleteHistory(address: url.absoluteString)
+        if database?.deleteHistory(address: url.absoluteString) == true {
+            scheduleSyncAfterLocalChange()
+        }
     }
 
     func clearHistory() {
