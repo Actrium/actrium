@@ -37,9 +37,6 @@ use tokio::sync::{Mutex, OnceCell};
 
 use crate::signer_client_wrapper::SignerClientWrapper;
 
-/// The only membership policy of version 1.
-const MEMBERSHIP: &str = "invite-only";
-
 /// Signer key name, and descriptor key id, of a domain's Realm signing key.
 pub fn realm_signing_key_id(domain: &str) -> String {
     format!("realm-signing:{domain}")
@@ -138,6 +135,7 @@ pub struct ProviderEndpoints {
 /// previous values.
 #[derive(Debug, Clone, Default)]
 pub struct ProfileChange {
+    pub policy: Option<RealmPolicy>,
     pub selection: Option<RealmPackageSelection>,
     pub display_name: Option<String>,
     pub retire: bool,
@@ -277,6 +275,7 @@ impl RealmProfiles {
         let mut document = self
             .draft(realm, sequence, &display_name, selection, change.retire)
             .await?;
+        document["policy"] = json!(change.policy.unwrap_or(current.policy));
         let signature = self
             .signer
             .sign(*signer_key_id, jcs(&document).as_bytes())
@@ -341,7 +340,7 @@ impl RealmProfiles {
                 signaling: self.endpoints.signaling.clone(),
                 ice: self.endpoints.ice.clone(),
             },
-            "policy": RealmPolicy { membership: MEMBERSHIP.to_string() },
+            "policy": Realm::get(realm).await?.ok_or(RealmError::NotFound)?.policy,
             "issued_at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         });
         if let Some(selection) = selection {

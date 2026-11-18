@@ -42,6 +42,7 @@ pub struct IssuerState {
     pub counters: Option<Arc<ServiceCounters>>,
     /// Membership limits (`[realm]`).
     pub(crate) limits: Limits,
+    pub(crate) invite_mode: platform::config::realm::DevJoinMode,
     /// Signs Realm Profiles for `update_realm` when this Loran is an Actr Facility
     /// Provider.
     pub(crate) profiles: Option<Arc<crate::realm_profile::RealmProfiles>>,
@@ -63,6 +64,7 @@ impl IssuerState {
             idempotency,
             counters: None,
             limits: Limits::from(&platform::config::RealmConfig::default()),
+            invite_mode: Default::default(),
             profiles: None,
         }
     }
@@ -75,6 +77,12 @@ impl IssuerState {
         profiles: Option<Arc<crate::realm_profile::RealmProfiles>>,
     ) -> Self {
         self.limits = Limits::from(config);
+        self.invite_mode = config.dev_join.mode;
+        if config.dev_join.mode == platform::config::realm::DevJoinMode::Open {
+            platform::recording::warn!(
+                "The legacy AFP-wide open setting is ignored. Configure admission for each Realm."
+            );
+        }
         self.profiles = profiles;
         self
     }

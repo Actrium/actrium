@@ -2,7 +2,7 @@
 //!
 //! Defines the core data structures and database CRUD operations for the Realm entity
 
-use actr_protocol::realm_profile::RealmPackageSelection;
+use actr_protocol::realm_profile::{RealmPackageSelection, RealmPolicy};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -37,6 +37,8 @@ pub struct Realm {
     pub status: RealmStatus,
     /// Operator suspend switch; a suspended Realm serves no Actor
     pub enabled: bool,
+    #[serde(default)]
+    pub policy: RealmPolicy,
     pub expires_at: Option<u64>,
     pub created_at: u64,
     pub updated_at: Option<u64>,
@@ -54,6 +56,7 @@ impl Default for Realm {
             name: String::new(),
             status: RealmStatus::Active,
             enabled: true,
+            policy: Default::default(),
             expires_at: None,
             created_at: now,
             updated_at: None,
@@ -86,6 +89,12 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for Realm {
             name,
             status,
             enabled,
+            policy: row
+                .try_get::<Option<String>, _>("admission_policy")?
+                .map(|policy| serde_json::from_str(&policy))
+                .transpose()
+                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?
+                .unwrap_or_default(),
             expires_at: expires_at.map(|v| v as u64),
             created_at: created_at as u64,
             updated_at: updated_at.map(|v| v as u64),
@@ -204,6 +213,7 @@ impl Realm {
                 }
             }
             Ok(_) => {
+                Self::store_policy(&mut tx, &self.name, self.policy).await?;
                 if let Some(selection) = selection {
                     sqlx::query(
                         "INSERT INTO realm_creation_selection (realm, selection) VALUES (?, ?)",
@@ -317,7 +327,8 @@ impl Realm {
     ) -> Result<Option<Self>, RealmError> {
         let result = sqlx::query_as::<_, Realm>(
             "SELECT name, status, enabled, expires_at, created_at, updated_at,
-                    requester, pending_expires_at
+                    requester, pending_expires_at,
+                    (SELECT policy FROM realm_admission WHERE realm_admission.realm = realm.name) AS admission_policy
              FROM realm WHERE name = ?",
         )
         .bind(name)
@@ -327,11 +338,60 @@ impl Realm {
         Ok(result)
     }
 
+    pub(crate) async fn store_policy(
+        conn: &mut sqlx::SqliteConnection,
+        name: &str,
+        policy: RealmPolicy,
+    ) -> Result<(), RealmError> {
+        let document = serde_json::to_string(&policy)
+            .map_err(|e| RealmError::ValidationError(e.to_string()))?;
+        sqlx::query(
+            "INSERT INTO realm_admission (realm, policy) VALUES (?, ?)
+                     ON CONFLICT(realm) DO UPDATE SET policy=excluded.policy",
+        )
+        .bind(name)
+        .bind(document)
+        .execute(conn)
+        .await?;
+        Ok(())
+    }
+
+    /// Update an operator-managed Realm which has no signed Profile.
+    pub async fn set_unsigned_policy(name: &str, policy: RealmPolicy) -> Result<Self, RealmError> {
+        let mut tx = get_database()
+            .get_pool()
+            .begin_with("BEGIN IMMEDIATE")
+            .await?;
+        let realm = Self::get_on(&mut tx, name)
+            .await?
+            .ok_or(RealmError::NotFound)?;
+        if realm.status != RealmStatus::Active {
+            return Err(RealmError::Conflict(
+                "only active Realms accept admission changes".into(),
+            ));
+        }
+        let signed: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM realm_profile WHERE realm=?)")
+                .bind(name)
+                .fetch_one(&mut *tx)
+                .await?;
+        if signed {
+            return Err(RealmError::Conflict(
+                "admission changes require a signed Realm Profile".into(),
+            ));
+        }
+        Self::store_policy(&mut tx, name, policy).await?;
+        tx.commit().await?;
+        changes::announce(name);
+        Ok(Self { policy, ..realm })
+    }
+
     /// Get all realms.
     pub async fn get_all() -> Result<Vec<Self>, RealmError> {
         let realms = sqlx::query_as::<_, Realm>(
             "SELECT name, status, enabled, expires_at, created_at, updated_at,
-                    requester, pending_expires_at
+                    requester, pending_expires_at,
+                    (SELECT policy FROM realm_admission WHERE realm_admission.realm = realm.name) AS admission_policy
              FROM realm ORDER BY created_at, name",
         )
         .fetch_all(get_database().get_pool())
