@@ -34,8 +34,13 @@ enum AppColors {
     }
 
     static var windowChromeTabPlateColor: Color {
-        Color(nsColor: NSColor(
-            calibratedWhite: usesDarkAppearance ? 0.16 : 0.94, alpha: 1
+        if usesDarkAppearance {
+            return Color(nsColor: NSColor(calibratedWhite: 0.16, alpha: 1))
+        }
+        // #EBEBEC — opaque light plate so inactive Tabs stay solid over the
+        // translucent Header material.
+        return Color(nsColor: NSColor(
+            srgbRed: 235 / 255, green: 235 / 255, blue: 236 / 255, alpha: 1
         ))
     }
 

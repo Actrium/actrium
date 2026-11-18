@@ -70,8 +70,6 @@ final class ContentViewController: NSViewController {
             .layerMinXMaxYCorner, .layerMaxXMaxYCorner,
         ]
         container.layer?.masksToBounds = true
-        container.layer?.borderWidth = 1
-        container.layer?.borderColor = AppColors.bodyBorder.cgColor
         container.addSubview(hostingView)
 
         NSLayoutConstraint.activate([
@@ -93,7 +91,6 @@ final class ContentViewController: NSViewController {
 
     func applyAppearanceColors() {
         view.layer?.backgroundColor = AppColors.workspaceBackground.cgColor
-        view.layer?.borderColor = AppColors.bodyBorder.cgColor
         view.needsDisplay = true
     }
 
