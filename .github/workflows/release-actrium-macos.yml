@@ -1,0 +1,113 @@
+name: Release Actrium macOS
+
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: actrium-macos-alpha
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: macos-26
+    timeout-minutes: 180
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+    steps:
+      - name: Require the main branch
+        run: test "$GITHUB_REF" = refs/heads/main
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Choose snapshot version
+        run: python3 .github/scripts/macos_snapshot_tag.py >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: "29.3"
+          repo-token: ${{ github.token }}
+
+      - name: Prepare React Native and CocoaPods
+        run: |
+          xcodebuild -version
+          pnpm --filter @actrium/runtime install --frozen-lockfile --ignore-scripts
+          (cd packages/actrium && node node_modules/keel/scripts/keel_postinstall.js)
+          pnpm --dir packages/actrium run postinstall
+          pod install --project-directory=macos
+
+      - name: Build the local Swift package binaries
+        run: |
+          cargo install --locked uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
+          bash scripts/actrium/build-actrium-rust-bindings.sh apple-macos
+          ACTR_XCFRAMEWORK_TARGETS=macos bash packages/actr-swift/build-xcframework.sh
+
+      - name: Build the unsigned Release DMG
+        run: |
+          export XCODE_XCCONFIG_FILE="$RUNNER_TEMP/snapshot.xcconfig"
+          printf 'MARKETING_VERSION = %s\nCURRENT_PROJECT_VERSION = %s\n' \
+            "$APP_VERSION" "$GITHUB_RUN_NUMBER" > "$XCODE_XCCONFIG_FILE"
+          npm run package:macos:dmg -- --unsigned
+
+      - name: Verify the mounted image and checksum
+        run: |
+          cd macos/dist
+          asset="Actrium_${TAG}_macos-arm64_unsigned.dmg"
+          mv "$DMG_PATH" "$asset"
+          mount_dir=$(mktemp -d "$RUNNER_TEMP/actrium-mount.XXXXXX")
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$asset"
+          trap 'hdiutil detach "$mount_dir"' EXIT
+          app="$mount_dir/Actrium.app/Contents"
+          test "$(readlink "$mount_dir/Applications")" = /Applications
+          test "$(lipo -archs "$app/MacOS/Actrium")" = arm64
+          test "$(plutil -extract CFBundleShortVersionString raw "$app/Info.plist")" = "$APP_VERSION"
+          test "$(plutil -extract CFBundleVersion raw "$app/Info.plist")" = "$GITHUB_RUN_NUMBER"
+          test -n "$(find "$app" -name system.jsbundle -size +0 -print -quit)"
+          shasum -a 256 "$asset" > "$asset.sha256"
+          shasum -a 256 -c "$asset.sha256"
+
+      - name: Publish the snapshot to this repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh auth setup-git
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$GITHUB_SHA"
+          else
+            git tag "$TAG" "$GITHUB_SHA"
+          fi
+          git push origin "refs/tags/$TAG:refs/tags/$TAG"
+          notes="$RUNNER_TEMP/release-notes.md"
+          printf 'Commit: %s\n\nBuilt: %s (UTC)\n\nApple Silicon, macOS 26.1 or later. Unsigned and not notarized.\n' \
+            "$GITHUB_SHA" "$(date -u '+%Y-%m-%d %H:%M:%S')" > "$notes"
+          if state=$(gh release view "$TAG" --json isPrerelease,isDraft --jq '[.isPrerelease,.isDraft]|@tsv'); then
+            test "$state" = "$(printf 'true\tfalse')" || { echo "::error::Not a published prerelease: $TAG"; exit 1; }
+          else
+            gh release create "$TAG" --verify-tag --prerelease --latest=false --title "$TAG" --notes-file "$notes"
+          fi
+          asset="macos/dist/Actrium_${TAG}_macos-arm64_unsigned.dmg"
+          gh release upload "$TAG" "$asset" "$asset.sha256" --clobber
+          gh release edit "$TAG" --latest=false --notes-file "$notes"
+          gh release view "$TAG" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
