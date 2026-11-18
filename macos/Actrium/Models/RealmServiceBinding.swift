@@ -42,8 +42,8 @@ extension RealmServiceFailure {
 protocol RealmServiceBindingHandle: AnyObject, Sendable {
     var id: UUID { get }
     func call(_ request: RealmServiceCall) async throws -> Data
-    func subscribe(events: [String]) async throws
-    func suspendEvents() async
+    func subscribe(events: [String], generation: UInt64) async throws
+    func suspendEvents(ifGeneration generation: UInt64) async
     func stop() async
 }
 
@@ -55,6 +55,8 @@ final class RealmServiceBindings {
     private var subscriptions: [UUID: (bindingId: UUID, events: Set<String>)] = [:]
     private var pendingSubscriptions: [UUID: UUID] = [:]
     private var cancelledSubscriptions: Set<UUID> = []
+    private var eventGeneration: UInt64 = 0
+    private var bindingEventGenerations: [UUID: UInt64] = [:]
     var eventHandler: ((UUID, RealmServiceEvent) -> Void)?
 
     func attach(_ binding: any RealmServiceBindingHandle, to tabId: UUID) {
@@ -66,6 +68,7 @@ final class RealmServiceBindings {
     func remove(_ tabId: UUID) {
         guard let binding = bindings.removeValue(forKey: tabId) else { return }
         bindingTabs.removeValue(forKey: binding.id)
+        bindingEventGenerations.removeValue(forKey: binding.id)
         subscriptions = subscriptions.filter { $0.value.bindingId != binding.id }
         Task { await binding.stop() }
     }
@@ -82,6 +85,9 @@ final class RealmServiceBindings {
             throw RealmServiceError(message: "The tab has no Realm Service.")
         }
         pendingSubscriptions[request.id] = tabId
+        eventGeneration &+= 1
+        let generation = eventGeneration
+        bindingEventGenerations[binding.id] = generation
         // The actor may publish as soon as subscribe selects its event peer,
         // before the subscribe reply crosses the Renderer/Host IPC boundary.
         // Register first so publish can already address this subscription.
@@ -93,11 +99,11 @@ final class RealmServiceBindings {
         func rollback() async {
             subscriptions.removeValue(forKey: request.id)
             if !subscriptions.values.contains(where: { $0.bindingId == binding.id }) {
-                await binding.suspendEvents()
+                await binding.suspendEvents(ifGeneration: generation)
             }
         }
         do {
-            try await binding.subscribe(events: request.events)
+            try await binding.subscribe(events: request.events, generation: generation)
         } catch {
             await rollback()
             throw error
@@ -116,8 +122,15 @@ final class RealmServiceBindings {
         guard let removed = subscriptions.removeValue(forKey: subscriptionId),
               let tab = bindingTabs[removed.bindingId], tab == tabId,
               let binding = bindings[tabId] else { return }
-        if !subscriptions.values.contains(where: { $0.bindingId == removed.bindingId }) {
-            Task { await binding.suspendEvents() }
+        if !subscriptions.values.contains(where: { $0.bindingId == removed.bindingId }),
+           let generation = bindingEventGenerations[removed.bindingId] {
+            Task { @MainActor in
+                // A new subscription may have appeared before this task runs.
+                guard !subscriptions.values.contains(where: {
+                    $0.bindingId == removed.bindingId
+                }) else { return }
+                await binding.suspendEvents(ifGeneration: generation)
+            }
         }
     }
 
@@ -186,6 +199,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     private let events: Set<String>
     private let eventRelay: RealmServiceEventRelay
     private var eventReference: ActrRefWrapper?
+    private var eventGeneration: UInt64 = 0
     private var startup: (id: UUID, task: Task<ActrRefWrapper, Error>)?
     private var stopped = false
 
@@ -266,7 +280,8 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         )
     }
 
-    func subscribe(events requestedEvents: [String]) async throws {
+    func subscribe(events requestedEvents: [String], generation: UInt64) async throws {
+        eventGeneration = max(eventGeneration, generation)
         let requested = Set(requestedEvents)
         guard !stopped, !requested.isEmpty, requested.isSubset(of: events) else {
             throw RealmServiceError(message: "The Service event subscription is outside this tab's declared capabilities.")
@@ -281,7 +296,12 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         eventReference = reference
     }
 
-    func suspendEvents() {
+    func suspendEvents(ifGeneration generation: UInt64) {
+        guard eventGeneration == generation else { return }
+        clearEventPeer()
+    }
+
+    private func clearEventPeer() {
         try? eventReference?.setServiceEventPeer(peer: nil)
         eventReference = nil
     }
@@ -328,7 +348,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
 
     func stop() async {
         stopped = true
-        suspendEvents()
+        clearEventPeer()
         if let startup {
             startup.task.cancel()
             if let reference = try? await startup.task.value {
