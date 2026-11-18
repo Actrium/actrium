@@ -8,10 +8,40 @@ import { Engine } from 'keel/host';
 import { createV1CapabilityManifest, type V1Linkage, writeV1Bundle } from 'keel/v1';
 import { contract } from './contract';
 import { createHostModules } from './host-modules';
+import { bindNativeLocalStorage } from './local-storage';
 import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
 
 const moduleId = 'host:local-storage';
 const declarations = ['host:local-storage.getItem'];
+
+test('native storage JSON framing preserves NUL and Unicode strings', async () => {
+  const key = 'theme\0\u00e9';
+  const value = 'dark\0\u00e9\u{1f332}';
+  const data = new Map<string, string>();
+  const call = bindNativeLocalStorage({
+    perform: async (tabId, documentId, operation, json) => {
+      expect([tabId, documentId]).toEqual(['tab', 'document']);
+      expect(json).not.toContain('\0');
+      const input = JSON.parse(json) as { key: string; value?: string };
+      if (operation === 'setItem' && input.value !== undefined) data.set(input.key, input.value);
+      if (operation === 'removeItem') data.delete(input.key);
+      return JSON.stringify(operation === 'getItem' ? data.get(input.key) ?? null : null);
+    },
+  }, 'tab', 'document');
+  if (!call) throw new Error('The test bridge did not bind.');
+  await call('setItem', { key: 'theme', value: 'plain' });
+  await call('setItem', { key, value });
+  expect(await call('getItem', { key })).toBe(value);
+  expect(await call('getItem', { key: 'theme' })).toBe('plain');
+  await call('removeItem', { key });
+  expect(await call('getItem', { key })).toBeNull();
+});
+
+test('native storage rejects a response with an invalid JSON value type', async () => {
+  const call = bindNativeLocalStorage({ perform: async () => '42' }, 'tab', 'document');
+  if (!call) throw new Error('The test bridge did not bind.');
+  await expect(call('getItem', { key: 'theme' })).rejects.toThrow('Invalid local storage result.');
+});
 
 test('a read-only package can only bind the declared storage method', async () => {
   const linkage: V1Linkage = {

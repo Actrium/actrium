@@ -51,8 +51,7 @@ RCT_EXTERN_METHOD(requestGrant:(NSString *)tabId capability:(NSString *)capabili
 RCT_EXTERN_METHOD(perform:(NSString *)tabId
                   documentId:(NSString *)documentId
                   operation:(NSString *)operation
-                  key:(NSString *)key
-                  value:(NSString * _Nullable)value
+                  inputJSON:(NSString *)inputJSON
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 

@@ -1305,7 +1305,9 @@ void *JSCSandboxContext::jsiToJSValueImpl(jsi::Runtime &rt,
   }
   if (value.isString()) {
     std::string str = value.asString(rt).utf8(rt);
-    NSString *nsStr = [NSString stringWithUTF8String:str.c_str()];
+    NSString *nsStr = [[NSString alloc] initWithBytes:str.data()
+                                            length:str.size()
+                                          encoding:NSUTF8StringEncoding];
     return (__bridge void *)[JSValue valueWithObject:nsStr inContext:ctx];
   }
   // Handle Symbols
@@ -1736,7 +1738,9 @@ jsi::Value JSCSandboxContext::jsValueToJSI(jsi::Runtime &rt, void *jsValue,
   }
   if ([value isString]) {
     NSString *str = [value toString];
-    return jsi::String::createFromUtf8(rt, [str UTF8String]);
+    return jsi::String::createFromUtf8(
+        rt, std::string([str UTF8String],
+                        [str lengthOfBytesUsingEncoding:NSUTF8StringEncoding]));
   }
 
   // Depth guard for extremely deep (non-circular) structures

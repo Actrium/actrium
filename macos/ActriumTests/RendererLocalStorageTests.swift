@@ -56,7 +56,7 @@ struct RendererLocalStorageTests {
                 try await Task.sleep(for: .milliseconds(100))
                 outcome = try database.getItem(origin: origin, key: "report")
             }
-            #expect(outcome == "dark/null")
+            #expect(outcome == "[\"dark\\u0000\u{e9}🌲\",\"plain\",null]")
         }
     }
 
@@ -251,11 +251,14 @@ struct RendererLocalStorageTests {
         // keel:v1-linkage {"guestEntry":"workload/guest.js","links":[["host:local-storage","getItem"],["host:local-storage","removeItem"],["host:local-storage","setItem"]]}
         var store = globalThis.__keel.hostModules['host:local-storage'];
         (async function () {
-          await store.setItem({key: 'theme', value: 'dark'});
-          var theme = await store.getItem({key: 'theme'});
-          await store.removeItem({key: 'theme'});
-          var missing = await store.getItem({key: 'theme'});
-          await store.setItem({key: 'report', value: theme + '/' + missing});
+          var key = 'theme\\u0000\\u00e9';
+          await store.setItem({key: 'theme', value: 'plain'});
+          await store.setItem({key: key, value: 'dark\\u0000\\u00e9\\ud83c\\udf32'});
+          var theme = await store.getItem({key: key});
+          var plain = await store.getItem({key: 'theme'});
+          await store.removeItem({key: key});
+          var missing = await store.getItem({key: key});
+          await store.setItem({key: 'report', value: JSON.stringify([theme, plain, missing])});
         })();
         """
 }

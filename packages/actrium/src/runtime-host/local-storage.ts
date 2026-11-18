@@ -12,9 +12,8 @@ type NativeLocalStorage = {
     tabId: string,
     documentId: string,
     operation: LocalStorageOperation,
-    key: string,
-    value: string | null
-  ): Promise<string | null>;
+    inputJSON: string
+  ): Promise<string>;
 };
 
 export function bindNativeLocalStorage(
@@ -23,7 +22,13 @@ export function bindNativeLocalStorage(
   documentId: string | undefined
 ): LocalStorageCall | undefined {
   if (!bridge?.perform || !documentId) return undefined;
-  return (operation, input) => bridge.perform(
-    tabId, documentId, operation, input.key, 'value' in input ? input.value : null
-  );
+  return async (operation, input) => {
+    // JSON escapes embedded NULs before they cross React Native's string bridge.
+    const json = await bridge.perform(tabId, documentId, operation, JSON.stringify(input));
+    const value: unknown = JSON.parse(json);
+    if (value !== null && typeof value !== 'string') {
+      throw new Error('Invalid local storage result.');
+    }
+    return value;
+  };
 }
