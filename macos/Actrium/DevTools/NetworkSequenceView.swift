@@ -63,30 +63,35 @@ class NetworkSequenceViewModel: ObservableObject {
         ]
         var allEvents: [SequenceEvent] = []
 
-        // Sort requests by start time
-        let sortedRequests = requests.sorted { $0.startTime < $1.startTime }
+        // Sort requests by their first known lifecycle timestamp.
+        let sortedRequests = requests.sorted {
+            ($0.startTime ?? $0.endTime ?? .distantPast) <
+                ($1.startTime ?? $1.endTime ?? .distantPast)
+        }
 
         for (index, request) in sortedRequests.enumerated() {
             let requestNumber = index + 1
 
-            // Extract remote service from URL
-            let remoteHost = URL(string: request.url)?.host ?? "unknown"
+            // Extract remote service from URL without inventing one when absent.
+            let remoteHost = request.url.flatMap { URL(string: $0)?.host } ?? "Unknown"
             if allParticipants[remoteHost] == nil {
                 allParticipants[remoteHost] = .remoteService(host: remoteHost)
             }
             let remoteParticipant = allParticipants[remoteHost]!
 
-            // Request event: Host -> Remote Service
-            let requestEvent = SequenceEvent(
-                timestamp: request.startTime,
-                type: .request,
-                from: .host,
-                to: remoteParticipant,
-                requestNumber: requestNumber,
-                request: request,
-                label: "\(request.method) \(shortenPath(request.displayPathWithQuery))"
-            )
-            allEvents.append(requestEvent)
+            // A request arrow requires a real request timestamp.
+            if let startTime = request.startTime {
+                let requestEvent = SequenceEvent(
+                    timestamp: startTime,
+                    type: .request,
+                    from: .host,
+                    to: remoteParticipant,
+                    requestNumber: requestNumber,
+                    request: request,
+                    label: "\(request.method ?? "N/A") \(shortenPath(request.displayPathWithQuery ?? "N/A"))"
+                )
+                allEvents.append(requestEvent)
+            }
 
             // Response event (if completed)
             if let endTime = request.endTime {
@@ -174,8 +179,8 @@ struct NetworkSequenceView: View {
                 // Search filter
                 if !searchText.isEmpty {
                     let q = searchText.lowercased()
-                    let matchesUrl = req.url.lowercased().contains(q)
-                    let matchesMethod = req.method.lowercased().contains(q)
+                    let matchesUrl = req.url?.lowercased().contains(q) == true
+                    let matchesMethod = req.method?.lowercased().contains(q) == true
                     if !(matchesUrl || matchesMethod) { return false }
                 }
                 return true
@@ -521,17 +526,17 @@ struct RequestDetailsView: View {
                 // Header
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text(request.method)
+                        Text(request.method ?? "N/A")
                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .foregroundColor(.blue)
-                        Text(request.displayPathWithQuery)
+                        Text(request.displayPathWithQuery ?? "N/A")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.primary)
                             .lineLimit(1)
                     }
 
                     HStack(spacing: 8) {
-                        Text(request.displayHost)
+                        Text(request.displayHost ?? "N/A")
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
 
@@ -541,6 +546,10 @@ struct RequestDetailsView: View {
 
                         if let duration = request.duration {
                             Text(String(format: "%.0fms", duration * 1000))
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("N/A")
                                 .font(.system(size: 10))
                                 .foregroundColor(.secondary)
                         }
