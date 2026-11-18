@@ -216,16 +216,21 @@ describe('createNativeServiceEventSource', () => {
       tabId: 'tab-1', subscriptionId: 'older-subscription', event: 'a', payloadBase64: 'BAUG',
     });
     expect(received).toEqual([]);
+    const lateReceived: string[] = [];
+    const unsubscribeLate = source.subscribe((event) => lateReceived.push(event.payloadBase64));
 
     resolveSubscription('subscription-early');
     await Promise.resolve();
     await Promise.resolve();
     expect(received).toEqual(['AAEC']);
+    expect(lateReceived).toEqual([]);
 
     emitNative({
       tabId: 'tab-1', subscriptionId: 'subscription-early', event: 'a', payloadBase64: 'AQID',
     });
     expect(received).toEqual(['AAEC', 'AQID']);
+    expect(lateReceived).toEqual(['AQID']);
+    unsubscribeLate();
     unsubscribe();
   });
 
@@ -403,6 +408,53 @@ describe('createHttpServiceEventSource', () => {
       unsubscribeSecond();
       expect(requestSignal?.aborted).toBe(true);
     } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('restarts a terminal HTTP stream for a new handler', async () => {
+    const originalFetch = globalThis.fetch;
+    const encoder = new TextEncoder();
+    let fetchCalls = 0;
+    let secondController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    globalThis.fetch = (async () => {
+      fetchCalls += 1;
+      if (fetchCalls === 1) {
+        return new Response('missing', { status: 404 });
+      }
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            secondController = controller;
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+      );
+    }) as unknown as typeof fetch;
+
+    let unsubscribeFirst: (() => void) | undefined;
+    let unsubscribeSecond: (() => void) | undefined;
+    try {
+      const source = createHttpServiceEventSource('https://example.com/events', ['a']);
+      const first: string[] = [];
+      const second: string[] = [];
+      unsubscribeFirst = source.subscribe((event) => first.push(event.payloadBase64));
+      await waitFor(() => fetchCalls === 1);
+      // Let the terminal response finish and release the active-stream slot.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      unsubscribeSecond = source.subscribe((event) => second.push(event.payloadBase64));
+      await waitFor(() => fetchCalls === 2 && secondController !== undefined);
+      secondController!.enqueue(
+        encoder.encode('event: a\ndata: {"payloadBase64":"AAEC"}\n\n')
+      );
+      await waitFor(() => first.length === 1 && second.length === 1);
+      expect(first).toEqual(['AAEC']);
+      expect(second).toEqual(['AAEC']);
+      expect(fetchCalls).toBe(2);
+    } finally {
+      unsubscribeSecond?.();
+      unsubscribeFirst?.();
       globalThis.fetch = originalFetch;
     }
   });

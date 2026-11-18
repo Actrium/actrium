@@ -74,7 +74,11 @@ export function createNativeServiceEventSource(
   // Keep those early events by generation until the reply identifies which
   // native subscription they belong to. A finite buffer prevents a stale or
   // malicious emitter from growing memory while authorization is pending.
-  const earlyEvents: { subscriptionId: string; event: ServiceEvent }[] = [];
+  const earlyEvents: {
+    subscriptionId: string;
+    event: ServiceEvent;
+    handlers: ServiceEventHandler[];
+  }[] = [];
   const maxEarlyEvents = 256;
 
   const stop = () => {
@@ -132,7 +136,11 @@ export function createNativeServiceEventSource(
         stop();
         return;
       }
-      earlyEvents.push({ subscriptionId: body.subscriptionId, event });
+      earlyEvents.push({
+        subscriptionId: body.subscriptionId,
+        event,
+        handlers: [...handlers.keys()],
+      });
     });
     void nativeModule.subscribeServiceEvents(tabId, events).then(
       (subscriptionId) => {
@@ -152,7 +160,9 @@ export function createNativeServiceEventSource(
         for (const item of pending) {
           if (current !== generation) break;
           if (item.subscriptionId === subscriptionId) {
-            deliver([...handlers.keys()], item.event);
+            // Buffering is not replay for handlers added after the event. Also
+            // exclude handlers that unsubscribed while the reply was pending.
+            deliver(item.handlers.filter((handler) => handlers.has(handler)), item.event);
           }
         }
       },
@@ -275,12 +285,14 @@ export function createHttpServiceEventSource(
   const handlers = new Map<ServiceEventHandler, number>();
   let handlerCount = 0;
   let generation = 0;
-  let stopStream: (() => void) | undefined;
+  type ActiveStream = { stop(): void; readonly terminal: boolean };
+  let activeStream: ActiveStream | undefined;
 
   const stop = () => {
     generation += 1;
-    stopStream?.();
-    stopStream = undefined;
+    const stream = activeStream;
+    activeStream = undefined;
+    stream?.stop();
   };
 
   const start = () => {
@@ -288,6 +300,7 @@ export function createHttpServiceEventSource(
       for (const event of events) url.searchParams.append('event', event);
 
       let active = true;
+      let terminal = false;
       let retryCount = 0;
       let lastEventId: string | undefined;
       let cancelConnection: (() => void) | undefined;
@@ -314,6 +327,7 @@ export function createHttpServiceEventSource(
         const finish = (result: SseConnectionResult) => {
           if (settled) return;
           settled = true;
+          if (!result.retry) terminal = true;
           if (stableTimer !== undefined) clearTimeout(stableTimer);
           transportAbort?.();
           transportAbort = undefined;
@@ -476,59 +490,73 @@ export function createHttpServiceEventSource(
         return done;
       };
 
-      const consume = async () => {
-        while (active) {
-          const result = await connect();
+      const stream: ActiveStream = {
+        get terminal() {
+          return terminal;
+        },
+        stop: () => {
+          if (!active) return;
+          active = false;
+          cancelConnection?.();
           cancelConnection = undefined;
-          if (!active) break;
-          if (result.error) {
-            if (result.retry) {
-              console.warn('[Actrium] Service event stream failed:', result.error);
-            } else {
-              console.error('[Actrium] Service event stream failed:', result.error);
-            }
-          }
-          if (!result.retry) break;
-
-          const delayMs = Math.min(
-            initialRetryDelayMs * 2 ** retryCount,
-            maxRetryDelayMs
-          );
-          retryCount = Math.min(retryCount + 1, 30);
-          await new Promise<void>((resolve) => {
-            finishRetrySleep = resolve;
-            retryTimer = setTimeout(resolve, delayMs);
-          });
+          if (retryTimer !== undefined) clearTimeout(retryTimer);
           retryTimer = undefined;
+          finishRetrySleep?.();
           finishRetrySleep = undefined;
+        },
+      };
+      activeStream = stream;
+
+      const consume = async () => {
+        try {
+          while (active) {
+            const result = await connect();
+            cancelConnection = undefined;
+            if (!active) break;
+            if (result.error) {
+              if (result.retry) {
+                console.warn('[Actrium] Service event stream failed:', result.error);
+              } else {
+                console.error('[Actrium] Service event stream failed:', result.error);
+              }
+            }
+            if (!result.retry) break;
+
+            const delayMs = Math.min(
+              initialRetryDelayMs * 2 ** retryCount,
+              maxRetryDelayMs
+            );
+            retryCount = Math.min(retryCount + 1, 30);
+            await new Promise<void>((resolve) => {
+              finishRetrySleep = resolve;
+              retryTimer = setTimeout(resolve, delayMs);
+            });
+            retryTimer = undefined;
+            finishRetrySleep = undefined;
+          }
+        } finally {
+          // A stopped stream may already have a replacement. Only the stream
+          // that is still registered can clear the shared active slot.
+          if (activeStream === stream) activeStream = undefined;
         }
       };
 
       void consume();
-      stopStream = () => {
-        if (!active) return;
-        active = false;
-        cancelConnection?.();
-        cancelConnection = undefined;
-        if (retryTimer !== undefined) clearTimeout(retryTimer);
-        retryTimer = undefined;
-        finishRetrySleep?.();
-        finishRetrySleep = undefined;
-      };
   };
 
   return {
     subscribe(handler) {
-      const wasEmpty = handlerCount === 0;
       handlers.set(handler, (handlers.get(handler) ?? 0) + 1);
       handlerCount += 1;
-      if (wasEmpty) {
+      if (!activeStream || activeStream.terminal) {
         try {
           start();
         } catch (error) {
-          handlers.delete(handler);
+          const remaining = (handlers.get(handler) ?? 1) - 1;
+          if (remaining > 0) handlers.set(handler, remaining);
+          else handlers.delete(handler);
           handlerCount -= 1;
-          stop();
+          if (handlerCount === 0) stop();
           throw error;
         }
       }
