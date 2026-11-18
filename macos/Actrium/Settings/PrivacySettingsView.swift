@@ -167,9 +167,9 @@ struct PrivacySettingsView: View {
 
     @MainActor
     private func clearPackageCache() {
+        guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else { return }
         isClearingPackageCache = true
-        let protectedDigests = (NSApplication.shared.delegate as? AppDelegate)?
-            .protectedPackageDigests() ?? []
+        let protectedDigests = appDelegate.protectedPackageDigests()
         Task { @MainActor in
             packageCacheSize = await Task.detached(priority: .utility) {
                 ActrPackageCache.clearAll(protectedDigests: protectedDigests)

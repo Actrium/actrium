@@ -602,6 +602,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 leftPanelScript: leftPanelScript,
                 rightPanelScript: rightPanelScript,
                 unifiedScript: unifiedScript,
+                guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
+                guestEntry: !isDirectory.boolValue && unifiedScript != nil
+                    ? manifestInfo.unifiedScript
+                    : nil,
                 capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                 contractName: manifestInfo.contractName,
                 contractVersion: manifestInfo.contractVersion,
@@ -1270,12 +1274,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[tabIndex].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
             tabs[tabIndex].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
 
-            // Replace any previous package's extracted guest source: the
-            // renderer must only execute bytes from the newly loaded package
-            // (same shape as the archive/dev-directory branch above).
-            let usesExtractedEntry = !isDirectory.boolValue && unifiedScript != nil
-            tabs[tabIndex].guestExtractedPath = usesExtractedEntry ? rootDir.path : nil
-            tabs[tabIndex].guestEntry = usesExtractedEntry ? manifestInfo.unifiedScript : nil
+            // Archive-backed tabs retain their digest source for cache protection.
+            // Only unified packages expose an entry to the renderer.
+            tabs[tabIndex].guestExtractedPath = isDirectory.boolValue ? nil : rootDir.path
+            tabs[tabIndex].guestEntry = !isDirectory.boolValue && unifiedScript != nil
+                ? manifestInfo.unifiedScript
+                : nil
 
             // Update panel visibility
             leftPanelVisibility[tabs[tabIndex].id] = manifestInfo.leftPanelDefaultVisible
@@ -1865,6 +1869,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].leftPanelScript = leftPanelScript
             tabs[index].rightPanelScript = rightPanelScript
             tabs[index].guestScript = guestScript
+            tabs[index].guestExtractedPath = isDirectory.boolValue ? nil : rootDir.path
+            tabs[index].guestEntry = !isDirectory.boolValue && unifiedScript != nil
+                ? manifestInfo.unifiedScript
+                : nil
             tabs[index].appId = manifestInfo.appId
             tabs[index].contractName = manifestInfo.contractName
             tabs[index].contractVersion = manifestInfo.contractVersion
@@ -1928,8 +1936,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     // MARK: - .actr Apply Load
 
     private func schedulePackageCacheEviction() {
-        let protectedDigests = (NSApplication.shared.delegate as? AppDelegate)?
-            .protectedPackageDigests() ?? []
+        guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else { return }
+        let protectedDigests = appDelegate.protectedPackageDigests()
         Task.detached(priority: .utility) {
             _ = ActrPackageCache.evictIfNeeded(protectedDigests: protectedDigests)
         }
@@ -2087,6 +2095,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     appId: manifestInfo.appId,
                     leftPanelScript: leftPanelScript,
                     rightPanelScript: rightPanelScript,
+                    guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
@@ -2106,6 +2115,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     sourceURL: resolvedURL,
                     appId: manifestInfo.appId,
                     guestScript: script,
+                    guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
                     permissions: manifestInfo.permissions,
@@ -2128,6 +2138,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     sourceURL: resolvedURL,
                     appId: manifestInfo.appId,
                     htmlContent: html,
+                    guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
                     replacingTabId: replacingTabId
                 )
                 schedulePackageCacheEviction()
@@ -2143,6 +2154,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     title: resolvedURL.deletingPathExtension().lastPathComponent,
                     sourceURL: resolvedURL,
                     htmlContent: errorHTML,
+                    guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
                     replacingTabId: replacingTabId
                 )
             }
@@ -2157,6 +2169,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 title: resolvedURL.deletingPathExtension().lastPathComponent,
                 sourceURL: resolvedURL,
                 htmlContent: fallbackHTML,
+                guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
                 replacingTabId: replacingTabId
             )
         }

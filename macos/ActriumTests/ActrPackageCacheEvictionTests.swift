@@ -297,6 +297,59 @@ struct ActrPackageCacheEvictionTests {
         #expect(fileExists(matchingDirectory))
     }
 
+    @Test func clearAll_waitsForInFlightExtractionAndPreservesProtectedResult() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("actr-cache-eviction-\(UUID().uuidString)", isDirectory: true)
+        let previousOverride = ActrPackageCache.rootOverrideForTesting
+        ActrPackageCache.rootOverrideForTesting = root
+        defer {
+            ActrPackageCache.rootOverrideForTesting = previousOverride
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let digest = testDigest("c")
+        let archive = try makeArchive()
+        defer { try? FileManager.default.removeItem(at: archive) }
+        let cachedArchive = try ActrPackageCache.installArchive(at: archive, digest: digest)
+
+        let validationStarted = DispatchSemaphore(value: 0)
+        let finishValidation = DispatchSemaphore(value: 0)
+        let extractionFinished = DispatchSemaphore(value: 0)
+        defer { finishValidation.signal() }
+        Task.detached {
+            defer { extractionFinished.signal() }
+            _ = try? ActrPackageCache.extractArchiveIfNeeded(cachedArchive, digest: digest) { candidate in
+                guard candidate.lastPathComponent.hasPrefix(".staging-") else { return }
+                validationStarted.signal()
+                guard finishValidation.wait(timeout: .now() + 5) == .success else {
+                    throw TestValidationFailure()
+                }
+            }
+        }
+        #expect(validationStarted.wait(timeout: .now() + 5) == .success)
+
+        let clearStarted = DispatchSemaphore(value: 0)
+        let clearFinished = DispatchSemaphore(value: 0)
+        Task.detached {
+            clearStarted.signal()
+            defer { clearFinished.signal() }
+            _ = ActrPackageCache.clearAll(protectedDigests: [digest])
+        }
+        #expect(clearStarted.wait(timeout: .now() + 5) == .success)
+        #expect(clearFinished.wait(timeout: .now() + 0.1) == .timedOut)
+
+        finishValidation.signal()
+        #expect(extractionFinished.wait(timeout: .now() + 5) == .success)
+        #expect(clearFinished.wait(timeout: .now() + 5) == .success)
+        let extracted = ActrPackageCache.extractedURL(forDigest: digest)
+
+        #expect(fileExists(extracted))
+        #expect(try String(
+            contentsOf: extracted.appendingPathComponent("manifest.toml"),
+            encoding: .utf8
+        ) == "name = \"demo\"\n")
+    }
+
     // MARK: - Helpers
 
     private func withTemporaryCacheRoot(_ body: (URL) throws -> Void) rethrows {

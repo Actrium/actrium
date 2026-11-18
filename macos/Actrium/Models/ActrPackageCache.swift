@@ -18,6 +18,16 @@ nonisolated enum ActrPackageCache {
 
     static let maxCacheBytes: Int64 = 2 * 1024 * 1024 * 1024
 
+    /// Serializes installs, extraction, eviction, cleanup, and URL-map updates.
+    /// Recursive because eviction re-enters size and last-used helpers.
+    private static let cacheLock = NSRecursiveLock()
+
+    private static func withCacheLock<T>(_ body: () throws -> T) rethrows -> T {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return try body()
+    }
+
     /// Cache root: ~/Library/Caches/<bundle-id>/ (system-managed, purgeable).
     static var root: URL {
         if let rootOverrideForTesting { return rootOverrideForTesting }
@@ -68,27 +78,31 @@ nonisolated enum ActrPackageCache {
     }
 
     static func touchLastUsed(forDigest digest: String) {
-        let file = lastUsedURL(forDigest: digest)
-        try? FileManager.default.createDirectory(
-            at: file.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        let timestamp = String(Int64(Date().timeIntervalSince1970))
-        try? Data(timestamp.utf8).write(to: file, options: .atomic)
+        withCacheLock {
+            let file = lastUsedURL(forDigest: digest)
+            try? FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let timestamp = String(Int64(Date().timeIntervalSince1970))
+            try? Data(timestamp.utf8).write(to: file, options: .atomic)
+        }
     }
 
     static func lastUsed(forDigest digest: String) -> Date {
-        let lastUsedFile = lastUsedURL(forDigest: digest)
-        if let data = try? Data(contentsOf: lastUsedFile),
-           let timestamp = String(data: data, encoding: .utf8).flatMap(TimeInterval.init) {
-            return Date(timeIntervalSince1970: timestamp)
+        withCacheLock {
+            let lastUsedFile = lastUsedURL(forDigest: digest)
+            if let data = try? Data(contentsOf: lastUsedFile),
+               let timestamp = String(data: data, encoding: .utf8).flatMap(TimeInterval.init) {
+                return Date(timeIntervalSince1970: timestamp)
+            }
+            if let attributes = try? FileManager.default.attributesOfItem(
+                atPath: archiveURL(forDigest: digest).path
+            ), let modificationDate = attributes[.modificationDate] as? Date {
+                return modificationDate
+            }
+            return .distantPast
         }
-        if let attributes = try? FileManager.default.attributesOfItem(
-            atPath: archiveURL(forDigest: digest).path
-        ), let modificationDate = attributes[.modificationDate] as? Date {
-            return modificationDate
-        }
-        return .distantPast
     }
 
     static func digest(fromExtractedPath path: String) -> String? {
@@ -105,28 +119,30 @@ nonisolated enum ActrPackageCache {
     /// Copies an archive into its digest-addressed location; reuses an existing
     /// copy (same digest implies identical content). Returns the cached path.
     static func installArchive(at sourceArchiveURL: URL, digest: String) throws -> URL {
-        let fm = FileManager.default
-        let destination = Self.archiveURL(forDigest: digest)
-        if fm.fileExists(atPath: destination.path) {
+        try withCacheLock {
+            let fm = FileManager.default
+            let destination = Self.archiveURL(forDigest: digest)
+            if fm.fileExists(atPath: destination.path) {
+                touchLastUsed(forDigest: digest)
+                return destination
+            }
+
+            let destinationDir = destination.deletingLastPathComponent()
+            try fm.createDirectory(at: destinationDir, withIntermediateDirectories: true)
+            let staging = destinationDir
+                .appendingPathComponent(".staging-\(UUID().uuidString)", isDirectory: false)
+            defer { try? fm.removeItem(at: staging) }
+
+            do {
+                try fm.copyItem(at: sourceArchiveURL, to: staging)
+                try fm.moveItem(at: staging, to: destination)
+            } catch {
+                // Another writer landed the same digest first — reuse it.
+                guard fm.fileExists(atPath: destination.path) else { throw error }
+            }
             touchLastUsed(forDigest: digest)
             return destination
         }
-
-        let destinationDir = destination.deletingLastPathComponent()
-        try fm.createDirectory(at: destinationDir, withIntermediateDirectories: true)
-        let staging = destinationDir
-            .appendingPathComponent(".staging-\(UUID().uuidString)", isDirectory: false)
-        defer { try? fm.removeItem(at: staging) }
-
-        do {
-            try fm.copyItem(at: sourceArchiveURL, to: staging)
-            try fm.moveItem(at: staging, to: destination)
-        } catch {
-            // Another writer landed the same digest first — reuse it.
-            guard fm.fileExists(atPath: destination.path) else { throw error }
-        }
-        touchLastUsed(forDigest: digest)
-        return destination
     }
 
     // MARK: - Extraction
@@ -144,39 +160,41 @@ nonisolated enum ActrPackageCache {
         digest: String,
         validate: ((URL) throws -> Void)? = nil
     ) throws -> URL {
-        let fm = FileManager.default
-        let destination = extractedURL(forDigest: digest)
-        if fm.fileExists(atPath: destination.path) {
-            do {
-                try validate?(destination)
-                touchLastUsed(forDigest: digest)
-                return destination
-            } catch {
-                // A damaged cache entry must not permanently poison future loads.
-                try fm.removeItem(at: destination)
+        try withCacheLock {
+            let fm = FileManager.default
+            let destination = extractedURL(forDigest: digest)
+            if fm.fileExists(atPath: destination.path) {
+                do {
+                    try validate?(destination)
+                    touchLastUsed(forDigest: digest)
+                    return destination
+                } catch {
+                    // A damaged cache entry must not permanently poison future loads.
+                    try fm.removeItem(at: destination)
+                }
             }
-        }
 
-        let parent = destination.deletingLastPathComponent()
-        try fm.createDirectory(at: parent, withIntermediateDirectories: true)
-        let staging = parent
-            .appendingPathComponent(".staging-\(UUID().uuidString)", isDirectory: true)
-        do {
-            try fm.createDirectory(at: staging, withIntermediateDirectories: true)
-            try unzipArchive(archiveURL, to: staging)
-            try validate?(staging)
+            let parent = destination.deletingLastPathComponent()
+            try fm.createDirectory(at: parent, withIntermediateDirectories: true)
+            let staging = parent
+                .appendingPathComponent(".staging-\(UUID().uuidString)", isDirectory: true)
             do {
-                try fm.moveItem(at: staging, to: destination)
+                try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+                try unzipArchive(archiveURL, to: staging)
+                try validate?(staging)
+                do {
+                    try fm.moveItem(at: staging, to: destination)
+                } catch {
+                    guard fm.fileExists(atPath: destination.path) else { throw error }
+                    try? fm.removeItem(at: staging)
+                }
             } catch {
-                guard fm.fileExists(atPath: destination.path) else { throw error }
                 try? fm.removeItem(at: staging)
+                throw error
             }
-        } catch {
-            try? fm.removeItem(at: staging)
-            throw error
+            touchLastUsed(forDigest: digest)
+            return destination
         }
-        touchLastUsed(forDigest: digest)
-        return destination
     }
 
     // MARK: - Size and eviction
@@ -184,7 +202,9 @@ nonisolated enum ActrPackageCache {
     /// Recursively measures archived packages and extracted files. Call off the
     /// main actor for user-interface workflows.
     static func cacheSize() -> Int64 {
-        directorySize(at: packagesRoot) + directorySize(at: extractedRoot)
+        withCacheLock {
+            directorySize(at: packagesRoot) + directorySize(at: extractedRoot)
+        }
     }
 
     /// Evicts least recently used cache entries until the cache is within the
@@ -193,35 +213,39 @@ nonisolated enum ActrPackageCache {
         protectedDigests: Set<String>,
         maxBytes: Int64 = maxCacheBytes
     ) -> Int64 {
-        var remainingBytes = cacheSize()
-        guard remainingBytes > maxBytes else { return 0 }
+        withCacheLock {
+            var remainingBytes = cacheSize()
+            guard remainingBytes > maxBytes else { return 0 }
 
-        let candidates = cachedDigests()
-            .subtracting(protectedDigests)
-            .sorted {
-                let leftDate = lastUsed(forDigest: $0)
-                let rightDate = lastUsed(forDigest: $1)
-                return leftDate == rightDate ? $0 < $1 : leftDate < rightDate
+            let candidates = cachedDigests()
+                .subtracting(protectedDigests)
+                .sorted {
+                    let leftDate = lastUsed(forDigest: $0)
+                    let rightDate = lastUsed(forDigest: $1)
+                    return leftDate == rightDate ? $0 < $1 : leftDate < rightDate
+                }
+
+            var freedBytes: Int64 = 0
+            for digest in candidates where remainingBytes > maxBytes {
+                let removed = removeCachedPackage(digest: digest)
+                freedBytes += removed
+                remainingBytes -= removed
             }
-
-        var freedBytes: Int64 = 0
-        for digest in candidates where remainingBytes > maxBytes {
-            let removed = removeCachedPackage(digest: digest)
-            freedBytes += removed
-            remainingBytes -= removed
+            return freedBytes
         }
-        return freedBytes
     }
 
     /// Removes every unprotected cache entry and any interrupted staging work.
     @discardableResult
     static func clearAll(protectedDigests: Set<String>) -> Int64 {
-        var freedBytes: Int64 = 0
-        for digest in cachedDigests().subtracting(protectedDigests) {
-            freedBytes += removeCachedPackage(digest: digest)
+        withCacheLock {
+            var freedBytes: Int64 = 0
+            for digest in cachedDigests().subtracting(protectedDigests) {
+                freedBytes += removeCachedPackage(digest: digest)
+            }
+            freedBytes += removeStagingEntries()
+            return freedBytes
         }
-        freedBytes += removeStagingEntries()
-        return freedBytes
     }
 
     private static func cachedDigests() -> Set<String> {
@@ -319,20 +343,24 @@ nonisolated enum ActrPackageCache {
     /// Returns the digest previously downloaded for a direct link, when the
     /// cached archive for it still exists. Falls through to download otherwise.
     static func cachedDigest(forDownloadURL url: URL) -> String? {
-        guard let record = urlMap()[url.absoluteString], let digest = record["digest"],
-              FileManager.default.fileExists(atPath: archiveURL(forDigest: digest).path)
-        else { return nil }
-        return digest
+        withCacheLock {
+            guard let record = urlMap()[url.absoluteString], let digest = record["digest"],
+                  FileManager.default.fileExists(atPath: archiveURL(forDigest: digest).path)
+            else { return nil }
+            return digest
+        }
     }
 
     /// Remembers which digest a direct link resolved to.
     static func rememberDownloadURL(_ url: URL, digest: String) {
-        var map = urlMap()
-        map[url.absoluteString] = [
-            "digest": digest,
-            "installedAtUnix": String(Date().timeIntervalSince1970),
-        ]
-        saveURLMap(map)
+        withCacheLock {
+            var map = urlMap()
+            map[url.absoluteString] = [
+                "digest": digest,
+                "installedAtUnix": String(Date().timeIntervalSince1970),
+            ]
+            saveURLMap(map)
+        }
     }
 
     private static func urlMapFile() -> URL {
