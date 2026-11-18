@@ -356,8 +356,8 @@ export function createHttpServiceEventSource(
             retryCount = 0;
           }, stableConnectionMs);
         };
-        const acceptText = (text: string) => {
-          if (settled || !active) return;
+        const acceptText = (text: string): boolean => {
+          if (settled || !active) return false;
           buffer += text;
           const chunks = buffer.split(/\r?\n\r?\n/);
           buffer = chunks.pop() ?? '';
@@ -386,6 +386,7 @@ export function createHttpServiceEventSource(
               ),
             });
           }
+          return chunks.length > 0;
         };
         const closed = () => {
           if (!settled) {
@@ -418,12 +419,14 @@ export function createHttpServiceEventSource(
             }
             markConnected();
             const text = xhr.responseText ?? '';
-            acceptText(text.slice(offset));
+            const crossedFrameBoundary = acceptText(text.slice(offset));
             offset = text.length;
-            // React Native's XHR retains the entire response string. Rotate
-            // only at a frame boundary so consumed events stay bounded; the
-            // next request resumes with Last-Event-ID when the server sent one.
-            if (!settled && active && buffer.length === 0 &&
+            // React Native's XHR retains the entire response string. Rotate as
+            // soon as a complete frame ends, even when the network chunk also
+            // started the next frame. A trailing partial frame is discarded;
+            // the next request resumes after the last complete event when the
+            // server supplied an id.
+            if (!settled && active && crossedFrameBoundary &&
                 offset >= maxXhrResponseCharacters) {
               finish({
                 retry: true,
