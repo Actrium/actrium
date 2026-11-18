@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+use actr_config::WasiDataAccess::{self, ReadOnly, ReadWrite};
 use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 #[cfg(feature = "dynclib-engine")]
@@ -8,17 +10,25 @@ use tempfile::TempDir;
 #[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
 pub(crate) async fn attach_wasi_fixture(
     root: &TempDir,
-    data_dir: Option<PathBuf>,
+    deployment: Option<(PathBuf, WasiDataAccess)>,
     grant: WasiDataDir,
-) -> Node<Attached> {
+    requested: Option<WasiDataAccess>,
+) -> HyperResult<Node<Attached>> {
     use actr_pack::{ActorPackOptions, ActorPackageManifest};
     use std::collections::BTreeMap;
 
     let key = SigningKey::generate(&mut OsRng);
-    let manifest = ActorPackageManifest::from_toml(include_str!(
+    let mut manifest = ActorPackageManifest::from_toml(include_str!(
         "../../actr-pack/tests/fixtures/registration-v2.toml"
     ))
     .unwrap();
+    if let Some(access) = requested {
+        let capability = match access {
+            ReadOnly => package_runtime::WASI_DATA_READ_ONLY,
+            ReadWrite => package_runtime::WASI_DATA_READ_WRITE,
+        };
+        manifest.host.required_capabilities.push(capability.into());
+    }
     let package = WorkloadPackage::new(
         actr_pack::pack_actor_package(&ActorPackOptions {
             manifest,
@@ -35,11 +45,11 @@ pub(crate) async fn attach_wasi_fixture(
     hyper_config.wasi_data_dir = grant;
     let hyper = Hyper::new(hyper_config).await.unwrap();
     let mut config = linked_runtime_config(root);
-    config.wasi_data_dir = data_dir;
-    Node::from_hyper(hyper, config)
-        .attach(&package)
-        .await
-        .unwrap()
+    if let Some((path, access)) = deployment {
+        config.wasi_data_dir = Some(path);
+        config.wasi_data_access = access;
+    }
+    Node::from_hyper(hyper, config).attach(&package).await
 }
 
 #[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
@@ -100,8 +110,14 @@ fn stalled_guest_file_io_does_not_block_mount_free_attach() {
                 .unwrap()
                 .success()
         );
-        let mounted =
-            attach_wasi_fixture(&mounted_root, Some(data.clone()), WasiDataDir::Inherit).await;
+        let mounted = attach_wasi_fixture(
+            &mounted_root,
+            Some((data.clone(), ReadWrite)),
+            WasiDataDir::Inherit,
+            Some(ReadWrite),
+        )
+        .await
+        .unwrap();
         let actor = mounted.attachment.unwrap().node.workload_dispatch;
         let request_actor = actor.clone();
         let mut request = tokio::spawn(async move {
@@ -131,7 +147,7 @@ fn stalled_guest_file_io_does_not_block_mount_free_attach() {
         };
         let attached = tokio::time::timeout(
             Duration::from_secs(20),
-            attach_wasi_fixture(&other_root, None, WasiDataDir::Inherit),
+            attach_wasi_fixture(&other_root, None, WasiDataDir::Inherit, None),
         )
         .await;
         // Release a started FIFO open, including when the attach timed out.
@@ -148,7 +164,9 @@ fn stalled_guest_file_io_does_not_block_mount_free_attach() {
             release_error.is_none(),
             "failed to release the FIFO reader: {release_error:?}"
         );
-        let other = attached.expect("mount-free attach was blocked by guest file I/O");
+        let other = attached
+            .expect("mount-free attach was blocked by guest file I/O")
+            .unwrap();
         other
             .attachment
             .unwrap()
@@ -165,7 +183,14 @@ async fn wasi_data_attach_reads_and_writes_original_directory_after_trap() {
     let root = TempDir::new().unwrap();
     let path = root.path().join("data");
     std::fs::create_dir(&path).unwrap();
-    let node = attach_wasi_fixture(&root, Some(path.clone()), WasiDataDir::Inherit).await;
+    let node = attach_wasi_fixture(
+        &root,
+        Some((path.clone(), ReadWrite)),
+        WasiDataDir::Inherit,
+        Some(ReadWrite),
+    )
+    .await
+    .unwrap();
     let actor = node.attachment.unwrap().node.workload_dispatch;
     let writes = call_wasi_fixture(&actor, "test/wasi-data-write", b"before")
         .await
@@ -232,9 +257,19 @@ async fn wasi_data_attach_respects_absent_and_disabled_grants() {
     std::fs::write(path.join("fixture-state"), b"host only").unwrap();
     for (runtime_path, grant) in [
         (None, WasiDataDir::Inherit),
-        (Some(path.clone()), WasiDataDir::Disabled),
+        (Some((path.clone(), ReadWrite)), WasiDataDir::Disabled),
     ] {
-        let node = attach_wasi_fixture(&dir, runtime_path, grant).await;
+        let result = attach_wasi_fixture(&dir, runtime_path, grant, Some(ReadWrite)).await;
+        assert!(matches!(
+            result,
+            Err(HyperError::Config(ref message))
+                if message.contains(package_runtime::WASI_DATA_READ_WRITE)
+        ));
+    }
+    for runtime_path in [None, Some((path.clone(), ReadWrite))] {
+        let node = attach_wasi_fixture(&dir, runtime_path, WasiDataDir::Inherit, None)
+            .await
+            .unwrap();
         let actor = node.attachment.unwrap().node.workload_dispatch;
         let error = call_wasi_fixture(&actor, "test/wasi-data-read", b"")
             .await
@@ -255,6 +290,84 @@ async fn wasi_data_attach_respects_absent_and_disabled_grants() {
             b"host only"
         );
         actor.shutdown().await;
+    }
+}
+
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+#[tokio::test]
+async fn wasi_data_attach_read_only_denies_writes_even_after_rebuild() {
+    let root = TempDir::new().unwrap();
+    let directory = root.path().join("data");
+    std::fs::create_dir(&directory).unwrap();
+    let state = directory.join("fixture-state");
+
+    for (deployment, grant) in [
+        (Some((directory.clone(), ReadOnly)), WasiDataDir::Inherit),
+        (Some((directory.clone(), ReadWrite)), WasiDataDir::Inherit),
+        (None, WasiDataDir::ReadOnlyDirectory(directory.clone())),
+    ] {
+        std::fs::write(&state, b"host contents").unwrap();
+        let node = attach_wasi_fixture(&root, deployment, grant, Some(ReadOnly))
+            .await
+            .unwrap();
+        let actor = node.attachment.unwrap().node.workload_dispatch;
+        for rebuild in [false, true] {
+            if rebuild {
+                let error = call_wasi_fixture(&actor, "test/wasi-data-trap", b"")
+                    .await
+                    .unwrap_err();
+                assert!(error.to_string().contains("trapped"), "{error}");
+            }
+
+            let read = call_wasi_fixture(&actor, "test/wasi-data-read", b"")
+                .await
+                .unwrap();
+            assert_eq!(read.as_ref(), b"host contents");
+            let error = call_wasi_fixture(&actor, "test/wasi-data-write", b"guest")
+                .await
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("WASI data write failed"),
+                "{error}"
+            );
+            assert_eq!(std::fs::read(&state).unwrap(), b"host contents");
+        }
+
+        std::fs::remove_file(&state).unwrap();
+        let error = call_wasi_fixture(&actor, "test/wasi-data-write", b"guest")
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("WASI data write failed"),
+            "{error}"
+        );
+        assert!(!state.exists());
+        actor.shutdown().await;
+    }
+}
+
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+#[tokio::test]
+async fn wasi_data_attach_rejects_required_write_with_a_read_only_grant() {
+    let root = TempDir::new().unwrap();
+    let directory = root.path().join("data");
+    std::fs::create_dir(&directory).unwrap();
+
+    for (deployment, grant) in [
+        (Some((directory.clone(), ReadOnly)), WasiDataDir::Inherit),
+        (
+            Some((directory.clone(), ReadOnly)),
+            WasiDataDir::Directory(directory.clone()),
+        ),
+        (None, WasiDataDir::ReadOnlyDirectory(directory)),
+    ] {
+        let result = attach_wasi_fixture(&root, deployment, grant, Some(ReadWrite)).await;
+        assert!(matches!(
+            result,
+            Err(HyperError::Config(ref message))
+                if message.contains(package_runtime::WASI_DATA_READ_WRITE)
+                    && message.contains("only read-only")
+        ));
     }
 }
 
@@ -502,6 +615,7 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
         web: None,
         storage_root: None,
         wasi_data_dir: None,
+        wasi_data_access: actr_config::WasiDataAccess::default(),
     }
 }
 

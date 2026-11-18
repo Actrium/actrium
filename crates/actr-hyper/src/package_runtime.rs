@@ -2,16 +2,22 @@
 
 use std::str::FromStr;
 
-use actr_config::lock::LockFile;
+use actr_config::{WasiDataAccess, lock::LockFile};
 use actr_pack::ActorPackageManifest;
 use actr_protocol::ActrType;
 use semver::{Version, VersionReq};
 
+use crate::config::WasiDataGrant;
 use crate::error::{HyperError, HyperResult};
 
 const V2_LOCK_PATH: &str = "manifest.lock.toml";
 
-pub(crate) fn validate_component_host(manifest: &ActorPackageManifest) -> HyperResult<()> {
+pub(crate) use actr_pack::actor_package::{WASI_DATA_READ_ONLY, WASI_DATA_READ_WRITE};
+
+pub(crate) fn resolve_component_host_grants<'a>(
+    manifest: &ActorPackageManifest,
+    configured_wasi_data: Option<WasiDataGrant<'a>>,
+) -> HyperResult<Option<WasiDataGrant<'a>>> {
     if manifest.workload.profile != "actr.component/1" || manifest.host.profile != "actr.host/1" {
         return Err(HyperError::InvalidManifest(format!(
             "unsupported native workload/host profile combination: {} / {}",
@@ -27,13 +33,51 @@ pub(crate) fn validate_component_host(manifest: &ActorPackageManifest) -> HyperR
             manifest.host.api
         )));
     }
-    if !manifest.host.required_capabilities.is_empty() {
-        return Err(HyperError::InvalidManifest(format!(
-            "native Component packages cannot require capabilities: {}",
-            manifest.host.required_capabilities.join(", ")
+    if !manifest.host.optional_capabilities.is_empty() {
+        return Err(HyperError::InvalidManifest(
+            "actr.component/1 does not support optional capability discovery".into(),
+        ));
+    }
+    let mut requested = None;
+    for capability in &manifest.host.required_capabilities {
+        let access = match capability.as_str() {
+            WASI_DATA_READ_ONLY => WasiDataAccess::ReadOnly,
+            WASI_DATA_READ_WRITE => WasiDataAccess::ReadWrite,
+            _ => {
+                return Err(HyperError::InvalidManifest(format!(
+                    "unsupported actr.component/1 required capability `{capability}`"
+                )));
+            }
+        };
+        if requested.replace((capability, access)).is_some() {
+            return Err(HyperError::InvalidManifest(format!(
+                "`{WASI_DATA_READ_ONLY}` and `{WASI_DATA_READ_WRITE}` are mutually exclusive"
+            )));
+        }
+    }
+    let Some((capability, access)) = requested else {
+        if configured_wasi_data.is_some() {
+            tracing::warn!(
+                actor_type = %manifest.actor_type(),
+                "configured WASI data directory is not mounted at /data because the signed package does not require a WASI data capability; repack and re-sign it with wasi.data.read-only or wasi.data.read-write"
+            );
+        }
+        return Ok(None);
+    };
+    let grant = configured_wasi_data.ok_or_else(|| {
+        HyperError::Config(format!(
+            "required capability `{capability}` has no directory grant; configure `[hyper].wasi_data_dir` and allow it in the Host"
+        ))
+    })?;
+    if access == WasiDataAccess::ReadWrite && grant.access == WasiDataAccess::ReadOnly {
+        return Err(HyperError::Config(format!(
+            "required capability `{capability}` needs read-write access, but the Host granted only read-only access to `/data`"
         )));
     }
-    Ok(())
+    Ok(Some(WasiDataGrant {
+        directory: grant.directory,
+        access,
+    }))
 }
 
 pub(crate) fn parse_lock(bytes: &[u8]) -> HyperResult<LockFile> {
@@ -204,7 +248,7 @@ service Echo { rpc Echo(Request) returns (Request); }
         let source = include_str!("../../actr-pack/tests/fixtures/registration-v2.toml");
         let manifest = ActorPackageManifest::from_toml(source).unwrap();
         let registration = actr_pack::RegistrationManifest::parse(source.as_bytes()).unwrap();
-        validate_component_host(&manifest).unwrap();
+        resolve_component_host_grants(&manifest, None).unwrap();
         assert_eq!(registration.target(), None);
         assert_eq!(
             registration.actor_type().to_program_identity(),
@@ -216,13 +260,21 @@ service Echo { rpc Echo(Request) returns (Request); }
             .host
             .required_capabilities
             .push("unsupported.permission".into());
-        assert!(validate_component_host(&unsupported).is_err());
+        assert!(resolve_component_host_grants(&unsupported, None).is_err());
+        unsupported = manifest.clone();
+        unsupported
+            .host
+            .optional_capabilities
+            .push("actor.call".into());
+        unsupported.validate().unwrap();
+        let error = resolve_component_host_grants(&unsupported, None).unwrap_err();
+        assert!(error.to_string().contains("optional capability discovery"));
         unsupported = manifest.clone();
         unsupported.host.api = ">=2.0.0".into();
-        assert!(validate_component_host(&unsupported).is_err());
+        assert!(resolve_component_host_grants(&unsupported, None).is_err());
         unsupported = manifest;
         unsupported.workload.profile = "keel.guest/1".into();
-        assert!(validate_component_host(&unsupported).is_err());
+        assert!(resolve_component_host_grants(&unsupported, None).is_err());
     }
 
     fn fixture_lock() -> LockFile {

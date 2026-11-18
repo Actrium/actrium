@@ -133,6 +133,7 @@ fn runtime_config_with_type(
         web: None,
         storage_root: None,
         wasi_data_dir: None,
+        wasi_data_access: actr_config::WasiDataAccess::default(),
     }
 }
 
