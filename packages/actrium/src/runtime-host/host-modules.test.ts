@@ -241,14 +241,14 @@ describe('host:speech implementation', () => {
       authorizeCapability: async (capability) => { calls.push(capability); },
       recognizeSpeech: async (input) => {
         calls.push(input);
-        return { text: '你好', nativeDetails: 'internal' };
+        return { text: '\u4f60\u597d', nativeDetails: 'internal' };
       },
     }));
 
     expect(() => dispatch['host:speech'].recognize({ locale: 'invalid/locale' })).toThrow('locale');
     expect(() => dispatch['host:speech'].recognize([])).toThrow('must be an object');
     expect(calls).toEqual([]);
-    await expect(dispatch['host:speech'].recognize({ locale: 'zh-CN' })).resolves.toEqual({ text: '你好' });
+    await expect(dispatch['host:speech'].recognize({ locale: 'zh-CN' })).resolves.toEqual({ text: '\u4f60\u597d' });
     expect(calls).toEqual(['host:speech.recognize', { locale: 'zh-CN' }]);
   });
 

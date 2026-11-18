@@ -33,11 +33,11 @@ test('calls prototype-backed native methods and returns the transcript after end
   await Promise.resolve();
   expect(backend.start).toHaveBeenCalledWith(expect.objectContaining({ lang: 'zh-CN' }));
   emit('start');
-  emit('result', { isFinal: false, results: [{ transcript: '你' }] });
-  emit('result', { isFinal: true, results: [{ transcript: '你好' }] });
+  emit('result', { isFinal: false, results: [{ transcript: '\u4f60' }] });
+  emit('result', { isFinal: true, results: [{ transcript: '\u4f60\u597d' }] });
   await expect(recognize({}, new AbortController().signal)).rejects.toThrow('already in progress');
   emit('end');
-  await expect(request).resolves.toEqual({ text: '你好' });
+  await expect(request).resolves.toEqual({ text: '\u4f60\u597d' });
   expect(listeners.size).toBe(0);
 });
 
@@ -96,12 +96,12 @@ test('emits complete interim hypotheses and delivers the final text once', async
   await Promise.resolve();
   expect(backend.start).toHaveBeenCalledWith(expect.objectContaining({ interimResults: true }));
   emit('start');
-  emit('result', { isFinal: false, results: [{ transcript: '你好' }] });
-  emit('result', { isFinal: false, results: [{ transcript: '您好，世界' }] });
-  emit('result', { isFinal: true, results: [{ transcript: '您好，世界。' }] });
-  expect(interim.mock.calls).toEqual([[{ text: '你好' }], [{ text: '您好，世界' }]]);
+  emit('result', { isFinal: false, results: [{ transcript: '\u4f60\u597d' }] });
+  emit('result', { isFinal: false, results: [{ transcript: '\u60a8\u597d\uff0c\u4e16\u754c' }] });
+  emit('result', { isFinal: true, results: [{ transcript: '\u60a8\u597d\uff0c\u4e16\u754c\u3002' }] });
+  expect(interim.mock.calls).toEqual([[{ text: '\u4f60\u597d' }], [{ text: '\u60a8\u597d\uff0c\u4e16\u754c' }]]);
   emit('end');
-  await expect(request).resolves.toEqual({ text: '您好，世界。' });
+  await expect(request).resolves.toEqual({ text: '\u60a8\u597d\uff0c\u4e16\u754c\u3002' });
 });
 
 test('reports recording and stops gracefully once while preserving all dictated segments', async () => {
