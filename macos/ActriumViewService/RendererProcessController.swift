@@ -1098,12 +1098,18 @@ private final class RendererTabSurface {
             // Shift+click/drag extends the selection; the mouse-down and
             // mouse-up paths consume the event, so AppKit's own extension
             // never runs. The base is the existing selection's anchor when a
-            // selection is live, and the caret otherwise — the stored anchor
-            // goes stale as soon as the caret moves (keyboard, undo), so a
-            // collapsed selection must not reuse it.
+            // selection is live, and the caret otherwise — a stored anchor
+            // is only trusted while it still belongs to the current
+            // selection (the caret may have moved since, via keyboard or
+            // undo). The resolved base is stored back so the whole gesture
+            // (mouse-down, drag, and repeated Shift+clicks) uses one anchor.
             let current = editor.selectedRange()
-            let base = (current.length > 0 ? dragSelectionAnchor : nil)
-                ?? current.upperBound
+            var base = current.upperBound
+            if current.length > 0, let anchor = dragSelectionAnchor,
+               anchor >= current.location, anchor <= current.upperBound {
+                base = anchor
+            }
+            dragSelectionAnchor = base
             let range = NSRange(location: min(base, index), length: abs(index - base))
             editor.setSelectedRange(range)
             publishCaret()
