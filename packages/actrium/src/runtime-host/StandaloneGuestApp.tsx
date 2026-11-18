@@ -14,10 +14,10 @@ import {
   ScrollView,
   Switch,
   Text,
-  TextInput,
   View,
 } from 'keel/host/preset';
 
+import { GuestTextInput } from './GuestTextInput';
 import { hasDeclaredCapability } from './capabilities';
 import {
   capabilitiesFromSnapshotJSON,
@@ -27,6 +27,7 @@ import {
 import { contract, type FileImportPickInput, type FileImportPickOutput } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
+import { Supramark } from './guest-markdown-renderer';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
 import { callHttpService, callNativeService } from './service-call';
 import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
@@ -87,10 +88,11 @@ const hostComponents: ComponentMap = {
   ImageAsset: GuestImage as unknown as React.ComponentType<
     Record<string, unknown>
   >,
+  ...(Supramark && { Supramark }),
   ScrollView: ScrollView as React.ComponentType<Record<string, unknown>>,
   Switch: Switch as unknown as React.ComponentType<Record<string, unknown>>,
   Text: Text as React.ComponentType<Record<string, unknown>>,
-  TextInput: TextInput as React.ComponentType<Record<string, unknown>>,
+  TextInput: GuestTextInput as React.ComponentType<Record<string, unknown>>,
   View: View as React.ComponentType<Record<string, unknown>>,
 };
 
@@ -225,6 +227,10 @@ export const StandaloneGuestApp: React.FC<Props> = ({
         `[StandaloneGuestApp] capability verification failed: ${details}`
       );
       setError(`Capability manifest verification failed: ${details}`);
+      return;
+    }
+    if (v1?.ok && v1.manifest.components.includes('Supramark') && !Supramark) {
+      setError('Supramark rendering is unavailable in this Host build.');
       return;
     }
     const authorizer = authorizerRef.current;
