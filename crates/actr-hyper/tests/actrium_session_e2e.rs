@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use actr_framework::{Bytes, Context, MessageDispatcher, Workload};
 use actr_hyper::actrium::ActriumAttachParams;
-use actr_hyper::test_support::{TestSignalingServer, actor_signing_key_for_scoped};
+use actr_hyper::test_support::TestSignalingServer;
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
 use actr_protocol::{ActrId, ActrType, RpcEnvelope, RpcRequest};
 use actrium_runtime::{
@@ -218,13 +218,7 @@ fn front_type() -> ActrType {
     }
 }
 
-/// Matches the node's own derivation: `storage_root` defaults to
-/// `config_dir/storage`, and the scoped Actor key lives under it.
-fn actor_key_root(dir: &TempDir) -> std::path::PathBuf {
-    dir.path().join("storage")
-}
-
-fn attach_params(actor_signing_key: ed25519_dalek::SigningKey) -> ActriumAttachParams {
+fn attach_params() -> ActriumAttachParams {
     ActriumAttachParams {
         program: ProgramRelease {
             publisher: "example.com".into(),
@@ -240,7 +234,6 @@ fn attach_params(actor_signing_key: ed25519_dalek::SigningKey) -> ActriumAttachP
             keel_api: "1".into(),
         },
         requested_capabilities: vec![READ.to_string()],
-        actor_signing_key,
     }
 }
 
@@ -310,7 +303,7 @@ async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (Act
     let service = InMemorySessionService::new(
         make_service_config(
             &service_actor_id.to_string_repr(),
-            actor_signing_key_for_scoped(&actor_key_root(dir), REALM, &service_type, None),
+            registered.actrium_actor_signing_key().unwrap(),
         ),
         policies,
     )
@@ -352,7 +345,7 @@ async fn start_front_node(server: &TestSignalingServer, dir: &TempDir) -> ActrRe
     let service = InMemorySessionService::new(
         make_service_config(
             &front_actor_id.to_string_repr(),
-            actor_signing_key_for_scoped(&actor_key_root(dir), REALM, &front_type, None),
+            registered.actrium_actor_signing_key().unwrap(),
         ),
         policies,
     )
@@ -394,15 +387,7 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     let session = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             match front
-                .attach_actrium(
-                    &service_actor_id,
-                    attach_params(actor_signing_key_for_scoped(
-                        &actor_key_root(&front_dir),
-                        REALM,
-                        &front_type(),
-                        None,
-                    )),
-                )
+                .attach_actrium(&service_actor_id, attach_params())
                 .await
             {
                 Ok(session) => return session,

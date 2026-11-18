@@ -3,7 +3,7 @@
 use crate::error::{ActrError, ActrResult, run_on_tokio_runtime};
 use crate::session::{
     ActrPeerSessionWrapper, ActriumAttachParams, ActriumServiceConfig, ActriumServicePolicies,
-    actr_ref_attach_actrium, registered_node_with_actrium_service,
+    actr_ref_attach_actrium, actrium_service_for_node,
 };
 use crate::types::{
     ActrId, ActrType, AppLifecycleState, CleanupReason, NetworkEventResult, NetworkSnapshot,
@@ -255,12 +255,19 @@ impl ActrNode {
     ) -> ActrResult<Arc<Self>> {
         let this = self.clone();
         let mut node_guard = this.inner.lock();
+        let service = {
+            let node = node_guard.as_ref().ok_or_else(|| ActrError::Internal {
+                msg: "runtime node is no longer available".to_string(),
+            })?;
+            actrium_service_for_node(node, config, policies)?
+        };
+        // Every fallible step above runs while the node is still owned by the
+        // guard. Installing the prepared service is infallible, so a config
+        // error cannot consume the node or prevent a corrected retry.
         let node = node_guard.take().ok_or_else(|| ActrError::Internal {
             msg: "runtime node is no longer available".to_string(),
         })?;
-        *node_guard = Some(registered_node_with_actrium_service(
-            node, config, policies,
-        )?);
+        *node_guard = Some(node.with_actrium_service(service));
         Ok(self)
     }
 }
@@ -940,6 +947,52 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
             None,
         )
         .await
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn invalid_actrium_service_config_allows_a_corrected_retry() {
+        let mut server = MockLoranServer::start()
+            .await
+            .expect("mock loran server should start");
+        let temp = tempdir().expect("temp dir");
+        let config_path = write_test_config(temp.path(), &server);
+        let node = linked_node_for_test(&config_path)
+            .await
+            .expect("linked workload node should be created");
+        let service_actor_id = node
+            .inner
+            .lock()
+            .as_ref()
+            .expect("registered node")
+            .actor_id()
+            .to_string_repr();
+        let mut config = crate::session::tests::service_config_for_test();
+        config.service_actor_id = service_actor_id;
+        config.routes.clear();
+
+        let error = match node
+            .clone()
+            .with_actrium_service(config.clone(), ActriumServicePolicies::allow_all())
+        {
+            Ok(_) => panic!("empty routes must be rejected"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("invalid service config"),
+            "unexpected validation error: {error}"
+        );
+
+        config.routes = crate::session::tests::service_config_for_test().routes;
+        node.clone()
+            .with_actrium_service(config, ActriumServicePolicies::allow_all())
+            .expect("the same node accepts a corrected config");
+        let actr_ref = node
+            .start()
+            .await
+            .expect("a failed first attempt must not consume the node");
+        actr_ref.shutdown();
+        actr_ref.wait_for_shutdown().await;
+        server.shutdown().await;
     }
 
     #[tokio::test]

@@ -5117,6 +5117,7 @@ impl Inner {
             shutdown_token,
             task_handles: Mutex::new(task_handles),
             rtc_manager: rtc_manager.clone(),
+            actor_signer,
             peer_runtime,
         });
 

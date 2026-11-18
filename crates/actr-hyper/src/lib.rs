@@ -1475,7 +1475,7 @@ impl Node<Registered> {
         self
     }
 
-    /// The Actor identity assigned by the Issuer at registration.
+    /// Actor identity assigned by the Issuer at registration.
     pub fn actor_id(&self) -> actr_protocol::ActrId {
         self.attachment
             .as_ref()
@@ -1486,6 +1486,32 @@ impl Node<Registered> {
             .expect("a registered node holds its issued credential")
             .actr_id
             .clone()
+    }
+
+    /// Load the same long-term Actor key used for registration and channel
+    /// authentication. This is a trusted-host bridge for Actrium setup; the key
+    /// must never cross into Guest or foreign-language workload code.
+    #[doc(hidden)]
+    pub fn actrium_actor_signing_key(&self) -> HyperResult<ed25519_dalek::SigningKey> {
+        let attachment = self
+            .attachment
+            .as_ref()
+            .expect("Node<Registered> without attachment");
+        let config = &attachment.node.config;
+        let actor_type = attachment
+            .verified
+            .as_ref()
+            .map(|verified| verified.manifest.actor_type())
+            .unwrap_or_else(|| config.actr_type().clone());
+        let signer = crate::issuer_client::actor_signer_for_scoped(
+            &self.hyper.config.storage_root,
+            &config.realm,
+            &actor_type,
+            attachment.node.actor_key_namespace.as_deref(),
+        )?;
+        Ok(ed25519_dalek::SigningKey::from_bytes(
+            &signer.signing_key_bytes(),
+        ))
     }
 
     /// Install the complete Actrium P2P session protocol on this node: the

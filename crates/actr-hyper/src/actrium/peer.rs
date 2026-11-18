@@ -57,9 +57,6 @@ pub struct ActriumAttachParams {
     pub protocol_fingerprint: Vec<u8>,
     pub runtime: actrium_runtime::Runtime,
     pub requested_capabilities: Vec<String>,
-    /// The attaching peer's long-term Ed25519 key, matching the key bound at
-    /// registration and proven during the relay handshake.
-    pub actor_signing_key: ed25519_dalek::SigningKey,
 }
 
 /// Handles to the running node's outbound path plus the shared peer state.
@@ -119,6 +116,7 @@ pub struct ActriumPeerSession {
     front_actor_id: String,
     service_actor_id: String,
     params: ActriumAttachParams,
+    actor_signing_key: ed25519_dalek::SigningKey,
     state: Mutex<SessionState>,
     heartbeat: Mutex<Option<JoinHandle<()>>>,
 }
@@ -392,7 +390,7 @@ impl ActriumPeerSession {
     pub async fn takeover(self: &Arc<Self>, session_id: &str, lease_epoch: u64) -> ActorResult<()> {
         let channel = self.runtime.verified_context(&self.service).await?;
         let mut attach = self.attach_request(&channel);
-        sign_attach_request(&mut attach, &self.params.actor_signing_key);
+        sign_attach_request(&mut attach, &self.actor_signing_key);
         let request_digest = attach_request_digest(&attach);
         let mut takeover = TakeoverRequest {
             session_id: session_id.to_string(),
@@ -402,7 +400,6 @@ impl ActriumPeerSession {
         };
         use ed25519_dalek::Signer as _;
         takeover.takeover_proof = self
-            .params
             .actor_signing_key
             .sign(&takeover_signing_bytes(&takeover, &attach))
             .to_bytes()
@@ -463,12 +460,15 @@ impl ActrRef {
             )
         })?;
         let channel = runtime.verified_context(service).await?;
+        let actor_signing_key =
+            ed25519_dalek::SigningKey::from_bytes(&self.shared.actor_signer.signing_key_bytes());
         let session = Arc::new(ActriumPeerSession {
             runtime,
             service: service.clone(),
             front_actor_id: self.actor_id().to_string_repr(),
             service_actor_id: service.to_string_repr(),
             params,
+            actor_signing_key,
             state: Mutex::new(SessionState {
                 session_id: String::new(),
                 lease_epoch: 0,
@@ -478,7 +478,7 @@ impl ActrRef {
             heartbeat: Mutex::new(None),
         });
         let mut attach = session.attach_request(&channel);
-        sign_attach_request(&mut attach, &session.params.actor_signing_key);
+        sign_attach_request(&mut attach, &session.actor_signing_key);
         let response: AttachResponse = session.session_rpc("Attach", &attach).await?;
         let secret =
             session.verify_response(&response, &attach_request_digest(&attach), &channel)?;

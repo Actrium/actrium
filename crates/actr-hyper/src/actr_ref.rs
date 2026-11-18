@@ -65,6 +65,10 @@ pub(crate) struct ActrRefShared {
     pub(crate) task_handles: Mutex<Vec<JoinHandle<()>>>,
     /// RTC connection manager backing the status query/list/subscribe APIs.
     pub(crate) rtc_manager: Option<Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>>,
+    /// Long-term Actor signer used by the Actrium Attach protocol. Keeping it
+    /// inside the trusted runtime prevents hosts and workloads from supplying a
+    /// key that differs from the registration and channel identity.
+    pub(crate) actor_signer: Arc<crate::issuer_client::FileActorKeySigner>,
     /// Actrium peer runtime, present when the node was configured with
     /// `with_actrium_service` and the PeerGate started successfully.
     pub(crate) peer_runtime: Option<Arc<crate::actrium::peer::PeerRuntime>>,

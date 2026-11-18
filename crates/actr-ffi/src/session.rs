@@ -53,9 +53,6 @@ pub struct ActriumRoute {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ActriumServiceConfig {
     pub service_actor_id: String,
-    pub runtime_instance_id: String,
-    /// 32-byte Ed25519 signing key for the Service Actor.
-    pub service_signing_key: Vec<u8>,
     pub allowed_front_actor_types: Vec<String>,
     pub program: ProgramRelease,
     pub package_digest: Vec<u8>,
@@ -72,22 +69,19 @@ pub struct ActriumServiceConfig {
 }
 
 impl ActriumServiceConfig {
-    fn into_runtime(self) -> ActrResult<actrium_runtime::ServiceConfig> {
-        let key_bytes: [u8; 32] =
-            self.service_signing_key
-                .try_into()
-                .map_err(|_| ActrError::InvalidArgument {
-                    msg: "service_signing_key must be 32 bytes".into(),
-                })?;
+    fn into_runtime(
+        self,
+        service_signing_key: ed25519_dalek::SigningKey,
+    ) -> actrium_runtime::ServiceConfig {
         let routes: BTreeMap<String, BTreeSet<String>> = self
             .routes
             .into_iter()
             .map(|entry| (entry.route, entry.capabilities.into_iter().collect()))
             .collect();
-        Ok(actrium_runtime::ServiceConfig {
+        actrium_runtime::ServiceConfig {
             service_actor_id: self.service_actor_id,
-            runtime_instance_id: self.runtime_instance_id,
-            service_signing_key: ed25519_dalek::SigningKey::from_bytes(&key_bytes),
+            runtime_instance_id: actr_hyper::process_runtime_instance_id().to_owned(),
+            service_signing_key,
             allowed_front_actor_types: self.allowed_front_actor_types.into_iter().collect(),
             program: self.program.into(),
             package_digest: self.package_digest,
@@ -107,11 +101,13 @@ impl ActriumServiceConfig {
             replay_retention: actrium_runtime::ServiceConfig::DEFAULT_REPLAY_RETENTION,
             max_replay_entries: actrium_runtime::ServiceConfig::DEFAULT_MAX_REPLAY_ENTRIES,
             max_completed_sessions: actrium_runtime::ServiceConfig::DEFAULT_MAX_COMPLETED_SESSIONS,
-        })
+        }
     }
 }
 
-struct AllowAllPolicies;
+struct AllowAllPolicies {
+    capabilities: BTreeSet<String>,
+}
 
 #[async_trait::async_trait]
 impl actrium_runtime::MembershipProvider for AllowAllPolicies {
@@ -125,7 +121,7 @@ impl actrium_runtime::MembershipProvider for AllowAllPolicies {
             member: member.to_string(),
             client_key: client_key.to_string(),
             role: actrium_runtime::MemberRole::Owner,
-            capabilities: BTreeSet::new(),
+            capabilities: self.capabilities.clone(),
         }))
     }
 }
@@ -136,10 +132,15 @@ impl actrium_runtime::AuthorizeAttach for AllowAllPolicies {
         &self,
         context: actrium_runtime::AttachAuthorization,
     ) -> Result<actrium_runtime::AuthorizeAttachDecision, actrium_runtime::SessionError> {
+        let allowed_capabilities = if context.requested_capabilities.is_empty() {
+            self.capabilities.iter().cloned().collect()
+        } else {
+            context.requested_capabilities
+        };
         Ok(actrium_runtime::AuthorizeAttachDecision {
             allowed: true,
             denial_reason: None,
-            allowed_capabilities: context.requested_capabilities,
+            allowed_capabilities,
         })
     }
 }
@@ -214,25 +215,40 @@ impl actrium_runtime::ResourceQuota for AllowAllPolicies {
 /// lifecycle / workspace layers. Future versions can add callback interfaces
 /// for each policy dimension.
 #[derive(uniffi::Object)]
-pub struct ActriumServicePolicies {
-    inner: actrium_runtime::ServicePolicies,
-}
+pub struct ActriumServicePolicies;
 
 #[uniffi::export]
 impl ActriumServicePolicies {
     /// Construct an allow-all policy bundle. Suitable only when the host
-    /// environment already authorizes callers and workloads.
+    /// environment already authorizes callers and workloads. The effective
+    /// capability set is bounded by each installed Service's configuration.
     #[uniffi::constructor]
     pub fn allow_all() -> Arc<Self> {
-        let policies = actrium_runtime::ServicePolicies {
-            membership: Arc::new(AllowAllPolicies),
-            authorize_attach: Arc::new(AllowAllPolicies),
-            authorize_takeover: Arc::new(AllowAllPolicies),
-            authorize_request: Arc::new(AllowAllPolicies),
-            privacy: Arc::new(AllowAllPolicies),
-            quota: Arc::new(AllowAllPolicies),
-        };
-        Arc::new(Self { inner: policies })
+        Arc::new(Self)
+    }
+}
+
+impl ActriumServicePolicies {
+    fn for_service(
+        &self,
+        config: &actrium_runtime::ServiceConfig,
+    ) -> actrium_runtime::ServicePolicies {
+        let mut capabilities = config.program_capabilities.clone();
+        capabilities.extend(
+            config
+                .routes
+                .values()
+                .flat_map(|route| route.iter().cloned()),
+        );
+        let policies = Arc::new(AllowAllPolicies { capabilities });
+        actrium_runtime::ServicePolicies {
+            membership: policies.clone(),
+            authorize_attach: policies.clone(),
+            authorize_takeover: policies.clone(),
+            authorize_request: policies.clone(),
+            privacy: policies.clone(),
+            quota: policies,
+        }
     }
 }
 
@@ -245,27 +261,18 @@ pub struct ActriumAttachParams {
     pub protocol_fingerprint: Vec<u8>,
     pub runtime: ActriumRuntime,
     pub requested_capabilities: Vec<String>,
-    /// 32-byte Ed25519 signing key for the attaching peer.
-    pub actor_signing_key: Vec<u8>,
 }
 
 impl ActriumAttachParams {
-    fn into_runtime(self) -> ActrResult<actr_hyper::actrium::ActriumAttachParams> {
-        let key_bytes: [u8; 32] =
-            self.actor_signing_key
-                .try_into()
-                .map_err(|_| ActrError::InvalidArgument {
-                    msg: "actor_signing_key must be 32 bytes".into(),
-                })?;
-        Ok(actr_hyper::actrium::ActriumAttachParams {
+    fn into_runtime(self) -> actr_hyper::actrium::ActriumAttachParams {
+        actr_hyper::actrium::ActriumAttachParams {
             program: self.program.into(),
             package_digest: self.package_digest,
             guest_digest: self.guest_digest,
             protocol_fingerprint: self.protocol_fingerprint,
             runtime: self.runtime.into(),
             requested_capabilities: self.requested_capabilities,
-            actor_signing_key: ed25519_dalek::SigningKey::from_bytes(&key_bytes),
-        })
+        }
     }
 }
 
@@ -319,17 +326,23 @@ impl ActrPeerSessionWrapper {
 // They are kept here as free-function helpers so the implementation detail does
 // not leak into the larger runtime module.
 
-pub(crate) fn registered_node_with_actrium_service(
-    node: actr_hyper::Node<actr_hyper::Registered>,
+pub(crate) fn actrium_service_for_node(
+    node: &actr_hyper::Node<actr_hyper::Registered>,
     config: ActriumServiceConfig,
     policies: Arc<ActriumServicePolicies>,
-) -> ActrResult<actr_hyper::Node<actr_hyper::Registered>> {
-    let config = config.into_runtime()?;
-    let service = actrium_runtime::InMemorySessionService::new(config, policies.inner.clone())
-        .map_err(|error| ActrError::Internal {
+) -> ActrResult<actrium_runtime::InMemorySessionService> {
+    let service_signing_key =
+        node.actrium_actor_signing_key()
+            .map_err(|error| ActrError::Internal {
+                msg: format!("failed to load the node Actor key: {error}"),
+            })?;
+    let config = config.into_runtime(service_signing_key);
+    let policies = policies.for_service(&config);
+    actrium_runtime::InMemorySessionService::new(config, policies).map_err(|error| {
+        ActrError::Internal {
             msg: format!("invalid service config: {error}"),
-        })?;
-    Ok(node.with_actrium_service(service))
+        }
+    })
 }
 
 pub(crate) async fn actr_ref_attach_actrium(
@@ -338,7 +351,106 @@ pub(crate) async fn actr_ref_attach_actrium(
     params: ActriumAttachParams,
 ) -> ActrResult<Arc<ActrPeerSessionWrapper>> {
     let service: actr_protocol::ActrId = service.into();
-    let params = params.into_runtime()?;
+    let params = params.into_runtime();
     let session = actr_ref.attach_actrium(&service, params).await?;
     Ok(Arc::new(ActrPeerSessionWrapper { inner: session }))
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    pub(crate) fn service_config_for_test() -> ActriumServiceConfig {
+        ActriumServiceConfig {
+            service_actor_id: "service@example.com/1".into(),
+            allowed_front_actor_types: vec!["example.com/Front@1.0.0".into()],
+            program: ProgramRelease {
+                publisher: "example.com".into(),
+                name: "documents".into(),
+                version: "1.0.0".into(),
+            },
+            package_digest: vec![4; 32],
+            guest_digest: vec![5; 32],
+            protocol_fingerprint: vec![6; 32],
+            supported_runtimes: vec![ActriumRuntime {
+                actrium_version: "1".into(),
+                front_host_api: "1".into(),
+                keel_api: "1".into(),
+            }],
+            program_capabilities: vec!["read".into(), "write".into()],
+            routes: vec![ActriumRoute {
+                route: "echo".into(),
+                capabilities: vec!["read".into(), "write".into()],
+            }],
+            attachment_policy: AttachmentPolicy::Exclusive,
+            lease_duration_secs: 300,
+            heartbeat_interval_secs: 30,
+            grace_period_secs: 60,
+        }
+    }
+
+    #[test]
+    fn service_config_uses_the_process_identity_and_node_key() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let expected_public_key = key.verifying_key();
+        let config = service_config_for_test().into_runtime(key);
+
+        assert_eq!(
+            config.runtime_instance_id,
+            actr_hyper::process_runtime_instance_id()
+        );
+        assert_eq!(
+            config.service_signing_key.verifying_key(),
+            expected_public_key
+        );
+    }
+
+    #[tokio::test]
+    async fn allow_all_uses_service_capabilities_for_attach_and_membership() {
+        let config =
+            service_config_for_test().into_runtime(ed25519_dalek::SigningKey::from_bytes(&[7; 32]));
+        let expected = BTreeSet::from(["read".to_string(), "write".to_string()]);
+        let policies = ActriumServicePolicies::allow_all().for_service(&config);
+
+        let principal = policies
+            .membership
+            .principal("front", "member", "client")
+            .await
+            .expect("membership lookup succeeds")
+            .expect("allow-all returns a principal");
+        assert_eq!(principal.capabilities, expected);
+
+        // An empty request means the full configured ceiling, not an empty
+        // application grant that would make every business request fail.
+        let decision = policies
+            .authorize_attach
+            .authorize_attach(actrium_runtime::AttachAuthorization {
+                front_actor_id: "front".into(),
+                member: "member".into(),
+                client_key: "client".into(),
+                role: actrium_runtime::MemberRole::Owner,
+                program: config.program.clone(),
+                requested_capabilities: Vec::new(),
+            })
+            .await
+            .expect("allow-all authorizes Attach");
+        assert_eq!(
+            decision.allowed_capabilities,
+            expected.into_iter().collect::<Vec<_>>()
+        );
+
+        let decision = policies
+            .authorize_attach
+            .authorize_attach(actrium_runtime::AttachAuthorization {
+                front_actor_id: "front".into(),
+                member: "member".into(),
+                client_key: "client".into(),
+                role: actrium_runtime::MemberRole::Owner,
+                program: config.program.clone(),
+                requested_capabilities: vec!["read".into()],
+            })
+            .await
+            .expect("allow-all authorizes an explicit capability");
+        assert_eq!(decision.allowed_capabilities, vec!["read".to_string()]);
+    }
 }
