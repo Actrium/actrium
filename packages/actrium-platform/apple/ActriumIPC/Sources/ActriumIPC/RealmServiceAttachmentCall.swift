@@ -7,6 +7,38 @@ public enum RealmServiceAttachmentIPC {
     public static let prepareRoute = "ask.AskService.PrepareAttachmentUpload"
 }
 
+/// Internal availability probe. The renderer queries the Host whether the
+/// owning tab actually has a Realm Service binding that permits the fixed upload
+/// transport; browser-wide module presence is not enough.
+public struct RealmServiceAttachmentAvailabilityCall: Codable, Sendable {
+    public static let requestEvent = "com.actrium.realmService.attachment.availability.request"
+    public static let responseEvent = "com.actrium.realmService.attachment.availability.response"
+
+    public let id: UUID
+
+    public init(id: UUID = UUID()) {
+        self.id = id
+    }
+}
+
+public struct RealmServiceAttachmentAvailabilityReply: Codable, Sendable {
+    public let id: UUID
+    public let available: Bool
+    public let failure: RealmServiceFailure?
+
+    public init(id: UUID, available: Bool) {
+        self.id = id
+        self.available = available
+        self.failure = nil
+    }
+
+    public init(id: UUID, failure: RealmServiceFailure) {
+        self.id = id
+        self.available = false
+        self.failure = failure
+    }
+}
+
 public struct RealmServiceAttachmentMetadata: Codable, Sendable, Equatable {
     public let key: String
     public let value: String

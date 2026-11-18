@@ -348,7 +348,10 @@ mod tests {
             contract::METHOD_PREPARE_ATTACHMENT_UPLOAD,
             "prepareAttachmentUpload"
         );
-        assert_eq!(contract::METHOD_SEND_ATTACHMENT_CHUNK, "sendAttachmentChunk");
+        assert_eq!(
+            contract::METHOD_SEND_ATTACHMENT_CHUNK,
+            "sendAttachmentChunk"
+        );
         assert_eq!(contract::METHOD_UNREGISTER_STREAM, "unregisterStream");
         assert_eq!(
             contract::EVENT_ATTACHMENT_RESULT,

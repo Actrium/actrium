@@ -59,7 +59,7 @@ describe('computeFrontCapabilities', () => {
   test('expands module shorthands to method-level capabilities', () => {
     expect(
       computeFrontCapabilities(base, withImplemented('host:assets.read'))
-    ).toEqual(['service.call', 'service.attachmentUpload', 'host:assets.read']);
+    ).toEqual(['service.call', 'host:assets.read']);
   });
 
   test('drops capabilities that require a grant until granted', () => {
@@ -120,7 +120,7 @@ describe('computeFrontCapabilities', () => {
         },
         definitions
       )
-    ).toEqual(['service.call', 'service.attachmentUpload']);
+    ).toEqual(['service.call']);
 
     expect(
       computeFrontCapabilities(
@@ -131,7 +131,7 @@ describe('computeFrontCapabilities', () => {
         },
         definitions
       )
-    ).toEqual(['service.call', 'service.tell', 'service.attachmentUpload']);
+    ).toEqual(['service.call', 'service.tell']);
 
     // A module grant must not silently cover future methods.
     expect(
@@ -143,7 +143,7 @@ describe('computeFrontCapabilities', () => {
         },
         definitions
       )
-    ).toEqual(['service.call', 'service.attachmentUpload']);
+    ).toEqual(['service.call']);
   });
 
   test('drops capabilities the host does not support', () => {
@@ -194,7 +194,7 @@ describe('computeFrontCapabilities', () => {
   test('deduplicates a capability declared through aliases', () => {
     expect(
       computeFrontCapabilities({ ...base, declared: ['service', 'actor.call'] })
-    ).toEqual(['service.call', 'service.attachmentUpload']);
+    ).toEqual(['service.call']);
   });
 
   test('accepts contract module ids in hostSupported', () => {
@@ -204,7 +204,7 @@ describe('computeFrontCapabilities', () => {
         declared: ['service'],
         hostSupported: new Set(['host:service']),
       })
-    ).toEqual(['service.call', 'service.attachmentUpload']);
+    ).toEqual(['service.call']);
   });
 
   test('silently drops unknown capabilities', () => {
@@ -220,7 +220,7 @@ describe('computeFrontCapabilities', () => {
         declared: ['service'],
         audience: 'system',
       })
-    ).toEqual(['service.call', 'service.attachmentUpload']);
+    ).toEqual(['service.call']);
   });
 });
 

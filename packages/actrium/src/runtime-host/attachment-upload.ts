@@ -164,7 +164,6 @@ export type AttachmentUploadNativeAdapter = {
   }) => Promise<void>;
   sendAttachmentChunk: (input: {
     streamId: string;
-    chunkId: string;
     sequence: number;
     base64: string;
     eos: boolean;
@@ -175,6 +174,12 @@ export type AttachmentUploadNativeAdapter = {
   addResultListener: (
     handler: (event: AttachmentUploadResultEvent) => void
   ) => AttachmentResultSubscription;
+  /**
+   * Queries the Host whether this tab actually owns a Realm Service binding
+   * that permits the fixed upload transport. Resolves `false` on any native
+   * error.
+   */
+  isAvailable: () => Promise<boolean>;
 };
 
 let streamIdSequence = 0;
@@ -223,6 +228,20 @@ export class AttachmentUploadManager {
   /** True when the native bridge supplied a usable adapter. */
   get available(): boolean {
     return this.adapter !== undefined;
+  }
+
+  /**
+   * Per-tab availability. Unlike {@link available}, this checks that the
+   * owning tab has a live Realm Service binding, not just that the renderer
+   * process exposes the module.
+   */
+  async checkAvailable(): Promise<boolean> {
+    if (this.disposed || !this.adapter) return false;
+    try {
+      return await this.adapter.isAvailable();
+    } catch {
+      return false;
+    }
   }
 
   async upload(input: AttachmentUploadInput): Promise<AttachmentUploadOutput> {
@@ -394,7 +413,7 @@ export class AttachmentUploadManager {
             checksumAlgorithm: ATTACHMENT_CONTRACT.checksumAlgorithms.md5,
           });
           if (settled) return;
-          await sendChunks(adapter, attachmentId, streamId, bytes, () => !settled);
+          await sendChunks(adapter, streamId, bytes, () => !settled);
         } catch (cause) {
           finish({ ok: false, cause });
         }
@@ -431,7 +450,6 @@ export class AttachmentUploadManager {
  */
 async function sendChunks(
   adapter: AttachmentUploadNativeAdapter,
-  attachmentId: string,
   streamId: string,
   bytes: Uint8Array,
   shouldContinue: () => boolean
@@ -444,7 +462,6 @@ async function sendChunks(
     if (!shouldContinue()) return;
     await adapter.sendAttachmentChunk({
       streamId,
-      chunkId: `${attachmentId}-1`,
       sequence: 1,
       base64: '',
       eos: true,
@@ -459,7 +476,6 @@ async function sendChunks(
     const last = sequence === chunkCount;
     await adapter.sendAttachmentChunk({
       streamId,
-      chunkId: `${attachmentId}-${sequence}`,
       sequence,
       base64: encodeBase64(
         bytes.subarray(
@@ -544,6 +560,7 @@ export type RealmServiceAttachmentBridge = {
     input: Record<string, unknown>
   ) => Promise<unknown>;
   unregisterStream?: (tabId: string, streamId: string) => Promise<unknown>;
+  attachmentUploadAvailable?: (tabId: string) => Promise<unknown>;
 };
 
 /**
@@ -603,6 +620,7 @@ export function createRealmServiceAttachmentAdapter(options: {
     typeof bridge.prepareAttachmentUpload !== 'function' ||
     typeof bridge.sendAttachmentChunk !== 'function' ||
     typeof bridge.unregisterStream !== 'function' ||
+    typeof bridge.attachmentUploadAvailable !== 'function' ||
     !emitter ||
     typeof emitter.addListener !== 'function'
   ) {
@@ -626,7 +644,6 @@ export function createRealmServiceAttachmentAdapter(options: {
     sendAttachmentChunk: async (input) => {
       await nativeMethods.sendAttachmentChunk!(tabId, {
         [BRIDGE_KEYS.streamId]: input.streamId,
-        [BRIDGE_KEYS.chunkId]: input.chunkId,
         [BRIDGE_KEYS.sequence]: input.sequence,
         [BRIDGE_KEYS.fileData]: input.base64,
         ...(input.eos ? input.metadata : {}),
@@ -634,6 +651,13 @@ export function createRealmServiceAttachmentAdapter(options: {
     },
     unregisterStream: async (streamId) => {
       await nativeMethods.unregisterStream!(tabId, streamId);
+    },
+    isAvailable: async () => {
+      try {
+        return (await nativeMethods.attachmentUploadAvailable!(tabId)) === true;
+      } catch {
+        return false;
+      }
     },
     addResultListener: (handler) => {
       const listener = (raw: unknown) => {

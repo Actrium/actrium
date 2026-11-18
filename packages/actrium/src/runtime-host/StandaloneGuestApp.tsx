@@ -282,17 +282,33 @@ export const StandaloneGuestApp: React.FC<Props> = ({
         tabId: tab.id,
       }),
     });
-    if (
-      v1?.ok &&
+    const attachmentsLinked =
+      v1?.ok === true &&
       v1.linkage.links.some(
         ([id, exportName]) => id === 'host:service' && exportName === 'uploadAttachment'
-      ) &&
-      !attachmentUploader.available
-    ) {
-      attachmentUploader.dispose();
-      setError('Attachment upload is unavailable for this application.');
-      return;
-    }
+      );
+    let stopEngine: (() => void) | undefined;
+    const start = async () => {
+      if (attachmentsLinked) {
+        // Process-wide module presence is not tab availability: a locally
+        // bundled Guest shares this renderer process without owning a
+        // Realm Service binding. Query the Host about this tab before the
+        // engine starts so the Guest never links an unusable transport.
+        const uploadAvailable = await attachmentUploader.checkAvailable();
+        if (disposed) {
+          attachmentUploader.dispose();
+          return;
+        }
+        if (!uploadAvailable) {
+          attachmentUploader.dispose();
+          setError('Attachment upload is unavailable for this application.');
+          return;
+        }
+      }
+      if (disposed) {
+        attachmentUploader.dispose();
+        return;
+      }
     const hostModules = createHostModules({
       hasServiceCapability,
       callActor: callServiceActor,
@@ -420,13 +436,19 @@ export const StandaloneGuestApp: React.FC<Props> = ({
         }
       });
 
+      stopEngine = () => {
+        unsubscribeEvents();
+        unsubscribeUpdate();
+        engine.destroy();
+      };
+    };
+    void start();
+
     return () => {
       disposed = true;
       cancelSpeech();
-      unsubscribeEvents();
-      unsubscribeUpdate();
       attachmentUploader.dispose();
-      engine.destroy();
+      stopEngine?.();
     };
   }, [
     // Do not recreate the engine on window resize. The first layout size is

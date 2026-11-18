@@ -179,6 +179,15 @@ function buildCapabilitiesByModule(): Record<
 
 export const CAPABILITIES_BY_MODULE = buildCapabilitiesByModule();
 
+/**
+ * Capabilities that must be declared by their exact name. Module shorthands
+ * such as `service` or `host:service` keep covering the pre-existing methods
+ * but must not silently opt a package into these.
+ */
+const EXPLICIT_ONLY_CAPABILITIES: ReadonlySet<FrontCapability> = new Set([
+  'service.attachmentUpload',
+]);
+
 const CONTRACT_MODULE_TO_CAPABILITY_MODULE = new Map<
   string,
   FrontCapabilityModule
@@ -219,7 +228,9 @@ export function expandCapabilityName(name: string): FrontCapability[] {
   }
 
   if (hasOwn(CAPABILITIES_BY_MODULE, aliased)) {
-    return [...CAPABILITIES_BY_MODULE[aliased as FrontCapabilityModule]];
+    return CAPABILITIES_BY_MODULE[aliased as FrontCapabilityModule].filter(
+      (capability) => !EXPLICIT_ONLY_CAPABILITIES.has(capability)
+    );
   }
 
   const capability = CONTRACT_CAPABILITY_TO_CAPABILITY.get(aliased);
@@ -229,7 +240,9 @@ export function expandCapabilityName(name: string): FrontCapability[] {
 
   const module = CONTRACT_MODULE_TO_CAPABILITY_MODULE.get(aliased);
   if (module) {
-    return [...CAPABILITIES_BY_MODULE[module]];
+    return CAPABILITIES_BY_MODULE[module].filter(
+      (capability) => !EXPLICIT_ONLY_CAPABILITIES.has(capability)
+    );
   }
 
   return [];

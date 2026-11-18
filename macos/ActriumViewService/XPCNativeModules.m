@@ -53,6 +53,10 @@ RCT_EXTERN_METHOD(unregisterStream:(NSString *)tabId
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(attachmentUploadAvailable:(NSString *)tabId
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 @end
 
 @interface RCT_EXTERN_MODULE(CapabilityPermission, NSObject)

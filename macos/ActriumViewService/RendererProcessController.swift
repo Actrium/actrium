@@ -135,6 +135,7 @@ final class RendererProcessController {
     private var attachmentPrepareReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentPrepareReply) -> Void)] = [:]
     private var attachmentChunkReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentChunkReply) -> Void)] = [:]
     private var attachmentUnregisterReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentUnregisterReply) -> Void)] = [:]
+    private var attachmentAvailabilityReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentAvailabilityReply) -> Void)] = [:]
 
     static func pickFiles(
         _ call: GuestFileImportCall, tabId: String, reply: @escaping (GuestFileImportReply) -> Void
@@ -198,6 +199,37 @@ final class RendererProcessController {
     nonisolated static let attachmentPrepareTimeoutMs = 25_000
     nonisolated static let attachmentChunkTimeoutMs = 30_000
     nonisolated static let attachmentUnregisterTimeoutMs = 10_000
+    nonisolated static let attachmentAvailabilityTimeoutMs = 5_000
+
+    /// Queries the Host whether the owning tab has a usable Realm Service
+    /// upload binding. Fails closed on every transport or timeout error.
+    static func attachmentUploadAvailable(
+        tabId: String,
+        call: RealmServiceAttachmentAvailabilityCall,
+        reply: @escaping (RealmServiceAttachmentAvailabilityReply) -> Void
+    ) {
+        guard let controller = RendererProcessLifetime.shared.controller,
+              controller.surfaces[tabId] != nil else {
+            reply(RealmServiceAttachmentAvailabilityReply(id: call.id, available: false))
+            return
+        }
+        do {
+            let data = try JSONEncoder().encode(call)
+            try controller.connection.sendHostEvent(
+                name: RealmServiceAttachmentAvailabilityCall.requestEvent,
+                userInfoJSON: String(decoding: data, as: UTF8.self),
+                tabId: tabId
+            )
+            controller.attachmentAvailabilityReplies[call.id] = (tabId, reply)
+            let requestId = call.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(attachmentAvailabilityTimeoutMs)) { [weak controller] in
+                controller?.attachmentAvailabilityReplies.removeValue(forKey: requestId)?
+                    .reply(RealmServiceAttachmentAvailabilityReply(id: requestId, available: false))
+            }
+        } catch {
+            reply(RealmServiceAttachmentAvailabilityReply(id: call.id, available: false))
+        }
+    }
 
     static func prepareAttachmentUpload(
         tabId: String,
@@ -410,6 +442,16 @@ final class RendererProcessController {
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.attachmentUnregisterReplies[response.id]?.tabId == tabId else { return }
                     self.attachmentUnregisterReplies.removeValue(forKey: response.id)?.reply(response)
+                }
+                return
+            }
+            if name == RealmServiceAttachmentAvailabilityCall.responseEvent {
+                guard let response = try? JSONDecoder().decode(RealmServiceAttachmentAvailabilityReply.self, from: Data(json.utf8)) else {
+                    return
+                }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.attachmentAvailabilityReplies[response.id]?.tabId == tabId else { return }
+                    self.attachmentAvailabilityReplies.removeValue(forKey: response.id)?.reply(response)
                 }
                 return
             }
@@ -697,6 +739,10 @@ final class RendererProcessController {
         for (id, pending) in attachmentUnregisterReplies where pending.tabId == tabId {
             attachmentUnregisterReplies.removeValue(forKey: id)?
                 .reply(RealmServiceAttachmentUnregisterReply(id: id, failure: failure))
+        }
+        for (id, pending) in attachmentAvailabilityReplies where pending.tabId == tabId {
+            attachmentAvailabilityReplies.removeValue(forKey: id)?
+                .reply(RealmServiceAttachmentAvailabilityReply(id: id, available: false))
         }
     }
 

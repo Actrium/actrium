@@ -39,8 +39,11 @@ struct RealmServiceAttachmentUploadTests {
             permissions: ["service.attachmentUpload"], declaredRoutes: declared))
         #expect(RealmServiceAttachmentUploadPolicy.isPermitted(
             permissions: ["host:service.uploadAttachment"], declaredRoutes: declared))
-        #expect(RealmServiceAttachmentUploadPolicy.isPermitted(
+        // Module shorthands cover pre-existing methods, not this opt-in.
+        #expect(!RealmServiceAttachmentUploadPolicy.isPermitted(
             permissions: ["service"], declaredRoutes: declared))
+        #expect(!RealmServiceAttachmentUploadPolicy.isPermitted(
+            permissions: ["host:service"], declaredRoutes: declared))
         #expect(!RealmServiceAttachmentUploadPolicy.isPermitted(
             permissions: [], declaredRoutes: declared))
         #expect(!RealmServiceAttachmentUploadPolicy.isPermitted(
@@ -115,8 +118,15 @@ struct RealmServiceAttachmentUploadTests {
         let call = makePrepareCall(attachmentId: attachmentId, sizeBytes: sizeBytes)
         let checksum = try RealmServiceAttachmentUploadPolicy.validatePrepare(call)
         try await store.registerPreparing(call, checksum: checksum)
-        try await store.markUploading(attachmentId: attachmentId, target: fixedTarget)
+        try await store.markUploading(
+            attachmentId: attachmentId, streamId: call.streamId, target: fixedTarget
+        )
         return (store, call)
+    }
+
+    @Test func prepareAcceptsTheMaximumAttachmentId() throws {
+        let call = makePrepareCall(attachmentId: String(repeating: "a", count: 128))
+        #expect(try RealmServiceAttachmentUploadPolicy.validatePrepare(call) == md5)
     }
 
     @Test func storeRejectsConflictingStreamsAndAttachmentIds() async throws {
@@ -143,13 +153,53 @@ struct RealmServiceAttachmentUploadTests {
     @Test func chunkUsesTheFixedPrepareTarget() async throws {
         let (store, call) = try await makeStoreWithUploadingSession()
         let fixed = ActrBindings.ActrId(realm: "fixed@example.test", serialNumber: 2)
-        try await store.markUploading(attachmentId: call.attachmentId, target: fixed)
+        try await store.markUploading(
+            attachmentId: call.attachmentId, streamId: call.streamId, target: fixed
+        )
         let planned = try await store.planChunk(
             streamId: call.streamId, sequence: 1, payloadBytes: 1, metadata: []
         )
         #expect(planned.plan.target == fixed)
         #expect(planned.plan.sequence == 1)
         #expect(!planned.plan.isEndOfStream)
+    }
+
+    @Test func aStaleAttemptCannotCancelOrRetargetARetry() async throws {
+        let store = RealmServiceAttachmentSessionStore()
+        let first = makePrepareCall(attachmentId: "same-id")
+        try await store.registerPreparing(first, checksum: md5)
+        // Cleanup scoped to another attempt is a no-op.
+        let unrelated = await store.cancel(attachmentId: "same-id", streamId: "another-stream")
+        #expect(unrelated == nil)
+        #expect(await store.isCurrent(attachmentId: "same-id", streamId: first.streamId))
+        let removed = await store.cancel(attachmentId: "same-id", streamId: first.streamId)
+        #expect(removed?.chunkStreamId == first.streamId)
+
+        let retry = makePrepareCall(
+            attachmentId: "same-id", streamId: "chunk-2", resultStreamId: "result-2"
+        )
+        try await store.registerPreparing(retry, checksum: md5)
+        #expect(await store.isCurrent(attachmentId: "same-id", streamId: retry.streamId))
+        let firstStillCurrent = await store.isCurrent(
+            attachmentId: "same-id", streamId: first.streamId
+        )
+        #expect(!firstStillCurrent)
+
+        // A late reply from the abandoned attempt must not move the retry
+        // into uploading or clean up its streams.
+        await #expect(throws: (any Error).self) {
+            try await store.markUploading(
+                attachmentId: "same-id", streamId: first.streamId, target: fixedTarget
+            )
+        }
+        let stillCurrent = await store.isCurrent(
+            attachmentId: "same-id", streamId: first.streamId
+        )
+        #expect(!stillCurrent)
+        try await store.markUploading(
+            attachmentId: "same-id", streamId: retry.streamId, target: fixedTarget
+        )
+        #expect(await store.isCurrent(attachmentId: "same-id", streamId: retry.streamId))
     }
 
     @Test func chunksRequireContiguousOneBasedSequences() async throws {

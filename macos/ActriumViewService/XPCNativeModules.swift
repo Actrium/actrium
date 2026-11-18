@@ -97,8 +97,8 @@ final class RealmService: NSObject {
         }
     }
 
-    /// Sends one attachment chunk. Request keys: streamId, chunkId,
-    /// sequence, fileData (strict padded base64) plus optional EOS metadata
+    /// Sends one attachment chunk. Request keys: streamId, sequence,
+    /// fileData (strict padded base64) plus optional EOS metadata
     /// (either a `metadata` array of `{key, value}` entries or a flattened
     /// `eos` field).
     @objc(sendAttachmentChunk:request:resolver:rejecter:)
@@ -146,6 +146,27 @@ final class RealmService: NSObject {
                     reject(failure.code, failure.message, nil)
                 } else {
                     resolve(nil)
+                }
+            }
+        }
+    }
+
+    /// Reports whether the owning tab has a Realm Service binding that permits
+    /// the fixed upload transport. The Guest preflight uses this instead of
+    /// assuming the browser-wide native module implies a usable tab.
+    @objc(attachmentUploadAvailable:resolver:rejecter:)
+    func attachmentUploadAvailable(
+        _ tabId: String,
+        resolver resolve: @escaping RCTPromiseResolveBlock,
+        rejecter reject: @escaping RCTPromiseRejectBlock
+    ) {
+        let call = RealmServiceAttachmentAvailabilityCall()
+        DispatchQueue.main.async {
+            RendererProcessController.attachmentUploadAvailable(tabId: tabId, call: call) { response in
+                if let failure = response.failure {
+                    reject(failure.code, failure.message, nil)
+                } else {
+                    resolve(response.available)
                 }
             }
         }
@@ -258,11 +279,6 @@ extension RealmService {
         guard let streamId = request["streamId"] as? String,
               (1...128).contains(streamId.utf8.count) else {
             throw AttachmentModuleValidationError.invalid("The streamId must be a string of 1...128 bytes.")
-        }
-        if let chunkId = request["chunkId"], !(chunkId is NSNull) {
-            guard let chunkId = chunkId as? String, (1...128).contains(chunkId.utf8.count) else {
-                throw AttachmentModuleValidationError.invalid("The chunkId must be a string of 1...128 bytes.")
-            }
         }
         guard let sequence = strictUInt64(request["sequence"]), sequence >= 1 else {
             throw AttachmentModuleValidationError.invalid("The sequence must be an integer >= 1.")

@@ -617,6 +617,28 @@ final class RendererProcessPool: ObservableObject {
                 )
                 return
             }
+            if name == RealmServiceAttachmentAvailabilityCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let request = try? JSONDecoder().decode(RealmServiceAttachmentAvailabilityCall.self, from: Data(userInfoJSON.utf8)) else {
+                    return
+                }
+                Task { [weak self, weak worker] in
+                    let available = await RealmServiceBindings.shared
+                        .attachmentUploadAvailable(tabId)
+                    let response = RealmServiceAttachmentAvailabilityReply(
+                        id: request.id, available: available
+                    )
+                    guard let self, let worker, self.worker(for: tabId) === worker,
+                          let data = try? JSONEncoder().encode(response) else { return }
+                    try? worker.connection.sendHostEvent(
+                        name: RealmServiceAttachmentAvailabilityCall.responseEvent,
+                        userInfoJSON: String(decoding: data, as: UTF8.self),
+                        tabId: tab
+                    )
+                }
+                return
+            }
             if name == RealmServiceAttachmentPrepareCall.requestEvent {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker,

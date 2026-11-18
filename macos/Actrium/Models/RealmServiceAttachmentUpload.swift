@@ -89,14 +89,13 @@ enum RealmServiceAttachmentUploadPolicy {
     ]
 
     static func isPermitted(permissions: [String], declaredRoutes: Set<String>) -> Bool {
-        // Match the TS capability expander exactly: the method capability,
-        // its contract id, and the two module aliases that cover every
-        // Service method. Never accept a substring or unrelated permission.
+        // Upload is an explicit opt-in. Existing module shorthands (`service`,
+        // `host:service`) keep covering the pre-existing methods, but only the
+        // exact capability or its exact contract id may unlock this transport.
+        // Never accept a substring or unrelated permission.
         let accepted: Set<String> = [
             permission,
             "host:service.uploadAttachment",
-            "service",
-            "host:service",
         ]
         return permissions.contains(where: accepted.contains)
             && declaredRoutes.contains(transportRoute)
@@ -262,11 +261,20 @@ actor RealmServiceAttachmentSessionStore {
         resultStreams[call.resultStreamId] = call.attachmentId
     }
 
-    /// Fixes the discovered peer once the prepare RPC succeeded.
-    func markUploading(attachmentId: String, target: ActrId) throws {
-        guard var session = sessions[attachmentId] else {
-            throw RealmServiceAttachmentUploadError.unknownStream(
-                "No attachment session for \(attachmentId).")
+    /// True while `streamId` is still the chunk stream of the live session for
+    /// `attachmentId`. A retry may reuse the attachment id with a new stream;
+    /// late replies and cancellations from the abandoned attempt must not
+    /// mutate it.
+    func isCurrent(attachmentId: String, streamId: String) -> Bool {
+        sessions[attachmentId]?.chunkStreamId == streamId
+    }
+
+    /// Fixes the discovered peer once the prepare RPC succeeded. Fails when
+    /// the attempt was replaced or cancelled while the RPC was in flight.
+    func markUploading(attachmentId: String, streamId: String, target: ActrId) throws {
+        guard var session = sessions[attachmentId],
+              session.chunkStreamId == streamId else {
+            throw RealmServiceAttachmentUploadError.cancelled
         }
         session.target = target
         session.state = .uploading
@@ -345,9 +353,12 @@ actor RealmServiceAttachmentSessionStore {
         remove(attachmentId: attachmentId)
     }
 
-    /// Idempotent per-session cancellation.
-    func cancel(attachmentId: String) -> RealmServiceAttachmentSession? {
-        remove(attachmentId: attachmentId)
+    /// Idempotent per-attempt cancellation. Only removes the session when it
+    /// still belongs to `streamId`, so an abandoned attempt cannot tear down a
+    /// retry that reuses the attachment id.
+    func cancel(attachmentId: String, streamId: String) -> RealmServiceAttachmentSession? {
+        guard isCurrent(attachmentId: attachmentId, streamId: streamId) else { return nil }
+        return remove(attachmentId: attachmentId)
     }
 
     /// Removes the whole session referenced by either its chunk stream or

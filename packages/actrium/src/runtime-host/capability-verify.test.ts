@@ -358,13 +358,14 @@ describe('verifyCapabilityManifest', () => {
         declaredCapabilities: ['service.attachmentUpload'],
       })
     ).toEqual({ ok: true, details: [] });
-    // A module shorthand also covers the fixed transport.
-    expect(
-      verifyCapabilityManifest(uploadManifest, {
-        ...options,
-        declaredCapabilities: ['service'],
-      })
-    ).toEqual({ ok: true, details: [] });
+    // The module shorthand covers the pre-existing methods only; upload is an
+    // explicit opt-in and must be declared by name.
+    const shorthand = verifyCapabilityManifest(uploadManifest, {
+      ...options,
+      declaredCapabilities: ['service'],
+    });
+    expect(shorthand.ok).toBe(false);
+    expect(shorthand.details.join('\n')).toContain('service.attachmentUpload');
   });
 
   test('rejects the uploadAttachment transport without its capability', () => {
@@ -377,7 +378,7 @@ describe('verifyCapabilityManifest', () => {
     );
     expect(result.ok).toBe(false);
     expect(result.code).toBe('capability_mismatch');
-    expect(result.details.join('\n')).toContain('host:service.uploadAttachment');
+    expect(result.details.join('\n')).toContain('service.attachmentUpload');
   });
 
   test('business routes still require service.call alongside uploadAttachment', () => {

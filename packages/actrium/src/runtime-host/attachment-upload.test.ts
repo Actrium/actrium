@@ -53,6 +53,7 @@ function createRecordingAdapter(options?: {
       calls.push({ kind: 'unregister', streamId });
       if (options?.unregisterThrows) throw new Error('native unregister exploded');
     },
+    isAvailable: async () => true,
     addResultListener: (handler) => {
       handlers.add(handler);
       return {
@@ -370,7 +371,6 @@ describe('AttachmentUploadManager protocol', () => {
     expect(chunks).toHaveLength(1);
     expect((chunks[0] as { input: ChunkRequest }).input).toEqual({
       streamId: 's-1',
-      chunkId: expect.stringContaining('-1'),
       sequence: 1,
       base64: '',
       eos: true,
@@ -379,6 +379,29 @@ describe('AttachmentUploadManager protocol', () => {
           ACTR_BRIDGE_CONTRACT.streamMetadata.terminalValue,
       },
     });
+    recorder.emit(completedEvent('s-2'));
+    await expect(done).resolves.toEqual({ attachmentId: 'attachment-1' });
+  });
+
+  test('a 128-byte attachment id is accepted and never becomes a chunk id', async () => {
+    const recorder = createRecordingAdapter();
+    const manager = new AttachmentUploadManager({
+      adapter: recorder.adapter,
+      createStreamId: sequentialIds('s'),
+    });
+    const done = manager.upload({
+      filename: 'max-id.txt',
+      base64: 'AAEC',
+      id: 'a'.repeat(128),
+    });
+    await flush();
+    const chunks = recorder.calls.filter((call) => call.kind === 'chunk');
+    expect(chunks).toHaveLength(1);
+    const input = (chunks[0] as { input: ChunkRequest }).input;
+    // The native bridge derives nothing from the attachment id, so the
+    // maximum legal id cannot overflow a derived chunk identifier.
+    expect(input).not.toHaveProperty('chunkId');
+    expect(Object.keys(input)).not.toContain('chunkId');
     recorder.emit(completedEvent('s-2'));
     await expect(done).resolves.toEqual({ attachmentId: 'attachment-1' });
   });
@@ -704,6 +727,10 @@ describe('createRealmServiceAttachmentAdapter', () => {
       unregisterStream: async (callTabId: string, streamId: string) => {
         sent.push(['unregister', callTabId, streamId]);
       },
+      attachmentUploadAvailable: async (callTabId: string) => {
+        sent.push(['available', callTabId]);
+        return true;
+      },
     };
     const emitter = {
       addListener: (eventType: string, listener: (event: unknown) => void) => {
@@ -739,6 +766,48 @@ describe('createRealmServiceAttachmentAdapter', () => {
     expect(
       createRealmServiceAttachmentAdapter({ bridge: rest, emitter, tabId })
     ).toBeUndefined();
+    const { attachmentUploadAvailable, ...withoutAvailability } = bridge;
+    expect(
+      createRealmServiceAttachmentAdapter({
+        bridge: withoutAvailability,
+        emitter,
+        tabId,
+      })
+    ).toBeUndefined();
+  });
+
+  test('probes availability through the owning tab and fails closed', async () => {
+    const { bridge, emitter } = createBridge();
+    const adapter = createRealmServiceAttachmentAdapter({
+      bridge,
+      emitter,
+      tabId,
+    });
+    await expect(adapter!.isAvailable()).resolves.toBe(true);
+    expect(bridge.sent[0]).toEqual(['available', tabId]);
+
+    const rejecting = createRealmServiceAttachmentAdapter({
+      bridge: {
+        ...bridge,
+        attachmentUploadAvailable: async () => {
+          throw new Error('host unavailable');
+        },
+      },
+      emitter,
+      tabId,
+    });
+    await expect(rejecting!.isAvailable()).resolves.toBe(false);
+  });
+
+  test('checkAvailable rejects a missing adapter and a disposed manager', async () => {
+    const disposed = new AttachmentUploadManager({ adapter: undefined });
+    await expect(disposed.checkAvailable()).resolves.toBe(false);
+
+    const recorder = createRecordingAdapter();
+    const manager = new AttachmentUploadManager({ adapter: recorder.adapter });
+    await expect(manager.checkAvailable()).resolves.toBe(true);
+    manager.dispose();
+    await expect(manager.checkAvailable()).resolves.toBe(false);
   });
 
   test('maps prepare and chunk through the generated keys', async () => {
@@ -773,7 +842,6 @@ describe('createRealmServiceAttachmentAdapter', () => {
 
     await adapter!.sendAttachmentChunk({
       streamId: 'stream-1',
-      chunkId: 'id-1-1',
       sequence: 1,
       base64: 'AAEC',
       eos: true,
@@ -787,7 +855,6 @@ describe('createRealmServiceAttachmentAdapter', () => {
       tabId,
       {
         [keys.streamId]: 'stream-1',
-        [keys.chunkId]: 'id-1-1',
         [keys.sequence]: 1,
         [keys.fileData]: 'AAEC',
         [ACTR_BRIDGE_CONTRACT.streamMetadata.eosKey]:
