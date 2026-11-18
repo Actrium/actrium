@@ -32,6 +32,8 @@ extension Notification.Name {
     static let rendererProcessCrashed = Notification.Name("rendererProcessCrashed")
     static let rendererViewportApplied = Notification.Name("rendererViewportApplied")
     static let rendererAccessibilityUpdated = Notification.Name("rendererAccessibilityUpdated")
+    static let rendererCaretUpdated = Notification.Name("rendererCaretUpdated")
+    static let rendererTextInputFocusChanged = Notification.Name("rendererTextInputFocusChanged")
 }
 
 /// Browser-style broker for a dynamically sized pool of homogeneous Renderer
@@ -280,6 +282,15 @@ final class RendererProcessPool: ObservableObject {
         } catch {
             AppLogger.reactNative.warning("Renderer keyboard focus update failed: \(error.localizedDescription)")
         }
+    }
+
+    func sendHostEvent(name: String, userInfoJSON: String, to tabId: UUID) {
+        guard let worker = worker(for: tabId), worker.isReady else { return }
+        try? worker.connection.sendHostEvent(
+            name: name,
+            userInfoJSON: userInfoJSON,
+            tabId: tabId.uuidString
+        )
     }
 
     func requestAccessibilityTree(for tabId: UUID) {
@@ -536,6 +547,32 @@ final class RendererProcessPool: ObservableObject {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker else { return }
                 Task { await self.handleFileImport(userInfoJSON, tabId: tabId, worker: worker) }
+                return
+            }
+            if name == "com.actrium.textInputFocus" {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let data = userInfoJSON.data(using: .utf8),
+                      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let focused = payload["focused"] as? Bool else { return }
+                NotificationCenter.default.post(
+                    name: .rendererTextInputFocusChanged,
+                    object: nil,
+                    userInfo: ["tabId": tabId, "focused": focused]
+                )
+                return
+            }
+            if name == "com.actrium.rendererCaret" {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker else { return }
+                var userInfo: [String: Any] = ["tabId": tabId]
+                if userInfoJSON != "null" {
+                    guard let rect = try? JSONDecoder().decode(CGRect.self, from: Data(userInfoJSON.utf8)) else { return }
+                    userInfo["rect"] = rect
+                }
+                NotificationCenter.default.post(
+                    name: .rendererCaretUpdated, object: nil, userInfo: userInfo
+                )
                 return
             }
             if name == RealmServiceCall.requestEvent {
