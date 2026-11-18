@@ -220,6 +220,7 @@ const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
             <StandaloneGuestApp
               key={tab.id}
               tab={tab}
+              isOverviewMode={isOverviewMode}
               containerWidth={containerWidth}
               containerHeight={containerHeight}
             />

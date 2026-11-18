@@ -21,6 +21,7 @@
   "type": "commonjs",
   "dependencies": {
     "@babel/runtime": "^7.28.4",
+    "@boomsi/rn-speech-recognition": "3.2.0",
     "askit": "file:../actrium-app-sdk",
     "keel": "file:../keel",
     "react": "19.0.0",
