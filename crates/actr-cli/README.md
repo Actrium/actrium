@@ -240,6 +240,8 @@ ceiling: a read-only package gets a read-only mount even when the ceiling is
 `"read-write"` (the default). A package that requires write access fails to
 attach under a read-only grant. Without a signed data capability, the
 directory is not mounted.
+For `actr run`, setting `wasi_data_access` alone does not grant a directory;
+configure `wasi_data_dir` as well.
 
 When upgrading a workload that used `wasi_data_dir` before capability
 declarations were enforced, add the required data capability to its package

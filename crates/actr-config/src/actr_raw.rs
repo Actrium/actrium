@@ -170,6 +170,8 @@ pub struct RawCapabilitiesConfig {
 /// Actor storage uses a fixed hashed layout under `storage_root`
 /// (`{storage_root}/actors/v1/<sha256-hex>/store.sqlite3`); the actor identity
 /// never contributes a path component (CWE-22 / CWE-73).
+/// Keep embedded Host keys in sync with `actr_hyper::config::HyperSection`,
+/// which is parsed separately after this strict schema.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RawHyperConfig {

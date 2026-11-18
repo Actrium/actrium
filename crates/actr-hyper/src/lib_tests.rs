@@ -301,16 +301,15 @@ async fn wasi_data_attach_read_only_denies_writes_even_after_rebuild() {
     std::fs::create_dir(&directory).unwrap();
     let state = directory.join("fixture-state");
 
-    for access in [ReadOnly, ReadWrite] {
+    for (deployment, grant) in [
+        (Some((directory.clone(), ReadOnly)), WasiDataDir::Inherit),
+        (Some((directory.clone(), ReadWrite)), WasiDataDir::Inherit),
+        (None, WasiDataDir::ReadOnlyDirectory(directory.clone())),
+    ] {
         std::fs::write(&state, b"host contents").unwrap();
-        let node = attach_wasi_fixture(
-            &root,
-            Some((directory.clone(), access)),
-            WasiDataDir::Inherit,
-            Some(ReadOnly),
-        )
-        .await
-        .unwrap();
+        let node = attach_wasi_fixture(&root, deployment, grant, Some(ReadOnly))
+            .await
+            .unwrap();
         let actor = node.attachment.unwrap().node.workload_dispatch;
         for rebuild in [false, true] {
             if rebuild {

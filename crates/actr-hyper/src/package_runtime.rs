@@ -262,6 +262,14 @@ service Echo { rpc Echo(Request) returns (Request); }
             .push("unsupported.permission".into());
         assert!(resolve_component_host_grants(&unsupported, None).is_err());
         unsupported = manifest.clone();
+        unsupported
+            .host
+            .optional_capabilities
+            .push("actor.call".into());
+        unsupported.validate().unwrap();
+        let error = resolve_component_host_grants(&unsupported, None).unwrap_err();
+        assert!(error.to_string().contains("optional capability discovery"));
+        unsupported = manifest.clone();
         unsupported.host.api = ">=2.0.0".into();
         assert!(resolve_component_host_grants(&unsupported, None).is_err());
         unsupported = manifest;

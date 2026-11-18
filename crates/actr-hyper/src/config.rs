@@ -378,6 +378,8 @@ impl std::fmt::Debug for HyperConfig {
 /// trust anchor lives inside `[hyper.trust]` (singular) and uses the
 /// same tag-dispatched schema as the top-level `[[trust]]` array so users
 /// can pick whichever style they prefer.
+/// Embedded Host keys must also be accepted by `actr_config::RawHyperConfig`,
+/// which is deserialized first with unknown fields denied.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub(crate) struct HyperSection {
