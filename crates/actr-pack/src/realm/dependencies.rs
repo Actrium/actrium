@@ -165,6 +165,7 @@ mod tests {
                             sha256: "a".repeat(64),
                             r#type: manifest.actor_type(),
                             dependencies: BTreeMap::new(),
+                            local_path: None,
                             extensions: BTreeMap::new(),
                         },
                     )

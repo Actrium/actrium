@@ -572,6 +572,15 @@ impl ActrRefWrapper {
         }
     }
 
+    /// Find the unique Service of this type in the actor's Realm.
+    pub async fn discover_service(&self, target_type: ActrType) -> ActrResult<ActrId> {
+        self.inner
+            .discover_service(&target_type.into())
+            .await
+            .map(Into::into)
+            .map_err(Into::into)
+    }
+
     /// Trigger shutdown.
     pub fn shutdown(&self) {
         self.inner.shutdown();

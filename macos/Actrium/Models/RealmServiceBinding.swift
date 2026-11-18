@@ -254,9 +254,7 @@ actor RealmServiceBinding {
         }
         let reference = try await connect()
         guard !stopped else { throw CancellationError() }
-        // A Realm tab targets the selected Service type. A restarted Service
-        // may register with a different ActorId while the Front stays running.
-        guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
+        guard let target = try await findService(using: reference) else {
             throw RealmServiceError(message: "The Realm's selected Service is not online.")
         }
         guard !stopped else { throw CancellationError() }
@@ -266,6 +264,18 @@ actor RealmServiceBinding {
             requestPayload: request.payload,
             timeoutMs: Int64(request.timeoutMs)
         )
+    }
+
+    func prepareLocalFront() async throws {
+        let reference = try await connect()
+        _ = try await reference.discoverService(targetType: serviceType)
+    }
+
+    private func findService(using reference: ActrRefWrapper) async throws -> ActrBindings.ActrId? {
+        if profile.packages.contains(where: { $0.reference == profile.frontPackage && $0.localPath != nil }) {
+            return try await reference.discoverService(targetType: serviceType)
+        }
+        return try await reference.discover(targetType: serviceType, count: 1).first
     }
 
     /// Availability as seen by this binding: the manifest must opt in and the
@@ -299,7 +309,7 @@ actor RealmServiceBinding {
                       await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
                     throw RealmServiceAttachmentUploadError.cancelled
                 }
-                guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
+                guard let target = try await findService(using: reference) else {
                     throw RealmServiceAttachmentUploadError.unavailable(
                         "The Realm's selected Service is not online.")
                 }

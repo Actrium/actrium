@@ -86,9 +86,10 @@ pub enum RealmStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RealmPackage {
-    /// HTTPS download URL.
+    /// HTTPS download URL, or the filename hint for a local Front.
     pub href: String,
-    /// Lowercase hex SHA-256 of the whole package.
+    /// Lowercase hex SHA-256 of the whole package, omitted only for a rebuildable local Front.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub sha256: String,
     /// Actor type of the package manifest, `publisher/program@version`.
     pub r#type: String,
@@ -96,17 +97,55 @@ pub struct RealmPackage {
     /// Omitted bindings continue to use the package's normal dependency resolution.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub dependencies: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<LocalRealmFront>,
     /// Preserve extension members when the accepted package map is copied to a draft.
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,
 }
 
+/// A signed declaration for a user-selected local Front. The href is a hint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalRealmFront {
+    pub signing_key_id: String,
+    pub allow_rebuild: bool,
+}
+
 impl RealmPackage {
     /// Check `href`, `sha256` and `type`.
     pub fn check(&self) -> Result<(), String> {
-        check_endpoint_url(&self.href, "https")
-            .map_err(|error| format!("package.href: {error}"))?;
-        if self.sha256.len() != 64
+        if let Some(local) = &self.local_path {
+            if self.href.len() > 255
+                || self.href.trim() != self.href
+                || self.href.contains(['/', '\\', ':'])
+                || self.href.chars().any(char::is_control)
+                || self.href.strip_suffix(".actr").is_none_or(str::is_empty)
+            {
+                return Err("local package.href must be a .actr filename".into());
+            }
+            if !local
+                .signing_key_id
+                .strip_prefix("actr-pub-")
+                .is_some_and(|id| {
+                    id.len() == 16 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+                })
+            {
+                return Err("local package.signing_key_id must identify a Publisher key".into());
+            }
+        } else {
+            check_endpoint_url(&self.href, "https")
+                .map_err(|error| format!("package.href: {error}"))?;
+        }
+        if self
+            .local_path
+            .as_ref()
+            .is_some_and(|local| local.allow_rebuild)
+        {
+            if !self.sha256.is_empty() {
+                return Err("a rebuildable local Front cannot declare a fixed sha256".into());
+            }
+        } else if self.sha256.len() != 64
             || !self
                 .sha256
                 .bytes()
@@ -118,6 +157,13 @@ impl RealmPackage {
         semver::Version::parse(&actor.version)
             .map_err(|e| format!("package.type needs an exact version: {e}"))?;
         Ok(())
+    }
+
+    pub fn fixed_digest(&self) -> Option<&str> {
+        match &self.local_path {
+            Some(local) if local.allow_rebuild => None,
+            _ => Some(&self.sha256),
+        }
     }
 
     pub(super) fn check_primary_successor(&self, next: &Self) -> Result<(), String> {

@@ -205,7 +205,7 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     }
 
     let pool = platform::storage::db::get_database().get_pool();
-    if let Err(error) = check_service_owner(pool, &request, &signer).await {
+    if let Err(error) = check_realm_registration(pool, &request, &signer).await {
         return encode_result(RegisterResponse {
             result: Some(register_response::Result::Error(error)),
         });
@@ -345,7 +345,7 @@ async fn authenticate_client(
 /// Only the owner registers the Realm's Service: an Actor whose publisher
 /// and program are those of the selected primary package, any version.
 /// Reads the Profile on `db`, which may be the registration transaction.
-async fn check_service_owner<'e>(
+async fn check_realm_registration<'e>(
     db: impl sqlx::SqliteExecutor<'e>,
     request: &RegisterRequest,
     signer: &Signer,
@@ -366,12 +366,8 @@ async fn check_service_owner<'e>(
             .and_then(serde_json::from_value)
             .map_err(|e| invalid(format!("invalid stored Realm selection: {e}")))?;
     selection.check().map_err(invalid)?;
-    let service = selection
-        .selected()
-        .map_err(invalid)?
-        .0
-        .actr_type()
-        .map_err(invalid)?;
+    let (service, front) = selection.selected().map_err(invalid)?;
+    let service = service.actr_type().map_err(invalid)?;
     if signer.role != Role::Owner
         && service.publisher == request.actr_type.publisher
         && service.name == request.actr_type.name
@@ -380,6 +376,24 @@ async fn check_service_owner<'e>(
             "service_owner_only",
             "only the Realm owner registers the Realm's Service",
         ));
+    }
+    if let Some(local) = &front.local_path
+        && front.actr_type().map_err(invalid)? == request.actr_type
+    {
+        let manifest = request
+            .manifest_raw
+            .as_deref()
+            .and_then(|raw| actr_pack::RegistrationManifest::parse(raw).ok());
+        if manifest
+            .as_ref()
+            .and_then(|manifest| manifest.signing_key_id())
+            != Some(local.signing_key_id.as_str())
+        {
+            return Err(membership_error(
+                "front_signing_key_mismatch",
+                "the selected local Front must use the Publisher key pinned by the Realm",
+            ));
+        }
     }
     Ok(())
 }
@@ -463,7 +477,7 @@ async fn persist_registration_state(
         Ok(signer) => signer,
         Err(error) => return Err((error.code.status().into(), error.to_string())),
     };
-    check_service_owner(&mut *tx, request, &signer)
+    check_realm_registration(&mut *tx, request, &signer)
         .await
         .map_err(|error| (error.code, error.message))?;
 
@@ -1439,7 +1453,11 @@ mod tests {
         };
 
         // The owner's request passed the entry check; then ownership moves.
-        assert!(check_service_owner(pool, &request, &owner).await.is_ok());
+        assert!(
+            check_realm_registration(pool, &request, &owner)
+                .await
+                .is_ok()
+        );
         membership::transfer_owner(&owner, &editor.member_id, Role::Editor)
             .await
             .unwrap();

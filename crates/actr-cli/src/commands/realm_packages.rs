@@ -4,7 +4,7 @@ use actr_pack::{
     realm::{check_realm_dependencies, check_realm_pair, verify_realm_archive},
 };
 use actr_protocol::{
-    AuthorityDescriptor, KeyPinOutcome, KeyPins, PublisherKeys, RealmSigningKeys,
+    AuthorityDescriptor, KeyPinOutcome, KeyPins, KeyStatus, PublisherKeys, RealmSigningKeys,
     realm_profile::{RealmPackage, RealmPackageSelection, RealmProfile, RealmStatus},
     uri::{ActrUri, is_forbidden_address},
 };
@@ -180,13 +180,17 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 impl Cache {
     fn pin_package_digests(&mut self, profile: &RealmProfile) -> Result<()> {
         if let Some(selection) = &profile.selection {
-            for package in selection.packages.values() {
+            for (package, digest) in selection
+                .packages
+                .values()
+                .filter_map(|package| package.fixed_digest().map(|digest| (package, digest)))
+            {
                 let pinned = self
                     .digests
                     .entry(package.r#type.clone())
-                    .or_insert_with(|| package.sha256.clone());
+                    .or_insert_with(|| digest.to_owned());
                 ensure!(
-                    *pinned == package.sha256,
+                    *pinned == digest,
                     "PACKAGE_EQUIVOCATION for {}",
                     package.r#type
                 );
@@ -366,6 +370,15 @@ where
                 slot.insert(keys)
             }
         };
+        if let Some(local) = &entry.local_path {
+            ensure!(
+                keys.keys.iter().any(|key| key.id == local.signing_key_id
+                    && key.status == KeyStatus::Active
+                    && key.verification_key().is_ok()),
+                "local Front key is not trusted by its Publisher"
+            );
+            continue;
+        }
         let destination = output.join(format!("{}.actr", entry.sha256));
         let (manifest, bytes) = archive(entry, keys, &destination, &get).await?;
         if name == selection.primary_package {
@@ -408,10 +421,9 @@ where
         files.insert(name.clone(), destination);
     }
     check_realm_dependencies(selection, &manifests, &locks)?;
-    check_realm_pair(
-        &manifests[&selection.primary_package],
-        &manifests[&selection.front_package],
-    )?;
+    if let Some(front) = manifests.get(&selection.front_package) {
+        check_realm_pair(&manifests[&selection.primary_package], front)?;
+    }
     let dependencies: Vec<_> = manifests.iter().flat_map(|(source, manifest)| {
         manifest.dependencies.iter().map(move |(alias, declared)| {
             let target = selection.packages[source].dependencies.get(alias);
@@ -419,7 +431,7 @@ where
         })
     }).collect();
     Ok(
-        json!({"primary_package":selection.primary_package,"front_package":selection.front_package,"service":files[&selection.primary_package],"front":files[&selection.front_package],"packages":files,"dependencies":dependencies,"privacy_contract_sha256":privacy_contract}),
+        json!({"primary_package":selection.primary_package,"front_package":selection.front_package,"service":files[&selection.primary_package],"front":files.get(&selection.front_package),"packages":files,"dependencies":dependencies,"privacy_contract_sha256":privacy_contract}),
     )
 }
 

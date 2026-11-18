@@ -14,6 +14,10 @@ namespace actrium_core {
 
     [Throws=ActrPackageVerificationError]
     VerifiedActrPackageInfo verify_realm_front_package(bytes archive, bytes trusted_public_key, RealmProfileInfo profile);
+    [Throws=ActrPackageVerificationError]
+    VerifiedActrPackageInfo verify_local_realm_front_package(bytes archive, bytes trusted_public_key, RealmProfileInfo profile, bytes service_archive, sequence<bytes> service_public_keys);
+    [Throws=CoreError]
+    PublisherProfileInfo verify_realm_package_publisher(string body, string domain);
 
     /// Generate a fresh installation id: 26 lowercase base32 characters
     /// from 16 OS-CSPRNG bytes. Platforms persist the value once and own
@@ -1057,12 +1061,18 @@ dictionary RealmDependencyInfo {
     string target_package;
 };
 
+dictionary LocalRealmFront {
+    string signing_key_id;
+    boolean allow_rebuild;
+};
+
 dictionary RealmPackageInfo {
     string reference;
     string href;
     string sha256;
     string actor_type;
     sequence<RealmDependencyInfo> dependencies;
+    LocalRealmFront? local_path;
 };
 
 dictionary RealmProfileInfo {

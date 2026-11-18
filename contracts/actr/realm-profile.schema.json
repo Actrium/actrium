@@ -154,12 +154,11 @@
       "type": "object",
       "required": [
         "href",
-        "sha256",
         "type"
       ],
       "properties": {
         "href": {
-          "$ref": "#/$defs/httpsUri"
+          "type": "string"
         },
         "sha256": {
           "type": "string",
@@ -171,6 +170,15 @@
           "description": "publisher/program@version; Publisher identity and version semantics require the Actor-type parser.",
           "type": "string",
           "pattern": "^[^/@\\s]+/[^/@\\s]+@[^/@\\s]+$"
+        },
+        "local_path": {
+          "type": "object",
+          "required": ["signing_key_id", "allow_rebuild"],
+          "additionalProperties": false,
+          "properties": {
+            "signing_key_id": {"type": "string", "pattern": "^actr-pub-[0-9a-f]{16}$"},
+            "allow_rebuild": {"type": "boolean"}
+          }
         },
         "dependencies": {
           "description": "Optional dependency alias to selected package reference map. The verifier checks that targets exist; consumers check aliases, types, versions, contracts and locks against the signed packages. Cycles are allowed and do not specify startup order.",
@@ -193,6 +201,23 @@
           }
         }
       },
+      "oneOf": [
+        {
+          "required": ["sha256"],
+          "not": {"required": ["local_path"]},
+          "properties": {"href": {"$ref": "#/$defs/httpsUri"}}
+        },
+        {
+          "required": ["local_path", "dependencies"],
+          "properties": {
+            "href": {"maxLength": 255, "pattern": "^[^/\\\\:]+\\.actr$"},
+            "dependencies": {"required": ["service"]}
+          },
+          "if": {"properties": {"local_path": {"properties": {"allow_rebuild": {"const": true}}}}},
+          "then": {"not": {"required": ["sha256"]}},
+          "else": {"required": ["sha256"]}
+        }
+      ],
       "additionalProperties": true
     },
     "httpsUri": {

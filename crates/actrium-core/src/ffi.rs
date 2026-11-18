@@ -832,12 +832,19 @@ pub struct RealmDependencyInfo {
 
 /// One archive entry in the verified Realm Profile.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalRealmFront {
+    pub signing_key_id: String,
+    pub allow_rebuild: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealmPackageInfo {
     pub reference: String,
     pub href: String,
     pub sha256: String,
     pub actor_type: String,
     pub dependencies: Vec<RealmDependencyInfo>,
+    pub local_path: Option<LocalRealmFront>,
 }
 
 /// A verified Realm Profile: the package selection and endpoints that feed
@@ -1062,6 +1069,10 @@ pub fn accept_realm_profile(
                         target_package: target.clone(),
                     })
                     .collect(),
+                local_path: package.local_path.as_ref().map(|local| LocalRealmFront {
+                    signing_key_id: local.signing_key_id.clone(),
+                    allow_rebuild: local.allow_rebuild,
+                }),
             })
             .collect(),
         package_href: front.href.clone(),
@@ -1123,6 +1134,46 @@ pub fn accept_publisher_profile(
     })
 }
 
+/// Authenticate Publisher keys used for a locally selected Realm archive.
+pub fn verify_realm_package_publisher(
+    body: String,
+    domain: String,
+) -> Result<PublisherProfileInfo, CoreError> {
+    let invalid = |error: &dyn std::fmt::Display| {
+        CoreError::AuthorityDescriptorInvalid(format!("invalid Publisher {domain}: {error}"))
+    };
+    let value = actr_protocol::signed_json::parse(body.as_bytes()).map_err(|e| invalid(&e))?;
+    let descriptor: AuthorityDescriptor = serde_json::from_value(value).map_err(|e| invalid(&e))?;
+    let uri = ActrUri::from_domain(&domain).map_err(|e| invalid(&e))?;
+    descriptor.validate_for(&uri).map_err(|e| invalid(&e))?;
+    let publisher = descriptor
+        .publisher
+        .ok_or_else(|| invalid(&"missing Publisher Profile"))?;
+    let keys = publisher
+        .verify(&domain, std::time::SystemTime::now().into())
+        .map_err(|e| invalid(&e))?;
+    let package_signing_keys = keys
+        .keys
+        .into_iter()
+        .filter(|key| key.verification_key().is_ok())
+        .map(|key| PublisherPackageKeyInfo {
+            id: key.id,
+            public_key_base64: key.public_key,
+            status: match key.status {
+                actr_protocol::KeyStatus::Active => "active",
+                actr_protocol::KeyStatus::Retired => "retired",
+            }
+            .into(),
+        })
+        .collect();
+    Ok(PublisherProfileInfo {
+        domain,
+        profile_sequence: keys.sequence,
+        profile_expires_at: keys.profile_expires_at,
+        package_signing_keys,
+    })
+}
+
 pub fn decode_actr_invite(invite_text: String) -> Result<ActrInviteInfo, CoreError> {
     let invite = RealmInvite::decode(&invite_text).map_err(|error| {
         CoreError::AuthorityDescriptorInvalid(format!("invalid invite: {error}"))
@@ -1139,13 +1190,43 @@ pub fn verify_realm_front_package(
     trusted_public_key: Vec<u8>,
     profile: RealmProfileInfo,
 ) -> Result<VerifiedActrPackageInfo, ActrPackageVerificationError> {
+    verify_realm_front(archive, trusted_public_key, profile, None)
+}
+
+/// A local Front is verified against the authenticated Service archive as well
+/// as its own Publisher. The caller supplies bytes from the user's file grant.
+pub fn verify_local_realm_front_package(
+    archive: Vec<u8>,
+    trusted_public_key: Vec<u8>,
+    profile: RealmProfileInfo,
+    service_archive: Vec<u8>,
+    service_public_keys: Vec<Vec<u8>>,
+) -> Result<VerifiedActrPackageInfo, ActrPackageVerificationError> {
+    verify_realm_front(
+        archive,
+        trusted_public_key,
+        profile,
+        Some((service_archive, service_public_keys)),
+    )
+}
+
+fn realm_verifying_key(bytes: &[u8]) -> Result<VerifyingKey, ActrPackageVerificationError> {
+    let bytes = <&[u8; PUBLIC_KEY_LENGTH]>::try_from(bytes)
+        .map_err(|_| ActrPackageVerificationError::InvalidPublicKey("expected 32 bytes".into()))?;
+    VerifyingKey::from_bytes(bytes)
+        .map_err(|error| ActrPackageVerificationError::InvalidPublicKey(error.to_string()))
+}
+
+fn verify_realm_front(
+    archive: Vec<u8>,
+    trusted_public_key: Vec<u8>,
+    profile: RealmProfileInfo,
+    local_service: Option<(Vec<u8>, Vec<Vec<u8>>)>,
+) -> Result<VerifiedActrPackageInfo, ActrPackageVerificationError> {
     use actr_protocol::realm_profile::{RealmPackage, RealmPackageSelection};
     use std::collections::BTreeMap;
     let invalid = |message: String| actr_pack::PackError::InvalidPackage(message);
-    let public_key_bytes = <&[u8; PUBLIC_KEY_LENGTH]>::try_from(trusted_public_key.as_slice())
-        .map_err(|_| ActrPackageVerificationError::InvalidPublicKey("expected 32 bytes".into()))?;
-    let public_key = VerifyingKey::from_bytes(public_key_bytes)
-        .map_err(|error| ActrPackageVerificationError::InvalidPublicKey(error.to_string()))?;
+    let public_key = realm_verifying_key(&trusted_public_key)?;
     let selection = RealmPackageSelection {
         primary_package: profile.primary_package,
         front_package: profile.front_package,
@@ -1164,6 +1245,12 @@ pub fn verify_realm_front_package(
                             .into_iter()
                             .map(|dep| (dep.alias, dep.target_package))
                             .collect(),
+                        local_path: package.local_path.map(|local| {
+                            actr_protocol::realm_profile::LocalRealmFront {
+                                signing_key_id: local.signing_key_id,
+                                allow_rebuild: local.allow_rebuild,
+                            }
+                        }),
                         extensions: BTreeMap::new(),
                     },
                 )
@@ -1172,12 +1259,52 @@ pub fn verify_realm_front_package(
     };
     selection.check().map_err(invalid)?;
     let reference = &selection.packages[&selection.front_package];
-    if hex_digest(&archive) != reference.sha256 {
+    if reference.local_path.is_some() != local_service.is_some() {
+        return Err(
+            invalid("Front archive source differs from the verified Realm Profile".into()).into(),
+        );
+    }
+    if reference
+        .fixed_digest()
+        .is_some_and(|digest| hex_digest(&archive) != digest)
+    {
         return Err(
             invalid("Front archive digest differs from the verified Realm Profile".into()).into(),
         );
     }
     let verified = actr_pack::verify_actor_package(&archive, &public_key)?;
+    if let Some((service_bytes, service_public_keys)) = local_service {
+        let local = reference
+            .local_path
+            .as_ref()
+            .expect("local Front source checked");
+        if verified.manifest.signature.key_id != local.signing_key_id {
+            return Err(invalid(
+                "Front signing key differs from the verified Realm Profile".into(),
+            )
+            .into());
+        }
+        let service = &selection.packages[&selection.primary_package];
+        if hex_digest(&service_bytes) != service.sha256 {
+            return Err(invalid(
+                "Service archive digest differs from the verified Realm Profile".into(),
+            )
+            .into());
+        }
+        let manifest = actr_pack::read_runtime_manifest(&service_bytes)?;
+        let service_public_key = service_public_keys
+            .iter()
+            .find(|key| manifest.signing_key_id() == Some(actr_pack::compute_key_id(key).as_str()))
+            .ok_or_else(|| invalid("Service signing key is not trusted by its Publisher".into()))?;
+        let service_key = realm_verifying_key(service_public_key)?;
+        let verified_service = actr_pack::verify_actor_package(&service_bytes, &service_key)?;
+        if verified_service.manifest.actor_type() != service.r#type {
+            return Err(
+                invalid("Service type differs from the verified Realm Profile".into()).into(),
+            );
+        }
+        actr_pack::realm::check_realm_pair(&verified_service.manifest, &verified.manifest)?;
+    }
     let mut locked_types = BTreeMap::new();
     for file in &verified.manifest.files {
         if file.role != "lock" {

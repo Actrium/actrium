@@ -94,6 +94,15 @@ impl RealmPackageSelection {
             package
                 .check()
                 .map_err(|e| format!("packages[{name}]: {e}"))?;
+            if package.local_path.is_some()
+                && (name != &self.front_package
+                    || package.dependencies.get("service") != Some(&self.primary_package))
+            {
+                return Err(
+                    "local_path is only allowed on the selected Front with a Service binding"
+                        .into(),
+                );
+            }
             if digests
                 .insert(&package.r#type, &package.sha256)
                 .is_some_and(|old| old != &package.sha256)
@@ -123,13 +132,75 @@ impl RealmPackageSelection {
         let digests: BTreeMap<_, _> = self
             .packages
             .values()
-            .map(|p| (&p.r#type, &p.sha256))
+            .filter_map(|p| p.fixed_digest().map(|digest| (&p.r#type, digest)))
             .collect();
         for p in next.packages.values() {
-            if digests.get(&p.r#type).is_some_and(|old| *old != &p.sha256) {
+            if let Some(digest) = p.fixed_digest()
+                && digests.get(&p.r#type).is_some_and(|old| *old != digest)
+            {
                 return Err(format!("digest changed for immutable package {}", p.r#type));
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn selection() -> RealmPackageSelection {
+        serde_json::from_value(json!({
+            "primary_package": "service",
+            "front_package": "front",
+            "packages": {
+                "service": {
+                    "href": "https://publisher.example/service.actr",
+                    "sha256": "a".repeat(64),
+                    "type": "publisher.example/service@1.0.0"
+                },
+                "front": {
+                    "href": "front.actr",
+                    "type": "publisher.example/front@1.0.0",
+                    "dependencies": { "service": "service" },
+                    "local_path": {
+                        "signing_key_id": "actr-pub-0123456789abcdef",
+                        "allow_rebuild": true
+                    }
+                }
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn local_front_requires_an_explicit_service_binding_and_safe_hint() {
+        let mut selection = selection();
+        selection.check().unwrap();
+        assert_eq!(selection.selected().unwrap().1.fixed_digest(), None);
+
+        let front = selection.packages.get_mut("front").unwrap();
+        front.href = "/Users/test/front.actr".into();
+        assert!(selection.check().is_err());
+
+        let front = selection.packages.get_mut("front").unwrap();
+        front.href = "front.actr".into();
+        front.dependencies.clear();
+        assert!(selection.check().is_err());
+    }
+
+    #[test]
+    fn rebuild_permission_does_not_apply_to_downloads_or_services() {
+        let mut selection = selection();
+        let local = selection.packages["front"].local_path.clone();
+        selection.packages.get_mut("service").unwrap().local_path = local;
+        assert!(selection.check().is_err());
+
+        let mut selection = self::selection();
+        let front = selection.packages.get_mut("front").unwrap();
+        front.href = "https://publisher.example/front.actr".into();
+        front.local_path = None;
+        assert!(selection.check().is_err());
     }
 }

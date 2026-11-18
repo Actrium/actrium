@@ -4842,6 +4842,76 @@ public func FfiConverterTypeEmailBridgeContractInfo_lower(_ value: EmailBridgeCo
 }
 
 
+public struct LocalRealmFront {
+    public var signingKeyId: String
+    public var allowRebuild: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(signingKeyId: String, allowRebuild: Bool) {
+        self.signingKeyId = signingKeyId
+        self.allowRebuild = allowRebuild
+    }
+}
+
+#if compiler(>=6)
+extension LocalRealmFront: Sendable {}
+#endif
+
+
+extension LocalRealmFront: Equatable, Hashable {
+    public static func ==(lhs: LocalRealmFront, rhs: LocalRealmFront) -> Bool {
+        if lhs.signingKeyId != rhs.signingKeyId {
+            return false
+        }
+        if lhs.allowRebuild != rhs.allowRebuild {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(signingKeyId)
+        hasher.combine(allowRebuild)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLocalRealmFront: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LocalRealmFront {
+        return
+            try LocalRealmFront(
+                signingKeyId: FfiConverterString.read(from: &buf),
+                allowRebuild: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LocalRealmFront, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.signingKeyId, into: &buf)
+        FfiConverterBool.write(value.allowRebuild, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLocalRealmFront_lift(_ buf: RustBuffer) throws -> LocalRealmFront {
+    return try FfiConverterTypeLocalRealmFront.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLocalRealmFront_lower(_ value: LocalRealmFront) -> RustBuffer {
+    return FfiConverterTypeLocalRealmFront.lower(value)
+}
+
+
 public struct PackageIntegrityFilePlanInfo {
     public var path: String
     public var expectedHash: String
@@ -5256,15 +5326,17 @@ public struct RealmPackageInfo {
     public var sha256: String
     public var actorType: String
     public var dependencies: [RealmDependencyInfo]
+    public var localPath: LocalRealmFront?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(reference: String, href: String, sha256: String, actorType: String, dependencies: [RealmDependencyInfo]) {
+    public init(reference: String, href: String, sha256: String, actorType: String, dependencies: [RealmDependencyInfo], localPath: LocalRealmFront?) {
         self.reference = reference
         self.href = href
         self.sha256 = sha256
         self.actorType = actorType
         self.dependencies = dependencies
+        self.localPath = localPath
     }
 }
 
@@ -5290,6 +5362,9 @@ extension RealmPackageInfo: Equatable, Hashable {
         if lhs.dependencies != rhs.dependencies {
             return false
         }
+        if lhs.localPath != rhs.localPath {
+            return false
+        }
         return true
     }
 
@@ -5299,6 +5374,7 @@ extension RealmPackageInfo: Equatable, Hashable {
         hasher.combine(sha256)
         hasher.combine(actorType)
         hasher.combine(dependencies)
+        hasher.combine(localPath)
     }
 }
 
@@ -5315,7 +5391,8 @@ public struct FfiConverterTypeRealmPackageInfo: FfiConverterRustBuffer {
                 href: FfiConverterString.read(from: &buf),
                 sha256: FfiConverterString.read(from: &buf),
                 actorType: FfiConverterString.read(from: &buf),
-                dependencies: FfiConverterSequenceTypeRealmDependencyInfo.read(from: &buf)
+                dependencies: FfiConverterSequenceTypeRealmDependencyInfo.read(from: &buf),
+                localPath: FfiConverterOptionTypeLocalRealmFront.read(from: &buf)
         )
     }
 
@@ -5325,6 +5402,7 @@ public struct FfiConverterTypeRealmPackageInfo: FfiConverterRustBuffer {
         FfiConverterString.write(value.sha256, into: &buf)
         FfiConverterString.write(value.actorType, into: &buf)
         FfiConverterSequenceTypeRealmDependencyInfo.write(value.dependencies, into: &buf)
+        FfiConverterOptionTypeLocalRealmFront.write(value.localPath, into: &buf)
     }
 }
 
@@ -7524,6 +7602,30 @@ fileprivate struct FfiConverterOptionTypeCoreInstalledAppInfo: FfiConverterRustB
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeLocalRealmFront: FfiConverterRustBuffer {
+    typealias SwiftType = LocalRealmFront?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeLocalRealmFront.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeLocalRealmFront.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypePackageIntegrityPlanInfo: FfiConverterRustBuffer {
     typealias SwiftType = PackageIntegrityPlanInfo?
 
@@ -7637,6 +7739,31 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceData: FfiConverterRustBuffer {
+    typealias SwiftType = [Data]
+
+    public static func write(_ value: [Data], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterData.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Data] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Data]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterData.read(from: &buf))
         }
         return seq
     }
@@ -10467,12 +10594,31 @@ public func verifyActrPackage(archive: Data, trustedPublicKey: Data)throws  -> V
     )
 })
 }
+public func verifyLocalRealmFrontPackage(archive: Data, trustedPublicKey: Data, profile: RealmProfileInfo, serviceArchive: Data, servicePublicKeys: [Data])throws  -> VerifiedActrPackageInfo  {
+    return try  FfiConverterTypeVerifiedActrPackageInfo_lift(try rustCallWithError(FfiConverterTypeActrPackageVerificationError_lift) {
+    uniffi_actrium_core_fn_func_verify_local_realm_front_package(
+        FfiConverterData.lower(archive),
+        FfiConverterData.lower(trustedPublicKey),
+        FfiConverterTypeRealmProfileInfo_lower(profile),
+        FfiConverterData.lower(serviceArchive),
+        FfiConverterSequenceData.lower(servicePublicKeys),$0
+    )
+})
+}
 public func verifyRealmFrontPackage(archive: Data, trustedPublicKey: Data, profile: RealmProfileInfo)throws  -> VerifiedActrPackageInfo  {
     return try  FfiConverterTypeVerifiedActrPackageInfo_lift(try rustCallWithError(FfiConverterTypeActrPackageVerificationError_lift) {
     uniffi_actrium_core_fn_func_verify_realm_front_package(
         FfiConverterData.lower(archive),
         FfiConverterData.lower(trustedPublicKey),
         FfiConverterTypeRealmProfileInfo_lower(profile),$0
+    )
+})
+}
+public func verifyRealmPackagePublisher(body: String, domain: String)throws  -> PublisherProfileInfo  {
+    return try  FfiConverterTypePublisherProfileInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actrium_core_fn_func_verify_realm_package_publisher(
+        FfiConverterString.lower(body),
+        FfiConverterString.lower(domain),$0
     )
 })
 }
@@ -11275,7 +11421,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_actrium_core_checksum_func_verify_actr_package() != 49733) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_actrium_core_checksum_func_verify_local_realm_front_package() != 508) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_actrium_core_checksum_func_verify_realm_front_package() != 30025) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_func_verify_realm_package_publisher() != 59675) {
         return InitializationResult.apiChecksumMismatch
     }
 
