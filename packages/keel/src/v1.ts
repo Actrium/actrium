@@ -123,8 +123,14 @@ export function createV1CapabilityManifest(
       imports.add(moduleId);
       continue;
     }
-    // Raw service methods take an arbitrary route, so they require a fixed route import.
-    if (moduleId === 'host:service') {
+    // Raw service methods take an arbitrary route, so they require a fixed
+    // route import. `uploadAttachment` is the fixed transport upload: it has
+    // no route parameter, so it may be imported from `host:service` directly
+    // and falls through to the generic contract validation below.
+    if (
+      moduleId === 'host:service' &&
+      (exportName === 'call' || exportName === 'tell' || exportName === 'on')
+    ) {
       throw new Error(
         'capability_mismatch: use a fixed route or event import from host:service/<name>'
       );

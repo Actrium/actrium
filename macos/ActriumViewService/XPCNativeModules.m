@@ -38,6 +38,21 @@ RCT_EXTERN_METHOD(call:(NSString *)tabId
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(prepareAttachmentUpload:(NSString *)tabId
+                  request:(NSDictionary *)request
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(sendAttachmentChunk:(NSString *)tabId
+                  request:(NSDictionary *)request
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(unregisterStream:(NSString *)tabId
+                  streamId:(NSString *)streamId
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 @end
 
 @interface RCT_EXTERN_MODULE(CapabilityPermission, NSObject)

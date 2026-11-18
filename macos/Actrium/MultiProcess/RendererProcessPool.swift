@@ -140,6 +140,10 @@ final class RendererProcessPool: ObservableObject {
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private var consecutivePrewarmFailures = 0
     private var prewarmRetryWorkItem: DispatchWorkItem?
+    /// Per-tab epoch for attachment result delivery. Bumped whenever the
+    /// tab's renderer is released or replaced, so results produced by an
+    /// older session can never be delivered to a replacement renderer.
+    private var attachmentDeliveryEpoch: [UUID: Int] = [:]
 
     private init() {
         setupMemoryPressureHandling()
@@ -201,6 +205,11 @@ final class RendererProcessPool: ObservableObject {
 
     func releaseRenderer(for tabId: UUID) {
         fileImport.cancel(tabId: tabId)
+        // The renderer is going away (close or fingerprint replacement):
+        // invalidate late attachment results and cancel the tab's sessions
+        // without touching any other tab.
+        attachmentDeliveryEpoch[tabId, default: 0] &+= 1
+        RealmServiceBindings.shared.cancelAttachmentUploads(tabId)
         guard let workerId = tabWorkerMap.removeValue(forKey: tabId),
               let worker = workers[workerId] else {
             return
@@ -608,6 +617,63 @@ final class RendererProcessPool: ObservableObject {
                 )
                 return
             }
+            if name == RealmServiceAttachmentPrepareCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let request = try? JSONDecoder().decode(RealmServiceAttachmentPrepareCall.self, from: Data(userInfoJSON.utf8)) else {
+                    return
+                }
+                Task { [weak self, weak worker] in
+                    let deliver = self?.makeAttachmentResultDeliver(tabId: tabId) ?? { _ in }
+                    let response = await RealmServiceBindings.shared.prepareAttachmentUpload(
+                        request, tabId: tabId, deliver: deliver
+                    )
+                    guard let self, let worker, self.worker(for: tabId) === worker,
+                          let data = try? JSONEncoder().encode(response) else { return }
+                    try? worker.connection.sendHostEvent(
+                        name: RealmServiceAttachmentPrepareCall.responseEvent,
+                        userInfoJSON: String(decoding: data, as: UTF8.self),
+                        tabId: tab
+                    )
+                }
+                return
+            }
+            if name == RealmServiceAttachmentChunkCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let request = try? JSONDecoder().decode(RealmServiceAttachmentChunkCall.self, from: Data(userInfoJSON.utf8)) else {
+                    return
+                }
+                Task { [weak self, weak worker] in
+                    let response = await RealmServiceBindings.shared.sendAttachmentChunk(request, tabId: tabId)
+                    guard let self, let worker, self.worker(for: tabId) === worker,
+                          let data = try? JSONEncoder().encode(response) else { return }
+                    try? worker.connection.sendHostEvent(
+                        name: RealmServiceAttachmentChunkCall.responseEvent,
+                        userInfoJSON: String(decoding: data, as: UTF8.self),
+                        tabId: tab
+                    )
+                }
+                return
+            }
+            if name == RealmServiceAttachmentUnregisterCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let request = try? JSONDecoder().decode(RealmServiceAttachmentUnregisterCall.self, from: Data(userInfoJSON.utf8)) else {
+                    return
+                }
+                Task { [weak self, weak worker] in
+                    let response = await RealmServiceBindings.shared.unregisterAttachmentStream(request, tabId: tabId)
+                    guard let self, let worker, self.worker(for: tabId) === worker,
+                          let data = try? JSONEncoder().encode(response) else { return }
+                    try? worker.connection.sendHostEvent(
+                        name: RealmServiceAttachmentUnregisterCall.responseEvent,
+                        userInfoJSON: String(decoding: data, as: UTF8.self),
+                        tabId: tab
+                    )
+                }
+                return
+            }
             if name == RealmServiceCall.requestEvent {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker,
@@ -716,6 +782,27 @@ final class RendererProcessPool: ObservableObject {
         }
     }
 
+    /// Builds the result-delivery closure for one prepare call. The captured
+    /// epoch invalidates the closure as soon as the tab's renderer is
+    /// released or replaced, which stops in-flight or ghost results from
+    /// reaching a renderer that no longer owns the upload session.
+    private func makeAttachmentResultDeliver(tabId: UUID) -> @Sendable (RealmServiceAttachmentResultEvent) -> Void {
+        let epoch = attachmentDeliveryEpoch[tabId] ?? 0
+        return { [weak self] event in
+            Task { @MainActor in
+                guard let self,
+                      self.attachmentDeliveryEpoch[tabId] == epoch,
+                      let worker = self.worker(for: tabId), worker.isReady,
+                      let data = try? JSONEncoder().encode(event) else { return }
+                try? worker.connection.sendHostEvent(
+                    name: RealmServiceAttachmentResultEvent.event,
+                    userInfoJSON: String(decoding: data, as: UTF8.self),
+                    tabId: tabId.uuidString
+                )
+            }
+        }
+    }
+
     private func handleFileImport(_ json: String, tabId: UUID, worker: Worker) async {
         do {
             let reply = try await fileImport.reply(to: json, tabId: tabId) { reloadKey in
@@ -740,6 +827,8 @@ final class RendererProcessPool: ObservableObject {
         let affectedTabs = worker.tabs
         for tabId in affectedTabs {
             fileImport.cancel(tabId: tabId)
+            attachmentDeliveryEpoch[tabId, default: 0] &+= 1
+            RealmServiceBindings.shared.cancelAttachmentUploads(tabId)
             tabWorkerMap.removeValue(forKey: tabId)
         }
         if let fingerprint = worker.fingerprint {

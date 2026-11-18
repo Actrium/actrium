@@ -1580,7 +1580,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         front: packageBytes,
                         serviceType: serviceType,
                         trustedFrontKey: trustedKey,
-                        capabilitiesJSON: capabilities
+                        capabilitiesJSON: capabilities,
+                        permissions: manifest.permissions
                     )
                 }
                 guard let tabIndex = tabs.firstIndex(where: {

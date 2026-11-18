@@ -1,5 +1,10 @@
 import { defineKeelContract, rpc, subscription } from 'keel/contract';
 
+import {
+  type AttachmentUploadType,
+  parseAttachmentUploadInput,
+} from './attachment-upload';
+
 /**
  * Host capabilities declared to Guests (v1 runtime spec, section 5.2/5.3).
  *
@@ -35,6 +40,24 @@ export type ServiceTellInput = {
 export type ServiceEvent = {
   event: string;
   payloadBase64: string;
+};
+
+/**
+ * Fixed transport upload exposed on `host:service`. Unlike `call`/`tell`/
+ * `on`, the Guest cannot name a route here: the Host owns the whole
+ * prepare/chunk/result protocol natively.
+ */
+export type ServiceUploadAttachmentInput = {
+  filename: string;
+  base64: string;
+  /** Defaults to `document`. */
+  type?: AttachmentUploadType;
+  /** Optional caller-chosen attachment id. */
+  id?: string;
+};
+
+export type ServiceUploadAttachmentOutput = {
+  attachmentId: string;
 };
 
 export type AssetsReadInput = { path: string };
@@ -334,6 +357,30 @@ export const contract = defineKeelContract({
               payloadBase64: requireBase64(
                 event.payloadBase64,
                 'service.on event.payloadBase64'
+              ),
+            };
+          },
+        },
+      }),
+      uploadAttachment: rpc<ServiceUploadAttachmentInput, ServiceUploadAttachmentOutput>({
+        schema: {
+          parseInput: (value) => {
+            // Shared boundary validation: strict base64, 7 MiB cap, type
+            // defaulting to `document`.
+            const input = parseAttachmentUploadInput(value);
+            return {
+              filename: input.filename,
+              base64: input.base64,
+              type: input.type,
+              id: input.id,
+            };
+          },
+          parseOutput: (value) => {
+            const output = asObject(value, 'service.uploadAttachment output');
+            return {
+              attachmentId: requireString(
+                output.attachmentId,
+                'service.uploadAttachment output.attachmentId'
               ),
             };
           },

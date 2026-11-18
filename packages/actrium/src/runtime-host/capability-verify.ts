@@ -140,12 +140,14 @@ export function verifyCapabilityManifest(
     for (const [rawKey, entry] of Object.entries(manifest.hostModules)) {
       const moduleId = toModuleId(rawKey);
       if (moduleId === 'host:service') {
-        // `host:service` entries are business routes/events, not transport
-        // exports (`call`/`tell`/`on`). Validate them against the service
-        // route policy whenever one is supplied, independently of
-        // `contractKinds`.
+        // `host:service` entries are business routes/events or fixed
+        // transport exports (`call`/`tell`/`on`/`uploadAttachment`).
+        // Transport exports never enter the business route ACL; business
+        // routes are validated against the service policy whenever one is
+        // supplied, independently of `contractKinds`.
         if (options.serviceCapabilities) {
           for (const route of entry.rpc ?? []) {
+            if (expandCapabilityName(`host:service.${route}`).length > 0) continue;
             if (!options.serviceCapabilities.rpc.has(route)) {
               return fail(
                 'capability_mismatch',
@@ -154,6 +156,7 @@ export function verifyCapabilityManifest(
             }
           }
           for (const event of entry.events ?? []) {
+            if (expandCapabilityName(`host:service.${event}`).length > 0) continue;
             if (!options.serviceCapabilities.events.has(event)) {
               return fail(
                 'capability_mismatch',
@@ -194,14 +197,25 @@ export function verifyCapabilityManifest(
   if (options.hostSupportedMethods) {
     for (const [rawKey, entry] of Object.entries(manifest.hostModules)) {
       const moduleId = toModuleId(rawKey);
-      // `host:service` entries are business routes/events, not transport
-      // exports (`call`/`tell`/`on`). They are validated against
-      // `serviceCapabilities` when a policy is supplied; the transport
-      // method set must not reject them.
+      // `host:service` entries are business routes/events or fixed transport
+      // exports (`call`/`tell`/`on`/`uploadAttachment`). Business routes are
+      // deferred to `serviceCapabilities`; fixed transports must actually be
+      // implemented by the Host.
       if (moduleId === 'host:service') {
-        // Business rpc routes are deferred to `serviceCapabilities`, but an
-        // event subscription still needs an implemented `on` transport.
         const supported = options.hostSupportedMethods['host:service'];
+        for (const transportName of [
+          ...(entry.rpc ?? []),
+          ...(entry.events ?? []),
+        ]) {
+          if (expandCapabilityName(`host:service.${transportName}`).length === 0)
+            continue;
+          if (!supported?.has(transportName)) {
+            return fail(
+              'unknown_capability',
+              `Host method "host:service.${transportName}" is not implemented.`
+            );
+          }
+        }
         if ((entry.events?.length ?? 0) > 0 && !supported?.has('on')) {
           return fail(
             'unknown_capability',
@@ -244,23 +258,11 @@ export function verifyCapabilityManifest(
     for (const [rawKey, entry] of Object.entries(manifest.hostModules)) {
       const moduleId = toModuleId(rawKey);
       if (moduleId === 'host:service') {
-        // Business route names do not map to contract exports, so require the
-        // transport method capability explicitly instead of accepting any
-        // sibling method declaration (`service.on` / `service.tell`).
-        if ((entry.rpc?.length ?? 0) > 0 && !declared.has('service.call')) {
-          return fail(
-            'capability_mismatch',
-            'Capability "service.call" is used but not declared by the package.'
-          );
-        }
-        if ((entry.events?.length ?? 0) > 0 && !declared.has('service.on')) {
-          return fail(
-            'capability_mismatch',
-            'Capability "service.on" is used but not declared by the package.'
-          );
-        }
-        // Known transport exports (`call` / `tell` / `on`) still need their
-        // exact capability; business routes do not expand to a capability.
+        // Fixed transport exports (`call` / `tell` / `on` /
+        // `uploadAttachment`) expand from `host:service.<name>` and need
+        // their exact capability; business routes do not expand and instead
+        // require the transport method capability explicitly.
+        const transportNames = new Set<string>();
         for (const transportName of [
           ...(entry.rpc ?? []),
           ...(entry.events ?? []),
@@ -269,12 +271,31 @@ export function verifyCapabilityManifest(
             `host:service.${transportName}`
           );
           if (capabilities.length === 0) continue;
+          transportNames.add(transportName);
           if (!capabilities.some((capability) => declared.has(capability))) {
             return fail(
               'capability_mismatch',
               `Capability "host:service.${transportName}" is used but not declared by the package.`
             );
           }
+        }
+        const businessRoutes = (entry.rpc ?? []).filter(
+          (route) => !transportNames.has(route)
+        );
+        const businessEvents = (entry.events ?? []).filter(
+          (event) => !transportNames.has(event)
+        );
+        if (businessRoutes.length > 0 && !declared.has('service.call')) {
+          return fail(
+            'capability_mismatch',
+            'Capability "service.call" is used but not declared by the package.'
+          );
+        }
+        if (businessEvents.length > 0 && !declared.has('service.on')) {
+          return fail(
+            'capability_mismatch',
+            'Capability "service.on" is used but not declared by the package.'
+          );
         }
         continue;
       }

@@ -20,6 +20,7 @@ describe('Front capability mapping', () => {
       'service.call',
       'service.tell',
       'service.on',
+      'service.attachmentUpload',
     ]);
     expect(expandCapabilityName('host:clipboard')).toEqual([
       'host:clipboard.write',
@@ -34,8 +35,12 @@ describe('Front capability mapping', () => {
       'service.call',
       'service.tell',
       'service.on',
+      'service.attachmentUpload',
     ]);
     expect(expandCapabilityName('host:service.call')).toEqual(['service.call']);
+    expect(expandCapabilityName('host:service.uploadAttachment')).toEqual([
+      'service.attachmentUpload',
+    ]);
     // The contract method is `writeText`; the capability name is `.write`.
     expect(expandCapabilityName('host:clipboard.writeText')).toEqual([
       'host:clipboard.write',
@@ -66,5 +71,14 @@ describe('Front capability mapping', () => {
     expect(hasDeclaredCapability(['service.on'], 'service.call')).toBe(false);
     expect(hasDeclaredCapability(['service.tell'], 'service.call')).toBe(false);
     expect(hasDeclaredCapability(['service.call'], 'service.call')).toBe(true);
+    expect(
+      hasDeclaredCapability(['service.attachmentUpload'], 'service.attachmentUpload')
+    ).toBe(true);
+    expect(
+      hasDeclaredCapability(['service'], 'service.attachmentUpload')
+    ).toBe(true);
+    expect(hasDeclaredCapability(['service.call'], 'service.attachmentUpload')).toBe(
+      false
+    );
   });
 });

@@ -71,6 +71,14 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     requiresSandbox: true,
     implemented: false,
   },
+  'service.attachmentUpload': {
+    name: 'service.attachmentUpload',
+    audience: 'third_party',
+    requiresGrant: 'none',
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: true,
+  },
   'host:assets.read': {
     name: 'host:assets.read',
     audience: 'third_party',

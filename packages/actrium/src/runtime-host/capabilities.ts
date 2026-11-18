@@ -41,6 +41,11 @@ export const FRONT_CAPABILITY_SPECS = {
     hostModule: 'host:service',
     hostMethod: 'on',
   },
+  'service.attachmentUpload': {
+    module: 'service',
+    hostModule: 'host:service',
+    hostMethod: 'uploadAttachment',
+  },
   'host:assets.read': {
     module: 'host:assets',
     hostModule: 'host:assets',
