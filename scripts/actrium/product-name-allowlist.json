@@ -161,9 +161,6 @@
     "examples/actrium/echo/run-macos.sh": {
       "actro://": 1
     },
-    "packages/actrium/keel-guest-examples/counterapp/run-macos.sh": {
-      "actro://": 1
-    },
     "ios/Actrium.xcodeproj/project.pbxproj": {
       "io.actrium.actro.ios": 2
     },
@@ -205,12 +202,6 @@
     },
     "ios/Scripts/TESTFLIGHT_README.zh.md": {
       "com.actrium.actro": 1
-    },
-    "macos/AGENTS.md": {
-      "actro://": 1
-    },
-    "macos/AGENTS.zh.md": {
-      "actro://": 1
     },
     "macos/Actrium.xcodeproj/project.pbxproj": {
       "io.actrium.actro": 2,
@@ -335,14 +326,11 @@
     },
     "macos/Actrium/Views/MainContentView/BrowserViewModel.swift": {
       "actro": 1,
-      "actro://": 8,
+      "actro://": 7,
       "actro://...": 1,
-      "actro:///Users/example-dev-2/path/to/app": 1,
-      "actro:///absolute/path": 2,
-      "actro:///path": 2,
-      "actro:///path/to/app": 1,
-      "actro://bundleId": 2,
-      "actro://com.example.app": 1,
+      "actro:///absolute/path": 1,
+      "actro:///path": 1,
+      "actro://bundleId": 1,
       "actroSourcePath": 2
     },
     "macos/Actrium/Views/Sidebar/TabOutlineView.swift": {

@@ -94,6 +94,8 @@ A text input field. Maps to React Native's `TextInput`.
 | `multiline` | `boolean` | `false` | Whether the input supports multiple lines. |
 | `maxLength` | `number` | `undefined` | Maximum number of characters allowed. |
 
+Use `value` and `onChangeText` for controlled input, as in React Native. Keel keeps newer Host edits visible while an older value is in flight.
+
 ### Button
 
 A basic button. Maps to React Native's `Button`.

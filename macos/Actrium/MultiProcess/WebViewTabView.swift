@@ -189,6 +189,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// Callback when estimated progress changes
     var onProgressChanged: ((Double) -> Void)?
 
+    /// The document received a primary click; reveal its active toolbar tab.
+    var onContentFocused: (() -> Void)?
+
     /// Current loading state
     private(set) var isLoading: Bool = false
 
@@ -232,6 +235,12 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         // Use custom DownloadableWebView for context menu download support
         self.webView = DownloadableWebView(frame: .zero, configuration: config)
         super.init()
+
+        if let webView = webView as? DownloadableWebView {
+            webView.onPrimaryMouseDown = { [weak self] in
+                self?.onContentFocused?()
+            }
+        }
 
         // Register self as message handler
         userContentController.add(self, name: "actriumThemeColor")
@@ -528,6 +537,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     }
 
     deinit {
+        onContentFocused = nil
         urlObservation?.invalidate()
         progressObservation?.invalidate()
         dismissAutofillPopover()
@@ -1208,9 +1218,15 @@ private class ClosureMenuItem: NSMenuItem {
 
 /// Custom WKWebView subclass that adds download options to context menu
 class DownloadableWebView: WKWebView {
+    var onPrimaryMouseDown: (() -> Void)?
     /// Store the detected element info for context menu
     private var contextMenuImageURL: URL?
     private var contextMenuLinkURL: URL?
+
+    override func mouseDown(with event: NSEvent) {
+        onPrimaryMouseDown?()
+        super.mouseDown(with: event)
+    }
 
     /// Pre-detect element on right mouse down using synchronous approach
     override func rightMouseDown(with event: NSEvent) {
@@ -1645,6 +1661,7 @@ struct FocusedWebOverlay: View {
     var onThemeColorChanged: ((String) -> Void)?
     /// Callback when estimated progress changes
     var onProgressChanged: ((Double) -> Void)?
+    var onContentFocused: (() -> Void)?
 
     /// From Global Manager Get Lasting WebViewHolder
     private let holder: WebViewHolder
@@ -1655,7 +1672,8 @@ struct FocusedWebOverlay: View {
          onLoadingStateChanged: ((Bool) -> Void)? = nil,
          onOpenNewWindow: ((URL) -> Void)? = nil,
          onThemeColorChanged: ((String) -> Void)? = nil,
-         onProgressChanged: ((Double) -> Void)? = nil) {
+         onProgressChanged: ((Double) -> Void)? = nil,
+         onContentFocused: (() -> Void)? = nil) {
         self.tab = tab
         self.url = url
         self.viewportSize = viewportSize
@@ -1665,6 +1683,7 @@ struct FocusedWebOverlay: View {
         self.onOpenNewWindow = onOpenNewWindow
         self.onThemeColorChanged = onThemeColorChanged
         self.onProgressChanged = onProgressChanged
+        self.onContentFocused = onContentFocused
         self.holder = WebViewHolderManager.shared.holder(for: tab.id)
 
         // Set callbacks immediately in init (SwiftUI View init can be called multiple times)
@@ -1674,6 +1693,7 @@ struct FocusedWebOverlay: View {
         holder.onOpenNewWindow = onOpenNewWindow
         holder.onThemeColorChanged = onThemeColorChanged
         holder.onProgressChanged = onProgressChanged
+        holder.onContentFocused = onContentFocused
     }
 
     var body: some View {

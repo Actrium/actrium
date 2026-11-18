@@ -24,6 +24,7 @@ final class XPCNotificationBridge {
     static let deleteHistoryItem = Notification.Name("xpc.deleteHistoryItem")
     static let restoreHistoryGroup = Notification.Name("xpc.restoreHistoryGroup")
     static let clearHistory = Notification.Name("xpc.clearHistory")
+    static let setHistoryPage = Notification.Name("xpc.setHistoryPage")
     static let openURLFromStartPage = Notification.Name("xpc.openURLFromStartPage")
     static let capabilityPermissionRequest = Notification.Name(
         "xpc.capabilityPermissionRequest"
@@ -421,9 +422,9 @@ struct ActriumApp: App {
             // Tab management shortcuts
             CommandGroup(after: .newItem) {
                 Button("New Tab") {
-                    withAnimation {
-                        _ = focusedViewModel?.addNewTab()
-                    }
+                    // The tab strip animates insertion. A global transaction also
+                    // animates the renderer and address editor, stalling ⌘T.
+                    _ = focusedViewModel?.addNewTab()
                 }
                 .keyboardShortcut("t", modifiers: .command)
 
@@ -449,7 +450,7 @@ struct ActriumApp: App {
                 Divider()
 
                 Button("Focus Address Bar") {
-                    focusedViewModel?.shouldAutoFocusAddressBar = true
+                    focusedViewModel?.requestAddressBarFocus()
                 }
                 .keyboardShortcut("l", modifiers: .command)
 

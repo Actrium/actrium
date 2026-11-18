@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import ActriumIPC
 
 /// Application delegate - manages AppKit windows
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
@@ -23,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     // MARK: - NSApplicationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppearanceManager.shared.apply()
         // Disable window state restoration
         UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
 
@@ -73,6 +75,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         _ = TabProcessManager.shared
 
         // Prewarm the browser-style homogeneous Renderer pool.
+        RendererProcessPool.shared.fileImportWindow = { [weak self] tabId, reloadKey in
+            self?.fileImportWindow(tabId: tabId, reloadKey: reloadKey)
+        }
         Task { @MainActor in
             _ = RendererProcessPool.shared.verifyRendererHelper()
             await RendererProcessPool.shared.prewarmInitialRenderersAsync()
@@ -86,6 +91,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         // Restore the local-folder browser sync provider selection
         SyncManager.shared.restoreOnLaunch()
+
+        Task.detached(priority: .utility) {
+            ActrPackageDownloadService.cleanupOrphanedTemporaryDownloads()
+        }
+    }
+
+    private func fileImportWindow(tabId: UUID, reloadKey: Int) -> NSWindow? {
+        guard let controller = windowControllers.first(where: { $0.viewModel.currentTabId == tabId }),
+              controller.viewModel.actriumMode == .focus(tabId: tabId),
+              let tab = controller.viewModel.currentTab, tab.reloadNonce == reloadKey,
+              RendererFileImport.isDeclared(manifest: tab.capabilityManifestJSON, permissions: tab.permissions),
+              CapabilityPermissionStore.shared.hasGrant(
+                tabId: tabId, appId: tab.appId, capability: GuestFileImportCall.capability
+              ) else { return nil }
+        return controller.window
     }
 
     private func setupNotifications() {
@@ -181,6 +201,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     // MARK: - Window Management
+
+    @MainActor
+    func protectedPackageDigests() -> Set<String> {
+        var digests = Set<String>()
+        for controller in windowControllers {
+            for tab in controller.viewModel.tabs {
+                guard let path = tab.guestExtractedPath,
+                      let digest = ActrPackageCache.digest(fromExtractedPath: path)
+                else { continue }
+                digests.insert(digest)
+            }
+        }
+        return digests
+    }
 
     @objc func createNewWindow() {
         let viewModel = BrowserViewModel()

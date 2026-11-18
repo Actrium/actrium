@@ -286,6 +286,8 @@ fn type_to_string(ty: &Type) -> String {
 
 fn get_default_value_for_field_with_context(field_name: &str, section_prefix: &str) -> String {
     match field_name {
+        "mode" if section_prefix == "realm.dev_join." => "\"off\"".to_string(),
+        "default_role" if section_prefix == "realm.dev_join." => "\"editor\"".to_string(),
         // Main config fields
         "enable" => "15".to_string(),
         "name" => "\"loran-default\"".to_string(),

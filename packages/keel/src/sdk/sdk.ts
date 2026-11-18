@@ -677,10 +677,11 @@ export interface TextInputProps extends BaseProps {
   placeholder?: string;
   placeholderTextColor?: string;
   onChangeText?: (text: string) => void;
-  onChange?: (event: { nativeEvent: { text: string } }) => void;
+  onChange?: (event: { nativeEvent: { text: string; eventCount: number } }) => void;
   onFocus?: () => void;
   onBlur?: () => void;
   onSubmitEditing?: () => void;
+  submitBehavior?: 'submit' | 'blurAndSubmit' | 'newline';
   multiline?: boolean;
   numberOfLines?: number;
   maxLength?: number;

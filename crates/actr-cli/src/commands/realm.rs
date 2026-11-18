@@ -20,7 +20,8 @@
 
 use actr_protocol::realm_management::{ManagementOp, ManagementRequest};
 use actr_protocol::realm_profile::{
-    MAX_REALM_PROFILE_BYTES, RealmPackageSelection, RealmProfile, sign_document,
+    MAX_REALM_PROFILE_BYTES, MembershipMode, RealmPackageSelection, RealmPolicy, RealmProfile,
+    sign_document,
 };
 use actr_protocol::{KeyStatus, RealmSigningKey, RealmSigningKeys, SIGNATURE_ALGORITHM};
 use anyhow::{Context, Result, bail};
@@ -67,8 +68,7 @@ pub enum RealmCommand {
     /// Sign a `register_publisher` request with a Publisher Profile signing
     /// key and send it to the Actr Facility Provider's `realm-management` endpoint.
     RegisterPublisher(RegisterPublisherArgs),
-    /// Redeem a Realm invite with a new Realm client key and write its key
-    /// file.
+    /// Join by invitation or join an open Realm by name, saving the device key.
     Join(JoinArgs),
     /// Create an invite: a new member (owner, `--role`) or a new client of a
     /// member (`--member`).
@@ -77,6 +77,8 @@ pub enum RealmCommand {
     Update(realm_members::UpdateArgs),
     /// Download and verify the selected Service and Front into a new directory
     FetchPackages(super::realm_packages::FetchArgs),
+    /// Download and validate a complete manual selection before signing a Realm Profile
+    CheckSelection(super::realm_packages::CheckArgs),
     /// List members, clients and open invites (a non-owner sees its own).
     Members(KeyArgs),
     /// Revoke an unused invite.
@@ -120,6 +122,15 @@ pub struct CreateRequestArgs {
     /// JSON file containing primary_package, front_package and the complete packages map
     #[arg(long, value_name = "FILE")]
     pub selection: PathBuf,
+    /// How members join this Realm (invite-only or open).
+    #[arg(long, value_name = "MODE", default_value = "invite-only")]
+    pub membership: MembershipMode,
+    /// Maximum new invite-free members in a rolling minute (default 10).
+    #[arg(long)]
+    pub open_joins_per_minute: Option<std::num::NonZeroU32>,
+    /// Realm member cap, subject to the Provider's limit.
+    #[arg(long)]
+    pub max_members: Option<std::num::NonZeroU32>,
     /// Opaque id of whom the request is signed for
     #[arg(long, value_name = "ID")]
     pub requester: Option<String>,
@@ -223,6 +234,11 @@ impl Command for RealmArgs {
                 let mut request =
                     new_request(ManagementOp::CreateRealm, &args.realm, &args.provider);
                 request.selection = Some(read_selection(&args.selection)?);
+                request.policy = Some(RealmPolicy {
+                    membership: args.membership,
+                    open_joins_per_minute: args.open_joins_per_minute,
+                    max_members: args.max_members,
+                });
                 request.requester = args.requester.clone();
                 request.sign(&key_id, &key)
             }
@@ -250,6 +266,9 @@ impl Command for RealmArgs {
             RealmCommand::Join(args) => realm_members::join(args).await?,
             RealmCommand::Update(args) => realm_members::update(args).await?,
             RealmCommand::FetchPackages(args) => super::realm_packages::fetch(args).await?,
+            RealmCommand::CheckSelection(args) => {
+                super::realm_packages::check_selection(args).await?
+            }
             RealmCommand::Invite(args) => realm_members::invite(args).await?,
             RealmCommand::Members(args) => realm_members::members(args).await?,
             RealmCommand::RevokeInvite(args) => realm_members::revoke_invite(args).await?,

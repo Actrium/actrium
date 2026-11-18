@@ -823,6 +823,23 @@ pub struct AuthorityDiscoveryInfo {
     pub signing_keys_json: String,
 }
 
+/// A dependency alias selected by the verified Realm Profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RealmDependencyInfo {
+    pub alias: String,
+    pub target_package: String,
+}
+
+/// One archive entry in the verified Realm Profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RealmPackageInfo {
+    pub reference: String,
+    pub href: String,
+    pub sha256: String,
+    pub actor_type: String,
+    pub dependencies: Vec<RealmDependencyInfo>,
+}
+
 /// A verified Realm Profile: the package selection and endpoints that feed
 /// package acquisition.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -833,6 +850,9 @@ pub struct RealmProfileInfo {
     /// Always `active`; retired Realms are rejected.
     pub status: String,
     pub sequence: u64,
+    pub primary_package: String,
+    pub front_package: String,
+    pub packages: Vec<RealmPackageInfo>,
     /// Front package: the archive this shell fetches and loads.
     pub package_href: String,
     /// Lowercase hex SHA-256 the Front package must match.
@@ -1024,6 +1044,26 @@ pub fn accept_realm_profile(
         display_name: profile.realm.display_name.clone(),
         status: "active".to_string(),
         sequence: profile.sequence,
+        primary_package: selection.primary_package.clone(),
+        front_package: selection.front_package.clone(),
+        packages: selection
+            .packages
+            .iter()
+            .map(|(reference, package)| RealmPackageInfo {
+                reference: reference.clone(),
+                href: package.href.clone(),
+                sha256: package.sha256.clone(),
+                actor_type: package.r#type.clone(),
+                dependencies: package
+                    .dependencies
+                    .iter()
+                    .map(|(alias, target)| RealmDependencyInfo {
+                        alias: alias.clone(),
+                        target_package: target.clone(),
+                    })
+                    .collect(),
+            })
+            .collect(),
         package_href: front.href.clone(),
         package_sha256: front.sha256.clone(),
         package_type: front.r#type.clone(),
@@ -1090,6 +1130,96 @@ pub fn decode_actr_invite(invite_text: String) -> Result<ActrInviteInfo, CoreErr
     Ok(ActrInviteInfo {
         realm_name: invite.realm,
     })
+}
+
+/// Verify a Front archive and its dependency selections before the native shell loads it.
+/// The Profile metadata must come from `accept_realm_profile`.
+pub fn verify_realm_front_package(
+    archive: Vec<u8>,
+    trusted_public_key: Vec<u8>,
+    profile: RealmProfileInfo,
+) -> Result<VerifiedActrPackageInfo, ActrPackageVerificationError> {
+    use actr_protocol::realm_profile::{RealmPackage, RealmPackageSelection};
+    use std::collections::BTreeMap;
+    let invalid = |message: String| actr_pack::PackError::InvalidPackage(message);
+    let public_key_bytes = <&[u8; PUBLIC_KEY_LENGTH]>::try_from(trusted_public_key.as_slice())
+        .map_err(|_| ActrPackageVerificationError::InvalidPublicKey("expected 32 bytes".into()))?;
+    let public_key = VerifyingKey::from_bytes(public_key_bytes)
+        .map_err(|error| ActrPackageVerificationError::InvalidPublicKey(error.to_string()))?;
+    let selection = RealmPackageSelection {
+        primary_package: profile.primary_package,
+        front_package: profile.front_package,
+        packages: profile
+            .packages
+            .into_iter()
+            .map(|package| {
+                (
+                    package.reference,
+                    RealmPackage {
+                        href: package.href,
+                        sha256: package.sha256,
+                        r#type: package.actor_type,
+                        dependencies: package
+                            .dependencies
+                            .into_iter()
+                            .map(|dep| (dep.alias, dep.target_package))
+                            .collect(),
+                        extensions: BTreeMap::new(),
+                    },
+                )
+            })
+            .collect(),
+    };
+    selection.check().map_err(invalid)?;
+    let reference = &selection.packages[&selection.front_package];
+    if hex_digest(&archive) != reference.sha256 {
+        return Err(
+            invalid("Front archive digest differs from the verified Realm Profile".into()).into(),
+        );
+    }
+    let verified = actr_pack::verify_actor_package(&archive, &public_key)?;
+    let mut locked_types = BTreeMap::new();
+    for file in &verified.manifest.files {
+        if file.role != "lock" {
+            continue;
+        }
+        if file.path != "manifest.lock.toml" {
+            return Err(invalid("dependency lock must be manifest.lock.toml".into()).into());
+        }
+        let raw = verified
+            .manifest
+            .read_declared_file(&archive, &file.path, 1024 * 1024)?;
+        let source = std::str::from_utf8(&raw).map_err(|error| invalid(error.to_string()))?;
+        let lock = source
+            .parse::<actr_config::LockFile>()
+            .map_err(|error| invalid(error.to_string()))?;
+        lock.validate_aliases()
+            .map_err(|error| invalid(error.to_string()))?;
+        locked_types.extend(
+            lock.dependencies
+                .into_iter()
+                .map(|entry| (entry.alias, entry.actr_type)),
+        );
+    }
+    actr_pack::realm::check_realm_package_dependencies(
+        &selection,
+        &selection.front_package,
+        &verified.manifest,
+        &locked_types,
+    )?;
+    let workload_bytes = actr_pack::read_actor_workload(&archive, &verified)?;
+    Ok(VerifiedActrPackageInfo {
+        workload_profile: verified.manifest.workload.profile.clone(),
+        manifest: verified.manifest.into(),
+        workload_bytes,
+    })
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 pub fn evaluate_contract(name: Option<String>, version: u32) -> ContractGateInfo {
@@ -5128,5 +5258,84 @@ mod tests {
             "b1a55027d4e0bb5d"
         );
         assert_eq!(stable_content_fingerprint("".to_string()).len(), 16);
+    }
+    #[test]
+    fn ffi_profile_exports_complete_selection_and_front_checks_selected_type() {
+        use base64::Engine as _;
+        use serde_json::json;
+        let key = SigningKey::from_bytes(&rand::random());
+        let public = key.verifying_key().to_bytes().to_vec();
+        let mut manifest = ActrPackageManifest::from_toml(FFI_TEST_MANIFEST).unwrap();
+        manifest.actor.publisher = "demo.example".into();
+        manifest.dependencies.insert(
+            "service".into(),
+            actr_pack::ActorDependency {
+                actor: "demo.example/service".into(),
+                version: "=1.0.0".into(),
+                contract: None,
+                required: true,
+            },
+        );
+        let archive = actr_pack::pack_actor_package(&actr_pack::ActorPackOptions {
+            manifest,
+            signing_key: key.clone(),
+            payloads: BTreeMap::from([
+                (
+                    "workload/guest.js".into(),
+                    b"globalThis.echo = true;".to_vec(),
+                ),
+                ("ui/capability-manifest.json".into(), b"{}".to_vec()),
+            ]),
+        })
+        .unwrap();
+        let mut document: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/actr/test-vectors/realm-profile.json"
+        ))
+        .unwrap();
+        document = document["profiles"]["active"]["document"].clone();
+        document["packages"]["notes"]["type"] = json!("demo.example/service@1.0.0");
+        document["packages"]["ui"]["type"] = json!("demo.example/app@1.0.0");
+        document["packages"]["ui"]["sha256"] = json!(hex_digest(&archive));
+        document["packages"]["ui"]["dependencies"] = json!({"service":"notes"});
+        document["packages"]["extra"] = document["packages"]["notes"].clone();
+        actr_protocol::realm_profile::sign_document(&mut document, "realm-test", &key);
+        let mut keys = json!({"sequence":1,"keys":[{"id":"realm-test","algorithm":"Ed25519","status":"active","public_key":base64::engine::general_purpose::STANDARD.encode(&public)}]});
+        actr_protocol::realm_profile::sign_document(&mut keys, "realm-test", &key);
+        let profile = accept_realm_profile(
+            document.to_string(),
+            document["realm"]["name"].as_str().unwrap().into(),
+            keys.to_string(),
+        )
+        .unwrap();
+        assert_eq!(profile.packages.len(), 3);
+        assert_eq!(profile.primary_package, "notes");
+        let front = profile
+            .packages
+            .iter()
+            .find(|entry| entry.reference == "ui")
+            .unwrap();
+        assert_eq!(front.dependencies[0].target_package, "notes");
+        verify_realm_front_package(archive.clone(), public.clone(), profile.clone()).unwrap();
+        let mut wrong = profile.clone();
+        wrong
+            .packages
+            .iter_mut()
+            .find(|entry| entry.reference == "notes")
+            .unwrap()
+            .actor_type = "demo.example/service@2.0.0".into();
+        assert!(
+            verify_realm_front_package(archive.clone(), public.clone(), wrong)
+                .unwrap_err()
+                .to_string()
+                .contains("ui.service -> notes")
+        );
+        let mut changed = archive;
+        changed.push(0);
+        assert!(
+            verify_realm_front_package(changed, public, profile)
+                .unwrap_err()
+                .to_string()
+                .contains("digest")
+        );
     }
 }

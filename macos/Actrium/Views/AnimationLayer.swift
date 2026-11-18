@@ -140,7 +140,7 @@ final class AnimationLayerNSView: NSView {
 
         // ━━━━ Background Layer (Consistent with the content area background colour) ━━━━
         // Use and WorkspaceMainView Same dark gray background, blinking when you avoid fade
-        backgroundLayer.backgroundColor = NSColor(white: 0.12, alpha: 1.0).cgColor
+        backgroundLayer.backgroundColor = AppColors.workspaceBackground.cgColor
         backgroundLayer.opacity = 0  // Initial hide, with isVisible=false Consistency
         layer?.addSublayer(backgroundLayer)
 
@@ -156,6 +156,17 @@ final class AnimationLayerNSView: NSView {
     override func layout() {
         super.layout()
         updateLayerFrames()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        backgroundLayer.backgroundColor = AppColors.workspaceBackground.cgColor
+        cachedCloseIcon = CardStyle.renderCloseIconImage()
+        for slot in cardSlots.values {
+            slot.titleLabel.foregroundColor = CardStyle.titleColor
+            slot.closeIcon.contents = cachedCloseIcon.image
+            slot.container.borderColor = AppColors.separator.cgColor
+        }
     }
 
     private func updateLayerFrames() {
@@ -222,9 +233,11 @@ final class AnimationLayerNSView: NSView {
 
                 // Add Shadow (with TabPanel Unanimously.: radius=5, x=0, y=2, opacity=0.3)
                 container.shadowColor = NSColor.black.cgColor
-                container.shadowOpacity = 0.3
-                container.shadowOffset = CGSize(width: 0, height: 2)
-                container.shadowRadius = 5
+                container.shadowOpacity = CardStyle.shadowOpacity
+                container.shadowOffset = CardStyle.shadowOffset
+                container.shadowRadius = CardStyle.shadowRadius
+                container.borderColor = AppColors.separator.cgColor
+                container.borderWidth = CardStyle.borderWidth
 
                 // Create Focus Layer (Bottom, show big picture)
                 // Focus No rounded angles in mode (with TabPanel cornerRadius(isFocused ? 0 : 10) Unanimously.)
@@ -656,6 +669,9 @@ struct AnimationLayerRepresentable: NSViewRepresentable {
 enum ModeTransitionConstants {
     /// The total length of the animation
     static let totalTransitionDuration: Double = 0.35
+
+    /// Blend into the live destination only after the zoom nearly settles.
+    static let handoffStartProgress: Double = 0.82
 
     /// Spring Response Parameters
     static let springResponse: Double = 0.35

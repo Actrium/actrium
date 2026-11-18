@@ -79,6 +79,13 @@ impl RealmPackageSelection {
             return Err("packages must contain 2 to 32 entries".into());
         }
         self.selected()?;
+        if self.packages[&self.front_package]
+            .dependencies
+            .get("service")
+            .is_some_and(|target| target != &self.primary_package)
+        {
+            return Err("Front service dependency must select primary_package".into());
+        }
         let mut digests = BTreeMap::new();
         for (name, package) in &self.packages {
             if !crate::uri::is_realm_id(name) {
@@ -92,6 +99,18 @@ impl RealmPackageSelection {
                 .is_some_and(|old| old != &package.sha256)
             {
                 return Err(format!("conflicting digest for {}", package.r#type));
+            }
+            for (alias, target) in &package.dependencies {
+                if alias.is_empty() || alias.trim() != alias {
+                    return Err(format!(
+                        "packages[{name}].dependencies has an empty or untrimmed alias"
+                    ));
+                }
+                if !self.packages.contains_key(target) {
+                    return Err(format!(
+                        "packages[{name}].dependencies[{alias}] names unknown package reference {target:?}"
+                    ));
+                }
             }
         }
         Ok(())

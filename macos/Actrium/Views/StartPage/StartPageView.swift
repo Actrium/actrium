@@ -41,12 +41,12 @@ private struct CompactStartPageView: View {
 
                 Text("Start Page")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.white.opacity(0.8))
+                    .foregroundStyle(StartPageColors.sectionTitle)
 
                 if bookmarkCount > 0 {
                     Text("\(bookmarkCount) favorites")
                         .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundStyle(StartPageColors.historyTitle)
                 }
             }
         }

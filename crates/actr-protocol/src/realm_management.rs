@@ -29,6 +29,7 @@ pub enum ManagementOp {
     ReissueOwnerInvite,
     RegisterPublisher,
     DraftProfile,
+    GetAdmission,
 }
 
 /// A Realm management request.
@@ -47,6 +48,9 @@ pub struct ManagementRequest {
         deserialize_with = "RealmPackageSelection::deserialize_optional"
     )]
     pub selection: Option<RealmPackageSelection>,
+    /// Admission rules selected when creating the Realm. Older callers use invite-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<crate::realm_profile::RealmPolicy>,
     /// `publish_profile`: the signed Realm Profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<Value>,
@@ -88,6 +92,7 @@ impl ManagementRequest {
             realm: realm.to_string(),
             publisher: String::new(),
             selection: None,
+            policy: None,
             profile: None,
             provider_id: provider_id.to_string(),
             requester: None,

@@ -5,6 +5,40 @@ import Foundation
 import QuartzCore
 import React
 
+/// JSON payload for Host-mirrored IME text operations.
+struct IMETextPayload: Codable {
+    var text: String
+    var loc: Int = 0
+    var len: Int = 0
+}
+
+/// Notification posted on the renderer's main queue after any
+/// `NSWindow.makeFirstResponder(_:)` call, carrying the window.
+let ActriumFirstResponderDidChangeNotification = Notification.Name(
+    "ActriumFirstResponderDidChangeNotification"
+)
+
+extension NSWindow {
+    /// Swizzled alongside the original `makeFirstResponder(_:)`; after the
+    /// real implementation runs, surfaces report text-input focus changes to
+    /// the Host so it can route IME composition there.
+    @objc func actrium_makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let accepted = actrium_makeFirstResponder(responder)
+        NotificationCenter.default.post(
+            name: ActriumFirstResponderDidChangeNotification,
+            object: self
+        )
+        return accepted
+    }
+
+    static func actrium_installFirstResponderHook() {
+        let original = class_getInstanceMethod(NSWindow.self, #selector(makeFirstResponder(_:)))
+        let swizzled = class_getInstanceMethod(NSWindow.self, #selector(actrium_makeFirstResponder(_:)))
+        guard let original, let swizzled else { return }
+        method_exchangeImplementations(original, swizzled)
+    }
+}
+
 /// Entry-point and lifecycle owner for a manually spawned Renderer Helper.
 @MainActor
 final class RendererProcessController {
@@ -21,7 +55,11 @@ final class RendererProcessController {
     /// that case the legacy distributed-notification fallback must not run,
     /// even if the Broker has already disconnected.
     @discardableResult
-    nonisolated static func sendHostEvent(name: String, userInfo: [String: Any] = [:]) -> Bool {
+    nonisolated static func sendHostEvent(
+        name: String,
+        userInfo: [String: Any] = [:],
+        tabId: String = ""
+    ) -> Bool {
         guard isRendererProcess else { return false }
         guard JSONSerialization.isValidJSONObject(userInfo),
               let data = try? JSONSerialization.data(withJSONObject: userInfo),
@@ -34,7 +72,7 @@ final class RendererProcessController {
         DispatchQueue.main.async {
             guard let controller = RendererProcessLifetime.shared.controller else { return }
             do {
-                try controller.connection.sendHostEvent(name: name, userInfoJSON: json)
+                try controller.connection.sendHostEvent(name: name, userInfoJSON: json, tabId: tabId)
             } catch {
                 NSLog("ActriumRenderer host event failed: %@ (%@)", name, error.localizedDescription)
             }
@@ -93,6 +131,32 @@ final class RendererProcessController {
     private let arguments: Arguments
     private let connection: IPCHelperConnection
     private var serviceCalls: [UUID: (RealmServiceReply) -> Void] = [:]
+    private var fileImports: [String: (id: UUID, reloadKey: Int, reply: (GuestFileImportReply) -> Void)] = [:]
+
+    static func pickFiles(
+        _ call: GuestFileImportCall, tabId: String, reply: @escaping (GuestFileImportReply) -> Void
+    ) {
+        guard let controller = RendererProcessLifetime.shared.controller,
+              controller.surfaces[tabId] != nil, controller.fileImports[tabId] == nil else {
+            reply(GuestFileImportReply(id: call.id, error: "The picker tab is unavailable or already selecting files."))
+            return
+        }
+        do {
+            let data = try JSONEncoder().encode(call)
+            try controller.connection.sendHostEvent(
+                name: GuestFileImportCall.requestEvent, userInfoJSON: String(decoding: data, as: UTF8.self), tabId: tabId
+            )
+            controller.fileImports[tabId] = (call.id, call.reloadKey, reply)
+            let requestId = call.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(GuestFileImportCall.timeoutSeconds)) {
+                [weak controller] in
+                guard let controller, controller.fileImports[tabId]?.id == requestId else { return }
+                controller.cancelFileImport(tabId, message: "The file selection timed out.")
+            }
+        } catch {
+            reply(GuestFileImportReply(id: call.id, error: "Could not contact the file picker."))
+        }
+    }
 
     static func callRealmService(
         tabId: String,
@@ -101,7 +165,8 @@ final class RendererProcessController {
     ) {
         guard let controller = RendererProcessLifetime.shared.controller,
               controller.surfaces[tabId] != nil else {
-            reply(RealmServiceReply(id: call.id, error: "The Realm tab is unavailable."))
+            let failure = RealmServiceFailure(code: "realm_tab_unavailable", message: "The Realm tab is unavailable.")
+            reply(RealmServiceReply(id: call.id, failure: failure))
             return
         }
         do {
@@ -113,12 +178,13 @@ final class RendererProcessController {
             )
             controller.serviceCalls[call.id] = reply
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(call.timeoutMs)) { [weak controller] in
-                controller?.serviceCalls.removeValue(forKey: call.id)?(
-                    RealmServiceReply(id: call.id, error: "The Service call timed out.")
+                let failure = RealmServiceFailure(
+                    code: "realm_service_timeout", message: "The Service call timed out."
                 )
+                controller?.serviceCalls.removeValue(forKey: call.id)?(RealmServiceReply(id: call.id, failure: failure))
             }
         } catch {
-            reply(RealmServiceReply(id: call.id, error: error.localizedDescription))
+            reply(RealmServiceReply(id: call.id, failure: RealmServiceFailure(error: error)))
         }
     }
     private let reactNativeHost = ServiceReactNativeHost.shared
@@ -171,12 +237,63 @@ final class RendererProcessController {
     }
 
     private func configureIPC() {
-        connection.onHostEvent = { [weak self] name, json, _ in
-            guard name == RealmServiceCall.responseEvent,
-                  let response = try? JSONDecoder().decode(RealmServiceReply.self, from: Data(json.utf8)) else {
+        NSWindow.actrium_installFirstResponderHook()
+        NotificationCenter.default.addObserver(
+            forName: ActriumFirstResponderDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self, let window = note.object as? NSWindow else { return }
+            for (tabId, surface) in self.surfaces where surface.window === window {
+                self.reportTextInputFocus(tabId: tabId, surface: surface)
+            }
+        }
+        connection.onHostEvent = { [weak self] name, json, tabId in
+            guard let self else { return }
+            if name == GuestFileImportCall.responseEvent {
+                receiveFileImport(json, tabId: tabId)
                 return
             }
-            self?.serviceCalls.removeValue(forKey: response.id)?(response)
+            if name == "com.actrium.rendererKeyboardFocus" {
+                guard let focused = Bool(json) else { return }
+                // Apply focus on the same queue as input so the next key
+                // event can reach the restored editor.
+                DispatchQueue.main.async {
+                    self.surfaces[tabId]?.setKeyboardFocus(focused)
+                }
+                return
+            }
+            if name == RealmServiceCall.responseEvent {
+                guard let response = try? JSONDecoder().decode(RealmServiceReply.self, from: Data(json.utf8)) else {
+                    return
+                }
+                self.serviceCalls.removeValue(forKey: response.id)?(response)
+                return
+            }
+            // IME composition runs in the Host process (TSM never engages in
+            // this background, activation-prohibited process); the Host
+            // mirrors marked/committed text back for the focused text input.
+            DispatchQueue.main.async {
+                switch name {
+                case "com.actrium.imeMarkedText":
+                    guard let op = try? JSONDecoder().decode(IMETextPayload.self, from: Data(json.utf8)) else { return }
+                    self.surfaces[tabId]?.applyMarkedText(op.text, selectedRange: NSRange(location: op.loc, length: op.len))
+                case "com.actrium.imeInsertText":
+                    guard let op = try? JSONDecoder().decode(IMETextPayload.self, from: Data(json.utf8)) else { return }
+                    self.surfaces[tabId]?.applyInsertText(op.text)
+                case "com.actrium.textInputBlurRequest":
+                    self.surfaces[tabId]?.resignTextInputFocus()
+                case "com.actrium.textInputFocusReset":
+                    // The Host dropped our pre-interaction focus report and
+                    // its user-interaction gate just opened; force a fresh
+                    // report so IME can activate on the already-focused field.
+                    if let surface = self.surfaces[tabId] {
+                        self.reportTextInputFocus(tabId: tabId, surface: surface, force: true)
+                    }
+                default:
+                    break
+                }
+            }
         }
 
         connection.onLoadContent = { [weak self] request, reply in
@@ -270,6 +387,9 @@ final class RendererProcessController {
             config = decoded
         }
 
+        if let pending = fileImports[tabId], pending.reloadKey != Int(request.reloadKey) {
+            cancelFileImport(tabId)
+        }
         config["tabId"] = tabId
         if config["title"] == nil {
             config["title"] = request.title
@@ -372,9 +492,21 @@ final class RendererProcessController {
         }
     }
 
-    func publishAccessibilityTree(tabId: String) {
-        guard let surface = surfaces[tabId] else { return }
-        try? connection.sendAccessibilityTree(surface.accessibilityTree())
+    /// Forwards the surface caret rect to the Host; nil hides the candidate
+    /// window anchor. Transport reuses the generic HostEvent channel.
+    /// Reports the surface's text-input focus state to the Host, unless it is
+    /// unchanged since the last report. `force` bypasses the dedupe latch.
+    private func reportTextInputFocus(tabId: String, surface: RendererTabSurface, force: Bool = false) {
+        if force {
+            surface.resetTextInputFocusDedupe()
+        }
+        surface.reportTextInputFocusIfChanged { focused in
+            try self.connection.sendHostEvent(
+                name: "com.actrium.textInputFocus",
+                userInfoJSON: "{\"focused\":\(focused)}",
+                tabId: tabId
+            )
+        }
     }
 
     func publishCaret(tabId: String, rect: CGRect?) {
@@ -386,9 +518,27 @@ final class RendererProcessController {
         )
     }
 
+    func publishAccessibilityTree(tabId: String) {
+        guard let surface = surfaces[tabId] else { return }
+        try? connection.sendAccessibilityTree(surface.accessibilityTree())
+    }
+
     private func destroyTab(_ tabId: String) {
+        cancelFileImport(tabId)
         surfaces.removeValue(forKey: tabId)?.close()
         reactNativeHost.destroyRendererEntry(tabId: tabId)
+    }
+
+    private func cancelFileImport(_ tabId: String, message: String = "The picker document changed or closed.") {
+        if let pending = fileImports.removeValue(forKey: tabId) {
+            pending.reply(GuestFileImportReply(id: pending.id, error: message))
+        }
+    }
+
+    private func receiveFileImport(_ json: String, tabId: String) {
+        guard let response = try? JSONDecoder().decode(GuestFileImportReply.self, from: Data(json.utf8)),
+              fileImports[tabId]?.id == response.id else { return }
+        fileImports.removeValue(forKey: tabId)?.reply(response)
     }
 
     private func terminate(reason: String) {
@@ -438,30 +588,26 @@ final class RendererSurfaceMountObserver: NSObject {
     }
 }
 
-/// A background renderer window must look active to native text controls.
-/// NSTextView uses the key-window state to install its insertion indicator;
-/// activating the helper NSApplication itself would steal focus from the Host.
-private final class RendererWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var isKeyWindow: Bool { true }
-}
-
 /// One Tab root and its remotely hosted CoreAnimation context.
 @MainActor
 private final class RendererTabSurface {
     let tabId: String
     let entry: TabViewControllerEntry
     let container: ResizableContainerView
-    let window: NSWindow
+    let window: RendererWindow
     let context: RendererCAContext
     private var generation: UInt64 = 0
     private var hasCommitted = false
-    private weak var focusedEditor: NSTextView?
-    private var lastCaretRect: CGRect?
     private var accessibilityObservers: [NSObjectProtocol] = []
     private var accessibilityPublishWork: DispatchWorkItem?
     private var pressedRecognizers: [UInt32: [NSGestureRecognizer]] = [:]
     private var textInputPresses: Set<UInt32> = []
+    /// Last text-input focus state reported to the Host. The Host mirrors
+    /// IME composition for whichever surface owns the focused text input.
+    private var lastReportedTextFocus = false
+    private weak var focusedEditor: NSTextView?
+    private var lastCaretRect: CGRect?
+
 
     var contextId: UInt32 {
         context.contextId
@@ -519,9 +665,6 @@ private final class RendererTabSurface {
     }
 
     func commit() {
-        if context.layer !== container.layer {
-            context.layer = container.layer
-        }
         // The first commit happens on an empty view tree, so lay it out once.
         // Later commits rely on AppKit/RN marking the container dirty
         // (addSubview, surface stage change, resize); Fabric sets frames
@@ -532,8 +675,14 @@ private final class RendererTabSurface {
             container.layoutSubtreeIfNeeded()
             hasCommitted = true
         }
-        publishCaret()
+        context.attachWindowLayerTree(for: container)
         CATransaction.flush()
+    }
+
+    func setKeyboardFocus(_ focused: Bool) {
+        guard window.hasHostKeyboardFocus != focused else { return }
+        window.setHostKeyboardFocus(focused)
+        commit()
     }
 
     func close() {
@@ -633,7 +782,6 @@ private final class RendererTabSurface {
                 if input.button == 0, let textInput {
                     textInputPresses.insert(input.button)
                     focusTextInput(textInput, at: location, modifiers: modifiers)
-                    publishCaret()
                     // AppKit adds the field editor to the offscreen view
                     // hierarchy on focus. Republish after that update.
                     DispatchQueue.main.async { [weak self] in
@@ -653,35 +801,17 @@ private final class RendererTabSurface {
                 }
             }
             window.sendEvent(event)
-            if input.type == .mouseDown { publishCaret() }
 
         case .scroll:
             guard let hitView = hitTest(at: location) else { return }
-            let scrollView = sequence(first: hitView, next: \.superview)
-                .compactMap { $0 as? NSScrollView }
-                .first { candidate in
-                    guard let rnScrollView = candidate as? RCTUIScrollView else { return true }
-                    return rnScrollView.isScrollEnabled
-                }
-            guard let scrollView else { return }
-
-            // An offscreen window cannot route a CGEvent-backed NSEvent to its
-            // content. NSClipView scrolling also posts the bounds notification
-            // that drives RN's native scrollViewDidScroll delegate path.
-            let clipView = scrollView.contentView
-            let origin = clipView.bounds.origin
-            let target = NSPoint(
-                x: origin.x - input.scrollDeltaX,
-                y: origin.y - input.scrollDeltaY
-            )
-            let constrainedTarget = clipView.constrainBoundsRect(
-                NSRect(origin: target, size: clipView.bounds.size)
-            ).origin
-            clipView.scroll(to: constrainedTarget)
-            commit()
+            let delta = NSPoint(x: input.scrollDeltaX, y: input.scrollDeltaY)
+            if ActriumScrollRendererContent(hitView, delta) {
+                commit()
+            }
 
         case .keyDown, .keyUp:
-            guard let event = NSEvent.keyEvent(
+            guard window.hasHostKeyboardFocus,
+                  let event = NSEvent.keyEvent(
                 with: input.type == .keyDown ? .keyDown : .keyUp,
                 location: location,
                 modifierFlags: modifiers,
@@ -695,6 +825,9 @@ private final class RendererTabSurface {
             ) else {
                 return
             }
+            // Text composition happens in the Host process (TSM never engages
+            // in this background, activation-prohibited process); dispatched
+            // keys here are only non-text commands (arrows, enter, ...).
             if let textView = window.firstResponder as? NSTextView {
                 if input.type == .keyDown { textView.keyDown(with: event) }
                 else { textView.keyUp(with: event) }
@@ -717,6 +850,60 @@ private final class RendererTabSurface {
         return container.hitTest(point)
     }
 
+
+
+    /// Compares the current first responder against the last reported
+    /// text-input focus state and reports changes through `report`.
+    func reportTextInputFocusIfChanged(_ report: (Bool) throws -> Void) {
+        let responder = window.firstResponder
+        let focused = (responder as? NSTextView)?.isEditable == true
+            || (responder as? NSTextField)?.isEditable == true
+        guard focused != lastReportedTextFocus else { return }
+        lastReportedTextFocus = focused
+        try? report(focused)
+        if focused { publishCaret() }
+    }
+
+    /// Flips the dedupe latch so the next `reportTextInputFocusIfChanged`
+    /// reports even when the focus state itself did not change.
+    func resetTextInputFocusDedupe() {
+        let responder = window.firstResponder
+        let focused = (responder as? NSTextView)?.isEditable == true
+            || (responder as? NSTextField)?.isEditable == true
+        lastReportedTextFocus = !focused
+    }
+
+    /// Applies Host-mirrored IME marked text to the focused text input.
+    func applyMarkedText(_ text: String, selectedRange: NSRange) {
+        guard let client = window.firstResponder as? NSTextInputClient else { return }
+        client.setMarkedText(
+            text,
+            selectedRange: selectedRange,
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        publishCaret()
+        commit()
+    }
+
+    /// Applies Host-mirrored committed IME text to the focused text input.
+    func applyInsertText(_ text: String) {
+        guard let client = window.firstResponder as? NSTextInputClient else { return }
+        client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        publishCaret()
+        commit()
+    }
+
+    /// The Host asked this text input to give up focus (its own IME client
+    /// resigned first responder, e.g. the user focused the address bar).
+    func resignTextInputFocus() {
+        if window.firstResponder is NSTextView || window.firstResponder is NSTextField {
+            window.makeFirstResponder(container)
+        }
+        focusedEditor = nil
+        lastCaretRect = nil
+        RendererProcessLifetime.shared.controller?.publishCaret(tabId: tabId, rect: nil)
+    }
+
     private func focusTextInput(_ view: NSView, at location: NSPoint, modifiers: NSEvent.ModifierFlags) {
         // AppKit's native mouse tracking waits synchronously for mouse-up.
         // Renderer mouse-up arrives on the main queue over IPC.
@@ -728,8 +915,11 @@ private final class RendererTabSurface {
         let index = editor.characterIndexForInsertion(at: point)
         guard index != NSNotFound, index <= (editor.string as NSString).length else { return }
         editor.setSelectedRange(NSRange(location: index, length: 0))
+        publishCaret()
     }
 
+    /// Publishes the caret rect to the Host so native IME UI (candidate
+    /// window) can anchor at the remotely rendered insertion point.
     private func publishCaret() {
         let rect = caretRect()
         guard rect != lastCaretRect else { return }
@@ -738,7 +928,12 @@ private final class RendererTabSurface {
     }
 
     private func caretRect() -> CGRect? {
-        guard let editor = focusedEditor, window.firstResponder === editor, editor.isEditable,
+        // Prefer the stored editor but fall back to the current first
+        // responder: autoFocus / Tab / JS .focus() never pass through
+        // `focusTextInput`, leaving `focusedEditor` nil even though a text
+        // view owns first responder.
+        let editor = focusedEditor ?? (window.firstResponder as? NSTextView)
+        guard let editor, window.firstResponder === editor, editor.isEditable,
               editor.selectedRange().length == 0 else {
             return nil
         }
@@ -788,81 +983,5 @@ private final class RendererTabSurface {
         if encoded & 8 != 0 { result.insert(.command) }
         if encoded & 16 != 0 { result.insert(.capsLock) }
         return result
-    }
-}
-
-/// Dynamic wrapper for the private CAContext used by Chromium/WebKit style
-/// cross-process layer hosting.
-private final class RendererCAContext {
-    private let object: NSObject
-
-    var contextId: UInt32 {
-        if let number = object.value(forKey: "contextId") as? NSNumber {
-            return number.uint32Value
-        }
-        return object.value(forKey: "contextId") as? UInt32 ?? 0
-    }
-
-    var layer: CALayer? {
-        get {
-            object.value(forKey: "layer") as? CALayer
-        }
-        set {
-            object.setValue(newValue, forKey: "layer")
-        }
-    }
-
-    init?() {
-        guard let contextClass = NSClassFromString("CAContext") else {
-            return nil
-        }
-
-        let options: [String: Any] = [
-            "colorSpace": CGColorSpaceCreateDeviceRGB(),
-            "displayId": CGMainDisplayID()
-        ]
-
-        let connectionSelector = NSSelectorFromString("contextWithCGSConnection:options:")
-        if contextClass.responds(to: connectionSelector),
-           let symbol = dlsym(dlopen(nil, RTLD_LAZY), "CGSMainConnectionID") {
-            typealias ConnectionFunction = @convention(c) () -> UInt32
-            let connection = unsafeBitCast(symbol, to: ConnectionFunction.self)()
-            let implementation = contextClass.method(for: connectionSelector)
-            typealias Factory = @convention(c) (
-                AnyClass,
-                Selector,
-                UInt32,
-                [String: Any]
-            ) -> NSObject?
-            if let created = unsafeBitCast(implementation, to: Factory.self)(
-                contextClass,
-                connectionSelector,
-                connection,
-                options
-            ) {
-                object = created
-                return
-            }
-        }
-
-        let remoteSelector = NSSelectorFromString("remoteContextWithOptions:")
-        if contextClass.responds(to: remoteSelector) {
-            let implementation = contextClass.method(for: remoteSelector)
-            typealias Factory = @convention(c) (
-                AnyClass,
-                Selector,
-                [String: Any]
-            ) -> NSObject?
-            if let created = unsafeBitCast(implementation, to: Factory.self)(
-                contextClass,
-                remoteSelector,
-                options
-            ) {
-                object = created
-                return
-            }
-        }
-
-        return nil
     }
 }

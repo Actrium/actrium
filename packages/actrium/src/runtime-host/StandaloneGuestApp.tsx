@@ -7,7 +7,7 @@ import {
   Text as NativeText,
   View as NativeView,
 } from 'react-native';
-import { EventHandler, HostHttpHandler } from 'askit/host-events';
+import { EventHandler } from 'askit/host-events';
 import { Engine, type ComponentMap } from 'keel/host';
 import {
   FlatList,
@@ -23,10 +23,11 @@ import {
   capabilitiesFromSnapshotJSON,
   CapabilityAuthorizer,
 } from './capability-authorization';
-import { contract } from './contract';
+import { contract, type FileImportPickInput, type FileImportPickOutput } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
+import { callHttpService, callNativeService } from './service-call';
 import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
 import type { TabConfig } from './types';
 
@@ -91,12 +92,6 @@ const hostComponents: ComponentMap = {
   View: View as React.ComponentType<Record<string, unknown>>,
 };
 
-type ActorCallResult = {
-  success: boolean;
-  payloadBase64?: string;
-  error?: string;
-};
-
 type Props = {
   tab: TabConfig;
   containerWidth?: number;
@@ -128,6 +123,13 @@ const writeClipboardText = async (text: string): Promise<void> => {
 
 type CapabilityPermissionBridge = {
   requestGrant?: (tabId: string, capability: string) => void;
+};
+
+type FileImportBridge = {
+  pick?: (
+    tabId: string, reloadKey: number, source: NonNullable<FileImportPickInput['source']>,
+    accept: string[], multiple: boolean
+  ) => Promise<FileImportPickOutput>;
 };
 
 const requestNativeCapabilityGrant = (
@@ -224,71 +226,36 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     }
 
     let disposed = false;
-    const callLegacyActor: ActorCall = async ({
-      requestId,
-      route,
-      payloadBase64,
-      timeoutMs,
-    }) => {
+    const callLegacyActor: ActorCall = (request) => {
       const gatewayUrl =
         globalThis.__ACTRIUM_ACTR_GATEWAY_URL__ ??
         'http://127.0.0.1:8391/v1/call';
-      logToNative(`[StandaloneGuestApp] legacy actor call ${route}`);
-      const result = await HostHttpHandler.handleRequest<ActorCallResult>({
-        requestId,
-        url: gatewayUrl,
-        method: 'POST',
-        body: { routeKey: route, payloadBase64, timeoutMs },
-      });
-      return {
-        success: result.success && result.data?.success === true,
-        payloadBase64: result.data?.payloadBase64,
-        message: result.data?.error ?? result.message,
-      };
+      logToNative(`[StandaloneGuestApp] legacy actor call ${request.route}`);
+      return callHttpService(gatewayUrl, request);
     };
-    const callServiceActor: ActorCall = async ({
-      requestId,
-      route,
-      payloadBase64,
-      timeoutMs,
-    }) => {
+    const callServiceActor: ActorCall = (request) => {
       // The global echo gateway is legacy-bridge only. New service calls must
       // target the tab's attached Service actor.
       if (!tab.serviceCallUrl) {
-        const service = NativeModules.RealmService;
-        if (!service?.call) {
-          return { success: false, message: 'The native Realm Service bridge is unavailable.' };
-        }
-        try {
-          const { payloadBase64: response } = await service.call(
-            tab.id,
-            route,
-            payloadBase64,
-            timeoutMs
-          );
-          return { success: true, payloadBase64: response };
-        } catch (error) {
-          return { success: false, message: String(error) };
-        }
+        return callNativeService(NativeModules.RealmService, tab.id, request);
       }
-      logToNative(`[StandaloneGuestApp] service call ${route}`);
-      const result = await HostHttpHandler.handleRequest<ActorCallResult>({
-        requestId,
-        url: tab.serviceCallUrl,
-        method: 'POST',
-        body: { routeKey: route, payloadBase64, timeoutMs },
-      });
-      return {
-        success: result.success && result.data?.success === true,
-        payloadBase64: result.data?.payloadBase64,
-        message: result.data?.error ?? result.message,
-      };
+      logToNative(`[StandaloneGuestApp] service call ${request.route}`);
+      return callHttpService(tab.serviceCallUrl, request);
     };
+    const fileImport = NativeModules.GuestFileImport as FileImportBridge | undefined;
+    const nativePick = fileImport?.pick?.bind(fileImport, tab.id, tab.reloadKey ?? 0);
+    if (v1?.ok && v1.linkage.links.some(([id]) => id === 'host:file-import') && !nativePick) {
+      setError('File import is unavailable for this application.');
+      return;
+    }
     const hostModules = createHostModules({
       hasServiceCapability,
       callActor: callServiceActor,
       authorizeCapability: (capability) => authorizer.authorize(capability),
       writeClipboardText,
+      pickFiles: nativePick && ((input) => nativePick(
+        input.source ?? 'files', input.accept ?? [], input.multiple ?? false
+      )),
     });
     // Expose exactly the verified method and component set to this Guest Engine.
     const linked = v1?.ok ? v1 : undefined;

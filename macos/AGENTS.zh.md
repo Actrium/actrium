@@ -6,7 +6,7 @@ System bundle（包含 StartPage/History/Bookmarks/Debug，同时也包含 `Runt
 `./scripts/bundle-actrium-runtime.sh --target system --dev`
 
 ## 2) 构建 CounterApp（Guest）
-`cd ../../../packages/actrium/keel-guest-examples/counterapp && bun run build`
+参阅 [ACTR Hub 中的 CounterApp 说明](https://github.com/Actrium/actr-hub/tree/main/counterapp#build-the-packages).
 
 ## 3) 编译
 `xcodebuild -workspace Actrium.xcworkspace -scheme Actrium build`
@@ -15,10 +15,6 @@ System bundle（包含 StartPage/History/Bookmarks/Debug，同时也包含 `Runt
 直接启动：
 
 `open "$(xcodebuild -workspace Actrium.xcworkspace -scheme Actrium -showBuildSettings 2>/dev/null | awk '/BUILT_PRODUCTS_DIR/ {print $3; exit}')/Actrium.app"`
-
-启动后自动打开 CounterApp（推荐用于验证 keel/Bundle 是否匹配）：
-
-`open -a "$(xcodebuild -workspace Actrium.xcworkspace -scheme Actrium -showBuildSettings 2>/dev/null | awk '/BUILT_PRODUCTS_DIR/ {print $3; exit}')/Actrium.app" --args --url "actro://$(cd ../../../packages/actrium/keel-guest-examples/counterapp && pwd)"`
 
 ## 5) 查看日志
 IPC 调试日志：

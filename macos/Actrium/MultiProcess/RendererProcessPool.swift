@@ -33,6 +33,7 @@ extension Notification.Name {
     static let rendererViewportApplied = Notification.Name("rendererViewportApplied")
     static let rendererAccessibilityUpdated = Notification.Name("rendererAccessibilityUpdated")
     static let rendererCaretUpdated = Notification.Name("rendererCaretUpdated")
+    static let rendererTextInputFocusChanged = Notification.Name("rendererTextInputFocusChanged")
 }
 
 /// Browser-style broker for a dynamically sized pool of homogeneous Renderer
@@ -100,6 +101,8 @@ final class RendererProcessPool: ObservableObject {
 
     private var workers: [String: Worker] = [:]
     private var tabWorkerMap: [UUID: String] = [:]
+    private let fileImport = RendererFileImport()
+    var fileImportWindow: ((UUID, Int) -> NSWindow?)?
     private var fingerprintWorkerMap: [String: String] = [:]
     private var systemWorkerId: String?
     private var viewportRequestId: UInt32 = 1
@@ -166,6 +169,7 @@ final class RendererProcessPool: ObservableObject {
     }
 
     func releaseRenderer(for tabId: UUID) {
+        fileImport.cancel(tabId: tabId)
         guard let workerId = tabWorkerMap.removeValue(forKey: tabId),
               let worker = workers[workerId] else {
             return
@@ -211,6 +215,7 @@ final class RendererProcessPool: ObservableObject {
             throw RendererProcessPoolError.rendererExited("Tab has no allocated renderer")
         }
         try await waitUntilReady(worker)
+        fileImport.update(tabId: tabId, reloadKey: config["reloadKey"] as? Int ?? 0)
 
         guard JSONSerialization.isValidJSONObject(config),
               let data = try? JSONSerialization.data(withJSONObject: config),
@@ -264,6 +269,28 @@ final class RendererProcessPool: ObservableObject {
         var tabEvent = event
         tabEvent.tabID = tabId.uuidString
         try? worker.connection.sendInputEvent(tabEvent)
+    }
+
+    func setKeyboardFocus(_ focused: Bool, for tabId: UUID) {
+        guard let worker = worker(for: tabId), worker.isReady else { return }
+        do {
+            try worker.connection.sendHostEvent(
+                name: "com.actrium.rendererKeyboardFocus",
+                userInfoJSON: String(focused),
+                tabId: tabId.uuidString
+            )
+        } catch {
+            AppLogger.reactNative.warning("Renderer keyboard focus update failed: \(error.localizedDescription)")
+        }
+    }
+
+    func sendHostEvent(name: String, userInfoJSON: String, to tabId: UUID) {
+        guard let worker = worker(for: tabId), worker.isReady else { return }
+        try? worker.connection.sendHostEvent(
+            name: name,
+            userInfoJSON: userInfoJSON,
+            tabId: tabId.uuidString
+        )
     }
 
     func requestAccessibilityTree(for tabId: UUID) {
@@ -352,6 +379,7 @@ final class RendererProcessPool: ObservableObject {
     }
 
     func shutdown() {
+        for tabId in tabWorkerMap.keys { fileImport.cancel(tabId: tabId) }
         let activeWorkers = Array(workers.values)
         for worker in activeWorkers {
             terminate(worker, reason: "Actrium is terminating")
@@ -515,6 +543,25 @@ final class RendererProcessPool: ObservableObject {
         }
 
         worker.connection.onHostEvent = { [weak self, weak worker] name, userInfoJSON, tab in
+            if name == GuestFileImportCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker else { return }
+                Task { await self.handleFileImport(userInfoJSON, tabId: tabId, worker: worker) }
+                return
+            }
+            if name == "com.actrium.textInputFocus" {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let data = userInfoJSON.data(using: .utf8),
+                      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let focused = payload["focused"] as? Bool else { return }
+                NotificationCenter.default.post(
+                    name: .rendererTextInputFocusChanged,
+                    object: nil,
+                    userInfo: ["tabId": tabId, "focused": focused]
+                )
+                return
+            }
             if name == "com.actrium.rendererCaret" {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker else { return }
@@ -541,7 +588,7 @@ final class RendererProcessPool: ObservableObject {
                         response = RealmServiceReply(id: request.id, payload: payload)
                     } catch {
                         AppLogger.reactNative.warning("Realm Service call failed: \(error.localizedDescription)")
-                        response = RealmServiceReply(id: request.id, error: error.localizedDescription)
+                        response = RealmServiceReply(id: request.id, failure: RealmServiceFailure(serviceError: error))
                     }
                     guard let self, let worker, self.worker(for: tabId) === worker,
                           let data = try? JSONEncoder().encode(response) else { return }
@@ -567,6 +614,8 @@ final class RendererProcessPool: ObservableObject {
                 localName = XPCNotificationBridge.restoreHistoryGroup
             case "com.actro.clearHistory":
                 localName = XPCNotificationBridge.clearHistory
+            case "com.actrium.setHistoryPage":
+                localName = XPCNotificationBridge.setHistoryPage
             case "com.actro.openURLFromStartPage":
                 localName = XPCNotificationBridge.openURLFromStartPage
             case "com.actrium.capabilityPermissionRequest":
@@ -578,14 +627,27 @@ final class RendererProcessPool: ObservableObject {
 
             var userInfo: [AnyHashable: Any]?
             if let data = userInfoJSON.data(using: .utf8),
-               let decoded = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               !decoded.isEmpty {
+               let decoded = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 userInfo = decoded
+            }
+            switch localName {
+            case XPCNotificationBridge.openBookmark, XPCNotificationBridge.deleteBookmark,
+                 XPCNotificationBridge.openHistoryItem, XPCNotificationBridge.deleteHistoryItem,
+                 XPCNotificationBridge.clearHistory, XPCNotificationBridge.restoreHistoryGroup,
+                 XPCNotificationBridge.setHistoryPage:
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      worker.id == self.systemWorkerId,
+                      self.worker(for: tabId) === worker,
+                      var scopedInfo = userInfo else { return }
+                scopedInfo["tabId"] = tabId
+                userInfo = scopedInfo
+            default:
+                break
             }
             NotificationCenter.default.post(
                 name: localName,
                 object: nil,
-                userInfo: userInfo
+                userInfo: userInfo?.isEmpty == false ? userInfo : nil
             )
         }
 
@@ -621,6 +683,22 @@ final class RendererProcessPool: ObservableObject {
         }
     }
 
+    private func handleFileImport(_ json: String, tabId: UUID, worker: Worker) async {
+        do {
+            let reply = try await fileImport.reply(to: json, tabId: tabId) { reloadKey in
+                guard self.worker(for: tabId) === worker else { return nil }
+                return self.fileImportWindow?(tabId, reloadKey)
+            }
+            guard let reply, self.worker(for: tabId) === worker else { return }
+            try worker.connection.sendHostEvent(
+                name: GuestFileImportCall.responseEvent, userInfoJSON: reply,
+                tabId: tabId.uuidString
+            )
+        } catch {
+            AppLogger.reactNative.error("Could not send file import result: \(error.localizedDescription)")
+        }
+    }
+
     private func handleTermination(of worker: Worker, status: Int32) {
         guard workers[worker.id] != nil else { return }
         worker.isTerminating = true
@@ -628,6 +706,7 @@ final class RendererProcessPool: ObservableObject {
 
         let affectedTabs = worker.tabs
         for tabId in affectedTabs {
+            fileImport.cancel(tabId: tabId)
             tabWorkerMap.removeValue(forKey: tabId)
         }
         if let fingerprint = worker.fingerprint {

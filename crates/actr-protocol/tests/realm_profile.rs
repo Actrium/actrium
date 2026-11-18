@@ -1,7 +1,7 @@
 //! Shared Realm Profile vectors exercise both the JSON Schema and the real
 //! signature/successor verifier. Schema acceptance alone never grants trust.
 
-use actr_protocol::realm_profile::{RealmProfile, jcs};
+use actr_protocol::realm_profile::{RealmPackageSelection, RealmProfile, jcs};
 use actr_protocol::{KeyPinOutcome, RealmSigningKeys};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -259,6 +259,8 @@ fn published_echo_example_selects_service_and_front() {
     let (service, front) = checked.selection.as_ref().unwrap().selected().unwrap();
     assert_eq!(service.r#type, "publisher.example/echo@0.1.1");
     assert_eq!(front.r#type, "publisher.example/echo-ui@0.1.1");
+    assert!(service.dependencies.is_empty());
+    assert!(front.dependencies.is_empty());
     assert!(schema().is_valid(&serde_json::from_slice(bytes).unwrap()));
     let text = std::str::from_utf8(bytes).unwrap();
     for invalid in [
@@ -274,4 +276,84 @@ fn published_echo_example_selects_service_and_front() {
     ] {
         assert!(RealmProfile::verify(invalid.as_bytes(), "echo@realm.example", &trusted).is_err());
     }
+}
+
+#[test]
+fn dependency_selections_match_schema_and_reject_missing_targets() {
+    let vectors = vectors();
+    let schema = schema();
+    for (name, bindings, schema_valid, valid) in [
+        ("empty", json!({}), true, true),
+        ("selected service", json!({"service": "notes"}), true, true),
+        (
+            "case-sensitive alias",
+            json!({"EchoService": "notes"}),
+            true,
+            true,
+        ),
+        ("self reference", json!({"self": "ui"}), true, true),
+        ("wrong Front service", json!({"service": "ui"}), true, false),
+        ("missing target", json!({"service": "missing"}), true, false),
+        (
+            "invalid reference",
+            json!({"service": "Notes"}),
+            false,
+            false,
+        ),
+        ("empty reference", json!({"service": ""}), false, false),
+        ("empty alias", json!({"": "notes"}), false, false),
+        (
+            "untrimmed alias",
+            json!({" service": "notes"}),
+            false,
+            false,
+        ),
+        (
+            "trailing newline",
+            json!({"service\n": "notes"}),
+            false,
+            false,
+        ),
+        ("null map", Value::Null, false, false),
+        ("array map", json!(["notes"]), false, false),
+        (
+            "non-string target",
+            json!({"service": ["notes"]}),
+            false,
+            false,
+        ),
+    ] {
+        let mut document = vectors["profiles"]["active"]["document"].clone();
+        document["packages"]["ui"]["dependencies"] = bindings;
+        assert_eq!(schema.is_valid(&document), schema_valid, "{name}");
+        let result = serde_json::from_value::<RealmPackageSelection>(document)
+            .map_err(|error| error.to_string())
+            .and_then(|selection| selection.check());
+        assert_eq!(result.is_ok(), valid, "{name}: {result:?}");
+    }
+}
+
+#[test]
+fn dependency_selection_example_round_trips_and_allows_cycles() {
+    let mut document = vectors()["profiles"]["active"]["document"].clone();
+    document.as_object_mut().unwrap().retain(|key, _| {
+        matches!(
+            key.as_str(),
+            "primary_package" | "front_package" | "packages"
+        )
+    });
+    let mut index = document["packages"]["notes"].clone();
+    index["type"] = json!("publisher.example/index@1.0.0");
+    document["packages"]["index"] = index;
+    document["packages"]["ui"]["dependencies"] = json!({"service": "notes"});
+    document["packages"]["notes"]["dependencies"] = json!({"index": "index"});
+    let mut selection: RealmPackageSelection = serde_json::from_value(document.clone()).unwrap();
+    selection.check().unwrap();
+    assert_eq!(selection.packages["ui"].dependencies["service"], "notes");
+    assert_eq!(selection.packages["notes"].dependencies["index"], "index");
+    assert_eq!(serde_json::to_value(&selection).unwrap(), document);
+
+    selection.packages.get_mut("index").unwrap().dependencies =
+        [("notes".into(), "notes".into())].into();
+    selection.check().unwrap();
 }

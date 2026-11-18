@@ -1659,6 +1659,11 @@ void uniffi_actrium_core_fn_func_validate_installation_id(RustBuffer id, RustCal
 RustBuffer uniffi_actrium_core_fn_func_verify_actr_package(RustBuffer archive, RustBuffer trusted_public_key, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTRIUM_CORE_FN_FUNC_VERIFY_REALM_FRONT_PACKAGE
+#define UNIFFI_FFIDEF_UNIFFI_ACTRIUM_CORE_FN_FUNC_VERIFY_REALM_FRONT_PACKAGE
+RustBuffer uniffi_actrium_core_fn_func_verify_realm_front_package(RustBuffer archive, RustBuffer trusted_public_key, RustBuffer profile, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_FFI_ACTRIUM_CORE_RUSTBUFFER_ALLOC
 #define UNIFFI_FFIDEF_FFI_ACTRIUM_CORE_RUSTBUFFER_ALLOC
 RustBuffer ffi_actrium_core_rustbuffer_alloc(uint64_t size, RustCallStatus *_Nonnull out_status
@@ -3502,6 +3507,12 @@ uint16_t uniffi_actrium_core_checksum_func_validate_installation_id(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRIUM_CORE_CHECKSUM_FUNC_VERIFY_ACTR_PACKAGE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRIUM_CORE_CHECKSUM_FUNC_VERIFY_ACTR_PACKAGE
 uint16_t uniffi_actrium_core_checksum_func_verify_actr_package(void
+
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTRIUM_CORE_CHECKSUM_FUNC_VERIFY_REALM_FRONT_PACKAGE
+#define UNIFFI_FFIDEF_UNIFFI_ACTRIUM_CORE_CHECKSUM_FUNC_VERIFY_REALM_FRONT_PACKAGE
+uint16_t uniffi_actrium_core_checksum_func_verify_realm_front_package(void
 
 );
 #endif

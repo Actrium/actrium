@@ -30,6 +30,12 @@ enum CardStyle {
     /// Spacing between title bar items
     static let titleBarItemSpacing: CGFloat = 8
 
+    static let closeButtonSize: CGFloat = 20
+    static let borderWidth: CGFloat = 1
+    static let shadowOpacity: Float = 0.3
+    static let shadowRadius: CGFloat = 5
+    static let shadowOffset = CGSize(width: 0, height: 2)
+
     // MARK: Close Icon Style
 
     /// Close icon SF Symbol name
@@ -65,7 +71,7 @@ extension CardStyle {
     static func closeIcon() -> some View {
         Image(systemName: closeIconName)
             .font(.system(size: closeIconFontSize))
-            .foregroundColor(.white.opacity(closeIconOpacity))
+            .foregroundStyle(Color.secondary.opacity(closeIconOpacity))
     }
 
     /// Title text view - use this in SwiftUI views for visual consistency
@@ -73,7 +79,7 @@ extension CardStyle {
     static func titleText(_ title: String, placeholder: String = "New Tab") -> some View {
         Text(title.isEmpty ? placeholder : title)
             .font(.system(size: titleFontSize, weight: titleFontWeight))
-            .foregroundColor(.white.opacity(titleOpacity))
+            .foregroundStyle(Color.primary.opacity(titleOpacity))
             .lineLimit(1)
     }
 
@@ -87,7 +93,7 @@ extension CardStyle {
         HStack(spacing: titleBarItemSpacing) {
             Button(action: onClose) {
                 closeIcon()
-                    .frame(width: 20, height: 20)
+                    .frame(width: closeButtonSize, height: closeButtonSize)
             }
             .buttonStyle(.plain)
             .contentShape(Rectangle())
@@ -109,7 +115,7 @@ extension CardStyle {
     static func renderCloseIconImage() -> (image: NSImage, size: CGSize) {
         let iconView = Image(systemName: closeIconName)
             .font(.system(size: closeIconFontSize))
-            .foregroundColor(.white.opacity(closeIconOpacity))
+            .foregroundStyle(Color(nsColor: .secondaryLabelColor).opacity(closeIconOpacity))
 
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
         let renderer = ImageRenderer(content: iconView)
@@ -126,7 +132,7 @@ extension CardStyle {
 
         // Fallback to NSImage API
         let config = NSImage.SymbolConfiguration(pointSize: closeIconFontSize, weight: .regular)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor.white.withAlphaComponent(closeIconOpacity)]))
+            .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor.secondaryLabelColor.withAlphaComponent(closeIconOpacity)]))
         let fallbackImage = NSImage(systemSymbolName: closeIconName, accessibilityDescription: nil)?
             .withSymbolConfiguration(config) ?? NSImage()
         return (fallbackImage, CGSize(width: closeIconFontSize, height: closeIconFontSize))
@@ -139,6 +145,6 @@ extension CardStyle {
 
     /// Title text color for CATextLayer
     static var titleColor: CGColor {
-        NSColor.white.withAlphaComponent(titleOpacity).cgColor
+        NSColor.labelColor.withAlphaComponent(titleOpacity).cgColor
     }
 }

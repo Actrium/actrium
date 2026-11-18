@@ -262,26 +262,6 @@ ensure_keychain_for_import() {
   IMPORTED_P12=1
 }
 
-# Sign the top-level .dylib and .framework entries of a directory, inside out:
-# dylibs first, then frameworks.
-sign_nested_code() {
-  local dir="$1"
-
-  [ -d "${dir}" ] || return 0
-
-  while IFS= read -r -d '' dylib; do
-    echo "    Signing dylib: $(basename "${dylib}")"
-    codesign -f -o runtime --timestamp -s "${IDENTITY_NAME}" \
-      ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} "${dylib}"
-  done < <(find "${dir}" -maxdepth 1 -type f -name '*.dylib' -print0)
-
-  while IFS= read -r -d '' framework; do
-    echo "    Signing framework: $(basename "${framework}")"
-    codesign -f -o runtime --timestamp -s "${IDENTITY_NAME}" \
-      ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} "${framework}"
-  done < <(find "${dir}" -maxdepth 1 -type d -name '*.framework' -print0)
-}
-
 if [ "${SKIP_SIGNING}" -eq 0 ]; then
   [ -n "${IDENTITY_NAME:-}" ] || die "signing requires IDENTITY_NAME (or use --skip-signing/--unsigned)"
   [ -f "${APP_ENTITLEMENTS}" ] || die "entitlements file does not exist: ${APP_ENTITLEMENTS}"
@@ -289,38 +269,19 @@ if [ "${SKIP_SIGNING}" -eq 0 ]; then
 
   ensure_keychain_for_import
 
-  CODESIGN_KEYCHAIN_ARGS=()
   NOTARY_KEYCHAIN_ARGS=()
   if [ "${IMPORTED_P12}" -eq 1 ]; then
-    CODESIGN_KEYCHAIN_ARGS=(--keychain "${KEYCHAIN_PATH}")
     NOTARY_KEYCHAIN_ARGS=(--keychain "${KEYCHAIN_PATH}")
   elif [ -n "${KEYCHAIN_PATH}" ]; then
     NOTARY_KEYCHAIN_ARGS=(--keychain "${KEYCHAIN_PATH}")
   fi
 
-  echo "==> Signing the app (inside out, without --deep)"
-
-  # The embedded renderer helper (ActriumRenderer.app).
-  HELPER_APP="${APP_PATH}/Contents/Helpers/ActriumRenderer.app"
-  if [ -d "${HELPER_APP}" ]; then
-    sign_nested_code "${HELPER_APP}/Contents/Frameworks"
-    echo "    Signing helper: ActriumRenderer.app"
-    codesign -f -o runtime --timestamp \
-      --entitlements "${RENDERER_ENTITLEMENTS}" \
-      -s "${IDENTITY_NAME}" \
-      ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} "${HELPER_APP}"
-  fi
-
-  # Frameworks inside the main app (Pods, SwiftPM, Hermes, etc.).
-  sign_nested_code "${APP_PATH}/Contents/Frameworks"
-
-  echo "    Signing the main app: ${APP_SCHEME}.app"
-  codesign -f -o runtime --timestamp \
-    --entitlements "${APP_ENTITLEMENTS}" \
-    -s "${IDENTITY_NAME}" \
-    ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} "${APP_PATH}"
-
-  codesign -vvv "${APP_PATH}"
+  IDENTITY_NAME="${IDENTITY_NAME}" \
+    KEYCHAIN_PATH="${KEYCHAIN_PATH}" \
+    APP_ENTITLEMENTS="${APP_ENTITLEMENTS}" \
+    RENDERER_ENTITLEMENTS="${RENDERER_ENTITLEMENTS}" \
+    CODESIGN_TIMESTAMP=secure \
+    "${SCRIPT_DIR}/sign-app.sh" "${APP_PATH}"
 else
   echo "==> Skipping signing (--skip-signing/--unsigned)"
 fi

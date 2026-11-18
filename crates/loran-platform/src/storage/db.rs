@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const LORAN_SCHEMA_VERSION: i64 = 11;
+const LORAN_SCHEMA_VERSION: i64 = 12;
 const LORAN_SCHEMA_VERSION_WITH_REALM_CLIENT_KEYS: i64 = 10;
 
 /// Database manager
@@ -51,8 +51,10 @@ impl Database {
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
             .fetch_one(&mut *connection)
             .await?;
-        if version == LORAN_SCHEMA_VERSION || version == LORAN_SCHEMA_VERSION_WITH_REALM_CLIENT_KEYS
-        {
+        if matches!(
+            version,
+            LORAN_SCHEMA_VERSION_WITH_REALM_CLIENT_KEYS | 11 | LORAN_SCHEMA_VERSION
+        ) {
             return Ok(version);
         }
 
@@ -105,6 +107,27 @@ impl Database {
         )
         .execute(&mut *tx)
         .await?;
+
+        // Rows from earlier schemas have no override and remain invite-only.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_admission (
+                realm TEXT PRIMARY KEY REFERENCES realm(name) ON DELETE CASCADE,
+                policy TEXT NOT NULL
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_open_join (
+                realm TEXT NOT NULL REFERENCES realm(name) ON DELETE CASCADE,
+                admitted_at INTEGER NOT NULL
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS realm_open_join_time ON realm_open_join(realm, admitted_at)")
+            .execute(&mut *tx)
+            .await?;
 
         // Keep the first package selection for idempotent external-domain creation retries.
         sqlx::query(
@@ -629,6 +652,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn v11_realms_reopen_invite_only_and_keep_memberships() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let old = Database::new(dir.path()).await?;
+        let pool = old.get_pool();
+        sqlx::query("DROP TABLE realm_open_join")
+            .execute(pool)
+            .await?;
+        sqlx::query("DROP TABLE realm_admission")
+            .execute(pool)
+            .await?;
+        sqlx::query("INSERT INTO realm (name, created_at) VALUES ('old@example.com',1)")
+            .execute(pool)
+            .await?;
+        sqlx::query("INSERT INTO realm_member (realm,member_id,role,status,created_at) VALUES ('old@example.com','existing','owner','active',1)").execute(pool).await?;
+        sqlx::query("PRAGMA user_version=11").execute(pool).await?;
+        pool.close().await;
+        let upgraded = Database::new(dir.path()).await?;
+        let mut conn = upgraded.get_pool().acquire().await?;
+        let realm = crate::realm::Realm::get_on(&mut conn, "old@example.com")
+            .await?
+            .unwrap();
+        assert_eq!(realm.policy, Default::default());
+        let members: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM realm_member WHERE realm=?")
+            .bind(&realm.name)
+            .fetch_one(&mut *conn)
+            .await?;
+        assert_eq!(members, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn realm_name_is_immutable_and_retirement_is_final() {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::new(dir.path()).await.unwrap();
@@ -792,9 +846,7 @@ mod tests {
     async fn unsupported_schema_version_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::new(dir.path()).await.unwrap();
-        sqlx::QueryBuilder::<sqlx::Sqlite>::new("PRAGMA user_version = ")
-            .push(LORAN_SCHEMA_VERSION - 2)
-            .build()
+        sqlx::query("PRAGMA user_version = 9")
             .execute(db.get_pool())
             .await
             .unwrap();
@@ -805,7 +857,7 @@ mod tests {
             .err()
             .expect("previous schema version must be rejected");
         let message = error.to_string();
-        assert!(message.contains(&format!("schema version {}", LORAN_SCHEMA_VERSION - 2)));
+        assert!(message.contains("schema version 9"));
         assert!(message.contains("rebuild the database"));
     }
 }

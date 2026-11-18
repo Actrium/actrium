@@ -46,7 +46,7 @@ class RealmMembershipActivity : AppCompatActivity() {
             }
         val invite =
             EditText(this).apply {
-                hint = "One-time Realm invitation"
+                hint = "Invitation (optional for open Realms)"
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
                 isSaveEnabled = false
                 importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
@@ -77,7 +77,12 @@ class RealmMembershipActivity : AppCompatActivity() {
                             } catch (
                                 error: RealmMembershipException.Rejected,
                             ) {
-                                status.text = error.code
+                                status.text =
+                                    when (error.code) {
+                                        "join_rate_limited" -> "Too many new members. Try joining again shortly."
+                                        "quota" -> "The Realm’s member, device or invitation limit has been reached."
+                                        else -> error.code
+                                    }
                             } catch (_: RealmMembershipException.Uncertain) {
                                 status.text =
                                     "Result unknown. Retry the same invitation; your key is saved."
@@ -104,7 +109,7 @@ class RealmMembershipActivity : AppCompatActivity() {
                 config.issuer,
                 true,
             )
-        action("Join / retry invitation") {
+        action("Join Realm") {
             val providerId = withContext(Dispatchers.Main) { provider.text.toString().trim() }
             val text = withContext(Dispatchers.Main) { invite.text.toString().trim() }
             preferences.edit().putString("provider:${config.realm}", providerId).commit()

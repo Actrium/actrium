@@ -20,6 +20,7 @@
     "bundle:ios": "cd packages/actrium && env -u NO_COLOR node node_modules/react-native/scripts/bundle.js --platform ios --dev false --entry-file index.ts --bundle-output /tmp/actrium-ios-index.bundle --assets-dest /tmp/actrium-ios-assets",
     "bundle:android": "cd android && env -u NO_COLOR node node_modules/react-native/cli.js bundle --platform android --dev false --entry-file index.js --bundle-output /tmp/actrium-android-index.bundle --assets-dest /tmp/actrium-android-assets",
     "bundle:macos:system": "cd macos && ./scripts/bundle-actrium-runtime.sh --target system --dev",
+    "build:macos": "macos/scripts/build-app.sh",
     "package:macos:dmg": "macos/scripts/package-dmg.sh",
     "verify:all": "npm run check:language && npm run check:retired-protocols && npm run check:repository-assets && npm run check:migration && npm run verify:rust && npm run verify:apple-core && npm run check:generated && npm run check:rust-boundary && npm run check:windows-layout && npm run verify:runtime && npm run check:bundles && npm run verify:android && npm run verify:ios && npm run verify:macos && npm run verify:windows",
     "verify:rust": "cargo test -p actrium-core -p actrium-vault -p actrium-sync-server",
@@ -28,7 +29,7 @@
     "verify:android": "cd android/android && ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --console=plain --stacktrace --no-daemon",
     "verify:android-device": "cd android/android && ./gradlew :app:connectedDebugAndroidTest --console=plain --stacktrace --no-daemon",
     "verify:ios": "scripts/actrium/filter-xcodebuild-output.sh xcodebuild -workspace ios/Actrium.xcworkspace -scheme Actrium -configuration Debug -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build",
-    "verify:macos": "scripts/actrium/filter-xcodebuild-output.sh xcodebuild -workspace macos/Actrium.xcworkspace -scheme Actrium -configuration Debug -destination \"platform=macOS,arch=$(uname -m)\" CODE_SIGNING_ALLOWED=NO build",
+    "verify:macos": "macos/scripts/build-app.sh --unsigned",
     "verify:windows": "bash scripts/actrium/verify-windows.sh"
   }
 }

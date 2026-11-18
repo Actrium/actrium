@@ -83,7 +83,7 @@ the Host.
 
 Runnable examples:
 
-- [`packages/actrium/keel-guest-examples/counterapp`](../../packages/actrium/keel-guest-examples/counterapp)
+- [CounterApp in ACTR Hub](https://github.com/Actrium/actr-hub/tree/main/counterapp)
 - [`examples/actrium/echo`](../../examples/actrium/echo)
 
 See the [Actor Package manifest](manifest-specification.md) and normative

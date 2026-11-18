@@ -5,13 +5,64 @@ import AppKit
 
 /// Simple in-memory cache for favicons to avoid repeated network requests
 /// Uses a thread-safe dictionary for synchronous access from main thread
-private final class FaviconCache: @unchecked Sendable {
+final class FaviconCache: @unchecked Sendable {
     static let shared = FaviconCache()
+    private static let maximumFaviconBytes = 1_048_576
 
     private var cache: [String: NSImage] = [:]
     private let lock = NSLock()
+    private let session: URLSession
 
-    private init() {}
+    private init() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        session = URLSession(configuration: configuration)
+    }
+
+    private static func originKey(for pageURL: URL) -> String? {
+        guard let scheme = pageURL.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = pageURL.host?.lowercased(), !host.isEmpty else { return nil }
+        return "\(scheme)://\(host)\(pageURL.port.map { ":\($0)" } ?? "")"
+    }
+
+    func getSync(for pageURL: URL) -> NSImage? {
+        guard let key = Self.originKey(for: pageURL) else { return nil }
+        return getSync(key)
+    }
+
+    func image(for pageURL: URL) async -> NSImage? {
+        if let cached = getSync(for: pageURL) { return cached }
+        guard let key = Self.originKey(for: pageURL),
+              var components = URLComponents(url: pageURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.user = nil
+        components.password = nil
+        components.path = "/favicon.ico"
+        components.query = nil
+        components.fragment = nil
+        guard let url = components.url else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 12
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            guard (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false,
+                  response.expectedContentLength <= Self.maximumFaviconBytes else { return nil }
+            var data = Data()
+            data.reserveCapacity(min(max(Int(response.expectedContentLength), 0), Self.maximumFaviconBytes))
+            for try await byte in bytes {
+                guard data.count < Self.maximumFaviconBytes else { return nil }
+                data.append(byte)
+            }
+            guard let image = NSImage(data: data) else { return nil }
+            set(key, image: image)
+            return image
+        } catch {
+            return nil
+        }
+    }
 
     /// Synchronous get - safe to call from main thread without await
     func getSync(_ host: String) -> NSImage? {
@@ -81,6 +132,8 @@ struct CrossWindowTabData: Codable {
     let urlString: String?
     let groupId: String?
     let unifiedScript: String?
+    let guestExtractedPath: String?
+    let guestEntry: String?
     let capabilityManifestJSON: String?
     let permissions: [String]?
     let leftPanelScript: String?
@@ -392,6 +445,8 @@ struct TabOutlineView: NSViewRepresentable {
                 urlString: tab.url?.absoluteString,
                 groupId: tab.groupId?.uuidString,
                 unifiedScript: tab.unifiedScript,
+                guestExtractedPath: tab.guestExtractedPath,
+                guestEntry: tab.guestEntry,
                 capabilityManifestJSON: tab.capabilityManifestJSON,
                 permissions: tab.permissions,
                 leftPanelScript: tab.leftPanelScript,
@@ -489,6 +544,8 @@ struct TabOutlineView: NSViewRepresentable {
                     leftPanelScript: tabData.leftPanelScript,
                     rightPanelScript: tabData.rightPanelScript,
                     unifiedScript: tabData.unifiedScript,
+                    guestExtractedPath: tabData.guestExtractedPath,
+                    guestEntry: tabData.guestEntry,
                     capabilityManifestJSON: tabData.capabilityManifestJSON,
                     permissions: tabData.permissions ?? [],
                     backgroundColor: tabData.backgroundColor
@@ -768,6 +825,8 @@ struct TabOutlineView: NSViewRepresentable {
                 if let url = tab.url?.absoluteString { data["urlString"] = url }
                 if let systemType = tab.systemTabType { data["systemTabType"] = systemType.rawValue }
                 if let script = tab.unifiedScript { data["unifiedScript"] = script }
+                if let path = tab.guestExtractedPath { data["guestExtractedPath"] = path }
+                if let entry = tab.guestEntry { data["guestEntry"] = entry }
                 if let manifest = tab.capabilityManifestJSON {
                     data["capabilityManifestJSON"] = manifest
                 }
@@ -1387,7 +1446,7 @@ private class RoundedRowView: NSTableRowView {
     override func drawBackground(in dirtyRect: NSRect) {
         if !isSelected && isHovering {
             let path = NSBezierPath(roundedRect: contentRect, xRadius: 8, yRadius: 8)
-            NSColor.white.withAlphaComponent(0.06).setFill()
+            NSColor.labelColor.withAlphaComponent(0.06).setFill()
             path.fill()
         }
     }
@@ -1493,14 +1552,14 @@ private class TabRowView: NSView {
             if let appIcon = tab.appIcon,
                let image = NSImage(systemSymbolName: appIcon, accessibilityDescription: nil) {
                 iconView.image = image
-                iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+                iconView.contentTintColor = isSelected ? .alternateSelectedControlTextColor : .secondaryLabelColor
             } else if let systemType = tab.systemTabType,
                       let image = NSImage(systemSymbolName: systemType.icon, accessibilityDescription: nil) {
                 iconView.image = image
-                iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+                iconView.contentTintColor = isSelected ? .alternateSelectedControlTextColor : .secondaryLabelColor
             } else {
                 iconView.image = NSImage(systemSymbolName: isSelected ? "doc.text.fill" : "doc.text", accessibilityDescription: nil)
-                iconView.contentTintColor = isSelected ? .controlAccentColor : .secondaryLabelColor
+                iconView.contentTintColor = isSelected ? .alternateSelectedControlTextColor : .secondaryLabelColor
             }
         }
 
@@ -1526,7 +1585,7 @@ private class TabRowView: NSView {
         // Title
         let titleLabel = NSTextField(labelWithString: tab.title)
         titleLabel.font = NSFont.systemFont(ofSize: 13, weight: isSelected ? .medium : .regular)
-        titleLabel.textColor = .labelColor
+        titleLabel.textColor = isSelected ? .alternateSelectedControlTextColor : .labelColor
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -1541,7 +1600,7 @@ private class TabRowView: NSView {
         closeButton.isBordered = false
         closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close tab")
         closeButton.imageScaling = .scaleProportionallyUpOrDown
-        closeButton.contentTintColor = .secondaryLabelColor
+        closeButton.contentTintColor = isSelected ? .alternateSelectedControlTextColor : .secondaryLabelColor
         closeButton.target = self
         closeButton.action = #selector(closeTabClicked)
         closeButton.translatesAutoresizingMaskIntoConstraints = false

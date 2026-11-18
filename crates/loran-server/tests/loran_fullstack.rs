@@ -5105,6 +5105,171 @@ fn any_realm_allow_acl(from: &str) -> Acl {
 
 #[tokio::test]
 #[serial]
+async fn admin_realm_admission_controls_real_issuer_joins() {
+    use actr_protocol::realm_membership::{MembershipOp, Role};
+    use reqwest::StatusCode;
+    const CLOSED: &str = "invited@localhost";
+    const OPEN: &str = "open@localhost";
+    let harness = LoranHarness::start_tls(DEFAULT_TOKEN_TTL).await;
+    let client = test_http_client();
+    let base = harness.base_url();
+    let login: Value = client
+        .post(format!("{base}/admin/api/auth/login"))
+        .json(&json!({"password":"testpassword123"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let token = login["token"].as_str().unwrap();
+    let closed = create_provider_realm(&client, &base, token, CLOSED).await;
+    assert_eq!(closed["realm"]["policy"]["membership"], "invite-only");
+    let mut body = create_body(OPEN);
+    body["policy"] = json!({"membership":"open","max_members":3,"open_joins_per_minute":1});
+    let open = create_provider_realm_with(&client, &base, token, body).await;
+    assert_eq!(open["realm"]["effective_max_members"], 3);
+
+    let free = async |realm: &str, device: &str| {
+        let key = client_key(device);
+        let mut request = membership_request(MembershipOp::Join, realm);
+        request.public_key =
+            Some(base64::engine::general_purpose::STANDARD.encode(key.verifying_key().as_bytes()));
+        client
+            .post(format!("{base}/issuer/membership"))
+            .json(&request.sign(&key))
+            .send()
+            .await
+            .unwrap()
+    };
+    assert_eq!(
+        free(CLOSED, "uninvited").await.status(),
+        StatusCode::BAD_REQUEST
+    );
+    let (status, owner) = join(
+        &base,
+        CLOSED,
+        closed["owner_invite"].as_str().unwrap(),
+        "closed-owner",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(owner["role"], "owner");
+    let editor_invite = async |realm: &str, owner: &str| {
+        let mut invitation = membership_request(MembershipOp::CreateInvite, realm);
+        invitation.role = Some(Role::Editor);
+        invitation.invite_expires_at =
+            Some((chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339());
+        let (status, issued) = membership(&base, invitation, owner).await;
+        assert_eq!(status, StatusCode::OK);
+        issued["invite"].as_str().unwrap().to_owned()
+    };
+    let invited = editor_invite(CLOSED, "closed-owner").await;
+    let (status, editor) = join(&base, CLOSED, &invited, "invited-editor").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(editor["role"], "editor");
+    assert_eq!(
+        join(&base, CLOSED, &invited, "different-device").await.1["error"],
+        "invite_used"
+    );
+
+    let first: Value = free(OPEN, "first")
+        .await
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(first["role"], "viewer");
+    assert_eq!(
+        free(OPEN, "first").await.json::<Value>().await.unwrap(),
+        first
+    );
+    let throttled = free(OPEN, "second").await;
+    assert_eq!(throttled.status(), StatusCode::TOO_MANY_REQUESTS);
+    let wait: u64 = throttled.headers()["retry-after"]
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((1..=60).contains(&wait));
+    let message: Value = throttled.json().await.unwrap();
+    assert_eq!(message["error"], "join_rate_limited");
+    assert_eq!(message["retry_after_secs"], wait);
+
+    let admin_url = format!("{base}/admin/api/realms/open%40localhost");
+    let edit = async |mode: &str, limit: u32| {
+        client
+            .put(format!("{admin_url}/admission"))
+            .bearer_auth(token)
+            .json(&json!({"membership":mode,"max_members":limit,"open_joins_per_minute":10}))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+    };
+    edit("open", 2).await;
+    assert_eq!(
+        free(OPEN, "second").await.json::<Value>().await.unwrap()["error"],
+        "quota"
+    );
+    let (status, owner) = join(
+        &base,
+        OPEN,
+        open["owner_invite"].as_str().unwrap(),
+        "open-owner",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(owner["role"], "owner");
+    edit("open", 3).await;
+    let (a, b) = tokio::join!(free(OPEN, "race-a"), free(OPEN, "race-b"));
+    let mut statuses = [a.status().as_u16(), b.status().as_u16()];
+    statuses.sort();
+    assert_eq!(statuses, [200, 429]);
+    let view: Value = client
+        .get(&admin_url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(view["realm"]["active_members"], 3);
+    assert_eq!(view["realm"]["effective_max_members"], 3);
+
+    let waiting = editor_invite(OPEN, "open-owner").await;
+    let (status, full) = join(&base, OPEN, &waiting, "waiting-editor").await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(full["error"], "quota");
+
+    edit("invite-only", 4).await;
+    let (status, joined) = join(&base, OPEN, &waiting, "waiting-editor").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(joined["role"], "editor");
+    assert_eq!(
+        free(OPEN, "after-close").await.status(),
+        StatusCode::BAD_REQUEST
+    );
+    let profile: Value = client
+        .get(format!("{admin_url}/profile"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(profile["profile"]["policy"]["membership"], "invite-only");
+    assert!(profile["profile"]["signature"].is_object());
+}
+
+#[tokio::test]
+#[serial]
 async fn admin_api_manages_many_realms_by_name() {
     let harness = LoranHarness::start_tls(DEFAULT_TOKEN_TTL).await;
     let client = test_http_client();
@@ -5558,11 +5723,20 @@ async fn create_provider_realm(
     token: &str,
     realm: &str,
 ) -> Value {
+    create_provider_realm_with(client, base, token, create_body(realm)).await
+}
+
+async fn create_provider_realm_with(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    body: Value,
+) -> Value {
     for _ in 0..50 {
         let response = client
             .post(format!("{base}/admin/api/realms"))
             .bearer_auth(token)
-            .json(&create_body(realm))
+            .json(&body)
             .send()
             .await
             .expect("create realm");

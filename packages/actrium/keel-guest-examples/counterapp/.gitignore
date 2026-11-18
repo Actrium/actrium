@@ -1,7 +1,0 @@
-
-# Debug project (generated)
-.debug/
-workload/guest.js
-workload/*.png
-dist/
-ui/capability-manifest.json
