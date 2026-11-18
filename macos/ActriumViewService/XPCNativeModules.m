@@ -46,6 +46,18 @@ RCT_EXTERN_METHOD(requestGrant:(NSString *)tabId capability:(NSString *)capabili
 
 @end
 
+@interface RCT_EXTERN_MODULE(GuestFileImport, NSObject)
+
+RCT_EXTERN_METHOD(pick:(NSString *)tabId
+                  reloadKey:(NSNumber *)reloadKey
+                  source:(NSString *)source
+                  accept:(NSArray *)accept
+                  multiple:(BOOL)multiple
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+@end
+
 // MARK: - StartPageModule
 
 @interface RCT_EXTERN_MODULE(StartPageModule, NSObject)

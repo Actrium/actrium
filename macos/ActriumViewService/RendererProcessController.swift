@@ -97,6 +97,32 @@ final class RendererProcessController {
     private let arguments: Arguments
     private let connection: IPCHelperConnection
     private var serviceCalls: [UUID: (RealmServiceReply) -> Void] = [:]
+    private var fileImports: [String: (id: UUID, reloadKey: Int, reply: (GuestFileImportReply) -> Void)] = [:]
+
+    static func pickFiles(
+        _ call: GuestFileImportCall, tabId: String, reply: @escaping (GuestFileImportReply) -> Void
+    ) {
+        guard let controller = RendererProcessLifetime.shared.controller,
+              controller.surfaces[tabId] != nil, controller.fileImports[tabId] == nil else {
+            reply(GuestFileImportReply(id: call.id, error: "The picker tab is unavailable or already selecting files."))
+            return
+        }
+        do {
+            let data = try JSONEncoder().encode(call)
+            try controller.connection.sendHostEvent(
+                name: GuestFileImportCall.requestEvent, userInfoJSON: String(decoding: data, as: UTF8.self), tabId: tabId
+            )
+            controller.fileImports[tabId] = (call.id, call.reloadKey, reply)
+            let requestId = call.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(GuestFileImportCall.timeoutSeconds)) {
+                [weak controller] in
+                guard let controller, controller.fileImports[tabId]?.id == requestId else { return }
+                controller.cancelFileImport(tabId, message: "The file selection timed out.")
+            }
+        } catch {
+            reply(GuestFileImportReply(id: call.id, error: "Could not contact the file picker."))
+        }
+    }
 
     static func callRealmService(
         tabId: String,
@@ -178,6 +204,10 @@ final class RendererProcessController {
 
     private func configureIPC() {
         connection.onHostEvent = { [weak self] name, json, tabId in
+            if name == GuestFileImportCall.responseEvent {
+                self?.receiveFileImport(json, tabId: tabId)
+                return
+            }
             if name == "com.actrium.rendererKeyboardFocus" {
                 guard let focused = Bool(json) else { return }
                 // Apply focus on the same queue as input so the next key
@@ -285,6 +315,9 @@ final class RendererProcessController {
             config = decoded
         }
 
+        if let pending = fileImports[tabId], pending.reloadKey != Int(request.reloadKey) {
+            cancelFileImport(tabId)
+        }
         config["tabId"] = tabId
         if config["title"] == nil {
             config["title"] = request.title
@@ -393,8 +426,21 @@ final class RendererProcessController {
     }
 
     private func destroyTab(_ tabId: String) {
+        cancelFileImport(tabId)
         surfaces.removeValue(forKey: tabId)?.close()
         reactNativeHost.destroyRendererEntry(tabId: tabId)
+    }
+
+    private func cancelFileImport(_ tabId: String, message: String = "The picker document changed or closed.") {
+        if let pending = fileImports.removeValue(forKey: tabId) {
+            pending.reply(GuestFileImportReply(id: pending.id, error: message))
+        }
+    }
+
+    private func receiveFileImport(_ json: String, tabId: String) {
+        guard let response = try? JSONDecoder().decode(GuestFileImportReply.self, from: Data(json.utf8)),
+              fileImports[tabId]?.id == response.id else { return }
+        fileImports.removeValue(forKey: tabId)?.reply(response)
     }
 
     private func terminate(reason: String) {

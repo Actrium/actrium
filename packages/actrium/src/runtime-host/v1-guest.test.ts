@@ -31,6 +31,14 @@ test('checks a signed manifest against the linkage before loading a Guest', () =
   expect(verifyV1RuntimeGuest('module.exports = {};', JSON.stringify(manifest), declarations).ok).toBe(false);
 });
 
+test('requires the package declaration for a linked file import picker', () => {
+  const linked: V1Linkage = { ...linkage, links: [['host:file-import', 'pick']] };
+  const profile = JSON.stringify(createV1CapabilityManifest(linked, contract));
+  const bundle = writeV1Bundle(linked, 'module.exports = {};');
+  expect(verifyV1RuntimeGuest(bundle, profile, ['host:file-import.pick']).ok).toBe(true);
+  expect(verifyV1RuntimeGuest(bundle, profile, []).ok).toBe(false);
+});
+
 test('exposes only linked Host methods and pins the route on the Host', async () => {
   const calls: string[] = [];
   const grants: string[] = [];
