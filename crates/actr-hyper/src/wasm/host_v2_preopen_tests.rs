@@ -98,10 +98,11 @@ fn started_wasi_preopen_timeout_does_not_block_mount_free_attach() {
             let root = tempfile::tempdir().unwrap();
             let node = tokio::time::timeout(
                 Duration::from_secs(20),
-                crate::tests::attach_wasi_fixture(&root, None, crate::WasiDataDir::Inherit),
+                crate::tests::attach_wasi_fixture(&root, None, crate::WasiDataDir::Inherit, None),
             )
             .await
-            .expect("mount-free attach must not wait for the preopen worker");
+            .expect("mount-free attach must not wait for the preopen worker")
+            .unwrap();
             node.attachment
                 .unwrap()
                 .node

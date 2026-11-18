@@ -233,6 +233,7 @@ impl ParserV1 {
             }),
             storage_root,
             wasi_data_dir,
+            wasi_data_access: hyper.wasi_data_access,
         })
     }
 
@@ -1248,6 +1249,46 @@ realm = "other@example.com"
         assert_eq!(
             config.storage_root,
             Some(tmpdir.path().join("config/store"))
+        );
+    }
+
+    #[test]
+    fn test_runtime_wasi_data_access() {
+        use crate::config::WasiDataAccess;
+
+        let tmpdir = TempDir::new().unwrap();
+        let path = tmpdir.path().join("actr.toml");
+        let with_dir = format!("{RUNTIME_BASE}\n[hyper]\nwasi_data_dir = \"workload-data\"\n");
+        let default_config = parse_runtime_str(&path, &with_dir).unwrap();
+        let read_only = parse_runtime_str(
+            &path,
+            &format!("{with_dir}wasi_data_access = \"read-only\"\n"),
+        )
+        .unwrap();
+        assert_eq!(default_config.wasi_data_access, WasiDataAccess::ReadWrite);
+        assert_eq!(read_only.wasi_data_access, WasiDataAccess::ReadOnly);
+        assert_eq!(
+            read_only.wasi_data_dir,
+            Some(tmpdir.path().join("workload-data"))
+        );
+    }
+
+    #[test]
+    fn test_runtime_rejects_misspelled_wasi_data_access() {
+        let tmpdir = TempDir::new().unwrap();
+        let path = tmpdir.path().join("actr.toml");
+        let config = format!(
+            "{RUNTIME_BASE}\n[hyper]\nwasi_data_dir = \"workload-data\"\nwasi_data_acess = \"read-only\"\n"
+        );
+        std::fs::write(&path, config).unwrap();
+
+        let error =
+            crate::ConfigParser::from_runtime_file(&path, runtime_test_package()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unknown field `wasi_data_acess`"),
+            "{error}"
         );
     }
 
