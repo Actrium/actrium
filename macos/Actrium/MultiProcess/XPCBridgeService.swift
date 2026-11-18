@@ -42,6 +42,7 @@ struct XPCTabConfig {
     let recentHistory: [[String: Any]]
     let reloadKey: Int
     let serviceCallUrl: String?
+    let serviceEventsUrl: String?
 
     func toDictionary(isOverviewMode: Bool) -> [String: Any] {
         var dict: [String: Any] = [
@@ -75,6 +76,9 @@ struct XPCTabConfig {
         }
         if let serviceCallUrl = serviceCallUrl {
             dict["serviceCallUrl"] = serviceCallUrl
+        }
+        if let serviceEventsUrl = serviceEventsUrl {
+            dict["serviceEventsUrl"] = serviceEventsUrl
         }
         if let appId = appId {
             dict["appId"] = appId

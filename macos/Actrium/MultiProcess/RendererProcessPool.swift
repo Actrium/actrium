@@ -108,7 +108,20 @@ final class RendererProcessPool: ObservableObject {
     private var prewarmRetryWorkItem: DispatchWorkItem?
 
     private init() {
+        RealmServiceBindings.shared.eventHandler = { tabId, event in
+            RendererProcessPool.shared.forwardServiceEvent(event, tabId: tabId)
+        }
         setupMemoryPressureHandling()
+    }
+
+    private func forwardServiceEvent(_ event: RealmServiceEvent, tabId: UUID) {
+        guard let worker = worker(for: tabId),
+              let data = try? JSONEncoder().encode(event) else { return }
+        try? worker.connection.sendHostEvent(
+            name: RealmServiceEventSubscription.eventEvent,
+            userInfoJSON: String(decoding: data, as: UTF8.self),
+            tabId: tabId.uuidString
+        )
     }
 
     // MARK: - Allocation
@@ -551,6 +564,40 @@ final class RendererProcessPool: ObservableObject {
                         tabId: tab
                     )
                 }
+                return
+            }
+            if name == RealmServiceEventSubscription.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let request = try? JSONDecoder().decode(
+                          RealmServiceEventSubscription.self, from: Data(userInfoJSON.utf8)
+                      ) else { return }
+                Task { [weak self, weak worker] in
+                    let reply: RealmServiceEventReply
+                    do {
+                        try await RealmServiceBindings.shared.subscribe(request, tabId: tabId)
+                        reply = RealmServiceEventReply(id: request.id)
+                    } catch {
+                        reply = RealmServiceEventReply(
+                            id: request.id, failure: RealmServiceFailure(serviceError: error)
+                        )
+                    }
+                    guard let self, let worker, self.worker(for: tabId) === worker,
+                          let data = try? JSONEncoder().encode(reply) else { return }
+                    try? worker.connection.sendHostEvent(
+                        name: RealmServiceEventSubscription.responseEvent,
+                        userInfoJSON: String(decoding: data, as: UTF8.self),
+                        tabId: tab
+                    )
+                }
+                return
+            }
+            if name == RealmServiceEventSubscription.cancelEvent {
+                guard let tabId = UUID(uuidString: tab),
+                      let request = try? JSONDecoder().decode(
+                          RealmServiceEventSubscription.self, from: Data(userInfoJSON.utf8)
+                      ) else { return }
+                RealmServiceBindings.shared.unsubscribe(request.id, tabId: tabId)
                 return
             }
             let localName: Notification.Name

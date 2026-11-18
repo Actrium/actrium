@@ -34,7 +34,7 @@ export type HostModules = HostModulesImplementation<ActriumContract>;
 
 /** Methods with a real Host implementation, excluding throwing placeholders. */
 export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
-  'host:service': new Set(['call']),
+  'host:service': new Set(['call', 'on']),
   'host:clipboard': new Set(['writeText']),
 };
 
@@ -80,6 +80,10 @@ export function createHostModules(options: {
   callActor: ActorCall;
   serviceEventSource?: ServiceEventSource;
   authorizeCapability: (capability: FrontCapability) => Promise<void>;
+  onCapabilityRevoked?: (
+    capability: FrontCapability,
+    listener: () => void
+  ) => () => void;
   writeClipboardText: (text: string) => Promise<void>;
 }): HostModules {
   let requestSequence = 0;
@@ -121,30 +125,34 @@ export function createHostModules(options: {
           throw new Error('Service event source is not available.');
         }
 
-        // Gate the subscription with authorization. Until authorization
-        // resolves, events are dropped. If it rejects, the subscription is
-        // torn down immediately. Continuous revocation handling (unsubscribing
-        // when the session or snapshot later loses service.on) is a follow-up.
+        // Authorization gates initial delivery and continuous snapshot/session
+        // revocation tears down the underlying native or HTTP transport.
         let allowed = false;
         let disposed = false;
+        let stopWatchingRevocation: (() => void) | undefined;
         const unsubscribe = options.serviceEventSource.subscribe((event) => {
           if (allowed && !disposed) handler(event);
         });
-        void options.authorizeCapability('service.on').then(
-          () => {
-            if (!disposed) allowed = true;
-          },
-          () => {
-            disposed = true;
-            unsubscribe();
-          }
-        );
-
-        return () => {
+        const cleanup = () => {
+          if (disposed) return;
           disposed = true;
           allowed = false;
+          stopWatchingRevocation?.();
+          stopWatchingRevocation = undefined;
           unsubscribe();
         };
+        void options.authorizeCapability('service.on').then(
+          () => {
+            if (disposed) return;
+            allowed = true;
+            const stopWatching = options.onCapabilityRevoked?.('service.on', cleanup);
+            if (disposed) stopWatching?.();
+            else stopWatchingRevocation = stopWatching;
+          },
+          cleanup
+        );
+
+        return cleanup;
       },
     },
     'host:assets': {

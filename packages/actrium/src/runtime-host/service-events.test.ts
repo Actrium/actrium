@@ -112,39 +112,86 @@ describe('createTestServiceEventSource', () => {
 });
 
 describe('createNativeServiceEventSource', () => {
-  test('fails closed when the native module lacks the event method', () => {
-    const source = createNativeServiceEventSource({}, 'tab-1', ['a']);
+  test('fails closed when the native module is unavailable', () => {
+    const source = createNativeServiceEventSource(undefined, 'tab-1', ['a']);
 
     expect(() => source.subscribe(() => {})).toThrow(
       'native Realm Service event bridge is unavailable'
     );
   });
 
-  test('registers through the native module and returns its unsubscribe', () => {
-    const received: { tabId: string; events: string[] }[] = [];
+  test('shares one actor subscription and filters native emitter events', async () => {
+    const subscribed: { tabId: string; events: string[] }[] = [];
+    const cancelled: string[] = [];
     const nativeModule = {
-      addServiceEventListener: (
-        tabId: string,
-        events: string[],
-        _listener: (event: { event: string; payloadBase64: string }) => void
-      ) => {
-        received.push({ tabId, events });
-        return () => {
-          received.pop();
-        };
+      addListener: () => {},
+      removeListeners: () => {},
+      subscribeServiceEvents: async (tabId: string, events: string[]) => {
+        subscribed.push({ tabId, events });
+        return 'subscription-1';
+      },
+      unsubscribeServiceEvents: (_tabId: string, subscriptionId: string) => {
+        cancelled.push(subscriptionId);
       },
     };
-    const source = createNativeServiceEventSource(
-      nativeModule,
-      'tab-1',
-      ['a', 'b']
-    );
+    let emitNative!: (event: unknown) => void;
+    const createEmitter = () => ({
+      addListener: (_event: 'realmServiceEvent', listener: (event: unknown) => void) => {
+        emitNative = listener;
+        return { remove: () => {} };
+      },
+    });
+    const source = createNativeServiceEventSource(nativeModule, 'tab-1', ['a'], createEmitter);
+    const first: string[] = [];
+    const second: string[] = [];
+    const unsubscribeFirst = source.subscribe((event) => first.push(event.event));
+    const unsubscribeSecond = source.subscribe((event) => second.push(event.event));
+    await Promise.resolve();
+    await Promise.resolve();
 
+    emitNative({
+      tabId: 'tab-1', subscriptionId: 'subscription-1', event: 'a', payloadBase64: 'AAEC',
+    });
+    emitNative({
+      tabId: 'other-tab', subscriptionId: 'subscription-1', event: 'a', payloadBase64: 'AAEC',
+    });
+    emitNative({
+      tabId: 'tab-1', subscriptionId: 'subscription-1', event: 'b', payloadBase64: 'AAEC',
+    });
+
+    expect(subscribed).toEqual([{ tabId: 'tab-1', events: ['a'] }]);
+    expect(first).toEqual(['a']);
+    expect(second).toEqual(['a']);
+
+    unsubscribeFirst();
+    expect(cancelled).toEqual([]);
+    unsubscribeSecond();
+    unsubscribeSecond();
+    expect(cancelled).toEqual(['subscription-1']);
+  });
+
+  test('cancels a native subscription that resolves after unsubscribe', async () => {
+    let resolveSubscription!: (id: string) => void;
+    const cancelled: string[] = [];
+    const nativeModule = {
+      addListener: () => {},
+      removeListeners: () => {},
+      subscribeServiceEvents: () => new Promise<string>((resolve) => {
+        resolveSubscription = resolve;
+      }),
+      unsubscribeServiceEvents: (_tabId: string, subscriptionId: string) => {
+        cancelled.push(subscriptionId);
+      },
+    };
+    const source = createNativeServiceEventSource(nativeModule, 'tab-1', ['a'], () => ({
+      addListener: () => ({ remove: () => {} }),
+    }));
     const unsubscribe = source.subscribe(() => {});
-    expect(received).toEqual([{ tabId: 'tab-1', events: ['a', 'b'] }]);
-
     unsubscribe();
-    expect(received).toHaveLength(0);
+    resolveSubscription('late-subscription');
+    await Promise.resolve();
+
+    expect(cancelled).toEqual(['late-subscription']);
   });
 });
 
@@ -167,7 +214,7 @@ describe('createHttpServiceEventSource', () => {
           },
         }),
         { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
-      )) as typeof fetch;
+      )) as unknown as typeof fetch;
 
     try {
       const source = createHttpServiceEventSource('https://example.com/events', ['a', 'b']);
@@ -206,7 +253,7 @@ describe('createHttpServiceEventSource', () => {
           },
         }),
         { status: 200 }
-      )) as typeof fetch;
+      )) as unknown as typeof fetch;
 
     try {
       const source = createHttpServiceEventSource('https://example.com/events', ['a']);

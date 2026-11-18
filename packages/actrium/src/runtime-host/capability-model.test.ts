@@ -59,7 +59,7 @@ describe('computeFrontCapabilities', () => {
   test('expands module shorthands to method-level capabilities', () => {
     expect(
       computeFrontCapabilities(base, withImplemented('host:assets.read'))
-    ).toEqual(['service.call', 'host:assets.read']);
+    ).toEqual(['service.call', 'service.on', 'host:assets.read']);
   });
 
   test('drops capabilities that require a grant until granted', () => {
@@ -196,7 +196,7 @@ describe('computeFrontCapabilities', () => {
 
   test('deduplicates a capability declared through aliases', () => {
     expect(
-      computeFrontCapabilities({ ...base, declared: ['service', 'actor.call'] })
+      computeFrontCapabilities({ ...base, declared: ['service.call', 'actor.call'] })
     ).toEqual(['service.call']);
   });
 
@@ -207,7 +207,7 @@ describe('computeFrontCapabilities', () => {
         declared: ['service'],
         hostSupported: new Set(['host:service']),
       })
-    ).toEqual(['service.call']);
+    ).toEqual(['service.call', 'service.on']);
   });
 
   test('silently drops unknown capabilities', () => {
@@ -223,7 +223,7 @@ describe('computeFrontCapabilities', () => {
         declared: ['service'],
         audience: 'system',
       })
-    ).toEqual(['service.call']);
+    ).toEqual(['service.call', 'service.on']);
   });
 });
 
@@ -288,8 +288,9 @@ describe('capability model data', () => {
   });
 
   test('only implemented capabilities count as host-supported', () => {
-    expect(HOST_SUPPORTED_CAPABILITIES.size).toBe(2);
+    expect(HOST_SUPPORTED_CAPABILITIES.size).toBe(3);
     expect(HOST_SUPPORTED_CAPABILITIES.has('service.call')).toBe(true);
+    expect(HOST_SUPPORTED_CAPABILITIES.has('service.on')).toBe(true);
     expect(HOST_SUPPORTED_CAPABILITIES.has('host:clipboard.write')).toBe(true);
     for (const capability of FRONT_CAPABILITIES) {
       if (HOST_SUPPORTED_CAPABILITIES.has(capability)) continue;

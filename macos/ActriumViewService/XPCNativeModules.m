@@ -38,6 +38,14 @@ RCT_EXTERN_METHOD(call:(NSString *)tabId
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(subscribeServiceEvents:(NSString *)tabId
+                  events:(NSArray<NSString *> *)events
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(unsubscribeServiceEvents:(NSString *)tabId
+                  subscriptionId:(NSString *)subscriptionId)
+
 @end
 
 @interface RCT_EXTERN_MODULE(CapabilityPermission, NSObject)

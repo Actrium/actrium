@@ -23,7 +23,7 @@ function makeHostModules() {
 }
 
 describe('v1 service.on linkage', () => {
-  test('verifyV1RuntimeGuest rejects a fixed event link while unimplemented', () => {
+  test('verifyV1RuntimeGuest accepts a fixed event link', () => {
     const linkage = {
       guestEntry: 'workload/guest.js',
       links: [[sourceModule, 'on'] as [string, string]],
@@ -34,8 +34,7 @@ describe('v1 service.on linkage', () => {
     const result = verifyV1RuntimeGuest(script, JSON.stringify(manifest), [
       'service.on',
     ]);
-    expect(result.ok).toBe(false);
-    expect(result.code).toBe('unknown_capability');
+    expect(result.ok).toBe(true);
   });
 
   test('bindV1HostModules filters events by the fixed event name', async () => {
@@ -48,7 +47,10 @@ describe('v1 service.on linkage', () => {
     const id = v1ServiceDispatchId(sourceModule, 'on');
 
     const received: { event: string; payloadBase64: string }[] = [];
-    const unsubscribe = bound.hostModules[id].on((event) => received.push(event));
+    const on = bound.hostModules[id].on as unknown as (
+      handler: (event: { event: string; payloadBase64: string }) => void
+    ) => () => void;
+    const unsubscribe = on((event) => received.push(event));
 
     // Wait for host-modules.on authorization to resolve.
     await Promise.resolve();

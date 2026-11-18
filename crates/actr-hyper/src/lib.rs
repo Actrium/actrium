@@ -837,6 +837,19 @@ impl Node<Init> {
         front: &WorkloadPackage,
         service_type: &actr_protocol::ActrType,
     ) -> HyperResult<Node<Attached>> {
+        self.attach_front_with_events(front, service_type, None)
+            .await
+    }
+
+    /// Register a Front with a host-side business-event route. Services publish
+    /// an event as a reliable Tell whose route is the declared event name and
+    /// whose payload is the unmodified business payload.
+    pub async fn attach_front_with_events(
+        self,
+        front: &WorkloadPackage,
+        service_type: &actr_protocol::ActrType,
+        events: Option<FrontEventRouter>,
+    ) -> HyperResult<Node<Attached>> {
         let front_identity = verify_package_for_hyper(&self.hyper, front.bytes()).await?;
         let RuntimePackageManifest::V2(front_manifest) = &front_identity.manifest else {
             return Err(HyperError::InvalidManifest(
@@ -851,7 +864,7 @@ impl Node<Init> {
         )?;
         let mut attached = self
             .with_actor_type(front_identity.manifest.actor_type())
-            .link(FrontWorkload)
+            .link(FrontWorkload { events })
             .await?;
         let attachment = attached.attachment.as_mut().expect("attached Front");
         attachment.verified = Some(front_identity);
@@ -1099,7 +1112,94 @@ impl Node<Init> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-struct FrontWorkload;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrontServiceEvent {
+    pub event: String,
+    pub payload: bytes::Bytes,
+}
+
+/// Host callback for Service business events delivered to a Front actor.
+#[cfg(not(target_arch = "wasm32"))]
+#[async_trait::async_trait]
+pub trait FrontEventListener: Send + Sync + 'static {
+    async fn on_event(&self, event: FrontServiceEvent);
+}
+
+/// Authenticates and filters inbound Service events before they cross into the
+/// embedding host. The selected Service is set after discovery; no peer is
+/// trusted by default, including when a Front has declared event names.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+pub struct FrontEventRouter {
+    inner: std::sync::Arc<FrontEventRouterInner>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct FrontEventRouterInner {
+    events: std::collections::HashSet<String>,
+    service: std::sync::Mutex<Option<actr_protocol::ActrId>>,
+    listener: std::sync::Arc<dyn FrontEventListener>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl FrontEventRouter {
+    pub fn new(
+        events: impl IntoIterator<Item = String>,
+        listener: std::sync::Arc<dyn FrontEventListener>,
+    ) -> Self {
+        Self {
+            inner: std::sync::Arc::new(FrontEventRouterInner {
+                events: events.into_iter().collect(),
+                service: std::sync::Mutex::new(None),
+                listener,
+            }),
+        }
+    }
+
+    /// Replace the discovered Service identity. Passing `None` suspends event
+    /// delivery without discarding the Front's declared event allowlist.
+    pub fn set_service(&self, service: Option<actr_protocol::ActrId>) {
+        *self
+            .inner
+            .service
+            .lock()
+            .expect("Front Service event lock poisoned") = service;
+    }
+
+    fn accept(
+        &self,
+        envelope: &actr_protocol::RpcEnvelope,
+        caller: Option<&actr_protocol::ActrId>,
+    ) -> Option<FrontServiceEvent> {
+        if envelope.direction != Some(actr_protocol::Direction::Tell as i32)
+            || !self.inner.events.contains(&envelope.route_key)
+        {
+            return None;
+        }
+        let service = self
+            .inner
+            .service
+            .lock()
+            .expect("Front Service event lock poisoned")
+            .clone();
+        if caller != service.as_ref() {
+            return None;
+        }
+        Some(FrontServiceEvent {
+            event: envelope.route_key.clone(),
+            payload: envelope.payload.clone().unwrap_or_default(),
+        })
+    }
+
+    async fn deliver(&self, event: FrontServiceEvent) {
+        self.inner.listener.on_event(event).await;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct FrontWorkload {
+    events: Option<FrontEventRouter>,
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 impl actr_framework::Workload for FrontWorkload {
@@ -1112,18 +1212,94 @@ impl actr_framework::MessageDispatcher for FrontWorkload {
     type Workload = Self;
 
     async fn dispatch<C: actr_framework::Context>(
-        _: &Self,
-        _: actr_protocol::RpcEnvelope,
-        _: &C,
+        workload: &Self,
+        envelope: actr_protocol::RpcEnvelope,
+        ctx: &C,
     ) -> actr_protocol::ActorResult<bytes::Bytes> {
+        if envelope.direction == Some(actr_protocol::Direction::Tell as i32)
+            && let Some(events) = &workload.events
+        {
+            if let Some(event) = events.accept(&envelope, ctx.caller_id()) {
+                events.deliver(event).await;
+            }
+            // Tell has no response body. Undeclared events and events from any
+            // other peer are acknowledged but never exposed to the Host.
+            return Ok(bytes::Bytes::new());
+        }
         Err(actr_protocol::ActrError::NotImplemented(
             "A Realm Front does not serve RPCs".into(),
         ))
     }
 }
 
-// ── State transition: Attached → Registered ──────────────────────────────────
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod front_event_tests {
+    use super::*;
 
+    struct NoopListener;
+
+    #[async_trait::async_trait]
+    impl FrontEventListener for NoopListener {
+        async fn on_event(&self, _: FrontServiceEvent) {}
+    }
+
+    fn envelope(route: &str, direction: actr_protocol::Direction) -> actr_protocol::RpcEnvelope {
+        actr_protocol::RpcEnvelope {
+            route_key: route.into(),
+            payload: Some(bytes::Bytes::from_static(&[0, 1, 2])),
+            direction: Some(direction as i32),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn front_events_require_the_selected_service_and_declared_route() {
+        let router = FrontEventRouter::new(
+            ["counter.changed".into()],
+            std::sync::Arc::new(NoopListener),
+        );
+        let service = actr_protocol::ActrId {
+            realm: "realm@example.com".into(),
+            serial_number: 7,
+        };
+        let other = actr_protocol::ActrId {
+            serial_number: 8,
+            ..service.clone()
+        };
+        let event = envelope("counter.changed", actr_protocol::Direction::Tell);
+
+        assert!(router.accept(&event, Some(&service)).is_none());
+        router.set_service(Some(service.clone()));
+        assert!(router.accept(&event, Some(&other)).is_none());
+        assert!(router.accept(&event, None).is_none());
+        assert!(
+            router
+                .accept(
+                    &envelope("other", actr_protocol::Direction::Tell),
+                    Some(&service)
+                )
+                .is_none()
+        );
+        assert!(
+            router
+                .accept(&event, Some(&service))
+                .is_some_and(|event| event.payload.as_ref() == [0, 1, 2])
+        );
+        assert!(
+            router
+                .accept(
+                    &envelope("counter.changed", actr_protocol::Direction::Request),
+                    Some(&service)
+                )
+                .is_none()
+        );
+
+        router.set_service(None);
+        assert!(router.accept(&event, Some(&service)).is_none());
+    }
+}
+
+// ── State transition: Attached → Registered ──────────────────────────────────
 #[cfg(not(target_arch = "wasm32"))]
 impl Node<Attached> {
     /// Use a platform-managed membership key for initial registration and all

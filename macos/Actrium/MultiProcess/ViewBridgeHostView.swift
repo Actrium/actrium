@@ -946,6 +946,7 @@ final class ViewBridgeCoordinator {
             }
             if let leftPanelScript = tabConfig.leftPanelScript { config["leftPanelScript"] = leftPanelScript }
             if let serviceCallUrl = tabConfig.serviceCallUrl { config["serviceCallUrl"] = serviceCallUrl }
+            if let serviceEventsUrl = tabConfig.serviceEventsUrl { config["serviceEventsUrl"] = serviceEventsUrl }
             if let appId = tabConfig.appId { config["appId"] = appId }
             if tabConfig.legacyActorBridge { config["legacyActorBridge"] = true }
             config["leftPanelVisible"] = tabConfig.leftPanelVisible
@@ -2278,7 +2279,8 @@ struct UnifiedReactNativeLayer: View {
                 bookmarks: bookmarks,
                 recentHistory: recentHistory,
                 reloadKey: tab.reloadNonce,
-                serviceCallUrl: tab.serviceCallUrl
+                serviceCallUrl: tab.serviceCallUrl,
+                serviceEventsUrl: tab.serviceEventsUrl
             )
             coordinator.currentViewportSize = currentSize
             ipcLog("📱 UnifiedReactNativeLayer.onAppear: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil"), isFocused=\(isFocused)")
@@ -2330,7 +2332,8 @@ struct UnifiedReactNativeLayer: View {
                 bookmarks: bookmarks,
                 recentHistory: recentHistory,
                 reloadKey: tab.reloadNonce,
-                serviceCallUrl: tab.serviceCallUrl
+                serviceCallUrl: tab.serviceCallUrl,
+                serviceEventsUrl: tab.serviceEventsUrl
             )
             coordinator.lastSentConfigSize = nil
             coordinator.lastSentReloadKey = nil
@@ -2398,6 +2401,9 @@ struct UnifiedReactNativeLayer: View {
         }
         if let serviceCallUrl = tab.serviceCallUrl {
             config["serviceCallUrl"] = serviceCallUrl
+        }
+        if let serviceEventsUrl = tab.serviceEventsUrl {
+            config["serviceEventsUrl"] = serviceEventsUrl
         }
         if let appId = tab.appId {
             config["appId"] = appId
@@ -2610,6 +2616,9 @@ struct UnifiedReactNativeLayer: View {
         }
         if let serviceCallUrl = tab.serviceCallUrl {
             tabConfig["serviceCallUrl"] = serviceCallUrl
+        }
+        if let serviceEventsUrl = tab.serviceEventsUrl {
+            tabConfig["serviceEventsUrl"] = serviceEventsUrl
         }
         if let appId = tab.appId {
             tabConfig["appId"] = appId

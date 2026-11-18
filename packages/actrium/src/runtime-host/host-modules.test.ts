@@ -13,6 +13,7 @@ function createTestHostModules(options?: {
   hasServiceOnCapability?: boolean;
   serviceEventSource?: ReturnType<typeof createTestServiceEventSource>['source'];
   authorizeCapability?: (capability: FrontCapability) => Promise<void>;
+  onCapabilityRevoked?: (capability: FrontCapability, listener: () => void) => () => void;
   writeClipboardText?: (text: string) => Promise<void>;
 }): HostModules {
   return createHostModules({
@@ -21,6 +22,7 @@ function createTestHostModules(options?: {
     callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
     serviceEventSource: options?.serviceEventSource,
     authorizeCapability: options?.authorizeCapability ?? (async () => {}),
+    onCapabilityRevoked: options?.onCapabilityRevoked,
     writeClipboardText: options?.writeClipboardText ?? (async () => {}),
   });
 }
@@ -159,9 +161,32 @@ describe('host:service implementation', () => {
       { event: 'notes.v1.changed', payloadBase64: 'AAEC' },
     ]);
 
-    unsubscribe();
+    unsubscribe?.();
     emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
     expect(received).toHaveLength(1);
+  });
+
+  test('unsubscribes the transport when service.on is revoked', async () => {
+    let subscriptions = 0;
+    let revoke!: () => void;
+    const hostModules = createTestHostModules({
+      serviceEventSource: {
+        subscribe: () => {
+          subscriptions += 1;
+          return () => { subscriptions -= 1; };
+        },
+      },
+      onCapabilityRevoked: (_capability, listener) => {
+        revoke = listener;
+        return () => {};
+      },
+    });
+    hostModules['host:service'].on(() => {});
+    await Promise.resolve();
+
+    expect(subscriptions).toBe(1);
+    revoke();
+    expect(subscriptions).toBe(0);
   });
 
   test('unsubscribes when service.on authorization is rejected', async () => {

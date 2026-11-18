@@ -291,6 +291,8 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       callActor: callServiceActor,
       serviceEventSource: trackedServiceEventSource,
       authorizeCapability: (capability) => authorizer.authorize(capability),
+      onCapabilityRevoked: (capability, listener) =>
+        authorizer.onRevoked(capability, listener),
       writeClipboardText,
     });
     // Expose exactly the verified method and component set to this Guest Engine.

@@ -93,6 +93,9 @@ final class RendererProcessController {
     private let arguments: Arguments
     private let connection: IPCHelperConnection
     private var serviceCalls: [UUID: (RealmServiceReply) -> Void] = [:]
+    private var serviceEventSubscriptions: [UUID: (RealmServiceEventReply) -> Void] = [:]
+    private var serviceEventTabs: [UUID: String] = [:]
+    private var cancelledServiceEventSubscriptions: Set<UUID> = []
 
     static func callRealmService(
         tabId: String,
@@ -123,6 +126,63 @@ final class RendererProcessController {
             reply(RealmServiceReply(id: call.id, failure: RealmServiceFailure(error: error)))
         }
     }
+    static func subscribeRealmServiceEvents(
+        tabId: String,
+        subscription: RealmServiceEventSubscription,
+        reply: @escaping (RealmServiceEventReply) -> Void
+    ) {
+        guard let controller = RendererProcessLifetime.shared.controller,
+              controller.surfaces[tabId] != nil else {
+            reply(RealmServiceEventReply(id: subscription.id, failure: RealmServiceFailure(
+                code: "realm_tab_unavailable", message: "The Realm tab is unavailable."
+            )))
+            return
+        }
+        do {
+            let data = try JSONEncoder().encode(subscription)
+            controller.serviceEventSubscriptions[subscription.id] = reply
+            controller.serviceEventTabs[subscription.id] = tabId
+            try controller.connection.sendHostEvent(
+                name: RealmServiceEventSubscription.requestEvent,
+                userInfoJSON: String(decoding: data, as: UTF8.self),
+                tabId: tabId
+            )
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(30)) { [weak controller] in
+                guard let pending = controller?.serviceEventSubscriptions.removeValue(forKey: subscription.id) else { return }
+                controller?.serviceEventTabs.removeValue(forKey: subscription.id)
+                controller?.cancelledServiceEventSubscriptions.remove(subscription.id)
+                RendererProcessController.unsubscribeRealmServiceEvents(
+                    tabId: tabId, subscriptionId: subscription.id
+                )
+                pending(RealmServiceEventReply(id: subscription.id, failure: RealmServiceFailure(
+                    code: "realm_service_event_timeout", message: "The Service event subscription timed out."
+                )))
+            }
+        } catch {
+            reply(RealmServiceEventReply(id: subscription.id, failure: RealmServiceFailure(error: error)))
+        }
+    }
+
+    static func unsubscribeRealmServiceEvents(tabId: String, subscriptionId: UUID) {
+        guard let controller = RendererProcessLifetime.shared.controller else { return }
+        // Keep only an in-flight reply for the registration/cancellation race.
+        // Established subscriptions can remove their renderer mapping now.
+        if controller.serviceEventSubscriptions[subscriptionId] != nil {
+            controller.cancelledServiceEventSubscriptions.insert(subscriptionId)
+            controller.serviceEventTabs[subscriptionId] = tabId
+        } else {
+            controller.serviceEventTabs.removeValue(forKey: subscriptionId)
+            controller.cancelledServiceEventSubscriptions.remove(subscriptionId)
+        }
+        let subscription = RealmServiceEventSubscription(id: subscriptionId, events: [])
+        guard let data = try? JSONEncoder().encode(subscription) else { return }
+        try? controller.connection.sendHostEvent(
+            name: RealmServiceEventSubscription.cancelEvent,
+            userInfoJSON: String(decoding: data, as: UTF8.self),
+            tabId: tabId
+        )
+    }
+
     private let reactNativeHost = ServiceReactNativeHost.shared
     private var surfaces: [String: RendererTabSurface] = [:]
 
@@ -174,11 +234,32 @@ final class RendererProcessController {
 
     private func configureIPC() {
         connection.onHostEvent = { [weak self] name, json, _ in
-            guard name == RealmServiceCall.responseEvent,
-                  let response = try? JSONDecoder().decode(RealmServiceReply.self, from: Data(json.utf8)) else {
+            if name == RealmServiceCall.responseEvent,
+               let response = try? JSONDecoder().decode(RealmServiceReply.self, from: Data(json.utf8)) {
+                self?.serviceCalls.removeValue(forKey: response.id)?(response)
                 return
             }
-            self?.serviceCalls.removeValue(forKey: response.id)?(response)
+            if name == RealmServiceEventSubscription.responseEvent,
+               let response = try? JSONDecoder().decode(RealmServiceEventReply.self, from: Data(json.utf8)) {
+                let tabId = self?.serviceEventTabs[response.id]
+                let cancelled = self?.cancelledServiceEventSubscriptions.remove(response.id) != nil
+                self?.serviceEventSubscriptions.removeValue(forKey: response.id)?(response)
+                if cancelled && response.failure == nil, let tabId {
+                    RendererProcessController.unsubscribeRealmServiceEvents(
+                        tabId: tabId, subscriptionId: response.id
+                    )
+                }
+                if cancelled || response.failure != nil {
+                    self?.serviceEventTabs.removeValue(forKey: response.id)
+                    self?.cancelledServiceEventSubscriptions.remove(response.id)
+                }
+                return
+            }
+            if name == RealmServiceEventSubscription.eventEvent,
+               let event = try? JSONDecoder().decode(RealmServiceEvent.self, from: Data(json.utf8)),
+               let tabId = self?.serviceEventTabs[event.subscriptionId] {
+                RealmService.emit(event, tabId: tabId)
+            }
         }
 
         connection.onLoadContent = { [weak self] request, reply in

@@ -43,14 +43,22 @@ extension RealmServiceFailure {
 final class RealmServiceBindings {
     static let shared = RealmServiceBindings()
     private var bindings: [UUID: RealmServiceBinding] = [:]
+    private var bindingTabs: [UUID: UUID] = [:]
+    private var subscriptions: [UUID: (bindingId: UUID, events: Set<String>)] = [:]
+    private var pendingSubscriptions: [UUID: UUID] = [:]
+    private var cancelledSubscriptions: Set<UUID> = []
+    var eventHandler: ((UUID, RealmServiceEvent) -> Void)?
 
     func attach(_ binding: RealmServiceBinding, to tabId: UUID) {
         remove(tabId)
         bindings[tabId] = binding
+        bindingTabs[binding.id] = tabId
     }
 
     func remove(_ tabId: UUID) {
         guard let binding = bindings.removeValue(forKey: tabId) else { return }
+        bindingTabs.removeValue(forKey: binding.id)
+        subscriptions = subscriptions.filter { $0.value.bindingId != binding.id }
         Task { await binding.stop() }
     }
 
@@ -59,6 +67,64 @@ final class RealmServiceBindings {
             throw RealmServiceError(message: "The tab has no Realm Service.")
         }
         return try await binding.call(request)
+    }
+
+    func subscribe(_ request: RealmServiceEventSubscription, tabId: UUID) async throws {
+        guard let binding = bindings[tabId] else {
+            throw RealmServiceError(message: "The tab has no Realm Service.")
+        }
+        pendingSubscriptions[request.id] = tabId
+        defer {
+            pendingSubscriptions.removeValue(forKey: request.id)
+            cancelledSubscriptions.remove(request.id)
+        }
+        try await binding.subscribe(events: request.events)
+        guard bindings[tabId] === binding, !cancelledSubscriptions.contains(request.id) else {
+            if !subscriptions.values.contains(where: { $0.bindingId == binding.id }) {
+                await binding.suspendEvents()
+            }
+            throw CancellationError()
+        }
+        subscriptions[request.id] = (binding.id, Set(request.events))
+    }
+
+    func unsubscribe(_ subscriptionId: UUID, tabId: UUID) {
+        if pendingSubscriptions[subscriptionId] == tabId {
+            cancelledSubscriptions.insert(subscriptionId)
+            return
+        }
+        guard let removed = subscriptions.removeValue(forKey: subscriptionId),
+              let tab = bindingTabs[removed.bindingId], tab == tabId,
+              let binding = bindings[tabId] else { return }
+        if !subscriptions.values.contains(where: { $0.bindingId == removed.bindingId }) {
+            Task { await binding.suspendEvents() }
+        }
+    }
+
+    nonisolated func publish(bindingId: UUID, event: String, payload: Data) {
+        Task { @MainActor in
+            guard let tabId = bindingTabs[bindingId] else { return }
+            for (subscriptionId, subscription) in subscriptions
+            where subscription.bindingId == bindingId && subscription.events.contains(event) {
+                eventHandler?(tabId, RealmServiceEvent(
+                    subscriptionId: subscriptionId, event: event, payload: payload
+                ))
+            }
+        }
+    }
+}
+
+private final class RealmServiceEventRelay: ActrBindings.ServiceEventListener, @unchecked Sendable {
+    private let bindingId: UUID
+
+    init(bindingId: UUID) {
+        self.bindingId = bindingId
+    }
+
+    func onEvent(event: ActrBindings.ServiceEventBridge) async {
+        RealmServiceBindings.shared.publish(
+            bindingId: bindingId, event: event.event, payload: event.payload
+        )
     }
 }
 
@@ -82,10 +148,14 @@ actor RealmServiceBinding {
     }
 
     private struct Capabilities: Decodable {
-        struct Service: Decodable { let rpc: [String]? }
+        struct Service: Decodable {
+            let rpc: [String]?
+            let events: [String]?
+        }
         let hostModules: [String: Service]
     }
 
+    let id: UUID
     private let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("actrium-front-" + UUID().uuidString, isDirectory: true)
     private let profile: RealmProfileInfo
@@ -93,6 +163,9 @@ actor RealmServiceBinding {
     private let configuration: String
     private let serviceType: ActrBindings.ActrType
     private let routes: Set<String>
+    private let events: Set<String>
+    private let eventRelay: RealmServiceEventRelay
+    private var eventReference: ActrRefWrapper?
     private var startup: (id: UUID, task: Task<ActrRefWrapper, Error>)?
     private var stopped = false
 
@@ -111,7 +184,12 @@ actor RealmServiceBinding {
             throw RealmServiceError(message: "The verified Realm profile has invalid signaling information.")
         }
         let capabilities = try JSONDecoder().decode(Capabilities.self, from: Data(capabilitiesJSON.utf8))
-        self.routes = Set(capabilities.hostModules["service"]?.rpc ?? capabilities.hostModules["host:service"]?.rpc ?? [])
+        let service = capabilities.hostModules["service"] ?? capabilities.hostModules["host:service"]
+        self.routes = Set(service?.rpc ?? [])
+        self.events = Set(service?.events ?? [])
+        let bindingId = UUID()
+        self.id = bindingId
+        self.eventRelay = RealmServiceEventRelay(bindingId: bindingId)
         self.serviceType = serviceType
         self.profile = profile
         self.front = front
@@ -168,6 +246,26 @@ actor RealmServiceBinding {
         )
     }
 
+    func subscribe(events requestedEvents: [String]) async throws {
+        let requested = Set(requestedEvents)
+        guard !stopped, !requested.isEmpty, requested.isSubset(of: events) else {
+            throw RealmServiceError(message: "The Service event subscription is outside this tab's declared capabilities.")
+        }
+        let reference = try await connect()
+        guard !stopped else { throw CancellationError() }
+        guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
+            throw RealmServiceError(message: "The Realm's selected Service is not online.")
+        }
+        guard !stopped else { throw CancellationError() }
+        try reference.setServiceEventPeer(peer: target)
+        eventReference = reference
+    }
+
+    func suspendEvents() {
+        try? eventReference?.setServiceEventPeer(peer: nil)
+        eventReference = nil
+    }
+
     private func connect() async throws -> ActrRefWrapper {
         if let startup { return try await startup.task.value }
         let id = UUID()
@@ -178,8 +276,13 @@ actor RealmServiceBinding {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             let configURL = directory.appendingPathComponent("actr.toml")
             try configuration.write(to: configURL, atomically: true, encoding: .utf8)
-            let node = try await ActrBindings.ActrNode.newFromFrontWithMembership(
-                configPath: configURL.path, frontArchive: front, serviceType: serviceType, membership: membership
+            let node = try await ActrBindings.ActrNode.newFromFrontWithMembershipAndEvents(
+                configPath: configURL.path,
+                frontArchive: front,
+                serviceType: serviceType,
+                membership: membership,
+                events: Array(events).sorted(),
+                listener: eventRelay
             )
             let reference = try await node.start()
             do {
@@ -205,6 +308,7 @@ actor RealmServiceBinding {
 
     func stop() async {
         stopped = true
+        suspendEvents()
         if let startup {
             startup.task.cancel()
             if let reference = try? await startup.task.value {

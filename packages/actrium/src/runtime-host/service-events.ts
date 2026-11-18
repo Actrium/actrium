@@ -1,3 +1,5 @@
+import type { NativeModule } from 'react-native';
+
 import type { CapabilityManifestV1 } from './capability-verify';
 import type { ServiceEvent } from './contract';
 
@@ -22,41 +24,138 @@ export interface ServiceEventSource {
   subscribe(handler: ServiceEventHandler): () => void;
 }
 
-export type NativeServiceEventModule = {
-  /**
-   * Start listening for service events on behalf of a tab.
-   *
-   * The native runtime calls `listener` with `{ event: string, payloadBase64: string }`
-   * whenever the attached Service sends an allowed event.
-   */
-  addServiceEventListener?: (
-    tabId: string,
-    events: string[],
-    listener: (event: ServiceEvent) => void
-  ) => () => void;
+export interface NativeServiceEventModule extends NativeModule {
+  subscribeServiceEvents(tabId: string, events: string[]): Promise<string>;
+  unsubscribeServiceEvents(tabId: string, subscriptionId: string): void;
+}
+
+type NativeServiceEventBody = ServiceEvent & {
+  tabId: string;
+  subscriptionId: string;
 };
 
+export type NativeServiceEventEmitter = {
+  addListener(
+    event: 'realmServiceEvent',
+    listener: (event: unknown) => void
+  ): { remove(): void };
+};
+
+function defaultNativeEventEmitter(
+  nativeModule: NativeServiceEventModule
+): NativeServiceEventEmitter {
+  // Keep React Native's Flow sources out of non-RN unit-test module graphs.
+  const { NativeEventEmitter } = require('react-native') as typeof import('react-native');
+  return new NativeEventEmitter(nativeModule);
+}
+
 /**
- * Create an event source backed by the native RealmService module.
+ * Create an event source backed by the RealmService RCTEventEmitter.
  *
- * The native module is expected to manage the WebRTC/data-channel subscription
- * to the attached Service actor and surface events through
- * `addServiceEventListener(tabId, events, listener)`. If the module does not
- * expose that method, the source fails closed at subscribe time.
+ * All Guest handlers for a tab share one native actor subscription. The last
+ * unsubscribe removes both the NativeEventEmitter listener and the Host-side
+ * actor subscription. Events are additionally scoped by tab/subscription ID and
+ * the signed manifest's event allowlist.
  */
 export function createNativeServiceEventSource(
   nativeModule: NativeServiceEventModule | undefined,
   tabId: string,
-  events: string[]
+  events: string[],
+  createEmitter: (
+    nativeModule: NativeServiceEventModule
+  ) => NativeServiceEventEmitter = defaultNativeEventEmitter
 ): ServiceEventSource {
+  const handlers = new Map<ServiceEventHandler, number>();
+  let handlerCount = 0;
+  const allowedEvents = new Set(events);
+  let emitterSubscription: { remove(): void } | undefined;
+  let nativeSubscriptionId: string | undefined;
+  let generation = 0;
+
+  const stop = () => {
+    generation += 1;
+    emitterSubscription?.remove();
+    emitterSubscription = undefined;
+    if (nativeSubscriptionId) {
+      nativeModule?.unsubscribeServiceEvents(tabId, nativeSubscriptionId);
+      nativeSubscriptionId = undefined;
+    }
+  };
+
+  const start = () => {
+    if (!nativeModule?.subscribeServiceEvents || !nativeModule.unsubscribeServiceEvents) {
+      throw new Error('The native Realm Service event bridge is unavailable.');
+    }
+    const current = ++generation;
+    const emitter = createEmitter(nativeModule);
+    emitterSubscription = emitter.addListener('realmServiceEvent', (value: unknown) => {
+      if (current !== generation) return;
+      const body = value as Partial<NativeServiceEventBody> | null;
+      if (
+        !body ||
+        body.tabId !== tabId ||
+        typeof body.subscriptionId !== 'string' ||
+        body.subscriptionId !== nativeSubscriptionId ||
+        typeof body.event !== 'string' ||
+        !allowedEvents.has(body.event) ||
+        typeof body.payloadBase64 !== 'string' ||
+        body.payloadBase64.length === 0
+      ) {
+        return;
+      }
+      const event = { event: body.event, payloadBase64: body.payloadBase64 };
+      for (const handler of [...handlers.keys()]) {
+        try {
+          handler(event);
+        } catch (error) {
+          console.warn('[Actrium] Service event handler failed:', error);
+        }
+      }
+    });
+    void nativeModule.subscribeServiceEvents(tabId, events).then(
+      (subscriptionId) => {
+        if (current !== generation) {
+          nativeModule.unsubscribeServiceEvents(tabId, subscriptionId);
+          return;
+        }
+        nativeSubscriptionId = subscriptionId;
+      },
+      (error) => {
+        if (current !== generation) return;
+        console.warn('[Actrium] Service event subscription failed:', error);
+        handlers.clear();
+        handlerCount = 0;
+        stop();
+      }
+    );
+  };
+
   return {
     subscribe(handler) {
-      if (!nativeModule?.addServiceEventListener) {
-        throw new Error(
-          'The native Realm Service event bridge is unavailable.'
-        );
+      const wasEmpty = handlerCount === 0;
+      handlers.set(handler, (handlers.get(handler) ?? 0) + 1);
+      handlerCount += 1;
+      if (wasEmpty) {
+        try {
+          start();
+        } catch (error) {
+          const remaining = (handlers.get(handler) ?? 1) - 1;
+          if (remaining === 0) handlers.delete(handler);
+          else handlers.set(handler, remaining);
+          handlerCount -= 1;
+          throw error;
+        }
       }
-      return nativeModule.addServiceEventListener(tabId, events, handler);
+      let active = true;
+      return () => {
+        if (!active) return;
+        active = false;
+        const remaining = (handlers.get(handler) ?? 0) - 1;
+        if (remaining > 0) handlers.set(handler, remaining);
+        else handlers.delete(handler);
+        handlerCount = Math.max(0, handlerCount - 1);
+        if (handlerCount === 0) stop();
+      };
     },
   };
 }
