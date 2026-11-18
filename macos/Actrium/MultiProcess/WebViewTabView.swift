@@ -922,7 +922,38 @@ final class WebViewHolderManager {
     static let shared = WebViewHolderManager()
     private var holders: [UUID: WebViewHolder] = [:]
 
-    private init() {}
+    /// Debounced re-capture after a live window resize settles, so the latest
+    /// cached snapshot always matches the current page geometry.
+    private var resizeCaptureTask: Task<Void, Never>?
+    private var resizeEndObserver: NSObjectProtocol?
+
+    private init() {
+        installResizeEndObserver()
+    }
+
+    /// After a window resize ends, re-capture every web tab once layout has
+    /// settled (short debounce). Each capture flows into
+    /// TabSnapshotCacheManager, keeping the single latest image fresh for
+    /// mode-transition animations.
+    private func installResizeEndObserver() {
+        guard resizeEndObserver == nil else { return }
+        resizeEndObserver = NotificationCenter.default.addObserver(
+            forName: .windowLiveResizeEnded,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            self.resizeCaptureTask?.cancel()
+            self.resizeCaptureTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 350_000_000) // 0.35s debounce
+                guard let self = self, !Task.isCancelled else { return }
+                for (tabId, holder) in self.holders {
+                    guard holder.webView.window != nil || holder.snapshot != nil else { continue }
+                    await self.takeSnapshot(for: tabId)
+                }
+            }
+        }
+    }
 
     func holder(for tabId: UUID) -> WebViewHolder {
         if let existing = holders[tabId] {
@@ -949,9 +980,15 @@ final class WebViewHolderManager {
         holders[tabId]?.snapshot
     }
 
-    /// Take a snapshot for a specific tab
+    /// Take a snapshot for a specific tab.
+    /// Every capture also refreshes the tab's single latest snapshot in
+    /// TabSnapshotCacheManager, so transitions never read a stale or missing
+    /// image.
     func takeSnapshot(for tabId: UUID) async {
         await holders[tabId]?.takeSnapshot()
+        if let image = holders[tabId]?.snapshot {
+            TabSnapshotCacheManager.shared.setSnapshot(image, for: tabId)
+        }
     }
 }
 

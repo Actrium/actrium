@@ -247,6 +247,14 @@ struct WorkspaceMainView: View {
                                 if let newURL = newURL {
                                     NSLog("🔗 WorkspaceMainView: Updating tab \(focusedTabId) URL to: \(newURL.absoluteString)")
                                     viewModel.updateTabURL(for: focusedTabId, url: newURL)
+
+                                    // The page content changed (SPA navigation).
+                                    // Refresh the latest snapshot so the next
+                                    // mode transition animates current content.
+                                    Task { @MainActor in
+                                        try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s debounce
+                                        await WebViewHolderManager.shared.takeSnapshot(for: focusedTabId)
+                                    }
                                 }
                             },
                             onLoadingStateChanged: { loading in
@@ -599,6 +607,31 @@ struct WorkspaceMainView: View {
                 }
             }
 
+            // Enter Focus Mode: capture the viewport once a native/empty Tab
+            // (e.g. a freshly opened New Tab Start Page) has rendered, so the
+            // next mode transition animates its real content instead of an
+            // empty slot falling back to the gray base layer.
+            if case .focus(let focusedTabId) = newValue,
+               let tab = viewModel.tabs.first(where: { $0.id == focusedTabId }) {
+                var capturesViewportSnapshotOnFocus = false
+                switch tab.contentType {
+                case .native, .empty: capturesViewportSnapshotOnFocus = true
+                case .web, .reactNative: capturesViewportSnapshotOnFocus = false
+                }
+                if capturesViewportSnapshotOnFocus {
+                    let size = CGSize(
+                        width: max(viewportSize.width, 100),
+                        height: max(viewportSize.height, 100)
+                    )
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 400_000_000) // 0.4s render settle
+                        guard viewModel.actriumMode == .focus(tabId: focusedTabId) else { return }
+                        guard let snapshot = captureViewportSnapshot(viewportSize: size) else { return }
+                        TabSnapshotCacheManager.shared.setSnapshot(snapshot, for: focusedTabId)
+                    }
+                }
+            }
+
             // Enter Overview The tags need automatic focus search boxes when mode is ticked
             if case .overview = newValue {
                 shouldAutoFocusSearchTabs = true
@@ -891,6 +924,16 @@ struct WorkspaceMainView: View {
         // Note: Do not intercept viewport, because Overview Mode viewport The whole grid is shown, not a single card
         let overviewSnapshot = TabSnapshotCacheManager.shared.overviewSnapshot(for: tabId)
 
+        // Fallback: no snapshot available → the zoom would animate an empty
+        // slot over the gray base layer. Skip the image-based animation and
+        // switch directly so no gray frame can appear.
+        guard let overviewSnapshot else {
+            NSLog("🎬 enterFocus: no snapshot for tab %@, direct switch (no animation)",
+                  String(tabId.uuidString.prefix(8)))
+            viewModel.actriumMode = .focus(tabId: tabId)
+            return
+        }
+
         // 🔑 Calculate Current Overview Mode transform(For animation starting point)
         let overviewTransform = calculateOverviewTransform(
             actriumSize: gridResult.actriumSize,
@@ -971,6 +1014,17 @@ struct WorkspaceMainView: View {
             let cardSize = CGSize(width: gridResultForCard.cardWidth, height: gridResultForCard.cardHeight)
             // applyBlur=false Ensure Sync settings
             TabSnapshotCacheManager.shared.setOverviewSnapshot(snapshot, for: currentTabId, targetSize: cardSize, applyBlur: false)
+        }
+
+        // Fallback: neither a fresh capture nor a cached image exists → the
+        // zoom-out would animate an empty slot over the gray base layer.
+        // Skip the image-based animation and switch directly.
+        guard focusSnapshot != nil
+            || TabSnapshotCacheManager.shared.focusSnapshot(for: currentTabId) != nil else {
+            NSLog("🎬 exitToOverview: no snapshot for tab %@, direct switch (no animation)",
+                  String(currentTabId.uuidString.prefix(8)))
+            viewModel.actriumMode = .overview
+            return
         }
 
         // 🔑 Calculating Cards in Overview Position in the lower viewer of mode (used for Zoom Animation)
@@ -2385,12 +2439,24 @@ private struct TabPanel: View {
             case .native(let nativeType):
                 // Native SwiftUI content - rendered in main process, no XPC
                 // 🔑 Focus mode: rendered by FocusedNativeOverlay (outside actrium transform)
-                // 🔑 Overview mode: rendered here at cardSize (will be shown as thumbnail)
+                // 🔑 Overview mode: prefer the latest cached snapshot (same
+                //    image the transition zooms) so the card is identical
+                //    before and after the switch. Only fall back to a live
+                //    re-render when no snapshot exists yet.
                 if isFocused {
                     // Focus mode: placeholder only, actual content rendered by FocusedNativeOverlay
                     Color.clear
+                } else if let snapshot = TabSnapshotCacheManager.shared.snapshot(for: tab.id) {
+                    // Overview mode: show the cached snapshot (matches the
+                    // transition image; the live Start Page must not cover it)
+                    Image(nsImage: snapshot)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: max(cardWidth, 1), height: max(cardHeight, 1))
+                        .clipped()
                 } else {
-                    // Overview mode: render at cardSize for thumbnail
+                    // Overview mode fallback without a snapshot: render at
+                    // cardSize for thumbnail (previous behavior)
                     let nativeSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
                     switch nativeType {
                     case .startPage:

@@ -1234,6 +1234,21 @@ final class ViewBridgeCoordinator {
             if WindowResizeState.shared.isWaitingForSizeApplied {
                 WindowResizeState.shared.isWaitingForSizeApplied = false
             }
+
+            // Geometry changed (window ratio): refresh the tab's single latest
+            // snapshot once the renderer has painted at the new size, so the
+            // next mode transition animates current content instead of falling
+            // back to the gray base layer.
+            if let hostView = self.hostView, let tabId = self.tabId {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    guard let self = self,
+                          let hostView = self.hostView,
+                          hostView.window != nil else { return }
+                    if let snapshot = hostView.captureSnapshot() {
+                        TabSnapshotCacheManager.shared.setSnapshot(snapshot, for: tabId)
+                    }
+                }
+            }
         }
     }
 
