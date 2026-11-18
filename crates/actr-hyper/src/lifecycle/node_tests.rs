@@ -1794,6 +1794,8 @@ fn dedup_test_config(dir: &tempfile::TempDir) -> actr_config::RuntimeConfig {
         package_path: None,
         web: None,
         storage_root: None,
+        wasi_data_dir: None,
+        wasi_data_access: actr_config::WasiDataAccess::default(),
     }
 }
 

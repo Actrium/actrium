@@ -14,22 +14,25 @@ import {
   ScrollView,
   Switch,
   Text,
-  TextInput,
   View,
 } from 'keel/host/preset';
 
+import { GuestTextInput } from './GuestTextInput';
 import { hasDeclaredCapability } from './capabilities';
 import {
   capabilitiesFromSnapshotJSON,
   CapabilityAuthorizer,
+  evaluateCapabilityAccess,
 } from './capability-authorization';
 import { contract, type FileImportPickInput, type FileImportPickOutput } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
+import { Supramark } from './guest-markdown-renderer';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
 import { callHttpService, callNativeService } from './service-call';
 import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
 import type { TabConfig } from './types';
+import { isGuestSpeechAvailable, useGuestSpeech } from './use-guest-speech';
 
 type GuestButtonProps = {
   title: string;
@@ -85,15 +88,17 @@ const hostComponents: ComponentMap = {
   ImageAsset: GuestImage as unknown as React.ComponentType<
     Record<string, unknown>
   >,
+  ...(Supramark && { Supramark }),
   ScrollView: ScrollView as React.ComponentType<Record<string, unknown>>,
   Switch: Switch as unknown as React.ComponentType<Record<string, unknown>>,
   Text: Text as React.ComponentType<Record<string, unknown>>,
-  TextInput: TextInput as React.ComponentType<Record<string, unknown>>,
+  TextInput: GuestTextInput as React.ComponentType<Record<string, unknown>>,
   View: View as React.ComponentType<Record<string, unknown>>,
 };
 
 type Props = {
   tab: TabConfig;
+  isOverviewMode?: boolean;
   containerWidth?: number;
   containerHeight?: number;
 };
@@ -147,6 +152,7 @@ const requestNativeCapabilityGrant = (
 
 export const StandaloneGuestApp: React.FC<Props> = ({
   tab,
+  isOverviewMode,
   containerWidth,
   containerHeight,
 }) => {
@@ -166,6 +172,10 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     [tab.capabilitySnapshotJSON]
   );
   const capabilitySnapshotAvailable = capabilitySnapshot !== null;
+  const { active: speechActive, request: recognizeSpeech, stop: stopSpeech, cancel: cancelSpeech } = useGuestSpeech(
+    isOverviewMode === false && capabilitySnapshot !== null &&
+      evaluateCapabilityAccess('host:speech.recognize', capabilitySnapshot).allowed
+  );
   const authorizerRef = React.useRef<CapabilityAuthorizer | null>(null);
   if (!authorizerRef.current && capabilitySnapshot) {
     authorizerRef.current = new CapabilityAuthorizer(
@@ -219,6 +229,10 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       setError(`Capability manifest verification failed: ${details}`);
       return;
     }
+    if (v1?.ok && v1.manifest.components.includes('Supramark') && !Supramark) {
+      setError('Supramark rendering is unavailable in this Host build.');
+      return;
+    }
     const authorizer = authorizerRef.current;
     if (!authorizer) {
       setError('The Native capability authorization snapshot is unavailable.');
@@ -248,6 +262,11 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       setError('File import is unavailable for this application.');
       return;
     }
+    const speechAvailable = isGuestSpeechAvailable();
+    if (v1?.ok && v1.linkage.links.some(([id]) => id === 'host:speech') && !speechAvailable) {
+      setError('Speech recognition is unavailable for this application.');
+      return;
+    }
     const hostModules = createHostModules({
       hasServiceCapability,
       callActor: callServiceActor,
@@ -256,6 +275,13 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       pickFiles: nativePick && ((input) => nativePick(
         input.source ?? 'files', input.accept ?? [], input.multiple ?? false
       )),
+      recognizeSpeech: speechAvailable ? (input, onInterim, onState) => {
+        if (disposed) throw new Error('The speech recognition session has ended.');
+        return recognizeSpeech(input, onInterim, onState);
+      } : undefined,
+      stopSpeech: speechAvailable ? async () => {
+        if (!disposed) await stopSpeech();
+      } : undefined,
     });
     // Expose exactly the verified method and component set to this Guest Engine.
     const linked = v1?.ok ? v1 : undefined;
@@ -369,6 +395,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
 
     return () => {
       disposed = true;
+      cancelSpeech();
       unsubscribeEvents();
       unsubscribeUpdate();
       engine.destroy();
@@ -386,6 +413,9 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     tab.capabilityManifestJSON,
     permissionsKey,
     capabilitySnapshotAvailable,
+    recognizeSpeech,
+    stopSpeech,
+    cancelSpeech,
   ]);
 
   if (error) {
@@ -400,6 +430,12 @@ export const StandaloneGuestApp: React.FC<Props> = ({
 
   return (
     <NativeView collapsable={false} style={{ flex: 1 }}>
+      {speechActive && (
+        <NativeView style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 8 }}>
+          <NativeText accessibilityLiveRegion='polite'>Speech recognition in progress</NativeText>
+          <GuestButton title='Cancel' onPress={cancelSpeech} />
+        </NativeView>
+      )}
       {content ?? (
         <NativeView
           style={{

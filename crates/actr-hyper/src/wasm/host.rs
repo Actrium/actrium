@@ -31,23 +31,30 @@
 //! for the execution path.
 
 use std::collections::HashMap;
+use std::fs::File;
+use std::path::{Component as PathComponent, Path};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use actr_config::WasiDataAccess;
 use actr_framework::{Deliver, ReplyOutcome};
+use cap_primitives::ambient_authority;
+use cap_primitives::fs::{open_ambient_dir, open_dir_nofollow};
 use tokio::time::Instant;
 use wasmtime::component::types::ComponentItem;
 use wasmtime::component::{Component, ResourceTable};
 use wasmtime::{Config, Engine, OptLevel, RegallocAlgorithm};
-use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::filesystem::{Descriptor, WasiFilesystemCtx, WasiFilesystemCtxView};
+use wasmtime_wasi::p2::bindings::filesystem::preopens::Host as WasiPreopens;
+use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-use crate::config::WasmRuntimeLimits;
+use crate::config::{WasiDataGrant, WasmRuntimeLimits};
 use crate::workload::{HostAbiFn, InvocationContext};
 
 use super::host_v2::WasmWorkloadV2;
 use super::runtime_limits::{
-    EpochTicker, StoreResourceLimiter, acquire_compile, acquire_store, record_compile_failure,
+    EpochTicker, StoreResourceLimiter, acquire_compile, record_compile_failure,
     record_resource_denial,
 };
 use crate::wasm::error::{WasmError, WasmResult};
@@ -115,6 +122,7 @@ fn build_engine(limits: &WasmRuntimeLimits) -> WasmResult<Engine> {
 /// - issue #346 per-store resource limits (memory/table/instance caps).
 pub(crate) struct HostState {
     wasi: WasiCtx,
+    isolate_wasi_runtime: bool,
     table: ResourceTable,
     /// Per-invocation table keyed by `ctx-token`, used by the V2 (0.6.0
     /// async world) Accessor-based host imports. Each in-flight invocation
@@ -141,10 +149,45 @@ pub(crate) struct HostState {
     pub(crate) limits: StoreResourceLimiter,
 }
 
+/// Poll and drop a host ABI future in the runtime that accepted its invocation.
+struct CallerRuntimeFuture {
+    runtime: tokio::runtime::Handle,
+    future: Option<
+        std::pin::Pin<
+            Box<dyn std::future::Future<Output = crate::workload::HostOperationResult> + Send>,
+        >,
+    >,
+}
+
+impl std::future::Future for CallerRuntimeFuture {
+    type Output = crate::workload::HostOperationResult;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let runtime = self.runtime.clone();
+        let _guard = runtime.enter();
+        self.future
+            .as_mut()
+            .expect("host future must exist until dropped")
+            .as_mut()
+            .poll(cx)
+    }
+}
+
+impl Drop for CallerRuntimeFuture {
+    fn drop(&mut self) {
+        let _guard = self.runtime.enter();
+        drop(self.future.take());
+    }
+}
+
 /// One live invocation's host-facing state, keyed by `ctx-token` in
 /// [`HostState::invocations`].
 pub(crate) struct InvocationEntry {
     pub(crate) ctx: InvocationContext,
+    caller_runtime: Option<tokio::runtime::Handle>,
     pub(crate) host_abi: HostAbiFn,
     pub(crate) reply_deliver: Option<Arc<dyn Deliver>>,
     /// Whether expiry should emit an error RESPONSE. TELL invocations still
@@ -181,10 +224,137 @@ impl std::fmt::Debug for HostState {
     }
 }
 
+#[cfg(unix)]
+fn directory_identity(file: &File) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = file.metadata()?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_filesystem_root(directory: &File) -> std::io::Result<bool> {
+    use std::ffi::{CStr, OsStr};
+    use std::mem::MaybeUninit;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+
+    fn mount_info(file: &File) -> std::io::Result<libc::statfs> {
+        let mut info = MaybeUninit::<libc::statfs>::uninit();
+        // SAFETY: the descriptor is live and the output buffer has the expected layout.
+        if unsafe { libc::fstatfs(file.as_raw_fd(), info.as_mut_ptr()) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: a successful fstatfs call initializes the buffer.
+        Ok(unsafe { info.assume_init() })
+    }
+
+    let info = mount_info(directory)?;
+    // SAFETY: f_mntonname is a NUL-terminated kernel-provided path.
+    let mount_path = unsafe { CStr::from_ptr(info.f_mntonname.as_ptr()) };
+    let mount_path = Path::new(OsStr::from_bytes(mount_path.to_bytes()));
+    let root = open_ambient_dir(mount_path, ambient_authority())?;
+    let root_info = mount_info(&root)?;
+    // SAFETY: both filesystem IDs are initialized values of the same C type.
+    let same_filesystem = unsafe {
+        libc::memcmp(
+            std::ptr::addr_of!(info.f_fsid).cast(),
+            std::ptr::addr_of!(root_info.f_fsid).cast(),
+            std::mem::size_of::<libc::fsid_t>(),
+        ) == 0
+    };
+    if !same_filesystem {
+        return Err(std::io::Error::other(
+            "WASI data volume changed during validation",
+        ));
+    }
+    Ok(directory_identity(directory)? == directory_identity(&root)?)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_filesystem_root(parent: &File, directory: &File) -> Option<bool> {
+    use std::os::fd::AsRawFd;
+
+    fn mount_id(file: &File) -> Option<u64> {
+        std::fs::read_to_string(format!("/proc/self/fdinfo/{}", file.as_raw_fd()))
+            .ok()?
+            .lines()
+            .find_map(|line| line.strip_prefix("mnt_id:"))?
+            .trim()
+            .parse()
+            .ok()
+    }
+
+    let mount_id_for_dir = mount_id(directory)?;
+    if mount_id_for_dir == mount_id(parent)? {
+        return Some(false);
+    }
+
+    // Match the opened mount by ID so a bind mount of a subdirectory
+    // remains usable, even if it crosses a device boundary.
+    let mounts = std::fs::read("/proc/self/mountinfo").ok()?;
+    linux_mount_is_filesystem_root(&mounts, mount_id_for_dir)
+}
+
+#[cfg(target_os = "linux")]
+fn require_linux_mount_check(result: Option<bool>, directory: &Path) -> WasmResult<bool> {
+    result.ok_or_else(|| {
+        WasmError::LoadFailed(format!(
+            "cannot verify whether WASI data directory `{}` is a filesystem root; Linux mount metadata is unavailable",
+            directory.display()
+        ))
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_mount_is_filesystem_root(mounts: &[u8], mount_id: u64) -> Option<bool> {
+    let id = mount_id.to_string();
+    for line in mounts.split(|byte| *byte == b'\n') {
+        let mut fields = line.split(|byte| *byte == b' ');
+        if fields.next() == Some(id.as_bytes()) {
+            return Some(fields.nth(2)? == b"/");
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn directory_identity(file: &File) -> std::io::Result<(u64, [u8; 16])> {
+    use std::mem::{MaybeUninit, size_of};
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx,
+    };
+
+    let mut info = MaybeUninit::<FILE_ID_INFO>::uninit();
+    // SAFETY: file owns the handle and the buffer matches the requested information class.
+    let success = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileIdInfo,
+            info.as_mut_ptr().cast(),
+            size_of::<FILE_ID_INFO>() as u32,
+        )
+    };
+    if success == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: a successful call initializes the complete FILE_ID_INFO.
+    let info = unsafe { info.assume_init() };
+    if info.FileId.Identifier == [0; 16] {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "filesystem returned no directory identifier",
+        ));
+    }
+    Ok((info.VolumeSerialNumber, info.FileId.Identifier))
+}
+
 impl HostState {
     pub(crate) fn new(limits: &WasmRuntimeLimits) -> Self {
         Self {
             wasi: WasiCtxBuilder::new().inherit_stdio().build(),
+            isolate_wasi_runtime: false,
             table: ResourceTable::new(),
             invocations: HashMap::new(),
             stream_context_tokens: HashMap::new(),
@@ -192,6 +362,140 @@ impl HostState {
             next_token: 1,
             limits: StoreResourceLimiter::new(limits),
         }
+    }
+
+    pub(super) fn set_wasi_runtime_isolation(&mut self, enabled: bool) {
+        self.isolate_wasi_runtime = enabled;
+    }
+
+    pub(super) fn preopen_data_dir(
+        directory: &Path,
+        access: WasiDataAccess,
+    ) -> WasmResult<WasiFilesystemCtx> {
+        if !directory.is_absolute() {
+            return Err(WasmError::LoadFailed(
+                "WASI data directory must be an absolute path".into(),
+            ));
+        }
+        let directory = directory.canonicalize().map_err(|error| {
+            WasmError::LoadFailed(format!(
+                "cannot resolve WASI data directory `{}`: {error}",
+                directory.display()
+            ))
+        })?;
+        let expected = Self::open_expected_data_dir(&directory)?;
+        Self::validated_data_preopen(&directory, &expected, access)
+    }
+
+    fn open_expected_data_dir(directory: &Path) -> WasmResult<File> {
+        let root = directory
+            .ancestors()
+            .last()
+            .expect("a path is its own ancestor");
+        if directory == root {
+            return Err(WasmError::LoadFailed(
+                "WASI data directory cannot be a filesystem root".into(),
+            ));
+        }
+        let relative = directory.strip_prefix(root).expect("root is a path prefix");
+        let mut components = relative.components();
+        let invalid_path =
+            || WasmError::LoadFailed("WASI data directory must have a canonical path".into());
+        let Some(PathComponent::Normal(name)) = components.next_back() else {
+            return Err(invalid_path());
+        };
+        let open_error = |error| {
+            WasmError::LoadFailed(format!(
+                "cannot open WASI data directory `{}`: {error}",
+                directory.display()
+            ))
+        };
+        // Walk from the root by handle so a replaced component cannot redirect the expected open.
+        let root = open_ambient_dir(root, ambient_authority()).map_err(open_error)?;
+        let mut parent = root.try_clone().map_err(open_error)?;
+        for component in components {
+            let PathComponent::Normal(ancestor) = component else {
+                return Err(invalid_path());
+            };
+            parent = open_dir_nofollow(&parent, Path::new(ancestor)).map_err(open_error)?;
+        }
+        let opened = open_dir_nofollow(&parent, Path::new(name)).map_err(open_error)?;
+        let identity = directory_identity(&opened).map_err(open_error)?;
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        let mounted_root = identity.0 != directory_identity(&parent).map_err(open_error)?.0;
+        #[cfg(target_os = "linux")]
+        let mounted_root =
+            require_linux_mount_check(linux_filesystem_root(&parent, &opened), directory)?;
+        #[cfg(target_os = "macos")]
+        let mounted_root = macos_filesystem_root(&opened).map_err(open_error)?;
+        if mounted_root || identity == directory_identity(&root).map_err(open_error)? {
+            return Err(WasmError::LoadFailed(
+                "WASI data directory cannot be a filesystem root".into(),
+            ));
+        }
+        Ok(opened)
+    }
+
+    fn validated_data_preopen(
+        directory: &Path,
+        expected: &File,
+        access: WasiDataAccess,
+    ) -> WasmResult<WasiFilesystemCtx> {
+        let perms = match access {
+            WasiDataAccess::ReadOnly => FsPerms::ReadOnly,
+            WasiDataAccess::ReadWrite => FsPerms::ReadWrite,
+        };
+        let mut wasi = WasiCtxBuilder::new();
+        wasi.preopened_dir(directory, "/data", perms)
+            .map_err(|error| {
+                WasmError::LoadFailed(format!(
+                    "cannot preopen WASI data directory `{}`: {error}",
+                    directory.display()
+                ))
+            })?;
+        let mut wasi = wasi.build();
+        let filesystem = wasi.filesystem();
+        let mut table = ResourceTable::new();
+        // P2 exposes the descriptor backed by Wasmtime's already opened directory.
+        let preopens = WasiPreopens::get_directories(&mut WasiFilesystemCtxView {
+            ctx: filesystem,
+            table: &mut table,
+        })
+        .map_err(|error| WasmError::LoadFailed(format!("cannot inspect WASI preopen: {error}")))?;
+        let [(resource, _)] = preopens.as_slice() else {
+            return Err(WasmError::LoadFailed(
+                "expected exactly one WASI data preopen".into(),
+            ));
+        };
+        let Descriptor::Dir(opened) = table.get(resource).map_err(|error| {
+            WasmError::LoadFailed(format!("cannot read WASI descriptor: {error}"))
+        })?
+        else {
+            return Err(WasmError::LoadFailed(
+                "WASI data preopen is not a directory".into(),
+            ));
+        };
+        let identify_error = |error| {
+            WasmError::LoadFailed(format!(
+                "cannot identify opened WASI data directory: {error}"
+            ))
+        };
+        if directory_identity(&opened.dir).map_err(identify_error)?
+            != directory_identity(expected).map_err(identify_error)?
+        {
+            return Err(WasmError::LoadFailed(format!(
+                "WASI data directory `{}` changed before preopen",
+                directory.display()
+            )));
+        }
+        Ok(std::mem::take(filesystem))
+    }
+
+    pub(super) fn set_wasi_filesystem(
+        &mut self,
+        filesystem: wasmtime_wasi::filesystem::WasiFilesystemCtx,
+    ) {
+        *self.wasi.filesystem() = filesystem;
     }
 
     /// Allocate a fresh `ctx-token` and register a live invocation's
@@ -216,6 +520,35 @@ impl HostState {
         reply_deadline: Option<Instant>,
     ) -> u64 {
         self.sweep_expired_deferred_replies(crate::lifecycle::dedup::INFLIGHT_TTL, Instant::now());
+        // The guest runtime isolates filesystem work; host operations belong to
+        // the runtime that accepted the invocation and its deadline.
+        let caller_runtime = self
+            .isolate_wasi_runtime
+            .then(tokio::runtime::Handle::try_current)
+            .and_then(Result::ok);
+        let host_abi = if let Some(runtime) = caller_runtime.clone() {
+            let inner = host_abi;
+            Arc::new(
+                move |op| -> std::pin::Pin<
+                    Box<
+                        dyn std::future::Future<Output = crate::workload::HostOperationResult>
+                            + Send,
+                    >,
+                > {
+                    let runtime = runtime.clone();
+                    let future = {
+                        let _guard = runtime.enter();
+                        inner(op)
+                    };
+                    Box::pin(CallerRuntimeFuture {
+                        runtime,
+                        future: Some(future),
+                    })
+                },
+            ) as HostAbiFn
+        } else {
+            host_abi
+        };
         let token = self.next_token;
         self.next_token = self.next_token.wrapping_add(1);
         if self.next_token == 0 {
@@ -230,6 +563,7 @@ impl HostState {
             token,
             InvocationEntry {
                 ctx,
+                caller_runtime,
                 host_abi,
                 reply_deliver,
                 expects_response,
@@ -402,19 +736,21 @@ impl HostState {
         result: Result<bytes::Bytes, actr_protocol::ActrError>,
     ) -> bool {
         let token = self.effective_invocation_token(token);
-        let Some((deliver, request_id, expects_response)) =
+        let Some((deliver, request_id, expects_response, caller_runtime)) =
             self.invocations.get(&token).and_then(|entry| {
                 entry.reply_deliver.clone().map(|deliver| {
                     (
                         deliver,
                         entry.ctx.request_id.clone(),
                         entry.expects_response,
+                        entry.caller_runtime.clone(),
                     )
                 })
             })
         else {
             return false;
         };
+        let _guard = caller_runtime.as_ref().map(tokio::runtime::Handle::enter);
         deliver.deliver(ReplyOutcome {
             request_id,
             result,
@@ -450,6 +786,10 @@ impl HostState {
                 } else {
                     Ok(actr_framework::Bytes::new())
                 };
+                let _guard = entry
+                    .caller_runtime
+                    .as_ref()
+                    .map(tokio::runtime::Handle::enter);
                 entry
                     .reply_deliver
                     .as_ref()
@@ -596,16 +936,18 @@ impl WasmHost {
     /// Builds a fresh [`Linker`] per instance (cheap) inside the V2
     /// instantiation helper, registers WASI p2 as well as the generated
     /// `actr:workload/host@0.6.0` linker, and runs `Component::instantiate_async`.
-    pub(crate) async fn instantiate(&self) -> WasmResult<WasmWorkloadV2> {
-        let store_permit = acquire_store(&self.limits)?;
+    pub(crate) async fn instantiate(
+        &self,
+        wasi_data: Option<WasiDataGrant<'_>>,
+    ) -> WasmResult<WasmWorkloadV2> {
         probe_world(&self.component, &self.engine)?;
         WasmWorkloadV2::instantiate(
             &self.engine,
             &self.component,
             &self.limits,
             Arc::clone(&self.epoch_ticker),
-            store_permit,
             self.uses_explicit_reply_boundary,
+            wasi_data,
         )
         .await
     }

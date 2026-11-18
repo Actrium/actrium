@@ -49,6 +49,8 @@ endpoint = "http://localhost:8081/issuer"
 # [hyper]
 # data_dir = "~/.actr/hyper"
 # storage_root = "~/.actr/hyper/storage"
+# wasi_data_dir = "./workload-data" # Directory grant for a signed WASI data capability
+# wasi_data_access = "read-only" # Maximum access; defaults to "read-write"
 
 [discovery]
 visible = true

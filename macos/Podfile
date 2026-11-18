@@ -57,6 +57,18 @@ end
 target 'ActriumRenderer' do
   platform :macos, '14.0'
   use_actrium_react_native
+  pod 'ExpoSpeechRecognition', :path => File.join(ACTRIUM_RUNTIME_RELATIVE_PATH, 'node_modules/@boomsi/rn-speech-recognition/ios')
+  if ENV['ACTRIUM_SUPRAMARK_DIR']
+    supramark_root = File.realpath(ENV.fetch('ACTRIUM_SUPRAMARK_DIR'))
+    ENV['REACT_NATIVE_NODE_MODULES_DIR'] ||= File.join(supramark_root, 'node_modules')
+    pod 'SupramarkMarkdownNative', :path => File.join(supramark_root, 'crates/supramark-markdown/packages/react-native')
+    pod 'RNSVG', :path => File.dirname(
+      Pod::Executable.execute_command('node', [
+        '-p', 'require.resolve("react-native-svg/package.json", { paths: [process.argv[1]] })',
+        File.join(supramark_root, 'examples/react-native')
+      ]).strip
+    )
+  end
 end
 
 post_install do |installer|

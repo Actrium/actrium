@@ -451,6 +451,24 @@ Profile **MUST NOT** 重新定义 Actor type、Package 签名、文件摘要、d
 Profile、Profile Runtime、Execution Engine 与 Actr Host 的分层及首批实现命名见
 [`workload-runtimes.zh.md`](../../docs/architecture/workload-runtimes.zh.md)。
 
+`actr.component/1` 的 Host 能力 ID 由点分隔的段组成。每段以 ASCII 小写字母开头，其余字符
+可以是 ASCII 小写字母、数字或连字符。两个能力数组内及数组之间均不允许重复的 ID。
+
+| ID | 语义 |
+| --- | --- |
+| `wasi.data.read-only` | 将实例私有目录以只读权限挂载到 Guest 的 `/data`。 |
+| `wasi.data.read-write` | 将实例私有目录以读写权限挂载到 Guest 的 `/data`。 |
+
+包通过签名保护的 `[host].required-capabilities` 最多申请上述一项能力。部署方通过
+`actr.toml` 的 `[hyper].wasi_data_dir` 指定目录，并可用 `[hyper].wasi_data_access`
+设置访问上限（`read-only` 或 `read-write`，默认 `read-write`）。嵌入式 Host 可提供等价授权。
+Host 只按包申请的级别挂载目录。包未申请时不挂载。包申请了能力但未获目录授权、目录
+无法打开，或申请的级别超过授权上限时，Host 拒绝实例化。
+Store 重建沿用实例已打开的目录。重新装载实例时重新评估授权。
+升级前依靠 `wasi_data_dir` 挂载的 Workload，需要声明对应能力后重新打包并签名；
+旧格式包须先转换为 `actr-package/2`。配置了目录但包未声明能力时，Host 记录警告。
+当前 Component Profile 尚未定义 Guest 的可选能力查询接口，Host 会拒绝非空的可选能力列表。
+
 ### 7.2 `keel.guest/1`
 
 选择 `keel.guest/1` 时，`.actr` 本身就是该 Actor 的唯一分发包。Keel Guest

@@ -72,6 +72,21 @@ struct DevToolsMonitorView: View {
         return rows.first
     }
 
+    private var multiProcessStatus: (text: String, color: Color) {
+        guard let tabId = viewModel.currentTabId,
+              let state = diagnosticsStore.poolSnapshot.state(for: tabId) else {
+            return ("Multi-Process: Unallocated", .secondary)
+        }
+        switch state {
+        case .ready:
+            return ("Multi-Process: Ready", .green)
+        case .starting:
+            return ("Multi-Process: Starting", .orange)
+        case .terminating:
+            return ("Multi-Process: Terminating", .secondary)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -139,9 +154,9 @@ struct DevToolsMonitorView: View {
             // Multi-process mode indicator
             HStack(spacing: 4) {
                 Circle()
-                    .fill(Color.green)
+                    .fill(multiProcessStatus.color)
                     .frame(width: 6, height: 6)
-                Text("Multi-Process")
+                Text(multiProcessStatus.text)
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
@@ -371,15 +386,22 @@ struct DevToolsMonitorView: View {
                     Divider()
 
                     // Process rows
-                    let processes = diagnosticsStore.allLegacyProcesses()
-                    if processes.isEmpty {
+                    let poolProcesses = diagnosticsStore.poolSnapshot.processes
+                    let legacyProcesses = diagnosticsStore.allLegacyProcesses()
+                    if poolProcesses.isEmpty && legacyProcesses.isEmpty {
                         Text("No tab processes running")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
                     } else {
-                        ForEach(processes, id: \.tabId) { processInfo in
+                        ForEach(poolProcesses) { process in
+                            PoolTaskManagerRow(process: process) { tabId in
+                                viewModel.closeTab(id: tabId)
+                            }
+                            Divider()
+                        }
+                        ForEach(legacyProcesses, id: \.tabId) { processInfo in
                             TaskManagerRow(processInfo: processInfo)
                             Divider()
                         }
@@ -418,7 +440,7 @@ struct DevToolsMonitorView: View {
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "xmark.circle")
-                    Text("Kill All")
+                    Text("Kill All Legacy")
                 }
                 .font(.system(size: 10))
                 .foregroundColor(.red)
@@ -703,19 +725,123 @@ private struct MonitorFlowLayout: Layout {
     }
 }
 
-// MARK: - Task Manager Row
+// MARK: - Task Manager Rows
+
+private struct PoolTaskManagerRow: View {
+    @ObservedObject private var diagnosticsStore = RendererDiagnosticsStore.shared
+    let process: RendererProcessSnapshot
+    let onCloseTab: (UUID) -> Void
+
+    private var metrics: PIDMetrics? {
+        diagnosticsStore.metrics(for: process.pid)
+    }
+
+    private var statusText: String {
+        switch process.state {
+        case .ready: return "Ready"
+        case .starting: return "Starting"
+        case .terminating: return "Terminating"
+        }
+    }
+
+    private var statusColor: Color {
+        switch process.state {
+        case .ready: return .green
+        case .starting: return .orange
+        case .terminating: return .secondary
+        }
+    }
+
+    private var sortedTabIDs: [UUID] {
+        process.tabIDs.sorted { $0.uuidString < $1.uuidString }
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Pool \(process.id.suffix(8))")
+                    .font(.system(size: 10, design: .monospaced))
+                    .lineLimit(1)
+                Text("\(process.tabIDs.count) tab\(process.tabIDs.count == 1 ? "" : "s")")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+            }
+            .frame(width: 120, alignment: .leading)
+
+            Text("\(process.pid)")
+                .font(.system(size: 10, design: .monospaced))
+                .frame(width: 60, alignment: .trailing)
+
+            if let memory = metrics?.memoryBytes {
+                Text(String(format: "%.1f MB", Double(memory) / 1_048_576.0))
+                    .font(.system(size: 10, design: .monospaced))
+                    .frame(width: 80, alignment: .trailing)
+            } else {
+                Text("N/A")
+                    .foregroundColor(.secondary)
+                    .frame(width: 80, alignment: .trailing)
+            }
+
+            if let cpuPercent = metrics?.cpuPercent {
+                Text(String(format: "%.1f%%", cpuPercent))
+                    .font(.system(size: 10, design: .monospaced))
+                    .frame(width: 60, alignment: .trailing)
+            } else {
+                Text("N/A")
+                    .foregroundColor(.secondary)
+                    .frame(width: 60, alignment: .trailing)
+            }
+
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 6, height: 6)
+                Text(statusText)
+                    .font(.system(size: 10))
+            }
+            .frame(width: 80, alignment: .center)
+
+            Spacer()
+
+            if !sortedTabIDs.isEmpty {
+                Menu {
+                    ForEach(sortedTabIDs, id: \.self) { tabId in
+                        Button("Close \(tabId.uuidString.prefix(8))…") {
+                            onCloseTab(tabId)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .foregroundColor(.red)
+                }
+                .frame(width: 60, alignment: .center)
+                .help("Close a tab hosted by this renderer")
+            } else {
+                Color.clear
+                    .frame(width: 60)
+            }
+        }
+        .font(.system(size: 10))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+}
 
 private struct TaskManagerRow: View {
     @ObservedObject private var diagnosticsStore = RendererDiagnosticsStore.shared
     @ObservedObject var processInfo: TabProcessInfo
-    @State private var metrics: (memory: UInt64, cpuTime: UInt64)?
+
+    private var metrics: PIDMetrics? {
+        guard let pid = processInfo.pid else { return nil }
+        return diagnosticsStore.metrics(for: pid)
+    }
 
     private var statusText: String {
         switch processInfo.state {
         case .idle: return "Idle"
         case .launching: return "Launching..."
-        case .running(let pid): return "Running"
-        case .crashed(let reason): return "Crashed"
+        case .running: return "Running"
+        case .crashed: return "Crashed"
         case .terminated: return "Terminated"
         }
     }
@@ -743,31 +869,29 @@ private struct TaskManagerRow: View {
                     .font(.system(size: 10, design: .monospaced))
                     .frame(width: 60, alignment: .trailing)
             } else {
-                Text("—")
+                Text("N/A")
                     .foregroundColor(.secondary)
                     .frame(width: 60, alignment: .trailing)
             }
 
             // Memory
-            if let mem = metrics?.memory {
-                let mb = Double(mem) / 1_048_576.0
-                Text(String(format: "%.1f MB", mb))
+            if let memory = metrics?.memoryBytes {
+                Text(String(format: "%.1f MB", Double(memory) / 1_048_576.0))
                     .font(.system(size: 10, design: .monospaced))
                     .frame(width: 80, alignment: .trailing)
             } else {
-                Text("—")
+                Text("N/A")
                     .foregroundColor(.secondary)
                     .frame(width: 80, alignment: .trailing)
             }
 
-            // CPU Time
-            if let cpu = metrics?.cpuTime {
-                let seconds = Double(cpu) / 1_000_000_000.0
-                Text(String(format: "%.1fs", seconds))
+            // Incremental CPU usage
+            if let cpuPercent = metrics?.cpuPercent {
+                Text(String(format: "%.1f%%", cpuPercent))
                     .font(.system(size: 10, design: .monospaced))
                     .frame(width: 60, alignment: .trailing)
             } else {
-                Text("—")
+                Text("N/A")
                     .foregroundColor(.secondary)
                     .frame(width: 60, alignment: .trailing)
             }
@@ -802,20 +926,6 @@ private struct TaskManagerRow: View {
         .font(.system(size: 10))
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .onAppear {
-            updateMetrics()
-        }
-        .onReceive(Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()) { _ in
-            updateMetrics()
-        }
-    }
-
-    private func updateMetrics() {
-        guard let pid = processInfo.pid else {
-            metrics = nil
-            return
-        }
-        metrics = diagnosticsStore.getProcessMetrics(pid: pid)
     }
 }
 

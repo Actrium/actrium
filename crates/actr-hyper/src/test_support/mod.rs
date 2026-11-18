@@ -892,7 +892,7 @@ pub async fn instantiate_wasm_workload(
     host: &crate::wasm::WasmHost,
 ) -> Result<TestWasmWorkload, crate::wasm::WasmError> {
     Ok(TestWasmWorkload {
-        inner: host.instantiate().await?,
+        inner: host.instantiate(None).await?,
     })
 }
 

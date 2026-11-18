@@ -114,6 +114,40 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     requiresSandbox: true,
     implemented: false,
   },
+  'host:speech.recognize': {
+    name: 'host:speech.recognize',
+    audience: 'third_party',
+    requiresGrant: 'user',
+    // The speech adapter checks system permissions in the recording process.
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: true,
+  },
+  'host:speech.onInterimResult': {
+    name: 'host:speech.onInterimResult',
+    audience: 'third_party',
+    // Subscribers only receive results from their Guest's authorized recognize call.
+    requiresGrant: 'none',
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: true,
+  },
+  'host:speech.stop': {
+    name: 'host:speech.stop',
+    audience: 'third_party',
+    requiresGrant: 'none',
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: true,
+  },
+  'host:speech.onStateChange': {
+    name: 'host:speech.onStateChange',
+    audience: 'third_party',
+    requiresGrant: 'none',
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: true,
+  },
   'host:location.getCurrentPosition': {
     name: 'host:location.getCurrentPosition',
     audience: 'third_party',
