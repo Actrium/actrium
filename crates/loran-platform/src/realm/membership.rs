@@ -13,6 +13,7 @@
 
 use actr_protocol::ActrId;
 use actr_protocol::realm_membership::{RealmInvite, Role, invite_id, invite_secret_hash};
+use actr_protocol::realm_profile::{MembershipMode, RealmPolicy};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
 use chrono::{TimeZone, Utc};
@@ -23,6 +24,7 @@ use sqlx::{Sqlite, SqliteConnection, Transaction};
 use super::changes;
 use super::error::RealmError;
 use super::model::Realm;
+use crate::config::realm::DevJoinMode;
 use crate::storage::db::get_database;
 
 /// Lifetime of an owner invite.
@@ -52,6 +54,7 @@ pub enum Code {
     InviteUsed,
     InviteRevoked,
     Quota,
+    JoinRateLimited,
     Unavailable,
 }
 
@@ -74,6 +77,7 @@ impl Code {
             Self::InviteUsed => "invite_used",
             Self::InviteRevoked => "invite_revoked",
             Self::Quota => "quota",
+            Self::JoinRateLimited => "join_rate_limited",
             Self::Unavailable => "unavailable",
         }
     }
@@ -93,7 +97,7 @@ impl Code {
             | Self::OwnerMustTransfer
             | Self::Conflict => 409,
             Self::InviteExpired | Self::InviteUsed | Self::InviteRevoked => 410,
-            Self::Quota => 429,
+            Self::Quota | Self::JoinRateLimited => 429,
             Self::Unavailable => 503,
         }
     }
@@ -104,6 +108,7 @@ impl Code {
 pub struct MembershipError {
     pub code: Code,
     pub message: String,
+    pub retry_after_secs: Option<u64>,
 }
 
 impl MembershipError {
@@ -111,6 +116,7 @@ impl MembershipError {
         Self {
             code,
             message: message.into(),
+            retry_after_secs: None,
         }
     }
 }
@@ -301,9 +307,9 @@ async fn recheck(
 async fn check_realm_active(
     conn: &mut SqliteConnection,
     realm: &str,
-) -> Result<(), MembershipError> {
+) -> Result<RealmPolicy, MembershipError> {
     match Realm::get_on(conn, realm).await? {
-        Some(realm) if realm.is_active() => Ok(()),
+        Some(realm) if realm.is_active() => Ok(realm.policy),
         _ => fail(
             Code::RealmUnavailable,
             format!("Realm {realm} is not active"),
@@ -542,6 +548,40 @@ type InviteRow = (
     Option<i64>,
 );
 
+/// Admission settings and aggregate occupancy for an authenticated Realm domain.
+pub async fn admission_info(name: &str, platform_limit: u32) -> Result<Value, RealmError> {
+    let mut tx = get_database().get_pool().begin().await?;
+    let realm = Realm::get_on(&mut tx, name)
+        .await?
+        .ok_or(RealmError::NotFound)?;
+    let members: u32 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM realm_member WHERE realm=? AND status='active'")
+            .bind(name)
+            .fetch_one(&mut *tx)
+            .await?;
+    tx.commit().await?;
+    Ok(json!({
+        "realm": name, "policy": realm.policy, "active_members": members,
+        "effective_max_members": realm.policy.member_limit(platform_limit),
+        "open_joins_per_minute": realm.policy.open_join_limit(),
+    }))
+}
+
+/// Active memberships for the admin list, or for a single Realm.
+pub async fn active_member_counts(realm: Option<&str>) -> Result<Vec<(String, u32)>, sqlx::Error> {
+    let mut query = sqlx::QueryBuilder::<Sqlite>::new(
+        "SELECT realm, COUNT(*) FROM realm_member WHERE status='active'",
+    );
+    if let Some(realm) = realm {
+        query.push(" AND realm=").push_bind(realm);
+    }
+    query.push(" GROUP BY realm");
+    query
+        .build_query_as()
+        .fetch_all(get_database().get_pool())
+        .await
+}
+
 /// Redeem the invite whose secret hashes to `secret_hash` with a new Realm
 /// client key (section 4.1). The request signature has been verified with
 /// `public_key` and its nonce recorded.
@@ -551,6 +591,26 @@ pub async fn join(
     public_key: &[u8; 32],
     label: &str,
     limits: Limits,
+) -> Result<Value, MembershipError> {
+    join_with_mode(
+        realm,
+        secret_hash,
+        public_key,
+        label,
+        limits,
+        DevJoinMode::Off,
+    )
+    .await
+}
+
+/// Development modes still verify client possession and register keys in the membership database.
+pub async fn join_with_mode(
+    realm: &str,
+    secret_hash: &str,
+    public_key: &[u8; 32],
+    label: &str,
+    limits: Limits,
+    mode: DevJoinMode,
 ) -> Result<Value, MembershipError> {
     let key_id = actr_protocol::realm_membership::client_key_id(public_key);
     let now = now_secs();
@@ -577,6 +637,7 @@ pub async fn join(
             && !key.revoked
             && key.member_active
         {
+            check_realm_active(&mut tx, realm).await?;
             return Ok(json!({
                 "realm": realm, "member_id": key.member_id,
                 "role": key.role.as_str(), "key_id": key_id,
@@ -587,7 +648,22 @@ pub async fn join(
     if expires_at <= now {
         return fail(Code::InviteExpired, "the invite expired");
     }
-    check_realm_active(&mut tx, realm).await?;
+    let policy = check_realm_active(&mut tx, realm).await?;
+    let member_limit = policy.member_limit(limits.max_members);
+    let reusable = mode == DevJoinMode::ReusableInvite && role.as_deref() != Some("owner");
+    if reusable && let Some(key) = client_key_on(&mut tx, realm, &key_id).await? {
+        let signer = signer_of(key)?;
+        if target.as_ref().is_some_and(|id| id != &signer.member_id) {
+            return fail(
+                Code::Conflict,
+                "the Realm client key belongs to another member",
+            );
+        }
+        return Ok(json!({
+            "realm": realm, "member_id": signer.member_id,
+            "role": signer.role.as_str(), "key_id": key_id,
+        }));
+    }
 
     let mut revoked_actors = Vec::new();
     let (member_id, role) = match (role.as_deref().and_then(Role::parse), target) {
@@ -607,13 +683,13 @@ pub async fn join(
                     (owner, Role::Owner)
                 }
                 None => (
-                    insert_member(&mut tx, realm, Role::Owner, now, limits).await?,
+                    insert_member(&mut tx, realm, Role::Owner, now, member_limit).await?,
                     Role::Owner,
                 ),
             }
         }
         (Some(role), None) => (
-            insert_member(&mut tx, realm, role, now, limits).await?,
+            insert_member(&mut tx, realm, role, now, member_limit).await?,
             role,
         ),
         (None, Some(member_id)) => match member_on(&mut tx, realm, &member_id).await? {
@@ -628,13 +704,102 @@ pub async fn join(
         }
     };
 
+    insert_client(&mut tx, realm, &member_id, public_key, label, now, limits).await?;
+    // Reusable development invites remain revocable and expire at their original deadline.
+    if !reusable {
+        sqlx::query(
+            "UPDATE realm_invite SET used_at = ?, used_by_key = ? WHERE realm = ? AND invite_id = ?",
+        )
+        .bind(now)
+        .bind(&key_id)
+        .bind(realm)
+        .bind(&invite_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    announce(&revoked_actors);
+    Ok(json!({
+        "realm": realm, "member_id": member_id, "role": role.as_str(), "key_id": key_id,
+    }))
+}
+
+/// Admit a signed device under the policy in force in the same write transaction.
+pub async fn join_open(
+    realm: &str,
+    public_key: &[u8; 32],
+    label: &str,
+    limits: Limits,
+) -> Result<Value, MembershipError> {
+    let key_id = actr_protocol::realm_membership::client_key_id(public_key);
+    let mut tx = begin().await?;
+    let policy = check_realm_active(&mut tx, realm).await?;
+    if policy.membership != MembershipMode::Open {
+        return fail(Code::InvalidRequest, "this Realm requires an invitation");
+    }
+    if let Some(key) = client_key_on(&mut tx, realm, &key_id).await? {
+        let signer = signer_of(key)?;
+        return Ok(json!({
+            "realm": realm, "member_id": signer.member_id,
+            "role": signer.role.as_str(), "key_id": key_id,
+        }));
+    }
+    let now = now_secs();
+    let role = Role::Viewer;
+    let member_limit = policy.member_limit(limits.max_members);
+    let member_id = insert_member(&mut tx, realm, role, now, member_limit).await?;
+    // Keep successful admissions through leave/rejoin and process restarts. Aborted
+    // joins roll back both the new member and the rate-limit entry.
+    sqlx::query("DELETE FROM realm_open_join WHERE realm=? AND admitted_at <= ?")
+        .bind(realm)
+        .bind(now - 60)
+        .execute(&mut *tx)
+        .await?;
+    let oldest_at_limit: Option<i64> = sqlx::query_scalar(
+        "SELECT admitted_at FROM realm_open_join WHERE realm=?
+         ORDER BY admitted_at DESC LIMIT 1 OFFSET ?",
+    )
+    .bind(realm)
+    .bind(i64::from(policy.open_join_limit() - 1))
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(admitted_at) = oldest_at_limit {
+        let mut error = MembershipError::new(
+            Code::JoinRateLimited,
+            "invite-free joins are temporarily rate limited",
+        );
+        error.retry_after_secs = Some((admitted_at + 60 - now).max(1) as u64);
+        return Err(error);
+    }
+    sqlx::query("INSERT INTO realm_open_join (realm, admitted_at) VALUES (?, ?)")
+        .bind(realm)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+    insert_client(&mut tx, realm, &member_id, public_key, label, now, limits).await?;
+    tx.commit().await?;
+    Ok(json!({
+        "realm": realm, "member_id": member_id, "role": role.as_str(), "key_id": key_id,
+    }))
+}
+
+async fn insert_client(
+    tx: &mut Transaction<'_, Sqlite>,
+    realm: &str,
+    member_id: &str,
+    public_key: &[u8; 32],
+    label: &str,
+    now: i64,
+    limits: Limits,
+) -> Result<(), MembershipError> {
+    let key_id = actr_protocol::realm_membership::client_key_id(public_key);
     let clients: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM realm_client_key
          WHERE realm = ? AND member_id = ? AND revoked_at IS NULL",
     )
     .bind(realm)
-    .bind(&member_id)
-    .fetch_one(&mut *tx)
+    .bind(member_id)
+    .fetch_one(&mut **tx)
     .await?;
     if clients >= i64::from(limits.max_clients_per_member) {
         return fail(Code::Quota, "the member has the most clients allowed");
@@ -646,10 +811,10 @@ pub async fn join(
     .bind(realm)
     .bind(&key_id)
     .bind(public_key.as_slice())
-    .bind(&member_id)
+    .bind(member_id)
     .bind(label)
     .bind(now)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await;
     match inserted {
         Ok(_) => {}
@@ -658,20 +823,7 @@ pub async fn join(
         }
         Err(error) => return Err(error.into()),
     }
-    sqlx::query(
-        "UPDATE realm_invite SET used_at = ?, used_by_key = ? WHERE realm = ? AND invite_id = ?",
-    )
-    .bind(now)
-    .bind(&key_id)
-    .bind(realm)
-    .bind(&invite_id)
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    announce(&revoked_actors);
-    Ok(json!({
-        "realm": realm, "member_id": member_id, "role": role.as_str(), "key_id": key_id,
-    }))
+    Ok(())
 }
 
 async fn insert_member(
@@ -679,16 +831,18 @@ async fn insert_member(
     realm: &str,
     role: Role,
     now: i64,
-    limits: Limits,
+    member_limit: u32,
 ) -> Result<String, MembershipError> {
-    let members: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM realm_member WHERE realm = ? AND status = 'active'",
+    let (members, has_owner): (i64, bool) = sqlx::query_as(
+        "SELECT COUNT(*), COUNT(*) FILTER (WHERE role='owner') > 0
+         FROM realm_member WHERE realm = ? AND status = 'active'",
     )
     .bind(realm)
     .fetch_one(&mut **tx)
     .await?;
-    if members >= i64::from(limits.max_members) {
-        return fail(Code::Quota, "the Realm has the most members allowed");
+    let reserved = i64::from(!has_owner && role != Role::Owner);
+    if members + reserved >= i64::from(member_limit) {
+        return fail(Code::Quota, "Realm member limit reached");
     }
     let member_id = random_member_id();
     sqlx::query(

@@ -221,9 +221,56 @@ pub struct IceEndpoint {
     pub credential_audience: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MembershipMode {
+    #[default]
+    InviteOnly,
+    Open,
+}
+
+impl MembershipMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InviteOnly => "invite-only",
+            Self::Open => "open",
+        }
+    }
+}
+
+impl std::str::FromStr for MembershipMode {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "invite-only" => Ok(Self::InviteOnly),
+            "open" => Ok(Self::Open),
+            _ => Err("membership must be invite-only or open"),
+        }
+    }
+}
+
+pub const DEFAULT_OPEN_JOINS_PER_MINUTE: u32 = 10;
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RealmPolicy {
-    pub membership: String,
+    pub membership: MembershipMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_joins_per_minute: Option<std::num::NonZeroU32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_members: Option<std::num::NonZeroU32>,
+}
+
+impl RealmPolicy {
+    pub fn member_limit(&self, platform_limit: u32) -> u32 {
+        self.max_members
+            .map_or(platform_limit, |limit| limit.get().min(platform_limit))
+    }
+
+    pub fn open_join_limit(&self) -> u32 {
+        self.open_joins_per_minute
+            .map_or(DEFAULT_OPEN_JOINS_PER_MINUTE, |limit| limit.get())
+    }
 }
 
 /// Realm Profile error. Each variant maps to one error code; see

@@ -3,6 +3,35 @@
 Development, reference, and production configuration for the composed Loran
 service suite belongs here.
 
+## Realm admission
+
+In Loran Admin, open **Realms** to select a policy at creation or edit a hosted Realm.
+New and upgraded Realms default to `invite-only`. An `open` Realm admits independently
+signed devices as Viewers. A valid invitation grants its specified role. Owner claim
+and recovery use an owner invitation.
+
+`policy.open_joins_per_minute` defaults to 10 successful invite-free joins in a rolling
+60-second window. `policy.max_members` counts all active members and is capped by
+`[realm].max_members_per_realm` (default 1000). The first owner has a reserved place.
+A retry with the same registered device key consumes neither another place nor another
+join. HTTP 429 with `join_rate_limited` includes `Retry-After` in seconds. A full
+Realm returns `quota`. Reducing the cap applies to future admissions.
+
+The Admin API accepts `policy` on `POST /admin/api/realms`. Replace a locally managed
+policy with `PUT /admin/api/realms/{realm}/admission`. The signed Profile and admission
+rules change together. When superv manages the node, the local UI is read-only.
+An external domain signs its policy in `create_realm` and publishes subsequent revisions.
+
+```sh
+actr realm create-request --key realm-key.json --realm echo@realm.example --provider provider.example \
+  --selection packages.json --membership open --open-joins-per-minute 5 --max-members 100
+actr realm join --realm echo@realm.example --output echo-client.json
+```
+
+The old AFP-wide `[realm.dev_join]` setting `mode = "open"` no longer opens any Realm.
+Existing deployments using `reusable_invite` can still redeem member or device
+invitations more than once until expiry or revocation. Owner recovery remains single-use.
+
 ## Standalone UDP STUN/TURN
 
 Use the regular Loran executable and the existing configuration schema.

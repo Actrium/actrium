@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-const approvedAdvisory =
-  "https://github.com/advisories/GHSA-qwww-vcr4-c8h2";
+const routerAdvisory = "https://github.com/advisories/GHSA-qwww-vcr4-c8h2";
 const approvedRouterVersion = "7.18.2";
+const picomatchAdvisory = "https://github.com/advisories/GHSA-fc5q-39xc-vjpf";
+const approvedBuildPicomatchVersion = "4.0.5";
 
 const packageJson = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
@@ -11,9 +12,8 @@ const packageJson = JSON.parse(
 const packageLock = JSON.parse(
   readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"),
 );
-// CI installs dependencies from pnpm-lock.yaml, not package-lock.json. Read the
-// pnpm lockfile too so the gate audits the versions that are actually built and
-// shipped, and so drift between the two lockfiles fails the gate closed.
+// Check the pnpm resolutions alongside the npm audit input so an exception
+// cannot migrate to a different build dependency version.
 const pnpmLock = readFileSync(
   new URL("../pnpm-lock.yaml", import.meta.url),
   "utf8",
@@ -23,9 +23,7 @@ const appSource = readFileSync(
   "utf8",
 );
 
-// The only temporary exception is an upstream advisory for React Router's
-// server-side RSC mode. Loran Admin is a static Vite SPA. Fail closed if the
-// dependency version or that architectural invariant changes.
+// The React Router exception applies to a static SPA using BrowserRouter.
 const allDependencies = {
   ...packageJson.dependencies,
   ...packageJson.devDependencies,
@@ -120,6 +118,23 @@ function advisoryRoots(packageName, seen = new Set()) {
   );
 }
 
+// The reviewed picomatch version is a build dependency for Vite's source scan.
+// Vite also rejects picomatch modules in the emitted Admin UI bundle.
+const pnpmPicomatchVersions = new Set(
+  Array.from(pnpmLock.matchAll(/^ {2}picomatch@([^:\s]+):/gm), ([, version]) => version),
+);
+const npmPicomatch = Object.entries(packageLock.packages ?? {}).filter(
+  ([path]) => /(?:^|\/)node_modules\/picomatch$/.test(path),
+);
+const reviewedBuildPicomatch =
+  pnpmPicomatchVersions.size === 1 &&
+  pnpmPicomatchVersions.has(approvedBuildPicomatchVersion) &&
+  npmPicomatch.length > 0 &&
+  npmPicomatch.every(
+    ([, entry]) => entry.dev === true && entry.version === approvedBuildPicomatchVersion,
+  );
+
+let buildAdvisoryAccepted = false;
 const unapproved = [];
 for (const [packageName, vulnerability] of Object.entries(
   report.vulnerabilities,
@@ -129,11 +144,21 @@ for (const [packageName, vulnerability] of Object.entries(
   }
 
   const roots = advisoryRoots(packageName);
-  if (
-    roots.length === 0 ||
-    roots.some((advisory) => advisory.url !== approvedAdvisory)
-  ) {
+  const buildOnly =
+    reviewedBuildPicomatch &&
+    vulnerability.severity === "high" &&
+    Array.isArray(vulnerability.nodes) &&
+    vulnerability.nodes.length > 0 &&
+    vulnerability.nodes.every((path) => packageLock.packages[path]?.dev === true);
+  const hasUnapprovedRoot = roots.some(
+    ({ packageName: origin, url }) =>
+      url !== routerAdvisory &&
+      !(buildOnly && origin === "picomatch" && url === picomatchAdvisory),
+  );
+  if (roots.length === 0 || hasUnapprovedRoot) {
     unapproved.push({ packageName, severity: vulnerability.severity, roots });
+  } else if (roots.some(({ url }) => url === picomatchAdvisory)) {
+    buildAdvisoryAccepted = true;
   }
 }
 
@@ -143,7 +168,9 @@ if (unapproved.length > 0) {
   process.exit(1);
 }
 
-console.log(
-  "Dependency audit passed: no unapproved high/critical advisories; " +
-    "the reviewed React Router RSC-only exception remains architecture-gated.",
-);
+if (buildAdvisoryAccepted) {
+  console.warn(
+    `Build-only advisory accepted for picomatch ${approvedBuildPicomatchVersion}: ${picomatchAdvisory}`,
+  );
+}
+console.log("Dependency audit passed: no unapproved high/critical advisories.");

@@ -5,6 +5,199 @@ use serial_test::serial;
 
 const REALM: &str = "k7m2q9xh@acme.com";
 
+#[tokio::test]
+#[serial]
+async fn open_admission_is_idempotent_and_enforces_revocation_and_quotas() {
+    let owner = realm_with_owner().await;
+    Realm::set_unsigned_policy(
+        REALM,
+        RealmPolicy {
+            membership: MembershipMode::Open,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let public_key = key(2);
+    let (a, b) = tokio::join!(
+        join_open(REALM, &public_key, "a", LIMITS),
+        join_open(REALM, &public_key, "b", LIMITS),
+    );
+    let joined = a.unwrap();
+    assert_eq!(joined, b.unwrap());
+    let again = join_open(REALM, &key(2), "retry", LIMITS).await.unwrap();
+    assert_eq!(again, joined);
+    assert_eq!(again["role"], "viewer");
+    let viewer = join_open(REALM, &key(3), "viewer", LIMITS).await.unwrap();
+    assert_eq!(viewer["role"], "viewer");
+    assert_eq!(
+        code(join_open(REALM, &key(4), "", LIMITS).await),
+        Code::Quota
+    );
+    revoke_client(&owner, &client_key_id(&key(2)))
+        .await
+        .unwrap();
+    assert_eq!(
+        code(join_open(REALM, &key(2), "", LIMITS).await),
+        Code::ClientRevoked
+    );
+    remove_member(&owner, viewer["member_id"].as_str().unwrap())
+        .await
+        .unwrap();
+    assert!(join_open(REALM, &key(3), "", LIMITS).await.is_err());
+    assert_eq!(
+        code(join_open("missing@acme.com", &key(5), "", LIMITS).await),
+        Code::RealmUnavailable
+    );
+    sqlx::query("UPDATE realm SET status = 'retired' WHERE name = ?")
+        .bind(REALM)
+        .execute(get_database().get_pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        code(join_open(REALM, &key(1), "", LIMITS).await),
+        Code::RealmUnavailable
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn open_join_rate_is_rolling_and_retries_do_not_consume_it() {
+    let owner = realm_with_owner().await;
+    let policy = RealmPolicy {
+        membership: MembershipMode::Open,
+        open_joins_per_minute: std::num::NonZeroU32::new(1),
+        ..Default::default()
+    };
+    Realm::set_unsigned_policy(REALM, policy).await.unwrap();
+    let first = join_open(REALM, &key(2), "", LIMITS).await.unwrap();
+    assert_eq!(join_open(REALM, &key(2), "", LIMITS).await.unwrap(), first);
+    remove_member(&owner, first["member_id"].as_str().unwrap())
+        .await
+        .unwrap();
+    let refused = join_open(REALM, &key(3), "", LIMITS).await.unwrap_err();
+    assert_eq!(refused.code, Code::JoinRateLimited);
+    assert!((1..=60).contains(&refused.retry_after_secs.unwrap()));
+    sqlx::query("UPDATE realm_open_join SET admitted_at = admitted_at - 60 WHERE realm=?")
+        .bind(REALM)
+        .execute(get_database().get_pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        join_open(REALM, &key(3), "", LIMITS).await.unwrap()["role"],
+        "viewer"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn reusable_admission_keeps_invitations_revocable_and_checks_expiry() {
+    let owner = realm_with_owner().await;
+    let invitation = create_invite(&owner, Some(Role::Editor), None, now_secs() + 3600, LIMITS)
+        .await
+        .unwrap();
+    let hash = invite_secret_hash(&secret_of(&invitation)).unwrap();
+    let redeem = |seed| {
+        let hash = &hash;
+        async move {
+            join_with_mode(
+                REALM,
+                hash,
+                &key(seed),
+                "",
+                LIMITS,
+                DevJoinMode::ReusableInvite,
+            )
+            .await
+        }
+    };
+    let first = redeem(2).await.unwrap();
+    let second = redeem(3).await.unwrap();
+    assert_ne!(first["member_id"], second["member_id"]);
+    assert_eq!(first, redeem(2).await.unwrap());
+    revoke_client(&owner, &client_key_id(&key(2)))
+        .await
+        .unwrap();
+    assert_eq!(code(redeem(2).await), Code::ClientRevoked);
+    sqlx::query("UPDATE realm_invite SET expires_at = 1 WHERE invite_id = ?")
+        .bind(&invitation.invite_id)
+        .execute(get_database().get_pool())
+        .await
+        .unwrap();
+    assert_eq!(code(redeem(4).await), Code::InviteExpired);
+    revoke_invite(&owner, &invitation.invite_id).await.unwrap();
+    assert_eq!(code(redeem(4).await), Code::InviteRevoked);
+}
+
+#[tokio::test]
+#[serial]
+async fn reusable_owner_client_invites_preserve_other_devices_and_recovery_stays_single_use() {
+    let owner = realm_with_owner().await;
+    let invitation = create_invite(
+        &owner,
+        None,
+        Some(&owner.member_id),
+        now_secs() + 3600,
+        LIMITS,
+    )
+    .await
+    .unwrap();
+    let hash = invite_secret_hash(&secret_of(&invitation)).unwrap();
+    let joined = join_with_mode(
+        REALM,
+        &hash,
+        &key(2),
+        "",
+        LIMITS,
+        DevJoinMode::ReusableInvite,
+    )
+    .await
+    .unwrap();
+    assert_eq!(joined["member_id"], owner.member_id);
+    assert_eq!(joined["role"], "owner");
+    assert_eq!(signer(1).await.member_id, owner.member_id);
+    assert_eq!(
+        code(
+            join_with_mode(
+                REALM,
+                &hash,
+                &key(3),
+                "",
+                LIMITS,
+                DevJoinMode::ReusableInvite
+            )
+            .await
+        ),
+        Code::Quota
+    );
+    let recovery = issue_owner_invite(REALM, BY_OPERATOR).await.unwrap();
+    let hash = invite_secret_hash(&secret_of(&recovery)).unwrap();
+    join_with_mode(
+        REALM,
+        &hash,
+        &key(3),
+        "",
+        LIMITS,
+        DevJoinMode::ReusableInvite,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        code(
+            join_with_mode(
+                REALM,
+                &hash,
+                &key(4),
+                "",
+                LIMITS,
+                DevJoinMode::ReusableInvite
+            )
+            .await
+        ),
+        Code::InviteUsed
+    );
+}
+
 const LIMITS: Limits = Limits {
     max_members: 3,
     max_clients_per_member: 2,
@@ -116,6 +309,11 @@ async fn invites_are_single_use_and_distinguish_their_failures() {
         .await
         .unwrap();
     assert_eq!(code(redeem(&again, 2).await), Code::Conflict);
+
+    Realm::set_enabled(REALM, false).await.unwrap();
+    assert_eq!(code(redeem(&expired, 3).await), Code::InviteExpired);
+    assert_eq!(code(redeem(&invite, 3).await), Code::InviteUsed);
+    assert_eq!(code(redeem(&invite, 2).await), Code::RealmUnavailable);
 }
 
 #[tokio::test]

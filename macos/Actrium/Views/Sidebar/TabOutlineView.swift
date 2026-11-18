@@ -132,6 +132,8 @@ struct CrossWindowTabData: Codable {
     let urlString: String?
     let groupId: String?
     let unifiedScript: String?
+    let guestExtractedPath: String?
+    let guestEntry: String?
     let capabilityManifestJSON: String?
     let permissions: [String]?
     let leftPanelScript: String?
@@ -443,6 +445,8 @@ struct TabOutlineView: NSViewRepresentable {
                 urlString: tab.url?.absoluteString,
                 groupId: tab.groupId?.uuidString,
                 unifiedScript: tab.unifiedScript,
+                guestExtractedPath: tab.guestExtractedPath,
+                guestEntry: tab.guestEntry,
                 capabilityManifestJSON: tab.capabilityManifestJSON,
                 permissions: tab.permissions,
                 leftPanelScript: tab.leftPanelScript,
@@ -540,6 +544,8 @@ struct TabOutlineView: NSViewRepresentable {
                     leftPanelScript: tabData.leftPanelScript,
                     rightPanelScript: tabData.rightPanelScript,
                     unifiedScript: tabData.unifiedScript,
+                    guestExtractedPath: tabData.guestExtractedPath,
+                    guestEntry: tabData.guestEntry,
                     capabilityManifestJSON: tabData.capabilityManifestJSON,
                     permissions: tabData.permissions ?? [],
                     backgroundColor: tabData.backgroundColor
@@ -819,6 +825,8 @@ struct TabOutlineView: NSViewRepresentable {
                 if let url = tab.url?.absoluteString { data["urlString"] = url }
                 if let systemType = tab.systemTabType { data["systemTabType"] = systemType.rawValue }
                 if let script = tab.unifiedScript { data["unifiedScript"] = script }
+                if let path = tab.guestExtractedPath { data["guestExtractedPath"] = path }
+                if let entry = tab.guestEntry { data["guestEntry"] = entry }
                 if let manifest = tab.capabilityManifestJSON {
                     data["capabilityManifestJSON"] = manifest
                 }

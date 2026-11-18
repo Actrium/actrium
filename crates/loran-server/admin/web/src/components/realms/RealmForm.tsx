@@ -1,8 +1,11 @@
 import { useState, type FormEvent, useEffect } from "react";
-import { api, type RealmMutationResponse } from "../../lib/api";
+import { api, type RealmPolicy, type RealmMutationResponse } from "../../lib/api";
 import { X, Copy, Download, CheckCircle, AlertTriangle } from "lucide-react";
 
+import { RealmAdmissionFields } from "./RealmAdmission";
+
 interface RealmFormProps {
+  limit: number;
   onSubmit: (data: Parameters<typeof api.createRealm>[0]) => Promise<RealmMutationResponse>;
   onClose: () => void;
   onRefresh?: () => void;
@@ -13,7 +16,8 @@ interface RealmFormProps {
  * Realm under the Provider domain gets a Loran-signed Realm Profile, which
  * names its Service and Front packages.
  */
-export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
+export function RealmForm({ onSubmit, onClose, onRefresh, limit }: RealmFormProps) {
+  const [policy, setPolicy] = useState<RealmPolicy>({ membership: "invite-only" });
   const [name, setName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const emptyPackage = { href: "", sha256: "", type: "" };
@@ -52,6 +56,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
     try {
       const resp = await onSubmit({
         realm: name,
+        policy,
         enabled: false,
         ...(displayName ? { display_name: displayName } : {}),
         ...(selectingPackages
@@ -107,7 +112,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
   if (step === "success" && ownerInvite && createdRealm) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-        <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+        <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
               <CheckCircle className="h-5 w-5 text-green-500" />
@@ -123,7 +128,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
                   <p className="text-sm font-medium text-amber-900">Save the owner invite now</p>
                   <p className="text-xs text-amber-700">
                     It is shown only once. Hand it to the Realm&apos;s owner, who redeems it with a
-                    new client and then invites the other members.
+                    new client to claim ownership.
                   </p>
                 </div>
               </div>
@@ -186,7 +191,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+      <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">
             Create Realm
@@ -230,6 +235,8 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
+
+          <RealmAdmissionFields policy={policy} limit={limit} onChange={setPolicy} />
 
           <div className="grid gap-3">
             {(["service", "front"] as const).map((role) => {

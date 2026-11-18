@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { api, type RealmInfo } from "../lib/api";
+import { EditRealmAdmission } from "../components/realms/RealmAdmission";
 import { RealmTable } from "../components/realms/RealmTable";
 import { RealmForm } from "../components/realms/RealmForm";
 import { HowItWorks } from "../components/ui/HowItWorks";
@@ -19,7 +20,9 @@ export function Realms() {
   const [realms, setRealms] = useState<RealmInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [realmWritesEnabled, setRealmWritesEnabled] = useState(true);
+  const [realmWritesEnabled, setRealmWritesEnabled] = useState(false);
+  const [memberLimit, setMemberLimit] = useState(1000);
+  const [editing, setEditing] = useState<RealmInfo | null>(null);
   const [ownerInvite, setOwnerInvite] = useState<{
     realm: string;
     invite: string;
@@ -42,6 +45,7 @@ export function Realms() {
     try {
       const capabilities = await api.getCapabilities();
       setRealmWritesEnabled(capabilities.realm_writes_enabled);
+      setMemberLimit(capabilities.max_members_per_realm);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load admin capabilities");
     }
@@ -72,6 +76,7 @@ export function Realms() {
       return;
     }
     setShowForm(false);
+    setEditing(null);
     setRetireConfirm(null);
     setInviteConfirm(null);
   }, [realmWritesEnabled]);
@@ -149,8 +154,8 @@ export function Realms() {
         <p className="text-xs text-gray-500 mb-4">
           One Loran instance hosts many Realms. A Realm is one deployed application instance,
           named <code>&lt;realm_id&gt;@&lt;domain&gt;</code>. Realms share this instance&apos;s
-          services but never see each other&apos;s Actors. Members join with one-time invites
-          and register a Realm client key per client; Issuer checks that key on every
+          services but never see each other&apos;s Actors. Members join by invitation or, in an open Realm, as Viewers.
+          Each client registers its own Realm key. Issuer checks that key on every
           registration, and guest workloads never receive it.
         </p>
 
@@ -167,7 +172,7 @@ export function Realms() {
             </li>
             <li>
               <strong className="text-gray-600">Owner invite</strong> — creating a Realm returns
-              its owner invite once. The owner redeems it and invites the members. If the owner
+              its owner invite once. The owner redeems it to manage members. If the owner
               loses all clients, issue a new owner invite here (Realms under this Actr Facility Provider&apos;s
               domain, or without a Realm Profile); redeeming it revokes the old owner clients.
             </li>
@@ -203,12 +208,18 @@ export function Realms() {
           if (ensureRealmWritesEnabled()) setRetireConfirm(realm);
         }}
         onShowMembers={setMembersRealm}
+        onEditAdmission={setEditing}
       />
 
       <IdentityReview kind="realm-domains" disabled={!realmWritesEnabled} />
 
+      {editing && realmWritesEnabled && (
+        <EditRealmAdmission realm={editing} limit={memberLimit} onClose={() => setEditing(null)} onSaved={fetchRealms} />
+      )}
+
       {showForm && (
         <RealmForm
+          limit={memberLimit}
           onSubmit={handleCreate}
           onClose={() => setShowForm(false)}
           onRefresh={fetchRealms}

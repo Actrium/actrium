@@ -107,14 +107,11 @@ impl RealmProfileRecord {
             .begin_with("BEGIN IMMEDIATE")
             .await?;
 
-        let status: Option<String> = sqlx::query_scalar("SELECT status FROM realm WHERE name = ?")
-            .bind(name)
-            .fetch_optional(&mut *tx)
-            .await?;
-        match status.as_deref() {
-            None => return Err(RealmError::NotFound),
-            Some("retired") => return Err(RealmError::Retired),
-            Some(_) => {}
+        let current = Realm::get_on(&mut tx, name)
+            .await?
+            .ok_or(RealmError::NotFound)?;
+        if current.status == super::model::RealmStatus::Retired {
+            return Err(RealmError::Retired);
         }
         if let Some(owner) = owner {
             require_owner(&check_key_on(&mut tx, name, &owner.key_id).await?)?;
@@ -140,7 +137,14 @@ impl RealmProfileRecord {
             }
         }
 
-        if status.as_deref() == Some("pending") && profile.realm.status == RealmStatus::Active {
+        if current.status == super::model::RealmStatus::Pending
+            && profile.realm.status == RealmStatus::Active
+        {
+            if current.policy != profile.policy {
+                return Err(RealmError::Conflict(
+                    "first Profile differs from the create_realm admission policy".into(),
+                ));
+            }
             let expected: Option<String> =
                 sqlx::query_scalar("SELECT selection FROM realm_creation_selection WHERE realm=?")
                     .bind(name)
@@ -217,6 +221,7 @@ impl RealmProfileRecord {
         match profile.realm.status {
             RealmStatus::Retired => retire_in(&mut tx, name, now).await?,
             RealmStatus::Active => {
+                Realm::store_policy(&mut tx, name, profile.policy).await?;
                 super::issuer_key::RealmIssuerKey::mark_published(&mut tx, profile, now).await?;
                 activated = sqlx::query(
                     "UPDATE realm SET status = 'active', pending_expires_at = NULL,

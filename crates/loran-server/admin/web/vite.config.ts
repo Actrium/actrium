@@ -3,7 +3,26 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    {
+      name: "loran-admin-no-runtime-picomatch",
+      apply: "build",
+      generateBundle(_options, bundle) {
+        for (const output of Object.values(bundle)) {
+          if (
+            output.type === "chunk" &&
+            Object.keys(output.modules).some(
+              (id) => /[\\/]node_modules[\\/]picomatch[\\/]/.test(id),
+            )
+          ) {
+            this.error("The Admin UI bundle includes build-only dependency picomatch");
+          }
+        }
+      },
+    },
+  ],
   base: "/admin/",
   server: {
     host: "::",
