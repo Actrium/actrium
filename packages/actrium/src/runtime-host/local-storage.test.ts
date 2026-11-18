@@ -64,6 +64,31 @@ test('storage validates inputs and authorizes each method before calling the bac
   expect(sent).toEqual(['setItem']);
 });
 
+test.each([
+  ['ASCII', 'a', 1],
+  ['two-byte characters', '\u00e9', 2],
+  ['three-byte characters', '\u96ea', 3],
+  ['emoji', '\u{1f332}', 4],
+] as const)('storage enforces UTF-8 byte limits for %s', async (_, character, bytes) => {
+  const methods = createHostModuleDispatch(contract, createHostModules({
+    hasServiceCapability: false,
+    callActor: async () => ({ success: false }),
+    writeClipboardText: async () => {},
+    authorizeCapability: async () => {},
+    localStorage: async () => null,
+  }))[moduleId];
+  const key = character.repeat(Math.floor(1024 / bytes)) + 'a'.repeat(1024 % bytes);
+  const value = character.repeat(Math.floor(65536 / bytes)) + 'a'.repeat(65536 % bytes);
+
+  await expect(methods.getItem({ key })).resolves.toBeNull();
+  await methods.removeItem({ key });
+  await methods.setItem({ key, value });
+  expect(() => methods.getItem({ key: key + 'a' })).toThrow('key');
+  expect(() => methods.removeItem({ key: key + 'a' })).toThrow('key');
+  expect(() => methods.setItem({ key: key + 'a', value: '' })).toThrow('key');
+  expect(() => methods.setItem({ key, value: value + 'a' })).toThrow('value');
+});
+
 test('the v1 CLI and Guest Engine round-trip all three named storage methods', async () => {
   const root = mkdtempSync(join(tmpdir(), 'actrium-local-storage-'));
   let engine: Engine | undefined;

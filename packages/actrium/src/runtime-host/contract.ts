@@ -89,11 +89,22 @@ function requireString(value: unknown, label: string, allowEmpty = false): strin
   return value;
 }
 
+function utf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (character.length === 2) bytes += 4;
+    else if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else bytes += 3;
+  }
+  return bytes;
+}
+
 function parseLocalStorageKey(value: unknown): LocalStorageKeyInput {
   const { key } = asObject(value, 'local storage input');
   const text = requireString(key, 'local storage key', true);
-  // The broker enforces the exact UTF-8 byte limit before touching SQLite.
-  if (text.length > 1024) throw new Error('local storage key is too long');
+  if (utf8ByteLength(text) > 1024) throw new Error('local storage key is too long');
   return { key: text };
 }
 
@@ -383,7 +394,7 @@ export const contract = defineKeelContract({
             const { key } = parseLocalStorageKey(value);
             const input = asObject(value, 'local storage input');
             const text = requireString(input.value, 'local storage value', true);
-            if (text.length > 64 * 1024) throw new Error('local storage value is too large');
+            if (utf8ByteLength(text) > 64 * 1024) throw new Error('local storage value is too large');
             return { key, value: text };
           },
         },

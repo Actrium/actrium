@@ -1,5 +1,6 @@
 import ActriumCore
 import ActriumIPC
+import CoreGraphics
 import Foundation
 import Testing
 @testable import Actrium
@@ -23,15 +24,17 @@ struct RendererLocalStorageTests {
     }
 
     @Test func guestRoundTripsThroughTheNativeRenderer() async throws {
-        let tabId = UUID()
+        let permissions = ["getItem", "setItem", "removeItem"].map { "host:local-storage.\($0)" }
+        var tab = Tab(
+            title: "Storage Probe", unifiedScript: Self.probeBundle,
+            capabilityManifestJSON: Self.probeManifest, permissions: permissions
+        )
+        let tabId = tab.id
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(tabId.uuidString)
         let database = GuestLocalStorage(path: url.path)
         let pool = RendererProcessPool(localStorage: RendererLocalStorage(database: database))
         let origin = "test:\(tabId.uuidString)"
-        let permissions = ["getItem", "setItem", "removeItem"].map { "host:local-storage.\($0)" }
-        let snapshot = try #require(CapabilityPermissionStore.shared.snapshotJSON(
-            tabId: tabId, appId: nil, version: nil, declaredCapabilities: permissions
-        ))
+        tab.localStorageOrigin = origin
         defer {
             pool.releaseRenderer(for: tabId)
             if FileManager.default.fileExists(atPath: url.path) {
@@ -40,24 +43,98 @@ struct RendererLocalStorageTests {
         }
 
         _ = try pool.allocateRenderer(for: tabId, fingerprint: "test.storage.\(tabId.uuidString)")
-        try await pool.prepareTab(tabId: tabId, config: [
-            "title": "Storage Probe",
-            "unifiedScript": Self.probeBundle,
-            "containerWidth": 800,
-            "containerHeight": 500,
-            "localStorageOrigin": origin,
-            "permissions": permissions,
-            "capabilitySnapshotJSON": snapshot,
-            "capabilityManifestJSON": Self.probeManifest,
-        ])
+        for revision in 0...2 {
+            tab.reloadNonce = min(revision, 1)
+            tab.capabilityRevision = revision
+            if revision == 2 { tab.permissions.append("host:clipboard.write") }
+            try database.removeItem(origin: origin, key: "report")
+            try await pool.prepareTab(tabId: tabId, config: rendererConfig(for: tab))
 
-        let deadline = ContinuousClock.now + .seconds(8)
-        var outcome: String?
-        while outcome == nil && ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(100))
-            outcome = try database.getItem(origin: origin, key: "report")
+            let deadline = ContinuousClock.now + .seconds(8)
+            var outcome: String?
+            while outcome == nil && ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(100))
+                outcome = try database.getItem(origin: origin, key: "report")
+            }
+            #expect(outcome == "dark/null")
         }
-        #expect(outcome == "dark/null")
+    }
+
+    @Test func resentConfigsPreserveStorageAcrossReloadAndCapabilityChanges() async throws {
+        let broker = RendererLocalStorage(database: GuestLocalStorage(path: ":memory:"))
+        var tab = Tab(
+            title: "Storage Probe", unifiedScript: Self.probeBundle,
+            capabilityManifestJSON: Self.probeManifest, localStorageOrigin: "app-a",
+            permissions: ["host:local-storage.getItem", "host:local-storage.setItem"]
+        )
+        let initial = broker.prepare(tabId: tab.id, config: rendererConfig(for: tab))
+        let firstId = try document(in: initial)
+        let write = try await request(broker, tab.id, firstId, .setItem, value: "dark")
+        #expect(write.error == nil)
+
+        tab.reloadNonce += 1
+        let reloaded = broker.prepare(tabId: tab.id, config: rendererConfig(for: tab))
+        let reloadedId = try document(in: reloaded)
+        #expect(reloadedId != firstId)
+        let stale = try await request(broker, tab.id, firstId, .getItem)
+        #expect(stale.error != nil)
+
+        tab.permissions.append("host:clipboard.write")
+        tab.capabilityRevision += 1
+        let updated = broker.prepare(tabId: tab.id, config: rendererConfig(for: tab))
+        let currentId = try document(in: updated)
+        #expect(currentId == reloadedId)
+        let read = try await request(broker, tab.id, currentId, .getItem)
+        #expect(read.value == "dark" && read.error == nil)
+        #expect(updated["localStorageOrigin"] == nil)
+        #expect(updated["capabilitySnapshotJSON"] as? String != nil)
+        #expect(updated["containerWidth"] as? CGFloat == 800)
+        #expect(updated["containerHeight"] as? CGFloat == 600)
+    }
+
+    @Test func aConfigWithoutAnOriginRevokesThePreviousDocument() async throws {
+        let broker = RendererLocalStorage(database: GuestLocalStorage(path: ":memory:"))
+        let tabId = UUID()
+        var config = configuration(origin: "app-a", permissions: ["host:local-storage.getItem"])
+        let previousId = try document(in: broker.prepare(tabId: tabId, config: config))
+        config.removeValue(forKey: "localStorageOrigin")
+        let revoked = broker.prepare(tabId: tabId, config: config)
+        #expect(revoked["localStorageDocumentId"] == nil)
+        let denied = try await request(broker, tabId, previousId, .getItem)
+        #expect(denied.error != nil)
+    }
+
+    @Test func panelChangesPreserveTheLatestStorageConfig() throws {
+        let tabId = UUID()
+        let coordinator = ViewBridgeCoordinator()
+        coordinator.tabId = tabId
+        coordinator.allocatedServiceId = "test.storage"
+        coordinator.tabConfig = XPCTabConfig(
+            tabId: tabId, appId: nil, legacyActorBridge: false, title: "Old", backgroundColor: "#ffffff",
+            containerSize: CGSize(width: 800, height: 600), systemAppType: nil,
+            unifiedScript: "old", capabilityManifestJSON: nil, capabilitySnapshotJSON: nil,
+            leftPanelScript: nil, leftPanelVisible: true, rightPanelVisible: false,
+            permissions: [], libraryData: [:], reloadKey: 0, serviceCallUrl: nil
+        )
+        let view = RendererSurfaceHostView(frame: .zero)
+        view.tabId = tabId
+        view.fingerprint = "test.storage"
+        coordinator.rendererHostView = view
+        defer { view.prepareForReuse() }
+        var latest = configuration(origin: "app-a", permissions: ["host:local-storage.getItem"])
+        latest["reloadKey"] = 2
+        latest["unifiedScript"] = "current"
+        latest["leftPanelVisible"] = true
+        view.apply(config: latest)
+
+        coordinator.sendLeftPanelVisibilityChanged(false)
+        let updated = try #require(view.lastConfig)
+        #expect(updated["leftPanelVisible"] as? Bool == false)
+        #expect(updated["localStorageOrigin"] as? String == "app-a")
+        #expect(updated["reloadKey"] as? Int == 2)
+        #expect(updated["unifiedScript"] as? String == "current")
+        let broker = RendererLocalStorage(database: GuestLocalStorage(path: ":memory:"))
+        _ = try document(in: broker.prepare(tabId: tabId, config: updated))
     }
 
     @Test func brokerScopesStorageToOriginAndCurrentDocument() async throws {
@@ -102,6 +179,18 @@ struct RendererLocalStorageTests {
             "permissions": permissions,
             "capabilityManifestJSON": #"{"hostModules":{"local-storage":{"rpc":["getItem","setItem"]}}}"#,
         ]
+    }
+
+    private func rendererConfig(for tab: Tab) -> [String: Any] {
+        let coordinator = ViewBridgeCoordinator()
+        coordinator.currentViewportSize = CGSize(width: 800, height: 600)
+        let layer = UnifiedReactNativeLayer(
+            tab: tab, fingerprint: "test.storage", viewportSize: CGSize(width: 1280, height: 720),
+            cardSize: CGSize(width: 300, height: 200), cardPosition: .zero,
+            isFocused: true, isOverviewMode: false, isTransitioning: false,
+            coordinator: coordinator, libraryData: [:]
+        )
+        return layer.rendererConfigForResend()
     }
 
     private func document(in config: [String: Any]) throws -> UUID {
