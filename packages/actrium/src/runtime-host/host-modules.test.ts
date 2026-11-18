@@ -32,6 +32,7 @@ describe('host:service implementation', () => {
     let called = false;
     const hostModules = createHostModules({
       hasServiceCapability: false,
+      hasServiceOnCapability: false,
       callActor: async () => {
         called = true;
         return { success: true, payloadBase64: 'AAEC' };
@@ -54,6 +55,7 @@ describe('host:service implementation', () => {
     } | null = null;
     const hostModules = createHostModules({
       hasServiceCapability: true,
+      hasServiceOnCapability: true,
       callActor: async (request) => {
         captured = request;
         return { success: true, payloadBase64: 'AAEC' };
@@ -74,6 +76,7 @@ describe('host:service implementation', () => {
   test('propagates gateway errors', async () => {
     const hostModules = createHostModules({
       hasServiceCapability: true,
+      hasServiceOnCapability: true,
       callActor: async () => ({ success: false, message: 'gateway down' }),
       authorizeCapability: async () => {},
       writeClipboardText: async () => {},
@@ -87,6 +90,7 @@ describe('host:service implementation', () => {
   test('times out a call that never resolves', async () => {
     const hostModules = createHostModules({
       hasServiceCapability: true,
+      hasServiceOnCapability: true,
       callActor: () => new Promise(() => {}),
       authorizeCapability: async () => {},
       writeClipboardText: async () => {},
@@ -100,6 +104,7 @@ describe('host:service implementation', () => {
   test('rejects a success response without a payload', async () => {
     const hostModules = createHostModules({
       hasServiceCapability: true,
+      hasServiceOnCapability: true,
       callActor: async () => ({ success: true }),
       authorizeCapability: async () => {},
       writeClipboardText: async () => {},
@@ -141,7 +146,7 @@ describe('host:service implementation', () => {
   });
 
   test('delivers service events through the event source after authorization', async () => {
-    const { source, emit } = createTestServiceEventSource([
+    const { source, emit, subscriberCount } = createTestServiceEventSource([
       'notes.v1.changed',
     ]);
     const hostModules = createTestHostModules({ serviceEventSource: source });
@@ -162,6 +167,7 @@ describe('host:service implementation', () => {
     ]);
 
     unsubscribe?.();
+    expect(subscriberCount()).toBe(0);
     emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
     expect(received).toHaveLength(1);
   });
@@ -190,7 +196,7 @@ describe('host:service implementation', () => {
   });
 
   test('unsubscribes when service.on authorization is rejected', async () => {
-    const { source, emit } = createTestServiceEventSource([
+    const { source, emit, subscriberCount } = createTestServiceEventSource([
       'notes.v1.changed',
     ]);
     const hostModules = createTestHostModules({
@@ -206,6 +212,7 @@ describe('host:service implementation', () => {
     });
 
     await Promise.resolve();
+    expect(subscriberCount()).toBe(0);
     emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
     expect(received).toEqual([]);
   });

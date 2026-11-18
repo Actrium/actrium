@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { createHostModuleDispatch } from 'keel/contract';
 import { createV1CapabilityManifest, v1ServiceDispatchId, writeV1Bundle } from 'keel/v1';
+
+import { CapabilityAuthorizer, type NativeCapabilitySnapshot } from './capability-authorization';
 
 import { contract } from './contract';
 import { createHostModules } from './host-modules';
@@ -11,15 +14,29 @@ const sourceModule = `host:service/${eventName}`;
 
 function makeHostModules() {
   const { source, emit } = createTestServiceEventSource([eventName]);
+  const snapshot: NativeCapabilitySnapshot = {
+    schemaVersion: 1,
+    revision: 1,
+    subject: {
+      publisher: 'actrium', program: 'notes', majorVersion: 1, packageDigest: 'sha256:test',
+    },
+    audience: 'third_party',
+    declaredCapabilities: ['service'],
+    grants: {},
+    platform: {},
+    session: { generation: 1, state: 'active', allowedCapabilities: ['service'] },
+  };
+  const authorizer = new CapabilityAuthorizer(snapshot, () => {});
   const hostModules = createHostModules({
     hasServiceCapability: true,
     hasServiceOnCapability: true,
     callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
     serviceEventSource: source,
-    authorizeCapability: async () => {},
+    authorizeCapability: (capability) => authorizer.authorize(capability),
+    onCapabilityRevoked: (capability, listener) => authorizer.onRevoked(capability, listener),
     writeClipboardText: async () => {},
   });
-  return { hostModules, emit };
+  return { hostModules, emit, authorizer };
 }
 
 describe('v1 service.on linkage', () => {
@@ -42,12 +59,17 @@ describe('v1 service.on linkage', () => {
       guestEntry: 'workload/guest.js',
       links: [[sourceModule, 'on'] as [string, string]],
     };
-    const { hostModules, emit } = makeHostModules();
-    const bound = bindV1HostModules(linkage, hostModules, async () => {});
+    const { hostModules, emit, authorizer } = makeHostModules();
+    const bound = bindV1HostModules(
+      linkage,
+      hostModules,
+      (capability) => authorizer.authorize(capability)
+    );
     const id = v1ServiceDispatchId(sourceModule, 'on');
+    const dispatch = createHostModuleDispatch(bound.contract, bound.hostModules);
 
     const received: { event: string; payloadBase64: string }[] = [];
-    const on = bound.hostModules[id].on as unknown as (
+    const on = dispatch[id].on as (
       handler: (event: { event: string; payloadBase64: string }) => void
     ) => () => void;
     const unsubscribe = on((event) => received.push(event));
@@ -73,8 +95,10 @@ describe('v1 service.on linkage', () => {
         [sourceModule, 'on'] as [string, string],
       ],
     };
-    const { hostModules } = makeHostModules();
-    const bound = bindV1HostModules(linkage, hostModules, async () => {});
+    const { hostModules, authorizer } = makeHostModules();
+    const authorize = (capability: Parameters<CapabilityAuthorizer['authorize']>[0]) =>
+      authorizer.authorize(capability);
+    const bound = bindV1HostModules(linkage, hostModules, authorize);
     const callId = v1ServiceDispatchId(routeModule, 'call');
     const onId = v1ServiceDispatchId(sourceModule, 'on');
 
@@ -90,9 +114,11 @@ describe('v1 service.on linkage', () => {
         [sourceModule, 'on'] as [string, string],
       ],
     };
-    const sameBound = bindV1HostModules(sameNameLinkage, hostModules, async () => {});
+    const sameBound = bindV1HostModules(sameNameLinkage, hostModules, authorize);
     const sameId = v1ServiceDispatchId(sourceModule, 'call');
     expect(sameBound.hostModules[sameId].call).toBeDefined();
     expect(sameBound.hostModules[sameId].on).toBeDefined();
+    expect(sameBound.contract.hostModules[sameId]?.call).toBeDefined();
+    expect(sameBound.contract.hostModules[sameId]?.on).toBeDefined();
   });
 });

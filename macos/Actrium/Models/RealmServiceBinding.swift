@@ -184,9 +184,9 @@ actor RealmServiceBinding {
             throw RealmServiceError(message: "The verified Realm profile has invalid signaling information.")
         }
         let capabilities = try JSONDecoder().decode(Capabilities.self, from: Data(capabilitiesJSON.utf8))
-        let service = capabilities.hostModules["service"] ?? capabilities.hostModules["host:service"]
-        self.routes = Set(service?.rpc ?? [])
-        self.events = Set(service?.events ?? [])
+        let services = ["service", "host:service"].compactMap { capabilities.hostModules[$0] }
+        self.routes = Set(services.flatMap { $0.rpc ?? [] })
+        self.events = Set(services.flatMap { $0.events ?? [] })
         let bindingId = UUID()
         self.id = bindingId
         self.eventRelay = RealmServiceEventRelay(bindingId: bindingId)

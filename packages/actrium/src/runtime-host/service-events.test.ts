@@ -8,6 +8,14 @@ import {
   serviceEventsFromManifest,
 } from './service-events';
 
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  expect(condition()).toBe(true);
+}
+
 describe('serviceEventsFromManifest', () => {
   test('reads events from the v1 "service" module key', () => {
     const manifest: CapabilityManifestV1 = {
@@ -44,20 +52,31 @@ describe('serviceEventsFromManifest', () => {
     expect(serviceEventsFromManifest(manifest)).toEqual(['legacy.event']);
   });
 
-  test('prefers the v1 "service" key over "host:service"', () => {
+  test('merges and deduplicates the v1 and legacy module keys', () => {
     const manifest: CapabilityManifestV1 = {
       schemaVersion: 1,
       keelApi: '1.0',
       guestEntry: 'workload/guest.js',
       imports: ['host:service'],
       hostModules: {
-        service: { events: ['v1.event'] },
-        'host:service': { events: ['legacy.event'] },
+        service: { events: ['shared.event', 'v1.event'] },
+        'host:service': { events: ['shared.event', 'legacy.event'] },
       },
       components: [],
     };
 
-    expect(serviceEventsFromManifest(manifest)).toEqual(['v1.event']);
+    expect(serviceEventsFromManifest(manifest)).toEqual([
+      'shared.event',
+      'v1.event',
+      'legacy.event',
+    ]);
+  });
+
+  test('rejects a malformed events declaration instead of iterating it', () => {
+    const manifest = {
+      hostModules: { service: { events: 'notes.v1.changed' } },
+    } as unknown as CapabilityManifestV1;
+    expect(() => serviceEventsFromManifest(manifest)).toThrow('must be a string array');
   });
 
   test('returns an empty array when no service module is declared', () => {
@@ -170,6 +189,70 @@ describe('createNativeServiceEventSource', () => {
     expect(cancelled).toEqual(['subscription-1']);
   });
 
+  test('delivers an empty native payload and rejects malformed base64', async () => {
+    const nativeModule = {
+      addListener: () => {},
+      removeListeners: () => {},
+      subscribeServiceEvents: async () => 'subscription-empty',
+      unsubscribeServiceEvents: () => {},
+    };
+    let emitNative!: (event: unknown) => void;
+    const source = createNativeServiceEventSource(nativeModule, 'tab-1', ['a'], () => ({
+      addListener: (_event, listener) => {
+        emitNative = listener;
+        return { remove: () => {} };
+      },
+    }));
+    const received: string[] = [];
+    const unsubscribe = source.subscribe((event) => received.push(event.payloadBase64));
+    await Promise.resolve();
+    await Promise.resolve();
+    emitNative({
+      tabId: 'tab-1', subscriptionId: 'subscription-empty', event: 'a', payloadBase64: '',
+    });
+    emitNative({
+      tabId: 'tab-1', subscriptionId: 'subscription-empty', event: 'a', payloadBase64: 'invalid!',
+    });
+    expect(received).toEqual(['']);
+    unsubscribe();
+  });
+
+  test('an old unsubscribe cannot tear down a replacement native generation', async () => {
+    let rejectFirst!: (error: Error) => void;
+    let calls = 0;
+    const cancelled: string[] = [];
+    const nativeModule = {
+      addListener: () => {},
+      removeListeners: () => {},
+      subscribeServiceEvents: () => {
+        calls += 1;
+        if (calls === 1) {
+          return new Promise<string>((_resolve, reject) => { rejectFirst = reject; });
+        }
+        return Promise.resolve('replacement-subscription');
+      },
+      unsubscribeServiceEvents: (_tabId: string, subscriptionId: string) => {
+        cancelled.push(subscriptionId);
+      },
+    };
+    const source = createNativeServiceEventSource(nativeModule, 'tab-1', ['a'], () => ({
+      addListener: () => ({ remove: () => {} }),
+    }));
+    const oldUnsubscribe = source.subscribe(() => {});
+    rejectFirst(new Error('native unavailable'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const replacementUnsubscribe = source.subscribe(() => {});
+    await Promise.resolve();
+    await Promise.resolve();
+    oldUnsubscribe();
+    expect(cancelled).toEqual([]);
+
+    replacementUnsubscribe();
+    expect(cancelled).toEqual(['replacement-subscription']);
+  });
+
   test('cancels a native subscription that resolves after unsubscribe', async () => {
     let resolveSubscription!: (id: string) => void;
     const cancelled: string[] = [];
@@ -199,7 +282,7 @@ describe('createHttpServiceEventSource', () => {
   test('subscribes via fetch and parses SSE events', async () => {
     const chunks = [
       'event: a\ndata: {"payloadBase64":"AAEC"}\n\n',
-      'event: b\ndata: {"payloadBase64":"AQID"}\n\n',
+      'event: b\r\ndata: {"payloadBase64":"AQID"}\r\n\r\n',
       'event: ignored\ndata: {"payloadBase64":"BAD"}\n\n',
     ];
     const originalFetch = globalThis.fetch;
@@ -239,6 +322,7 @@ describe('createHttpServiceEventSource', () => {
     const chunks = [
       'event: a\ndata: {}\n\n',
       'event: a\ndata: {"payloadBase64":123}\n\n',
+      'event: a\ndata: {"payloadBase64":"not-base64!"}\n\n',
       'event: a\ndata: {"payloadBase64":""}\n\n',
     ];
     const originalFetch = globalThis.fetch;
@@ -263,10 +347,201 @@ describe('createHttpServiceEventSource', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(received).toEqual([]);
+      expect(received).toEqual([{ event: 'a', payloadBase64: '' }]);
       unsubscribe();
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('keeps reading after a handler throws', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(
+              'event: a\ndata: {"payloadBase64":"AAEC"}\n\n' +
+              'event: a\ndata: {"payloadBase64":"AQID"}\n\n'
+            ));
+          },
+        }),
+        { status: 200 }
+      )) as unknown as typeof fetch;
+    const received: string[] = [];
+    try {
+      const source = createHttpServiceEventSource('https://example.com/events', ['a']);
+      const unsubscribe = source.subscribe((event) => {
+        received.push(event.payloadBase64);
+        if (received.length === 1) throw new Error('Guest failed');
+      });
+      await waitFor(() => received.length === 2);
+      expect(received).toEqual(['AAEC', 'AQID']);
+      unsubscribe();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('backs off accept-then-close connections instead of resetting on HTTP 200', async () => {
+    const originalFetch = globalThis.fetch;
+    const connectedAt: number[] = [];
+    globalThis.fetch = (async () => {
+      connectedAt.push(Date.now());
+      return new Response(new ReadableStream({
+        start(controller) { controller.close(); },
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+      const source = createHttpServiceEventSource(
+        'https://example.com/events',
+        ['a'],
+        { initialRetryDelayMs: 20 }
+      );
+      const unsubscribe = source.subscribe(() => {});
+      await waitFor(() => connectedAt.length >= 3);
+      unsubscribe();
+      expect(connectedAt.length).toBeGreaterThanOrEqual(3);
+      expect(connectedAt[1] - connectedAt[0]).toBeGreaterThanOrEqual(15);
+      expect(connectedAt[2] - connectedAt[1]).toBeGreaterThanOrEqual(30);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('reconnects with Last-Event-ID and resets backoff after a valid event', async () => {
+    const originalFetch = globalThis.fetch;
+    const resumeIds: string[] = [];
+    let calls = 0;
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      calls += 1;
+      const headers = new Headers(init?.headers);
+      resumeIds.push(headers.get('Last-Event-ID') ?? '');
+      const body = new ReadableStream({
+        start(controller) {
+          if (calls === 1) {
+            controller.enqueue(new TextEncoder().encode(
+              'id: event-41\r\nevent: a\r\ndata: {"payloadBase64":"AAEC"}\r\n\r\n'
+            ));
+            controller.close();
+          }
+          // Keep the second connection open until the test unsubscribes.
+        },
+      });
+      return new Response(body, { status: 200 });
+    }) as unknown as typeof fetch;
+    const received: string[] = [];
+    try {
+      const source = createHttpServiceEventSource(
+        'https://example.com/events',
+        ['a'],
+        { initialRetryDelayMs: 1 }
+      );
+      const unsubscribe = source.subscribe((event) => received.push(event.payloadBase64));
+      await waitFor(() => calls >= 2 && received.length === 1);
+      expect(resumeIds).toEqual(['', 'event-41']);
+      expect(received).toEqual(['AAEC']);
+      unsubscribe();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('reconnects when an incomplete SSE frame exceeds the buffer limit', async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      const body = new ReadableStream({
+        start(controller) {
+          if (calls === 1) {
+            controller.enqueue(new TextEncoder().encode('data: "too-large"'));
+          }
+          // No delimiter: the first connection must hit the configured cap.
+        },
+      });
+      return new Response(body, { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+      const source = createHttpServiceEventSource(
+        'https://example.com/events',
+        ['a'],
+        { initialRetryDelayMs: 1, maxBufferedCharacters: 8 }
+      );
+      const unsubscribe = source.subscribe(() => {});
+      await waitFor(() => calls >= 2);
+      unsubscribe();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('does not retry a permanent HTTP client error', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalError = console.error;
+    let calls = 0;
+    console.error = () => {};
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response(null, { status: 404 });
+    }) as unknown as typeof fetch;
+    try {
+      const source = createHttpServiceEventSource(
+        'https://example.com/events',
+        ['a'],
+        { initialRetryDelayMs: 1 }
+      );
+      const unsubscribe = source.subscribe(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(calls).toBe(1);
+      unsubscribe();
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.error = originalError;
+    }
+  });
+
+  test('uses incremental XHR when fetch has no streaming response body', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalXhr = globalThis.XMLHttpRequest;
+    let fetchSignal: AbortSignal | undefined;
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      fetchSignal = init?.signal ?? undefined;
+      return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
+    class FakeXhr {
+      readyState = 0;
+      status = 0;
+      responseText = '';
+      onreadystatechange: (() => void) | null = null;
+      onprogress: (() => void) | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      open(): void {}
+      setRequestHeader(): void {}
+      abort(): void {}
+      send(): void {
+        this.readyState = 3;
+        this.status = 200;
+        this.responseText = 'event: a\ndata: {"payloadBase64":""}\n\n';
+        this.onreadystatechange?.();
+        this.onprogress?.();
+      }
+    }
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const received: string[] = [];
+    try {
+      const source = createHttpServiceEventSource('https://example.com/events', ['a']);
+      const unsubscribe = source.subscribe((event) => received.push(event.payloadBase64));
+      await waitFor(() => received.length === 1);
+      expect(received).toEqual(['']);
+      expect(fetchSignal?.aborted).toBe(true);
+      unsubscribe();
+    } finally {
+      globalThis.fetch = originalFetch;
+      globalThis.XMLHttpRequest = originalXhr;
     }
   });
 });

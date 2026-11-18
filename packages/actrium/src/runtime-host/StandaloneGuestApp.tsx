@@ -274,13 +274,19 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       serviceEventSource
         ? {
             subscribe(handler) {
-              const unsubscribe = serviceEventSource!.subscribe(handler);
-              eventSubscriptions.push(unsubscribe);
-              return () => {
+              let active = true;
+              const unsubscribe = serviceEventSource!.subscribe((event) => {
+                if (active) handler(event);
+              });
+              const cleanup = () => {
+                if (!active) return;
+                active = false;
                 unsubscribe();
-                const index = eventSubscriptions.indexOf(unsubscribe);
+                const index = eventSubscriptions.indexOf(cleanup);
                 if (index >= 0) eventSubscriptions.splice(index, 1);
               };
+              eventSubscriptions.push(cleanup);
+              return cleanup;
             },
           }
         : undefined;
@@ -407,7 +413,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
 
     return () => {
       disposed = true;
-      for (const unsubscribe of eventSubscriptions) unsubscribe();
+      for (const unsubscribe of [...eventSubscriptions]) unsubscribe();
       eventSubscriptions.length = 0;
       unsubscribeEvents();
       unsubscribeUpdate();

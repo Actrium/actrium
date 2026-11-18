@@ -1,26 +1,15 @@
 import type { NativeModule } from 'react-native';
 
 import type { CapabilityManifestV1 } from './capability-verify';
-import type { ServiceEvent } from './contract';
+import { contract, type ServiceEvent } from './contract';
 
 export type { CapabilityManifestV1 };
 
 export type ServiceEventHandler = (event: ServiceEvent) => void;
 
-/**
- * Source of service-to-front events for a single tab.
- *
- * The source is constructed with the set of event names the package is allowed
- * to receive (from its capability manifest). Subscribers registered through
- * `subscribe` receive every event that the source delivers; guest-side SDK
- * wrappers are responsible for filtering by `event.event` when the guest only
- * asked for a specific name.
- */
+/** Source of service-to-front events for a single tab. */
 export interface ServiceEventSource {
-  /**
-   * Register a handler for service events. Returns an unsubscribe function.
-   * The source must not call the handler after unsubscribe returns.
-   */
+  /** The source must not call the handler after unsubscribe returns. */
   subscribe(handler: ServiceEventHandler): () => void;
 }
 
@@ -49,14 +38,24 @@ function defaultNativeEventEmitter(
   return new NativeEventEmitter(nativeModule);
 }
 
-/**
- * Create an event source backed by the RealmService RCTEventEmitter.
- *
- * All Guest handlers for a tab share one native actor subscription. The last
- * unsubscribe removes both the NativeEventEmitter listener and the Host-side
- * actor subscription. Events are additionally scoped by tab/subscription ID and
- * the signed manifest's event allowlist.
- */
+function parseServiceEvent(value: unknown): ServiceEvent {
+  const parse = contract.hostModules['host:service'].on.schema?.parseEvent;
+  if (!parse) throw new Error('The Service event schema is unavailable.');
+  return parse(value);
+}
+
+function deliver(handlers: Iterable<ServiceEventHandler>, event: ServiceEvent): void {
+  for (const handler of handlers) {
+    try {
+      handler(event);
+    } catch (error) {
+      // One Guest callback must not stop delivery to other callbacks or frames.
+      console.warn('[Actrium] Service event handler failed:', error);
+    }
+  }
+}
+
+/** Create an event source backed by the RealmService RCTEventEmitter. */
 export function createNativeServiceEventSource(
   nativeModule: NativeServiceEventModule | undefined,
   tabId: string,
@@ -97,25 +96,35 @@ export function createNativeServiceEventSource(
         typeof body.subscriptionId !== 'string' ||
         body.subscriptionId !== nativeSubscriptionId ||
         typeof body.event !== 'string' ||
-        !allowedEvents.has(body.event) ||
-        typeof body.payloadBase64 !== 'string' ||
-        body.payloadBase64.length === 0
+        !allowedEvents.has(body.event)
       ) {
         return;
       }
-      const event = { event: body.event, payloadBase64: body.payloadBase64 };
-      for (const handler of [...handlers.keys()]) {
-        try {
-          handler(event);
-        } catch (error) {
-          console.warn('[Actrium] Service event handler failed:', error);
-        }
+      let event: ServiceEvent;
+      try {
+        // The contract is the single authority for payload validation. Empty
+        // base64 is valid and represents a zero-byte business payload.
+        event = parseServiceEvent({
+          event: body.event,
+          payloadBase64: body.payloadBase64,
+        });
+      } catch (error) {
+        console.warn('[Actrium] Ignoring a malformed native Service event:', error);
+        return;
       }
+      deliver([...handlers.keys()], event);
     });
     void nativeModule.subscribeServiceEvents(tabId, events).then(
       (subscriptionId) => {
         if (current !== generation) {
           nativeModule.unsubscribeServiceEvents(tabId, subscriptionId);
+          return;
+        }
+        if (typeof subscriptionId !== 'string' || subscriptionId.length === 0) {
+          console.warn('[Actrium] Service event subscription returned an invalid ID.');
+          handlers.clear();
+          handlerCount = 0;
+          stop();
           return;
         }
         nativeSubscriptionId = subscriptionId;
@@ -143,13 +152,16 @@ export function createNativeServiceEventSource(
           if (remaining === 0) handlers.delete(handler);
           else handlers.set(handler, remaining);
           handlerCount -= 1;
+          stop();
           throw error;
         }
       }
       let active = true;
+      const subscriptionGeneration = generation;
       return () => {
         if (!active) return;
         active = false;
+        if (subscriptionGeneration !== generation) return;
         const remaining = (handlers.get(handler) ?? 0) - 1;
         if (remaining > 0) handlers.set(handler, remaining);
         else handlers.delete(handler);
@@ -160,12 +172,11 @@ export function createNativeServiceEventSource(
   };
 }
 
-/**
- * Create a test event source that allows tests to inject events manually.
- */
+/** Create a test event source that allows tests to inject events manually. */
 export function createTestServiceEventSource(events: string[]): {
   source: ServiceEventSource;
   emit(event: ServiceEvent): void;
+  subscriberCount(): number;
 } {
   const handlers = new Set<ServiceEventHandler>();
   return {
@@ -179,145 +190,373 @@ export function createTestServiceEventSource(events: string[]): {
     },
     emit(event) {
       if (!events.includes(event.event)) {
-        throw new Error(
-          `Event "${event.event}" is not in the allowed test event set.`
-        );
+        throw new Error(`Event "${event.event}" is not in the allowed test event set.`);
       }
-      for (const handler of handlers) {
-        handler(event);
-      }
+      deliver([...handlers], event);
+    },
+    subscriberCount() {
+      return handlers.size;
     },
   };
+}
+
+export interface HttpServiceEventSourceOptions {
+  /** Maximum incomplete SSE frame size, measured in decoded UTF-16 units. */
+  maxBufferedCharacters?: number;
+  /** A connection this old is considered stable and resets reconnect backoff. */
+  stableConnectionMs?: number;
+  initialRetryDelayMs?: number;
+  maxRetryDelayMs?: number;
+}
+
+type SseConnectionResult = {
+  retry: boolean;
+  error?: Error;
+};
+
+type ServiceEventXhr = {
+  readyState: number;
+  status: number;
+  responseText: string;
+  onreadystatechange: (() => void) | null;
+  onprogress: (() => void) | null;
+  onload: (() => void) | null;
+  onerror: (() => void) | null;
+  onabort: (() => void) | null;
+  ontimeout: (() => void) | null;
+  open(method: string, url: string, async: boolean): void;
+  setRequestHeader(name: string, value: string): void;
+  send(): void;
+  abort(): void;
+};
+
+function asError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
+
+function retryableHttpStatus(status: number): boolean {
+  // 204 is the SSE server's instruction to stop reconnecting. Other permanent
+  // client errors will not improve without changing the request or credentials.
+  if (status === 204) return false;
+  if (status >= 400 && status < 500) return status === 408 || status === 429;
+  return true;
 }
 
 /**
  * Create an event source backed by an HTTP Server-Sent Events endpoint.
  *
- * The source fetches `eventsUrl` and parses the `text/event-stream` body. Each
- * SSE event's `event:` field names the event; the `data:` field must be a JSON
- * object with a `payloadBase64` string. This uses `fetch` with a streaming
- * response body instead of `EventSource`, so it also works in React Native
- * environments that expose `response.body`.
+ * Streaming fetch is used where available. React Native's whatwg-fetch does not
+ * expose response.body, so those hosts automatically use incremental XHR
+ * responseText instead. Reconnects resume with Last-Event-ID when the server
+ * supplied an id; servers that do not persist IDs retain the documented
+ * no-replay behavior.
  */
 export function createHttpServiceEventSource(
   eventsUrl: string,
-  events: string[]
+  events: string[],
+  options: HttpServiceEventSourceOptions = {}
 ): ServiceEventSource {
+  const maxBufferedCharacters = options.maxBufferedCharacters ?? 1_048_576;
+  const stableConnectionMs = options.stableConnectionMs ?? 10_000;
+  const initialRetryDelayMs = options.initialRetryDelayMs ?? 1_000;
+  const maxRetryDelayMs = options.maxRetryDelayMs ?? 30_000;
+  if (
+    !Number.isFinite(maxBufferedCharacters) ||
+    !Number.isFinite(stableConnectionMs) ||
+    !Number.isFinite(initialRetryDelayMs) ||
+    !Number.isFinite(maxRetryDelayMs) ||
+    maxBufferedCharacters <= 0 ||
+    stableConnectionMs < 0 ||
+    initialRetryDelayMs < 0 ||
+    maxRetryDelayMs < 0
+  ) {
+    throw new Error('Invalid Service event stream limits.');
+  }
+
   return {
     subscribe(handler) {
       const url = new URL(eventsUrl, typeof location !== 'undefined' ? location.href : undefined);
-      for (const event of events) {
-        url.searchParams.append('event', event);
-      }
+      for (const event of events) url.searchParams.append('event', event);
 
-      const controller = new AbortController();
       let active = true;
       let retryCount = 0;
+      let lastEventId: string | undefined;
+      let cancelConnection: (() => void) | undefined;
+      let retryTimer: ReturnType<typeof setTimeout> | undefined;
+      let finishRetrySleep: (() => void) | undefined;
 
-      const consume = async () => {
-        while (active) {
+      const requestHeaders = (): Record<string, string> => ({
+        Accept: 'text/event-stream',
+        ...(lastEventId
+          ? { 'Last-Event-ID': lastEventId }
+          : {}),
+      });
+
+      const connect = () => {
+        let settled = false;
+        let buffer = '';
+        let transportAbort: (() => void) | undefined;
+        let stableTimer: ReturnType<typeof setTimeout> | undefined;
+        let resolveDone!: (result: SseConnectionResult) => void;
+        const done = new Promise<SseConnectionResult>((resolve) => {
+          resolveDone = resolve;
+        });
+
+        const finish = (result: SseConnectionResult) => {
+          if (settled) return;
+          settled = true;
+          if (stableTimer !== undefined) clearTimeout(stableTimer);
+          transportAbort?.();
+          transportAbort = undefined;
+          resolveDone(result);
+        };
+        const markConnected = () => {
+          if (stableTimer !== undefined) return;
+          stableTimer = setTimeout(() => {
+            retryCount = 0;
+          }, stableConnectionMs);
+        };
+        const acceptText = (text: string) => {
+          if (settled) return;
+          buffer += text;
+          const chunks = buffer.split(/\r?\n\r?\n/);
+          buffer = chunks.pop() ?? '';
+          for (const chunk of chunks) {
+            const frame = parseSseChunk(chunk);
+            if (frame.hasData && frame.id !== undefined) lastEventId = frame.id;
+            if (!frame.eventName || !events.includes(frame.eventName)) continue;
+            if (!frame.event) {
+              console.warn(`[Actrium] Ignoring malformed Service event "${frame.eventName}".`);
+              continue;
+            }
+            // A valid event proves the stream is making progress, even if the
+            // server closes it before the stable-connection timer fires.
+            retryCount = 0;
+            deliver([handler], frame.event);
+          }
+          if (buffer.length > maxBufferedCharacters) {
+            finish({
+              retry: true,
+              error: new Error(
+                `Service event stream exceeded the ${maxBufferedCharacters}-character frame limit.`
+              ),
+            });
+          }
+        };
+        const closed = () => {
+          if (!settled) {
+            finish({ retry: true, error: new Error('Service event stream closed.') });
+          }
+        };
+
+        const startXhr = () => {
+          if (settled) return;
+          if (typeof XMLHttpRequest === 'undefined') {
+            finish({
+              retry: false,
+              error: new Error(
+                'Neither streaming fetch nor XMLHttpRequest is available for Service events.'
+              ),
+            });
+            return;
+          }
+          const xhr = new XMLHttpRequest() as ServiceEventXhr;
+          let offset = 0;
+          transportAbort = () => xhr.abort();
+          const readProgress = () => {
+            if (settled || xhr.readyState < 3) return;
+            if (xhr.status < 200 || xhr.status >= 300 || xhr.status === 204) {
+              finish({
+                retry: retryableHttpStatus(xhr.status),
+                error: new Error(`Service event endpoint returned HTTP ${xhr.status}`),
+              });
+              return;
+            }
+            markConnected();
+            const text = xhr.responseText ?? '';
+            acceptText(text.slice(offset));
+            offset = text.length;
+          };
+          xhr.onreadystatechange = () => {
+            if (settled || xhr.readyState < 2) return;
+            if (xhr.status < 200 || xhr.status >= 300 || xhr.status === 204) {
+              finish({
+                retry: retryableHttpStatus(xhr.status),
+                error: new Error(`Service event endpoint returned HTTP ${xhr.status}`),
+              });
+            } else {
+              markConnected();
+            }
+          };
+          xhr.onprogress = readProgress;
+          xhr.onload = () => {
+            readProgress();
+            closed();
+          };
+          xhr.onerror = () => finish({ retry: true, error: new Error('Service event XHR failed.') });
+          xhr.ontimeout = () => finish({ retry: true, error: new Error('Service event XHR timed out.') });
+          xhr.onabort = () => finish({ retry: true, error: new Error('Service event XHR aborted.') });
           try {
+            xhr.open('GET', url.toString(), true);
+            for (const [name, value] of Object.entries(requestHeaders())) {
+              xhr.setRequestHeader(name, value);
+            }
+            xhr.send();
+          } catch (error) {
+            finish({ retry: false, error: asError(error) });
+          }
+        };
+
+        if (typeof fetch !== 'function') {
+          startXhr();
+        } else {
+          const controller = new AbortController();
+          let switchedToXhr = false;
+          transportAbort = () => controller.abort();
+          void (async () => {
             const response = await fetch(url.toString(), {
-              headers: { Accept: 'text/event-stream' },
+              headers: requestHeaders(),
               signal: controller.signal,
             });
-            if (!response.ok) {
-              throw new Error(`Service event endpoint returned HTTP ${response.status}`);
+            if (settled) return;
+            if (!response.ok || response.status === 204) {
+              finish({
+                retry: retryableHttpStatus(response.status),
+                error: new Error(`Service event endpoint returned HTTP ${response.status}`),
+              });
+              return;
             }
-            const reader = response.body?.getReader();
-            if (!reader) {
-              throw new Error('The environment does not expose a streaming response body.');
+            const reader = typeof response.body?.getReader === 'function'
+              ? response.body.getReader()
+              : undefined;
+            if (!reader || typeof TextDecoder !== 'function') {
+              // React Native fetch responses are not ReadableStreams. XHR is
+              // the supported incremental transport on that host. Abort the
+              // header-only fetch so it cannot remain as an orphan SSE request.
+              switchedToXhr = true;
+              reader?.releaseLock();
+              controller.abort();
+              startXhr();
+              return;
             }
-
-            retryCount = 0;
+            markConnected();
             const decoder = new TextDecoder();
-            let buffer = '';
             try {
-              while (active) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                // SSE frames may use LF or CRLF line endings.
-                const chunks = buffer.split(/\r?\n\r?\n/);
-                buffer = chunks.pop() ?? '';
-                for (const chunk of chunks) {
-                  const event = parseSseChunk(chunk, events);
-                  if (!event) continue;
-                  // A malformed event or a throwing guest callback must not
-                  // tear down the stream for subsequent events.
-                  try {
-                    handler(event);
-                  } catch (error) {
-                    console.warn('[Actrium] Service event handler failed:', error);
-                  }
-                }
+              while (!settled) {
+                const { done: eof, value } = await reader.read();
+                if (eof) break;
+                acceptText(decoder.decode(value, { stream: true }));
               }
+              if (!settled) acceptText(decoder.decode());
+              closed();
             } finally {
               reader.releaseLock();
             }
-          } catch (error) {
-            if (!active) break;
-            console.warn('[Actrium] Service event stream failed:', error);
-          }
+          })().catch((error) => {
+            if (!settled && !switchedToXhr) {
+              finish({ retry: true, error: asError(error) });
+            }
+          });
+        }
 
+        cancelConnection = () => finish({ retry: false });
+        return done;
+      };
+
+      const consume = async () => {
+        while (active) {
+          const result = await connect();
+          cancelConnection = undefined;
           if (!active) break;
-          // Reconnect with exponential backoff, capped at 30 seconds.
-          const delayMs = Math.min(1000 * 2 ** retryCount, 30_000);
-          retryCount = Math.min(retryCount + 1, 5);
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          if (result.error) {
+            if (result.retry) {
+              console.warn('[Actrium] Service event stream failed:', result.error);
+            } else {
+              console.error('[Actrium] Service event stream failed:', result.error);
+            }
+          }
+          if (!result.retry) break;
+
+          const delayMs = Math.min(
+            initialRetryDelayMs * 2 ** retryCount,
+            maxRetryDelayMs
+          );
+          retryCount = Math.min(retryCount + 1, 30);
+          await new Promise<void>((resolve) => {
+            finishRetrySleep = resolve;
+            retryTimer = setTimeout(resolve, delayMs);
+          });
+          retryTimer = undefined;
+          finishRetrySleep = undefined;
         }
       };
 
       void consume();
-
       return () => {
+        if (!active) return;
         active = false;
-        controller.abort();
+        cancelConnection?.();
+        cancelConnection = undefined;
+        if (retryTimer !== undefined) clearTimeout(retryTimer);
+        retryTimer = undefined;
+        finishRetrySleep?.();
+        finishRetrySleep = undefined;
       };
     },
   };
 }
 
-/** Parse one `text/event-stream` chunk into a ServiceEvent, or return null. */
-function parseSseChunk(chunk: string, allowedEvents: string[]): ServiceEvent | null {
+/** Parse one SSE frame, retaining its resume ID even for filtered event names. */
+function parseSseChunk(chunk: string): {
+  id?: string;
+  eventName?: string;
+  hasData: boolean;
+  event?: ServiceEvent;
+} {
   let eventName: string | undefined;
+  let id: string | undefined;
   const dataLines: string[] = [];
 
-  for (const line of chunk.split('\n')) {
-    if (line.startsWith('event:')) {
-      eventName = line.slice(6).trim();
-    } else if (line.startsWith('data:')) {
-      dataLines.push(line.slice(5).trim());
-    }
-    // Ignore `id:`, `retry:` and comments for the v1 service event subset.
+  for (const line of chunk.split(/\r?\n/)) {
+    if (!line || line.startsWith(':')) continue;
+    const colon = line.indexOf(':');
+    const field = colon < 0 ? line : line.slice(0, colon);
+    let value = colon < 0 ? '' : line.slice(colon + 1);
+    if (value.startsWith(' ')) value = value.slice(1);
+    if (field === 'event') eventName = value;
+    else if (field === 'data') dataLines.push(value);
+    else if (field === 'id' && !value.includes('\0')) id = value;
   }
 
-  if (!eventName || !allowedEvents.includes(eventName) || dataLines.length === 0) {
-    return null;
-  }
-
+  const hasData = dataLines.length > 0;
+  if (!eventName || !hasData) return { id, eventName, hasData };
   try {
     const data = JSON.parse(dataLines.join('\n')) as { payloadBase64?: unknown };
-    if (typeof data.payloadBase64 !== 'string' || data.payloadBase64.length === 0) {
-      return null;
-    }
-    return { event: eventName, payloadBase64: data.payloadBase64 };
+    return {
+      id,
+      eventName,
+      hasData,
+      event: parseServiceEvent({ event: eventName, payloadBase64: data.payloadBase64 }),
+    };
   } catch {
-    return null;
+    return { id, eventName, hasData };
   }
 }
 
-/**
- * Extract the allowed service event names from a capability manifest.
- *
- * The manifest may name the module as `service` (v1 canonical) or
- * `host:service` (older form). Returns an empty array when the manifest has no
- * service event declarations.
- */
+/** Return the union of events declared by the canonical and legacy module keys. */
 export function serviceEventsFromManifest(
   manifest: CapabilityManifestV1
 ): string[] {
-  const entry = manifest.hostModules['service'] ?? manifest.hostModules['host:service'];
-  return entry?.events ?? [];
+  const events = new Set<string>();
+  for (const key of ['service', 'host:service'] as const) {
+    const declared = manifest.hostModules[key]?.events as unknown;
+    if (declared === undefined) continue;
+    // This function also runs on parsed signed JSON before TypeScript types
+    // have been validated. Never iterate a string or another truthy value.
+    if (!Array.isArray(declared) || declared.some((event) => typeof event !== 'string')) {
+      throw new Error(`Capability manifest ${key}.events must be a string array.`);
+    }
+    for (const event of declared) events.add(event);
+  }
+  return [...events];
 }
-

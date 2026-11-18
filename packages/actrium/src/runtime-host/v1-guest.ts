@@ -45,12 +45,9 @@ export function verifyV1RuntimeGuest(
       if (!exportName || !moduleId.startsWith('host:')) continue;
       const isService = moduleId.startsWith(V1_SERVICE_PREFIX);
       const hostId = isService ? 'host:service' : moduleId;
-      // A fixed Service link needs a call adapter or an authenticated event route.
-      const supportedServiceOps = new Set(['call', 'on']);
-      if (
-        (isService && !supportedServiceOps.has(exportName)) ||
-        !HOST_SUPPORTED_METHODS[hostId]?.has(exportName)
-      ) {
+      // HOST_SUPPORTED_METHODS is the single source of truth for implemented
+      // Service operations; fixed links reuse the same support decision.
+      if (!HOST_SUPPORTED_METHODS[hostId]?.has(exportName)) {
         return {
           ok: false,
           code: 'unknown_capability',

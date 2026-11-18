@@ -38,6 +38,7 @@ test('exposes only linked Host methods and pins the route on the Host', async ()
   const authorize = async (capability: string) => { grants.push(capability); };
   const hostModules = createHostModules({
     hasServiceCapability: true,
+    hasServiceOnCapability: true,
     callActor: async ({ route: sentRoute }) => {
       calls.push(sentRoute);
       return { success: true, payloadBase64: '' };
@@ -100,6 +101,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
     const authorize = async () => {};
     const implementations = createHostModules({
       hasServiceCapability: true,
+    hasServiceOnCapability: true,
       callActor: async ({ route: sentRoute }) => {
         calls.push(sentRoute);
         return { success: true, payloadBase64: '' };

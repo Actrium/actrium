@@ -76,7 +76,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
  */
 export function createHostModules(options: {
   hasServiceCapability: boolean;
-  hasServiceOnCapability?: boolean;
+  hasServiceOnCapability: boolean;
   callActor: ActorCall;
   serviceEventSource?: ServiceEventSource;
   authorizeCapability: (capability: FrontCapability) => Promise<void>;
@@ -131,7 +131,12 @@ export function createHostModules(options: {
         let disposed = false;
         let stopWatchingRevocation: (() => void) | undefined;
         const unsubscribe = options.serviceEventSource.subscribe((event) => {
-          if (allowed && !disposed) handler(event);
+          if (!allowed || disposed) return;
+          try {
+            handler(event);
+          } catch (error) {
+            console.warn('[Actrium] Service event handler failed:', error);
+          }
         });
         const cleanup = () => {
           if (disposed) return;
@@ -149,7 +154,13 @@ export function createHostModules(options: {
             if (disposed) stopWatching?.();
             else stopWatchingRevocation = stopWatching;
           },
-          cleanup
+          (error) => {
+            console.warn(
+              '[Actrium] service.on authorization failed; subscription closed:',
+              error
+            );
+            cleanup();
+          }
         );
 
         return cleanup;
