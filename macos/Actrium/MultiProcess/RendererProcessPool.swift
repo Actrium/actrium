@@ -99,6 +99,8 @@ final class RendererProcessPool: ObservableObject {
 
     private var workers: [String: Worker] = [:]
     private var tabWorkerMap: [UUID: String] = [:]
+    private let fileImport = RendererFileImport()
+    var fileImportWindow: ((UUID, Int) -> NSWindow?)?
     private var fingerprintWorkerMap: [String: String] = [:]
     private var systemWorkerId: String?
     private var viewportRequestId: UInt32 = 1
@@ -527,6 +529,12 @@ final class RendererProcessPool: ObservableObject {
         }
 
         worker.connection.onHostEvent = { [weak self, weak worker] name, userInfoJSON, tab in
+            if name == GuestFileImportCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker else { return }
+                Task { await self.handleFileImport(userInfoJSON, tabId: tabId, worker: worker) }
+                return
+            }
             if name == RealmServiceCall.requestEvent {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker,
@@ -632,6 +640,22 @@ final class RendererProcessPool: ObservableObject {
                 ? -1
                 : worker.process.terminationStatus
             self.handleTermination(of: worker, status: status)
+        }
+    }
+
+    private func handleFileImport(_ json: String, tabId: UUID, worker: Worker) async {
+        do {
+            let reply = try await fileImport.reply(to: json, tabId: tabId) { reloadKey in
+                guard self.worker(for: tabId) === worker else { return nil }
+                return self.fileImportWindow?(tabId, reloadKey)
+            }
+            guard let reply, self.worker(for: tabId) === worker else { return }
+            try worker.connection.sendHostEvent(
+                name: GuestFileImportCall.responseEvent, userInfoJSON: reply,
+                tabId: tabId.uuidString
+            )
+        } catch {
+            AppLogger.reactNative.error("Could not send file import result: \(error.localizedDescription)")
         }
     }
 
