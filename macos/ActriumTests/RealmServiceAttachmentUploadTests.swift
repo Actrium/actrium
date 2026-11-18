@@ -401,4 +401,29 @@ struct RealmServiceAttachmentUploadTests {
         #expect(!noTransportAllowed)
         await noTransport.stop()
     }
+
+    @Test func aStoppedBindingRefusesToConnectAndStartARuntime() async throws {
+        // Closing the tab may land while a prepare is suspended on the session
+        // store hop. connect() must re-check the binding's own state before it
+        // creates or reuses a startup task, so teardown cannot resurrect a
+        // Realm node.
+        let binding = try await makeBinding(
+            capabilitiesJSON: #"{"hostModules":{"service":{"rpc":["uploadAttachment"]}}}"#,
+            permissions: ["service.attachmentUpload"]
+        )
+        await binding.stop()
+        await #expect(throws: CancellationError.self) {
+            _ = try await binding.connect()
+        }
+    }
+
+    @Test func prepareOnAStoppedBindingFailsWithoutStarting() async throws {
+        let binding = try await makeBinding(
+            capabilitiesJSON: #"{"hostModules":{"service":{"rpc":["uploadAttachment"]}}}"#,
+            permissions: ["service.attachmentUpload"]
+        )
+        await binding.stop()
+        let reply = await binding.prepareAttachmentUpload(makePrepareCall(), deliver: { _ in })
+        #expect(reply.failure?.code == "cancelled")
+    }
 }

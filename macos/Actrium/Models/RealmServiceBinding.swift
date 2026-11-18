@@ -541,7 +541,14 @@ actor RealmServiceBinding {
         try? await reference.unregisterStream(streamId: session.chunkStreamId)
     }
 
-    private func connect() async throws -> ActrRefWrapper {
+    /// Internal for the shutdown-race tests: a stopped binding must reject
+    /// before it creates or reuses a startup task.
+    func connect() async throws -> ActrRefWrapper {
+        // A caller may have been suspended on another actor (for example while
+        // registering an upload session) when `stop()` ran. Re-check on this
+        // actor before starting or reusing a startup task so teardown can
+        // never resurrect a Realm node.
+        guard !stopped else { throw CancellationError() }
         if let startup { return try await startup.task.value }
         let id = UUID()
         let task = Task {

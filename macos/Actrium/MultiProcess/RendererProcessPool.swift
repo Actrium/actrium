@@ -103,6 +103,17 @@ final class RendererProcessPool: ObservableObject {
         return currentFingerprint == canonicalFingerprint(requestedFingerprint)
     }
 
+    /// A result may reach the renderer only while the tab is still on the
+    /// epoch captured when the upload was prepared. A tab that has never
+    /// released a renderer has no stored epoch, which is the same as epoch 0;
+    /// both reads must apply that default or the tab's first result is dropped.
+    nonisolated static func attachmentResultIsCurrent(
+        capturedEpoch: Int,
+        currentEpoch: Int?
+    ) -> Bool {
+        (currentEpoch ?? 0) == capturedEpoch
+    }
+
     private final class Worker {
         let id: String
         let connection: IPCConnection
@@ -813,7 +824,10 @@ final class RendererProcessPool: ObservableObject {
         return { [weak self] event in
             Task { @MainActor in
                 guard let self,
-                      self.attachmentDeliveryEpoch[tabId] == epoch,
+                      Self.attachmentResultIsCurrent(
+                          capturedEpoch: epoch,
+                          currentEpoch: self.attachmentDeliveryEpoch[tabId]
+                      ),
                       let worker = self.worker(for: tabId), worker.isReady,
                       let data = try? JSONEncoder().encode(event) else { return }
                 try? worker.connection.sendHostEvent(
