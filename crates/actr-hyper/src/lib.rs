@@ -1575,7 +1575,15 @@ pub(crate) async fn load_workload_package_inner(
                 None
             };
             let workload = match binary_kind {
-                BinaryKind::Wasm => load_wasm_workload_inner(inner, bytes, manifest).await?,
+                BinaryKind::Wasm => {
+                    if configured_wasi_data.is_some() {
+                        tracing::warn!(
+                            actor_type = %manifest.actr_type_str(),
+                            "configured WASI data directory is not mounted at /data for a legacy package; repack and re-sign it as actr-package/2 with wasi.data.read-only or wasi.data.read-write"
+                        );
+                    }
+                    load_wasm_workload_inner(inner, bytes, manifest).await?
+                }
                 BinaryKind::DynClib => load_dynclib_workload_inner(inner, bytes, manifest)?,
             };
             (binary_kind, workload, packaged_lock, None)

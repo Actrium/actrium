@@ -241,6 +241,13 @@ ceiling: a read-only package gets a read-only mount even when the ceiling is
 attach under a read-only grant. Without a signed data capability, the
 directory is not mounted.
 
+When upgrading a workload that used `wasi_data_dir` before capability
+declarations were enforced, add the required data capability to its package
+manifest, then repack and re-sign it before starting it with the upgraded Host.
+Legacy packages must first be rebuilt as `actr-package/2`. When a configured
+directory is ignored because the package lacks a declaration, the Host logs a
+warning and does not mount it.
+
 Relative paths resolve against the config file's directory. The directory
 cannot be a filesystem root. On macOS, the Host process needs read and
 search permissions on each ancestor of the resolved directory to validate the mount.

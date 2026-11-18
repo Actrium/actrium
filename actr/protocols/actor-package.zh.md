@@ -465,6 +465,8 @@ Profile、Profile Runtime、Execution Engine 与 Actr Host 的分层及首批实
 Host 只按包申请的级别挂载目录。包未申请时不挂载。包申请了能力但未获目录授权、目录
 无法打开，或申请的级别超过授权上限时，Host 拒绝实例化。
 Store 重建沿用实例已打开的目录。重新装载实例时重新评估授权。
+升级前依靠 `wasi_data_dir` 挂载的 Workload，需要声明对应能力后重新打包并签名；
+旧格式包须先转换为 `actr-package/2`。配置了目录但包未声明能力时，Host 记录警告。
 当前 Component Profile 尚未定义 Guest 的可选能力查询接口，Host 会拒绝非空的可选能力列表。
 
 ### 7.2 `keel.guest/1`

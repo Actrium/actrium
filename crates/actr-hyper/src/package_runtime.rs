@@ -56,6 +56,12 @@ pub(crate) fn resolve_component_host_grants<'a>(
         }
     }
     let Some((capability, access)) = requested else {
+        if configured_wasi_data.is_some() {
+            tracing::warn!(
+                actor_type = %manifest.actor_type(),
+                "configured WASI data directory is not mounted at /data because the signed package does not require a WASI data capability; repack and re-sign it with wasi.data.read-only or wasi.data.read-write"
+            );
+        }
         return Ok(None);
     };
     let grant = configured_wasi_data.ok_or_else(|| {

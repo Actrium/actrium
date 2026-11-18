@@ -814,6 +814,53 @@ mod tests {
         );
     }
 
+    #[test]
+    fn component_capability_ids_are_validated() {
+        let source = include_str!("../tests/fixtures/registration-v2.toml");
+        let valid = ActorPackageManifest::from_toml(source).unwrap();
+        for id in ["", ".wasi", "wasi..data", "Wasi.data", "wasi.data_foo"] {
+            let mut manifest = valid.clone();
+            manifest.host.required_capabilities = vec![id.into()];
+            assert!(
+                manifest
+                    .validate()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("invalid")
+            );
+        }
+        let mut duplicate = valid.clone();
+        duplicate.host.required_capabilities =
+            vec![WASI_DATA_READ_ONLY.into(), WASI_DATA_READ_ONLY.into()];
+        assert!(
+            duplicate
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate")
+        );
+        duplicate.host.required_capabilities = vec![WASI_DATA_READ_ONLY.into()];
+        duplicate.host.optional_capabilities = vec![WASI_DATA_READ_ONLY.into()];
+        assert!(
+            duplicate
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("duplicate")
+        );
+
+        let mut conflicting = valid;
+        conflicting.host.required_capabilities =
+            vec![WASI_DATA_READ_ONLY.into(), WASI_DATA_READ_WRITE.into()];
+        assert!(
+            conflicting
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("mutually exclusive")
+        );
+    }
+
     #[cfg(feature = "profile-validation")]
     #[test]
     fn validates_product_v1_proto_imports_in_signed_archives() {
