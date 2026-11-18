@@ -94,6 +94,7 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `realm.display_name` | 人类可读名称，不是标识符。 |
 | `realm.status` | `active` 或 `retired`。 |
 | `primary_package` | `packages` 中的一个引用名，指定本实例的默认主 Service 包。 |
+| `service_actor_id` | 可选。指定本 Realm 中运行 `primary_package` 的 Actor，使用规范 ActorId。 |
 | `front_package` | `packages` 中本实例选用的 Front 包引用名。 |
 | `packages` | 本应用实例选定的包引用映射。 |
 | `packages[ref].href` | 该归档的 HTTPS 下载地址，可以在任何位置。 |
@@ -192,7 +193,8 @@ Service Host 验证 Service 归档，并在接受 Front 前核对所选 Front �
 `type` 所属 Publisher 的受信公钥验证包内 `manifest.sig` 对原始 `manifest.toml` 的签名。再核对清单中
 的精确 Actor 类型、签名覆盖的载荷、Workload、Host 要求、平台策略和依赖锁。见 [Actor Package](actor-package.zh.md)。
 
-主包的 Actor 类型标识实例的 Service。Realm 中该类型的 Actor 数量必须恰好为一。
+签名 Profile 指定 `service_actor_id` 时，客户端调用该 Actor，并按主包核对其类型。该 Actor 不可用时，
+不得改用发现到的其他实例。未指定 ActorId 时，按主包的 Actor 类型发现，Realm 内该类型的 Actor 数量必须恰好为一。
 授权部署配置决定还要运行哪些包、由哪个 Host 启动，以及每个 Actor 的身份和状态。
 停止 Actor、删除状态和撤销凭据均须单独执行。
 

@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const LORAN_SCHEMA_VERSION: i64 = 12;
+const LORAN_SCHEMA_VERSION: i64 = 14;
 
 /// Database manager
 #[derive(Clone)]
@@ -50,7 +50,7 @@ impl Database {
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
             .fetch_one(&mut *connection)
             .await?;
-        if matches!(version, 10 | 11 | LORAN_SCHEMA_VERSION) {
+        if matches!(version, 10 | 11 | 12 | 13 | LORAN_SCHEMA_VERSION) {
             return Ok(version);
         }
 
@@ -216,6 +216,25 @@ impl Database {
                 document TEXT NOT NULL,
                 accepted_at INTEGER NOT NULL,
                 FOREIGN KEY(realm) REFERENCES realm(name) ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Preserve Front release receipts when enabling managed Service releases.
+        if version == 13 {
+            sqlx::query("ALTER TABLE realm_front_update RENAME TO realm_package_release")
+                .execute(&mut *tx)
+                .await?;
+        }
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_package_release (
+                realm TEXT NOT NULL REFERENCES realm(name) ON DELETE CASCADE,
+                operation_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                previous_document TEXT NOT NULL,
+                document TEXT NOT NULL,
+                PRIMARY KEY(realm, operation_id)
             )",
         )
         .execute(&mut *tx)

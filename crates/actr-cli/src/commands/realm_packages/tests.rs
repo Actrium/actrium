@@ -9,6 +9,8 @@ use ed25519_dalek::SigningKey;
 use sha2::{Digest, Sha256};
 use std::{cell::RefCell, collections::HashMap};
 
+mod front_e2e;
+
 const REALM: &str = "echo@realm.example";
 const REALM_URL: &str = "https://realm.example/realms/echo";
 const PROTO: &[u8] = b"syntax = \"proto3\"; package echo; service Echo {}";
@@ -23,6 +25,15 @@ fn key(id: &str, key: &SigningKey) -> Value {
 }
 
 fn package(workload: &str, proto: &[u8], publisher: &SigningKey) -> (Value, Vec<u8>) {
+    package_version(workload, proto, publisher, "1.0.0")
+}
+
+fn package_version(
+    workload: &str,
+    proto: &[u8],
+    publisher: &SigningKey,
+    version: &str,
+) -> (Value, Vec<u8>) {
     let is_front = workload == KEEL_GUEST_PROFILE_V1;
     let template = if is_front {
         include_str!(concat!(
@@ -38,7 +49,7 @@ fn package(workload: &str, proto: &[u8], publisher: &SigningKey) -> (Value, Vec<
     let mut m = ActorPackageManifest::from_toml(template).unwrap();
     m.workload.profile = workload.into();
     m.actor.publisher = "publisher.example".into();
-    m.actor.version = "1.0.0".into();
+    m.actor.version = version.into();
     let contract = if is_front {
         FRONT_CONTRACT
     } else {
@@ -127,17 +138,21 @@ fn package(workload: &str, proto: &[u8], publisher: &SigningKey) -> (Value, Vec<
 }
 
 fn fixture(front_proto: &[u8]) -> (Documents, SigningKey, Value) {
-    let rk = SigningKey::from_bytes(&rand::random());
     let pk = SigningKey::from_bytes(&rand::random());
+    fixture_with_publisher(front_proto, &pk)
+}
+
+fn fixture_with_publisher(front_proto: &[u8], pk: &SigningKey) -> (Documents, SigningKey, Value) {
+    let rk = SigningKey::from_bytes(&rand::random());
     let root = SigningKey::from_bytes(&rand::random());
-    let (service, sb) = package("actr.component/1", PROTO, &pk);
-    let (front, fb) = package(KEEL_GUEST_PROFILE_V1, front_proto, &pk);
+    let (service, sb) = package("actr.component/1", PROTO, pk);
+    let (front, fb) = package(KEEL_GUEST_PROFILE_V1, front_proto, pk);
     let mut realm_keys = json!({"sequence":1,"keys":[key("realm-test",&rk)]});
     sign_document(&mut realm_keys, "realm-test", &rk);
     let rd = json!({"version":1,"authority":"actr://realm.example","services":[{"rel":"realms","href":"https://realm.example/realms","protocol":"actr-realm-profile/1"}],"realm_signing_keys":realm_keys});
     let now = chrono::Utc::now();
     let mut publisher = json!({"schema":"actr.publisher/v1","domain":"publisher.example","sequence":1,
-        "profile_signing_keys":[key("pub-root",&root)],"keys":[key(&actr_protocol::package_key_id(pk.verifying_key().as_bytes()),&pk)],
+        "profile_signing_keys":[key("pub-root",&root)],"keys":[key(&actr_protocol::package_key_id(pk.verifying_key().as_bytes()),pk)],
         "profile_issued_at":(now-chrono::Duration::hours(1)).to_rfc3339(),"profile_expires_at":(now+chrono::Duration::days(1)).to_rfc3339()});
     sign_document(&mut publisher, "pub-root", &root);
     let pd = json!({"version":1,"authority":"actr://publisher.example","services":[{"rel":"contracts","href":"https://publisher.example/contracts"}],"publisher":publisher});
@@ -172,6 +187,77 @@ async fn from_fixture(args: &FetchArgs, docs: &Documents) -> Result<Value> {
         )
     })
     .await
+}
+
+#[tokio::test]
+async fn front_release_resumes_after_a_lost_reply_and_rolls_back() -> Result<()> {
+    use actr_protocol::realm_membership::{MembershipOp, MembershipRequest};
+    use std::cell::Cell;
+
+    let pk = SigningKey::from_bytes(&rand::random());
+    let (docs, rk, old) = fixture_with_publisher(PROTO, &pk);
+    let (mut front, bytes) = package_version(KEEL_GUEST_PROFILE_V1, PROTO, &pk, "1.1.0");
+    let location = "https://cdn.example/front-v11.actr";
+    front["href"] = json!(location);
+    docs.borrow_mut().insert(location.to_owned(), bytes);
+    let mut selection: RealmPackageSelection = serde_json::from_value(old.clone())?;
+    selection
+        .packages
+        .insert("view".into(), serde_json::from_value(front)?);
+    let output = tempfile::tempdir()?;
+    let lose_reply = Cell::new(true);
+    let replies = RefCell::new(BTreeMap::<String, Value>::new());
+    let get = |url, _| {
+        std::future::ready(
+            docs.borrow()
+                .get(&url)
+                .cloned()
+                .with_context(|| format!("unexpected fetch {url}")),
+        )
+    };
+    let send = |request: MembershipRequest| {
+        std::future::ready((|| {
+            assert_eq!(request.op, MembershipOp::UpdateFront);
+            let update = request.front_update.unwrap();
+            if let Some(reply) = replies.borrow().get(&update.operation_id) {
+                return Ok(reply.clone());
+            }
+            let mut current: Value = serde_json::from_slice(&docs.borrow()[REALM_URL])?;
+            assert_eq!(current["sequence"], update.expected_sequence);
+            let previous: RealmPackageSelection = serde_json::from_value(current.clone())?;
+            let target = request.selection.unwrap();
+            previous
+                .check_unchanged_service(&target)
+                .map_err(anyhow::Error::msg)?;
+            current["packages"] = serde_json::to_value(target.packages)?;
+            current["primary_package"] = json!(target.primary_package);
+            current["front_package"] = json!(target.front_package);
+            let sequence = update.expected_sequence + 1;
+            publish_profile(&docs, &rk, &mut current, sequence);
+            let reply = json!({
+                "operation_id": update.operation_id,
+                "sequence": sequence,
+                "previous_selection": previous,
+            });
+            replies
+                .borrow_mut()
+                .insert(update.operation_id, reply.clone());
+            if lose_reply.replace(false) {
+                bail!("reply lost after publication");
+            }
+            Ok(reply)
+        })())
+    };
+    let update = |selection| {
+        front::release_with(REALM, "afp.example", output.path(), selection, &get, &send)
+    };
+    assert!(update(Some(selection.clone())).await.is_err());
+    assert_eq!(update(Some(selection)).await?["sequence"], 2);
+    assert_eq!(replies.borrow().len(), 1);
+    assert_eq!(update(None).await?["sequence"], 3);
+    let published: Value = serde_json::from_slice(&docs.borrow()[REALM_URL])?;
+    assert_eq!(published["packages"], old["packages"]);
+    Ok(())
 }
 
 fn publish_profile(docs: &Documents, signer: &SigningKey, profile: &mut Value, sequence: u64) {

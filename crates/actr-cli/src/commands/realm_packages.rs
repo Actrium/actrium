@@ -24,6 +24,12 @@ use tempfile::NamedTempFile;
 
 use super::realm_members::resolve_profile;
 
+mod front;
+pub(super) use front::{
+    FrontRollbackArgs, FrontUpdateArgs, ServiceRollbackArgs, ServiceSwitchArgs, rollback_front,
+    rollback_service, switch_service, update_front,
+};
+
 const DOCUMENT_LIMIT: usize = actr_protocol::realm_profile::MAX_REALM_PROFILE_BYTES;
 const ARCHIVE_LIMIT: usize = 64 * 1024 * 1024;
 
@@ -92,7 +98,11 @@ async fn download(address: &str, limit: usize) -> Result<Vec<u8>> {
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))
             .build()?;
-        let mut response = client.get(url.clone()).send().await?;
+        let mut response = client
+            .get(url.clone())
+            .header(reqwest::header::CACHE_CONTROL, "no-cache")
+            .send()
+            .await?;
         if response.status().is_redirection() {
             let location = response
                 .headers()

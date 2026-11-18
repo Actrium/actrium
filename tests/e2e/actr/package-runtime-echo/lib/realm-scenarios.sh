@@ -111,6 +111,8 @@ realm_fixture_join() {
 
 # A real, signed Keel Front for the Realm's second selection.
 build_realm_front() {
+    local version="${1:-1.0.0}" output="${2:-$DIST_DIR/realm-front.actr}"
+    local target_service_version="${3:-$SERVICE_VERSION}"
     local payload="$RUN_DIR/front-payload"
     mkdir -p "$payload/workload" "$payload/contracts"
     printf 'export default {};\n' >"$payload/workload/guest.js"
@@ -120,7 +122,7 @@ format = "actr-package/2"
 [actor]
 publisher = "$PUBLISHER"
 name = "EchoFront"
-version = "1.0.0"
+version = "$version"
 [workload]
 profile = "keel.guest/1"
 entry = "workload/guest.js"
@@ -132,7 +134,7 @@ profile = "actr.host/1"
 api = "^1.0.0"
 [dependencies.service]
 actor = "$PUBLISHER/EchoService"
-version = "=$SERVICE_VERSION"
+version = "=$target_service_version"
 contract = "contracts/echo.proto"
 required = true
 [signature]
@@ -152,7 +154,85 @@ size = 0
 sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 EOF
     run_actr pkg pack --manifest-path "$payload/manifest.toml" --payload-root "$payload" \
-        --key "$SERVICE_KEYCHAIN" --output "$DIST_DIR/realm-front.actr"
+        --key "$SERVICE_KEYCHAIN" --output "$output"
+}
+
+fixture_service_actor() {
+    local serial
+    serial="$(sqlite3 "$LORAN_DB" "SELECT printf('%x', serial_number)
+        FROM issued_actor_identity WHERE realm = '$REALM'
+          AND actor_type = '$PUBLISHER/EchoService@$1' AND auth_mode = 1;")"
+    [[ -n "$serial" && "$serial" != *$'\n'* ]] || fail "expected one registered Service Actor"
+    printf '%s.%s\n' "$serial" "$REALM"
+}
+
+start_fixture_candidate() {
+    local SERVICE_PACKAGE="$1" SERVER_RUNTIME_PATH="$RUN_DIR/server-next.toml"
+    local original_pid="$SERVER_PID" home_dir hyper_dir
+    IFS=$'\t' read -r home_dir hyper_dir <<<"$(mk_isolated_env service-next)"
+    start_server_isolated "$home_dir" "$hyper_dir" "server-next.log"
+    CANDIDATE_SERVICE_PID="$SERVER_PID"
+    SERVER_PID="$original_pid"
+    expect_server_started "server-next.log" "$CANDIDATE_SERVICE_PID"
+}
+
+run_package_release_roundtrips() {
+    local candidate="$DIST_DIR/realm-front-next.actr" selection="$RUN_DIR/front-next-selection.json"
+    local request="$RUN_DIR/front-release-request.json" front_sha front_href package_key
+    local target_service_version="$SERVICE_VERSION" actors=null
+    local next_service="" service_sha="" service_href=""
+    if [ "${REALM_SERVICE_SWITCH:-0}" = 1 ]; then
+        section "Service upgrade and rollback with signed ActorId selection"
+        target_service_version="1.1.0"
+        next_service="$DIST_DIR/echo-v2-next.actr"
+        local payload="$RUN_DIR/v2-echo-next-payload"
+        cp -R "$RUN_DIR/v2-echo-payload" "$payload"
+        sed 's/^version = "1.0.0"$/version = "1.1.0"/' "$RUN_DIR/v2-echo-payload/manifest.toml" >"$payload/manifest.toml"
+        run_actr pkg pack --manifest-path "$payload/manifest.toml" --payload-root "$payload" \
+            --key "$SERVICE_KEYCHAIN" --output "$next_service"
+        service_sha="$(shasum -a 256 "$next_service" | cut -d' ' -f1)"
+        service_href="https://packages.realm-e2e.test/${service_sha}.actr"
+        start_fixture_candidate "$next_service"
+        actors="$(jq -nc --arg old "$(fixture_service_actor "$SERVICE_VERSION")" \
+            --arg new "$(fixture_service_actor "$target_service_version")" '[$old,$new]')"
+    else
+        section "Front upgrade and rollback against one running Service"
+    fi
+    build_realm_front "1.1.0" "$candidate" "$target_service_version"
+    front_sha="$(shasum -a 256 "$candidate" | cut -d' ' -f1)"
+    front_href="https://packages.realm-e2e.test/${front_sha}.actr"
+    jq --arg href "$front_href" --arg sha "$front_sha" --arg type "$PUBLISHER/EchoFront@1.1.0" \
+        --arg sh "$service_href" --arg ss "$service_sha" --arg st "$PUBLISHER/EchoService@$target_service_version" \
+        '.packages[.front_package] = {href:$href, sha256:$sha, type:$type}
+         | if $sh != "" then .packages[.primary_package] = {href:$sh, sha256:$ss, type:$st} else . end' \
+        "$RUN_DIR/selection.json" >"$selection"
+    jq --arg href "$front_href" --arg file "$candidate" --arg sh "$service_href" --arg sf "$next_service" \
+        '.[$href] = $file | if $sh != "" then .[$sh] = $sf else . end' "$RUN_DIR/https-artifacts.json" \
+        >"$RUN_DIR/https-front-release.json"
+    mv "$RUN_DIR/https-front-release.json" "$RUN_DIR/https-artifacts.json"
+    package_key="$(jq -er '.public_key' "$SERVICE_PUBLIC_KEY")"
+    jq -n --arg owner "$REALM_OWNER_KEY" --arg front "$REALM_CLIENT_KEY" \
+        --arg selection "$selection" --arg output "$RUN_DIR/front-release-cache" \
+        --arg public "https://$REALM_DOMAIN/realms/${REALM%@*}" \
+        --arg served "${HTTP_BASE}/actr/realms/$REALM_DOMAIN/${REALM%@*}" \
+        --arg ca "$RUN_DIR/loran-tls/ca.pem" --arg key "$package_key" \
+        --argjson actors "$actors" \
+        '{owner_key:$owner,front_key:$front,selection:$selection,output:$output,
+          public_profile_url:$public,issuer_profile_url:$served,issuer_ca:$ca,package_key:$key,
+          service_actors:$actors}' >"$request"
+    ACTR_REALM_E2E_REQUEST="$request" timeout 180 "$REALM_CLI_FIXTURE" \
+        --exact commands::realm_packages::tests::front_e2e::realm_front_release_fixture \
+        --ignored --nocapture >"$LOG_DIR/front-release.log" 2>&1 ||
+        { cat "$LOG_DIR/front-release.log"; fail "Package release round-trips failed"; }
+    kill -0 "$SERVER_PID" 2>/dev/null || fail "Original Service stopped during the release"
+    if [ "${REALM_SERVICE_SWITCH:-0}" = 1 ]; then
+        kill -0 "$CANDIDATE_SERVICE_PID" 2>/dev/null || fail "Candidate Service stopped during the release"
+        grep -E '^SERVICE_(SWITCH|READINESS_GATE) ' "$LOG_DIR/front-release.log"
+        success "Front reached the original, upgraded, and restored Actor in order"
+    else
+        grep '^FRONT_RELEASE ' "$LOG_DIR/front-release.log"
+        success "All three Fronts called the same Service Actor"
+    fi
 }
 
 create_profile_realm() {

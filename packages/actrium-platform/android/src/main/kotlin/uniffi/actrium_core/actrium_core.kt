@@ -1235,6 +1235,12 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -1255,6 +1261,8 @@ internal interface IntegrityCheckingUniffiLib : Library {
 fun uniffi_actrium_core_checksum_func_accept_publisher_profile(
 ): Short
 fun uniffi_actrium_core_checksum_func_accept_realm_profile(
+): Short
+fun uniffi_actrium_core_checksum_func_accept_realm_profile_update(
 ): Short
 fun uniffi_actrium_core_checksum_func_active_tab_from_row(
 ): Short
@@ -1634,6 +1642,10 @@ fun uniffi_actrium_core_checksum_func_parse_vosk_partial_text(
 ): Short
 fun uniffi_actrium_core_checksum_func_parse_vosk_result_text(
 ): Short
+fun uniffi_actrium_core_checksum_func_pin_realm_authority(
+): Short
+fun uniffi_actrium_core_checksum_func_pin_realm_front_publisher(
+): Short
 fun uniffi_actrium_core_checksum_func_post_process_zh_asr_segments(
 ): Short
 fun uniffi_actrium_core_checksum_func_relative_path_from(
@@ -1824,6 +1836,8 @@ internal interface UniffiLib : Library {
 fun uniffi_actrium_core_fn_func_accept_publisher_profile(`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_accept_realm_profile(`body`: RustBuffer.ByValue,`realmName`: RustBuffer.ByValue,`signingKeysJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_accept_realm_profile_update(`body`: RustBuffer.ByValue,`realmName`: RustBuffer.ByValue,`signingKeysJson`: RustBuffer.ByValue,`previousStateJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_active_tab_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -2203,6 +2217,10 @@ fun uniffi_actrium_core_fn_func_parse_vosk_partial_text(`json`: RustBuffer.ByVal
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_parse_vosk_result_text(`json`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_pin_realm_authority(`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,`previousPinsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_pin_realm_front_publisher(`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,`previousPinsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_post_process_zh_asr_segments(`text`: RustBuffer.ByValue,`segments`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_relative_path_from(`absolutePath`: RustBuffer.ByValue,`baseDir`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -2476,6 +2494,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actrium_core_checksum_func_accept_realm_profile() != 6481.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_func_accept_realm_profile_update() != 1226.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actrium_core_checksum_func_active_tab_from_row() != 51323.toShort()) {
@@ -3043,6 +3064,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actrium_core_checksum_func_parse_vosk_result_text() != 55653.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_func_pin_realm_authority() != 19265.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_func_pin_realm_front_publisher() != 57787.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actrium_core_checksum_func_post_process_zh_asr_segments() != 19640.toShort()) {
@@ -5660,6 +5687,70 @@ public object FfiConverterTypePackageIntegrityPlanInfo: FfiConverterRustBuffer<P
 
 
 
+data class PinnedAuthorityInfo (
+    var `descriptor`: AuthorityDiscoveryInfo,
+    var `pinsJson`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePinnedAuthorityInfo: FfiConverterRustBuffer<PinnedAuthorityInfo> {
+    override fun read(buf: ByteBuffer): PinnedAuthorityInfo {
+        return PinnedAuthorityInfo(
+            FfiConverterTypeAuthorityDiscoveryInfo.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PinnedAuthorityInfo) = (
+            FfiConverterTypeAuthorityDiscoveryInfo.allocationSize(value.`descriptor`) +
+            FfiConverterString.allocationSize(value.`pinsJson`)
+    )
+
+    override fun write(value: PinnedAuthorityInfo, buf: ByteBuffer) {
+            FfiConverterTypeAuthorityDiscoveryInfo.write(value.`descriptor`, buf)
+            FfiConverterString.write(value.`pinsJson`, buf)
+    }
+}
+
+
+
+data class PinnedPublisherInfo (
+    var `profile`: PublisherProfileInfo,
+    var `pinsJson`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePinnedPublisherInfo: FfiConverterRustBuffer<PinnedPublisherInfo> {
+    override fun read(buf: ByteBuffer): PinnedPublisherInfo {
+        return PinnedPublisherInfo(
+            FfiConverterTypePublisherProfileInfo.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PinnedPublisherInfo) = (
+            FfiConverterTypePublisherProfileInfo.allocationSize(value.`profile`) +
+            FfiConverterString.allocationSize(value.`pinsJson`)
+    )
+
+    override fun write(value: PinnedPublisherInfo, buf: ByteBuffer) {
+            FfiConverterTypePublisherProfileInfo.write(value.`profile`, buf)
+            FfiConverterString.write(value.`pinsJson`, buf)
+    }
+}
+
+
+
 /**
  * A package signing key from a verified Publisher Profile.
  */
@@ -5867,6 +5958,10 @@ data class RealmProfileInfo (
     var `serviceSha256`: kotlin.String,
     var `serviceType`: kotlin.String,
     /**
+     * Serial number of the signed Service Actor in realm_name.
+     */
+    var `serviceActorSerial`: kotlin.ULong?,
+    /**
      * Issuer endpoint that serves Actor credentials.
      */
     var `issuerUrl`: kotlin.String,
@@ -5898,6 +5993,7 @@ public object FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer<RealmProf
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterOptionalULong.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
         )
@@ -5917,6 +6013,7 @@ public object FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer<RealmProf
             FfiConverterString.allocationSize(value.`serviceHref`) +
             FfiConverterString.allocationSize(value.`serviceSha256`) +
             FfiConverterString.allocationSize(value.`serviceType`) +
+            FfiConverterOptionalULong.allocationSize(value.`serviceActorSerial`) +
             FfiConverterString.allocationSize(value.`issuerUrl`) +
             FfiConverterString.allocationSize(value.`providerId`)
     )
@@ -5935,8 +6032,53 @@ public object FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer<RealmProf
             FfiConverterString.write(value.`serviceHref`, buf)
             FfiConverterString.write(value.`serviceSha256`, buf)
             FfiConverterString.write(value.`serviceType`, buf)
+            FfiConverterOptionalULong.write(value.`serviceActorSerial`, buf)
             FfiConverterString.write(value.`issuerUrl`, buf)
             FfiConverterString.write(value.`providerId`, buf)
+    }
+}
+
+
+
+data class RealmProfileUpdateInfo (
+    var `profile`: RealmProfileInfo?,
+    var `stateJson`: kotlin.String,
+    var `serviceSelectionKey`: kotlin.String,
+    var `frontSelectionKey`: kotlin.String,
+    var `signingKeyId`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRealmProfileUpdateInfo: FfiConverterRustBuffer<RealmProfileUpdateInfo> {
+    override fun read(buf: ByteBuffer): RealmProfileUpdateInfo {
+        return RealmProfileUpdateInfo(
+            FfiConverterOptionalTypeRealmProfileInfo.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RealmProfileUpdateInfo) = (
+            FfiConverterOptionalTypeRealmProfileInfo.allocationSize(value.`profile`) +
+            FfiConverterString.allocationSize(value.`stateJson`) +
+            FfiConverterString.allocationSize(value.`serviceSelectionKey`) +
+            FfiConverterString.allocationSize(value.`frontSelectionKey`) +
+            FfiConverterString.allocationSize(value.`signingKeyId`)
+    )
+
+    override fun write(value: RealmProfileUpdateInfo, buf: ByteBuffer) {
+            FfiConverterOptionalTypeRealmProfileInfo.write(value.`profile`, buf)
+            FfiConverterString.write(value.`stateJson`, buf)
+            FfiConverterString.write(value.`serviceSelectionKey`, buf)
+            FfiConverterString.write(value.`frontSelectionKey`, buf)
+            FfiConverterString.write(value.`signingKeyId`, buf)
     }
 }
 
@@ -6886,6 +7028,38 @@ public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
 /**
  * @suppress
  */
+public object FfiConverterOptionalULong: FfiConverterRustBuffer<kotlin.ULong?> {
+    override fun read(buf: ByteBuffer): kotlin.ULong? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterULong.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.ULong?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterULong.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.ULong?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterULong.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalLong: FfiConverterRustBuffer<kotlin.Long?> {
     override fun read(buf: ByteBuffer): kotlin.Long? {
         if (buf.get().toInt() == 0) {
@@ -7068,6 +7242,38 @@ public object FfiConverterOptionalTypePackageIntegrityPlanInfo: FfiConverterRust
         } else {
             buf.put(1)
             FfiConverterTypePackageIntegrityPlanInfo.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeRealmProfileInfo: FfiConverterRustBuffer<RealmProfileInfo?> {
+    override fun read(buf: ByteBuffer): RealmProfileInfo? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeRealmProfileInfo.read(buf)
+    }
+
+    override fun allocationSize(value: RealmProfileInfo?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeRealmProfileInfo.allocationSize(value)
+        }
+    }
+
+    override fun write(value: RealmProfileInfo?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeRealmProfileInfo.write(value, buf)
         }
     }
 }
@@ -7576,6 +7782,16 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_accept_realm_profile(
         FfiConverterString.lower(`body`),FfiConverterString.lower(`realmName`),FfiConverterString.lower(`signingKeysJson`),_status)
+}
+    )
+    }
+
+
+    @Throws(CoreException::class) fun `acceptRealmProfileUpdate`(`body`: kotlin.String, `realmName`: kotlin.String, `signingKeysJson`: kotlin.String, `previousStateJson`: kotlin.String?): RealmProfileUpdateInfo {
+            return FfiConverterTypeRealmProfileUpdateInfo.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_accept_realm_profile_update(
+        FfiConverterString.lower(`body`),FfiConverterString.lower(`realmName`),FfiConverterString.lower(`signingKeysJson`),FfiConverterOptionalString.lower(`previousStateJson`),_status)
 }
     )
     }
@@ -9809,6 +10025,26 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_parse_vosk_result_text(
         FfiConverterString.lower(`json`),_status)
+}
+    )
+    }
+
+
+    @Throws(CoreException::class) fun `pinRealmAuthority`(`body`: kotlin.String, `domain`: kotlin.String, `previousPinsJson`: kotlin.String?): PinnedAuthorityInfo {
+            return FfiConverterTypePinnedAuthorityInfo.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_pin_realm_authority(
+        FfiConverterString.lower(`body`),FfiConverterString.lower(`domain`),FfiConverterOptionalString.lower(`previousPinsJson`),_status)
+}
+    )
+    }
+
+
+    @Throws(CoreException::class) fun `pinRealmFrontPublisher`(`body`: kotlin.String, `domain`: kotlin.String, `previousPinsJson`: kotlin.String?): PinnedPublisherInfo {
+            return FfiConverterTypePinnedPublisherInfo.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_pin_realm_front_publisher(
+        FfiConverterString.lower(`body`),FfiConverterString.lower(`domain`),FfiConverterOptionalString.lower(`previousPinsJson`),_status)
 }
     )
     }

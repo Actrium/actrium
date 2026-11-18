@@ -73,6 +73,22 @@ REALM_HTTPS=1 REALM_MODE=provider bash tests/e2e/actr/package-runtime-echo/run.s
 REALM_HTTPS=1 REALM_MODE=external bash tests/e2e/actr/package-runtime-echo/run.sh
 ```
 
+To exercise a Front upgrade and rollback against the same live Service Actor:
+
+```sh
+REALM_HTTPS=1 REALM_MODE=provider REALM_FRONT_RELEASE=1 \
+  bash tests/e2e/actr/package-runtime-echo/run.sh --backend v2-component
+```
+
+The log records the three Profile revisions and checks the Service type, digest, and ActorId at every Echo call.
+
+To verify a Service switch, including a failed readiness RPC before publication and rollback to the original Actor, run:
+
+```sh
+REALM_HTTPS=1 REALM_MODE=provider REALM_SERVICE_SWITCH=1 \
+  bash tests/e2e/actr/package-runtime-echo/run.sh --backend v2-component
+```
+
 The matrix defaults to `MODE=runtime` and enables the Provider's authority. It builds
 the real package before creating the Realm, so the Profile pins its actual
 SHA-256 and Actor type. `REALM_MODE=provider` creates `echo-<run>@localhost`

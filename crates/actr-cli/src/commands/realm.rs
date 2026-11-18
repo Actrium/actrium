@@ -75,6 +75,14 @@ pub enum RealmCommand {
     Invite(InviteArgs),
     /// Replace the selection of a Realm under its Provider domain as its owner
     Update(realm_members::UpdateArgs),
+    /// Verify and publish a Front-only update for an AFP-domain Realm.
+    FrontUpdate(super::realm_packages::FrontUpdateArgs),
+    /// Republish the last Front selection at a higher Profile sequence.
+    FrontRollback(super::realm_packages::FrontRollbackArgs),
+    /// Probe a running Service and publish its ActorId with the new selection.
+    ServiceSwitch(super::realm_packages::ServiceSwitchArgs),
+    /// Probe the previous Service and restore its selection at a higher sequence.
+    ServiceRollback(super::realm_packages::ServiceRollbackArgs),
     /// Download and verify the selected Service and Front into a new directory
     FetchPackages(super::realm_packages::FetchArgs),
     /// Download and validate a complete manual selection before signing a Realm Profile
@@ -151,6 +159,9 @@ pub struct SignProfileArgs {
     /// Expected selection for first activation, or a complete replacement for an update
     #[arg(long, value_name = "FILE")]
     pub selection: Option<PathBuf>,
+    /// Operation ID (32 lowercase hex digits) for a conditional Front-only publish.
+    #[arg(long, requires = "selection", conflicts_with = "display_name")]
+    pub front_operation: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -245,7 +256,16 @@ impl Command for RealmArgs {
             RealmCommand::SignProfile(args) => {
                 let selection = args.selection.as_deref().map(read_selection).transpose()?;
                 let profile = read_profile(&args.profile)?;
-                sign_profile(&args.key, profile, args.display_name.as_deref(), selection)?
+                if let Some(operation_id) = &args.front_operation {
+                    sign_front_profile(
+                        &args.key,
+                        profile,
+                        selection.context("missing selection")?,
+                        operation_id,
+                    )?
+                } else {
+                    sign_profile(&args.key, profile, args.display_name.as_deref(), selection)?
+                }
             }
             RealmCommand::Retire(args) => retire(&args.key, read_profile(&args.profile)?)?,
             RealmCommand::ReissueRequest(args) => {
@@ -265,6 +285,16 @@ impl Command for RealmArgs {
             RealmCommand::RegisterPublisher(args) => register_publisher(args).await?,
             RealmCommand::Join(args) => realm_members::join(args).await?,
             RealmCommand::Update(args) => realm_members::update(args).await?,
+            RealmCommand::FrontUpdate(args) => super::realm_packages::update_front(args).await?,
+            RealmCommand::FrontRollback(args) => {
+                super::realm_packages::rollback_front(args).await?
+            }
+            RealmCommand::ServiceSwitch(args) => {
+                super::realm_packages::switch_service(args).await?
+            }
+            RealmCommand::ServiceRollback(args) => {
+                super::realm_packages::rollback_service(args).await?
+            }
             RealmCommand::FetchPackages(args) => super::realm_packages::fetch(args).await?,
             RealmCommand::CheckSelection(args) => {
                 super::realm_packages::check_selection(args).await?
@@ -483,10 +513,14 @@ fn sign_profile(
         selection.check().map_err(anyhow::Error::msg)?;
         if let Some(fields) = profile.as_object_mut() {
             fields.remove("package");
+            fields.remove("service_actor_id");
         }
         profile["primary_package"] = selection.primary_package.into();
         profile["front_package"] = selection.front_package.into();
         profile["packages"] = serde_json::to_value(selection.packages)?;
+        if let Some(actor_id) = selection.service_actor_id {
+            profile["service_actor_id"] = actor_id.into();
+        }
     }
     profile["issued_at"] = chrono::Utc::now()
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
@@ -516,6 +550,45 @@ fn sign_profile(
     Ok(request.sign(&key_id, &key))
 }
 
+fn sign_front_profile(
+    key_path: &Path,
+    profile: Value,
+    selection: RealmPackageSelection,
+    operation_id: &str,
+) -> Result<Value> {
+    use actr_protocol::realm_profile::FrontUpdate;
+    anyhow::ensure!(
+        profile.get("signature").is_some(),
+        "use the current signed Realm Profile"
+    );
+    let previous: RealmProfile = serde_json::from_value(profile.clone())?;
+    let previous_selection = previous
+        .selection
+        .as_ref()
+        .context("Profile has no selection")?;
+    previous_selection
+        .check_unchanged_service(&selection)
+        .map_err(anyhow::Error::msg)?;
+    previous_selection
+        .check_successor(&selection)
+        .map_err(anyhow::Error::msg)?;
+    let update = FrontUpdate {
+        operation_id: operation_id.to_owned(),
+        expected_sequence: previous.sequence,
+    };
+    update.check().map_err(anyhow::Error::msg)?;
+    let signed = sign_profile(key_path, profile, None, Some(selection))?;
+    let mut request = new_request(
+        ManagementOp::PublishFrontProfile,
+        &previous.realm.name,
+        &previous.provider.id,
+    );
+    request.profile = Some(signed["profile"].clone());
+    request.front_update = Some(update);
+    let (key_id, key) = RealmKeyFile::load(key_path)?;
+    Ok(request.sign(&key_id, &key))
+}
+
 /// The retired successor of the signed `profile`, as a `publish_profile`
 /// request.
 fn retire(key_path: &Path, mut profile: Value) -> Result<Value> {
@@ -524,7 +597,13 @@ fn retire(key_path: &Path, mut profile: Value) -> Result<Value> {
     }
     profile["realm"]["status"] = "retired".into();
     if let Value::Object(members) = &mut profile {
-        for field in ["primary_package", "front_package", "packages", "package"] {
+        for field in [
+            "primary_package",
+            "front_package",
+            "packages",
+            "package",
+            "service_actor_id",
+        ] {
             members.remove(field);
         }
     }

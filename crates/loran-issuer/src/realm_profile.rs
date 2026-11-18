@@ -26,7 +26,8 @@ use platform::net::FetchError;
 use platform::realm::domain::member_from_descriptor;
 use platform::realm::membership::Signer;
 use platform::realm::{
-    IssuerKeyState, Realm, RealmDomain, RealmError, RealmIssuerKey, RealmProfileRecord, RealmStatus,
+    IssuerKeyState, PackageRelease, Realm, RealmDomain, RealmError, RealmIssuerKey,
+    RealmProfileRecord, RealmStatus,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -142,6 +143,8 @@ pub struct ProfileChange {
     /// The owner who requested the change. The Profile is stored only if,
     /// in the storing transaction, it still is the owner.
     pub owner: Option<Signer>,
+    pub front_update: Option<actr_protocol::realm_profile::FrontUpdate>,
+    pub service_update: Option<actr_protocol::realm_profile::FrontUpdate>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -294,6 +297,22 @@ impl RealmProfiles {
             previous.check_successor(&profile)?;
         }
         let digest = record.as_ref().map(|record| record.digest.as_str());
+        let release = change
+            .front_update
+            .as_ref()
+            .map(PackageRelease::Front)
+            .or_else(|| change.service_update.as_ref().map(PackageRelease::Service));
+        if let Some(release) = release {
+            RealmProfileRecord::store_package_release(
+                &profile,
+                &document,
+                digest,
+                change.owner.as_ref(),
+                release,
+            )
+            .await?;
+            return Ok(current);
+        }
         let (realm, _, _) =
             RealmProfileRecord::store_issued(&profile, &document, digest, change.owner.as_ref())
                 .await?;
@@ -347,6 +366,9 @@ impl RealmProfiles {
             document["primary_package"] = json!(selection.primary_package);
             document["front_package"] = json!(selection.front_package);
             document["packages"] = json!(selection.packages);
+            if let Some(actor_id) = selection.service_actor_id {
+                document["service_actor_id"] = json!(actor_id);
+            }
         }
         Ok(document)
     }

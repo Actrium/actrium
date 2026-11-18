@@ -76,6 +76,28 @@ actr realm fetch-packages --realm echo@realm.example --output ./echo-cache
 
 `fetch-packages` verifies the signed Profile, both archives and their RPC contract. Its JSON output gives the local Service and Front paths. Reuse the same directory to retain trust and version pins. Add `--package <reference>` for a selected auxiliary. For Provider-domain Realms, an owner can replace the complete selection with `actr realm update --key client.json --selection selection.json`.
 
+For Front releases under the Provider's domain, use the same output directory for the update and rollback.
+
+```sh
+actr realm front-update --key client.json --selection selection.json --output ./echo-cache
+actr realm front-rollback --key client.json --output ./echo-cache
+```
+
+Both commands verify the archives before publishing. The primary Service and its selected dependencies must stay fixed. Rollback republishes the previous selection at a higher Profile sequence. If publication times out, retry the same command and selection to recover the recorded result.
+
+For another Realm domain, the signing key holder runs `check-selection` before `sign-profile --front-operation <32-lowercase-hex-digits> --key realm-key.json --selection selection.json current-profile.json`. Submit the resulting `publish_front_profile` envelope to the Provider. Keep its `previous_selection` for rollback. When hosting the public Profile externally, confirm the receipt's sequence is still current with the Provider, then publish its signed `profile`.
+
+For a stateless Service in a Provider-domain Realm, start the target with `actr run` using the verified archive and an owner Realm key. Keep the original running for rollback. Use a separate runtime config for the probe Front with a Realm member key, trust for the Front package, and permission to dial the target Service.
+
+```sh
+actr realm service-switch --key owner.json --selection next-selection.json --output ./realm-cache \
+  --actor-id "$NEXT_ACTOR_ID" --probe-config probe-next.toml --probe-route example.Health.Ready
+actr realm service-rollback --key owner.json --output ./realm-cache \
+  --actor-id "$ORIGINAL_ACTOR_ID" --probe-config probe-original.toml --probe-route example.Health.Ready
+```
+
+Use a read-only RPC that returns success when the Service is ready. Pass `--probe-request` if it expects an encoded request body. The CLI probes the exact Actor before publishing. The signed `service_actor_id` pins clients to that Actor. The original and candidate runtime lifecycles remain under operator control.
+
 ## Browser Host Realm client key
 
 Run `actr run --web -c actr.toml`, open its local page, choose the authorized

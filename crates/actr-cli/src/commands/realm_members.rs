@@ -126,22 +126,22 @@ pub struct TransferOwnerArgs {
 }
 
 /// A loaded key file.
-struct Member {
-    file: RealmClientKeyFile,
+pub(super) struct Member {
+    pub(super) file: RealmClientKeyFile,
     key: SigningKey,
 }
 
 impl Member {
-    fn load(args: &KeyArgs) -> Result<Self> {
+    pub(super) fn load(args: &KeyArgs) -> Result<Self> {
         let (file, key) = RealmClientKeyFile::read(&args.key)?;
         Ok(Self { file, key })
     }
 
-    fn request(&self, op: MembershipOp) -> MembershipRequest {
+    pub(super) fn request(&self, op: MembershipOp) -> MembershipRequest {
         MembershipRequest::new(op, &self.file.realm, &self.file.provider_id, &new_nonce())
     }
 
-    async fn send(&self, request: MembershipRequest) -> Result<Value> {
+    pub(super) async fn send(&self, request: MembershipRequest) -> Result<Value> {
         Ok(send(&self.file.issuer, &request.sign(&self.key)).await?)
     }
 }

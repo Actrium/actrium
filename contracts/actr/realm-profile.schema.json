@@ -60,6 +60,10 @@
         "pattern": "[^a-z0-9-]"
       }
     },
+    "service_actor_id": {
+      "type": "string",
+      "pattern": "^[1-9a-f][0-9a-f]{0,15}\\.[^\\s@]+@[^\\s@]+$"
+    },
     "front_package": {
       "type": "string",
       "minLength": 1,
@@ -380,6 +384,11 @@
     }
   },
   "dependentRequired": {
+    "service_actor_id": [
+      "primary_package",
+      "front_package",
+      "packages"
+    ],
     "primary_package": [
       "front_package",
       "packages"

@@ -119,6 +119,7 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `realm.display_name` | Human-readable title. It is not an identifier. |
 | `realm.status` | `active` or `retired`. |
 | `primary_package` | A key in `packages` selecting the instance's default Service package. |
+| `service_actor_id` | Optional canonical ActorId in this Realm, pinning the instance serving `primary_package`. |
 | `front_package` | A key in `packages` selecting the Front for this instance. |
 | `packages` | Map of archive references selected for this application instance. |
 | `packages[ref].href` | HTTPS download address of that archive; it may be anywhere. |
@@ -229,8 +230,10 @@ check its whole-archive `sha256` and verify its `manifest.sig` over the raw `man
 trusted key of the Publisher named in `type`. Check the manifest's exact Actor type, signed payloads,
 Workload, Host requirements, platform policy and dependency locks. See [Actor Package](actor-package.zh.md).
 
-The primary Actor type identifies the instance's Service. Finding zero or multiple Actors of that
-type in the Realm is an error. Authorized deployment configuration determines which other packages to
+When a signed Profile specifies `service_actor_id`, the client calls that Actor and checks its type
+against the primary package. A missing or unavailable pinned Actor must not be replaced by a discovered
+candidate. Without a binding, the primary Actor type identifies the Service. Finding zero or multiple
+Actors of that type in the Realm is an error. Authorized deployment configuration determines which other packages to
 run, on which Hosts, and with which identities and state. Stopping Actors, deleting state and revoking
 credentials require separate operations.
 

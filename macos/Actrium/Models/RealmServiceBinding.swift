@@ -92,6 +92,7 @@ actor RealmServiceBinding {
     private let front: Data
     private let configuration: String
     private let serviceType: ActrBindings.ActrType
+    private let serviceActor: ActrBindings.ActrId?
     private let routes: Set<String>
     private var startup: (id: UUID, task: Task<ActrRefWrapper, Error>)?
     private var stopped = false
@@ -113,6 +114,9 @@ actor RealmServiceBinding {
         let capabilities = try JSONDecoder().decode(Capabilities.self, from: Data(capabilitiesJSON.utf8))
         self.routes = Set(capabilities.hostModules["service"]?.rpc ?? capabilities.hostModules["host:service"]?.rpc ?? [])
         self.serviceType = serviceType
+        self.serviceActor = profile.serviceActorSerial.map {
+            ActrBindings.ActrId(realm: profile.realmName, serialNumber: $0)
+        }
         self.profile = profile
         self.front = front
 
@@ -147,18 +151,28 @@ actor RealmServiceBinding {
         """
     }
 
+    /// Start a replacement Front and check discovery without sending a business RPC.
+    func prepareForSwitch() async throws -> ActrBindings.ActrId {
+        try Task.checkCancellation()
+        let reference = try await connect()
+        let target = try await service(using: reference)
+        if let serviceActor {
+            let candidates = try await reference.discover(targetType: serviceType, count: 4)
+            guard candidates.contains(where: { $0.realm == serviceActor.realm && $0.serialNumber == serviceActor.serialNumber }) else {
+                throw RealmServiceError(message: "The Service Actor in the Realm Profile is not online.")
+            }
+        }
+        try Task.checkCancellation()
+        return target
+    }
+
     func call(_ request: RealmServiceCall) async throws -> Data {
         guard !stopped, routes.contains(request.route),
               (1...300_000).contains(request.timeoutMs), request.payload.count <= 1_048_576 else {
             throw RealmServiceError(message: "The Service call is outside this tab's declared capabilities.")
         }
         let reference = try await connect()
-        guard !stopped else { throw CancellationError() }
-        // A Realm tab targets the selected Service type. A restarted Service
-        // may register with a different ActorId while the Front stays running.
-        guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
-            throw RealmServiceError(message: "The Realm's selected Service is not online.")
-        }
+        let target = try await service(using: reference)
         guard !stopped else { throw CancellationError() }
         return try await reference.callPeer(
             target: target,
@@ -166,6 +180,16 @@ actor RealmServiceBinding {
             requestPayload: request.payload,
             timeoutMs: Int64(request.timeoutMs)
         )
+    }
+
+    private func service(using reference: ActrRefWrapper) async throws -> ActrBindings.ActrId {
+        guard !stopped else { throw CancellationError() }
+        if let serviceActor { return serviceActor }
+        guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
+            throw RealmServiceError(message: "The Realm's selected Service is not online.")
+        }
+        guard !stopped else { throw CancellationError() }
+        return target
     }
 
     private func connect() async throws -> ActrRefWrapper {

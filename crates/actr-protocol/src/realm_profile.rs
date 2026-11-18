@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 mod selection;
-pub use selection::RealmPackageSelection;
+pub use selection::{FrontUpdate, RealmPackageSelection};
 pub const MAX_REALM_PROFILE_BYTES: usize = 64 * 1024;
 
 pub const REALM_PROFILE_SCHEMA: &str = "actr.realm/v1";
@@ -485,6 +485,9 @@ impl RealmProfile {
                 "realm.name '{}' does not match '{realm_name}'",
                 self.realm.name
             ));
+        }
+        if let Some(selection) = &self.selection {
+            selection.service_actor(&self.realm.name)?;
         }
         if self.selection.is_none()
             && self.stored_primary.is_none()
