@@ -121,6 +121,7 @@ fn build_engine(limits: &WasmRuntimeLimits) -> WasmResult<Engine> {
 /// - issue #346 per-store resource limits (memory/table/instance caps).
 pub(crate) struct HostState {
     wasi: WasiCtx,
+    isolate_wasi_runtime: bool,
     table: ResourceTable,
     /// Per-invocation table keyed by `ctx-token`, used by the V2 (0.6.0
     /// async world) Accessor-based host imports. Each in-flight invocation
@@ -147,10 +148,45 @@ pub(crate) struct HostState {
     pub(crate) limits: StoreResourceLimiter,
 }
 
+/// Poll and drop a host ABI future in the runtime that accepted its invocation.
+struct CallerRuntimeFuture {
+    runtime: tokio::runtime::Handle,
+    future: Option<
+        std::pin::Pin<
+            Box<dyn std::future::Future<Output = crate::workload::HostOperationResult> + Send>,
+        >,
+    >,
+}
+
+impl std::future::Future for CallerRuntimeFuture {
+    type Output = crate::workload::HostOperationResult;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let runtime = self.runtime.clone();
+        let _guard = runtime.enter();
+        self.future
+            .as_mut()
+            .expect("host future must exist until dropped")
+            .as_mut()
+            .poll(cx)
+    }
+}
+
+impl Drop for CallerRuntimeFuture {
+    fn drop(&mut self) {
+        let _guard = self.runtime.enter();
+        drop(self.future.take());
+    }
+}
+
 /// One live invocation's host-facing state, keyed by `ctx-token` in
 /// [`HostState::invocations`].
 pub(crate) struct InvocationEntry {
     pub(crate) ctx: InvocationContext,
+    caller_runtime: Option<tokio::runtime::Handle>,
     pub(crate) host_abi: HostAbiFn,
     pub(crate) reply_deliver: Option<Arc<dyn Deliver>>,
     /// Whether expiry should emit an error RESPONSE. TELL invocations still
@@ -231,6 +267,7 @@ impl HostState {
     pub(crate) fn new(limits: &WasmRuntimeLimits) -> Self {
         Self {
             wasi: WasiCtxBuilder::new().inherit_stdio().build(),
+            isolate_wasi_runtime: false,
             table: ResourceTable::new(),
             invocations: HashMap::new(),
             stream_context_tokens: HashMap::new(),
@@ -238,6 +275,10 @@ impl HostState {
             next_token: 1,
             limits: StoreResourceLimiter::new(limits),
         }
+    }
+
+    pub(super) fn set_wasi_runtime_isolation(&mut self, enabled: bool) {
+        self.isolate_wasi_runtime = enabled;
     }
 
     pub(super) fn preopen_data_dir(directory: &Path) -> WasmResult<WasiFilesystemCtx> {
@@ -370,6 +411,35 @@ impl HostState {
         reply_deadline: Option<Instant>,
     ) -> u64 {
         self.sweep_expired_deferred_replies(crate::lifecycle::dedup::INFLIGHT_TTL, Instant::now());
+        // The guest runtime isolates filesystem work; host operations belong to
+        // the runtime that accepted the invocation and its deadline.
+        let caller_runtime = self
+            .isolate_wasi_runtime
+            .then(tokio::runtime::Handle::try_current)
+            .and_then(Result::ok);
+        let host_abi = if let Some(runtime) = caller_runtime.clone() {
+            let inner = host_abi;
+            Arc::new(
+                move |op| -> std::pin::Pin<
+                    Box<
+                        dyn std::future::Future<Output = crate::workload::HostOperationResult>
+                            + Send,
+                    >,
+                > {
+                    let runtime = runtime.clone();
+                    let future = {
+                        let _guard = runtime.enter();
+                        inner(op)
+                    };
+                    Box::pin(CallerRuntimeFuture {
+                        runtime,
+                        future: Some(future),
+                    })
+                },
+            ) as HostAbiFn
+        } else {
+            host_abi
+        };
         let token = self.next_token;
         self.next_token = self.next_token.wrapping_add(1);
         if self.next_token == 0 {
@@ -384,6 +454,7 @@ impl HostState {
             token,
             InvocationEntry {
                 ctx,
+                caller_runtime,
                 host_abi,
                 reply_deliver,
                 expects_response,
@@ -556,19 +627,21 @@ impl HostState {
         result: Result<bytes::Bytes, actr_protocol::ActrError>,
     ) -> bool {
         let token = self.effective_invocation_token(token);
-        let Some((deliver, request_id, expects_response)) =
+        let Some((deliver, request_id, expects_response, caller_runtime)) =
             self.invocations.get(&token).and_then(|entry| {
                 entry.reply_deliver.clone().map(|deliver| {
                     (
                         deliver,
                         entry.ctx.request_id.clone(),
                         entry.expects_response,
+                        entry.caller_runtime.clone(),
                     )
                 })
             })
         else {
             return false;
         };
+        let _guard = caller_runtime.as_ref().map(tokio::runtime::Handle::enter);
         deliver.deliver(ReplyOutcome {
             request_id,
             result,
@@ -604,6 +677,10 @@ impl HostState {
                 } else {
                     Ok(actr_framework::Bytes::new())
                 };
+                let _guard = entry
+                    .caller_runtime
+                    .as_ref()
+                    .map(tokio::runtime::Handle::enter);
                 entry
                     .reply_deliver
                     .as_ref()

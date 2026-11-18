@@ -115,3 +115,98 @@ fn started_wasi_preopen_timeout_does_not_block_mount_free_attach() {
         let _released = SLOTS.acquire().await.unwrap();
     });
 }
+
+#[tokio::test(start_paused = true)]
+async fn mounted_resident_deadlines_and_host_operations_use_caller_runtime() {
+    let caller = Handle::current();
+    let guest = wasi_guest_runtime().unwrap();
+    let caller_id = caller.id();
+    let (deadline_tx, mut deadline_rx) = mpsc::unbounded_channel();
+    let mut state = HostState::new(&WasmRuntimeLimits::default());
+    state.set_wasi_runtime_isolation(true);
+    let host_abi: HostAbiFn = Arc::new(move |_| {
+        assert_eq!(Handle::current().id(), caller_id);
+        Box::pin(async move {
+            assert_eq!(Handle::current().id(), caller_id);
+            HostOperationResult::Done
+        })
+    });
+    let ctx = InvocationContext {
+        self_id: ActrId::default(),
+        caller_id: None,
+        request_id: "runtime-context".into(),
+    };
+    let guest_for_call = guest.clone();
+    with_wasi_runtime(Some(guest), async {
+        with_wasi_runtime(Some(caller), async {
+            let _deadline = arm_deadline(1, 2, TEST_TIMEOUT, &deadline_tx);
+            let token = state.alloc_invocation(ctx, host_abi);
+            let host = state.invocation_host_abi(token);
+            with_wasi_runtime(Some(guest_for_call), async {
+                run_host_operation(host, HostOperation::Discover(HostDiscoverV1::default()))
+                    .await
+                    .unwrap()
+                    .unwrap();
+            })
+            .await;
+            tokio::task::yield_now().await;
+            advance(TEST_TIMEOUT + Duration::from_millis(1)).await;
+            let expired = deadline_rx.recv().await.unwrap();
+            assert_eq!((expired.generation, expired.token), (1, 2));
+        })
+        .await
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn canceled_host_operation_drops_on_caller_runtime() {
+    struct PendingHostOperation {
+        caller: tokio::runtime::Id,
+        dropped: Option<oneshot::Sender<bool>>,
+    }
+    impl std::future::Future for PendingHostOperation {
+        type Output = HostOperationResult;
+        fn poll(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Self::Output> {
+            std::task::Poll::Pending
+        }
+    }
+    impl Drop for PendingHostOperation {
+        fn drop(&mut self) {
+            let on_caller = Handle::current().id() == self.caller;
+            let _ = self.dropped.take().unwrap().send(on_caller);
+        }
+    }
+
+    let caller = Handle::current().id();
+    let guest = wasi_guest_runtime().unwrap();
+    let (dropped_tx, dropped_rx) = oneshot::channel();
+    let dropped_tx = Arc::new(Mutex::new(Some(dropped_tx)));
+    let host_abi: HostAbiFn = Arc::new(move |_| {
+        Box::pin(PendingHostOperation {
+            caller,
+            dropped: dropped_tx.lock().unwrap().take(),
+        })
+    });
+    let mut state = HostState::new(&WasmRuntimeLimits::default());
+    state.set_wasi_runtime_isolation(true);
+    let token = state.alloc_invocation(
+        InvocationContext {
+            self_id: ActrId::default(),
+            caller_id: None,
+            request_id: "cancel-runtime".into(),
+        },
+        host_abi,
+    );
+    let host_abi = state.invocation_host_abi(token).unwrap();
+    with_wasi_runtime(Some(guest), async move {
+        let mut future = host_abi(HostOperation::Discover(HostDiscoverV1::default()));
+        assert!(futures_util::poll!(future.as_mut()).is_pending());
+        drop(future);
+    })
+    .await;
+    assert!(dropped_rx.await.unwrap());
+}

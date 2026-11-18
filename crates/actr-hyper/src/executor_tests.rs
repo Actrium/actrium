@@ -913,3 +913,77 @@ async fn dispatch_with_cancelled_scope_replies_timeout_without_running_guest() {
         "runner must keep serving commands after scoped cancellation"
     );
 }
+
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+#[tokio::test]
+async fn mounted_interleaved_guest_uses_caller_clock_and_host_runtime() {
+    let data = tempfile::tempdir().expect("data directory");
+    let host = crate::wasm::WasmHost::compile(wasm_actor_fixture::WASM_ACTOR_FIXTURE)
+        .expect("compile fixture component");
+    let workload = host
+        .instantiate(Some(data.path()))
+        .await
+        .expect("instantiate mounted fixture");
+    let handle = spawn_runner_with_mode(
+        Workload::Wasm(workload),
+        RunnerMode::Interleaved,
+        Some(Duration::from_secs(1)),
+    );
+    let write = RpcEnvelope {
+        route_key: "test/wasi-data-write".into(),
+        request_id: "write".into(),
+        payload: Some(bytes::Bytes::from_static(b"before")),
+        ..Default::default()
+    };
+    handle
+        .dispatch_envelope(write, test_ctx(), test_invocation(), &noop_host_abi())
+        .await
+        .expect("mounted guest writes data");
+    assert_eq!(
+        std::fs::read(data.path().join("fixture-state")).unwrap(),
+        b"before"
+    );
+
+    tokio::time::pause();
+    let caller_id = tokio::runtime::Handle::current().id();
+    let (started_tx, mut started_rx) = mpsc::unbounded_channel();
+    let host_abi: HostAbiFn = Arc::new(move |_| {
+        let started_tx = started_tx.clone();
+        let constructed_on_caller = tokio::runtime::Handle::current().id() == caller_id;
+        Box::pin(async move {
+            let polled_on_caller = tokio::runtime::Handle::current().id() == caller_id;
+            let _ = started_tx.send(constructed_on_caller && polled_on_caller);
+            std::future::pending::<HostOperationResult>().await
+        })
+    });
+    let (reply, response) = tokio::sync::oneshot::channel();
+    handle
+        .tx
+        .try_send(ActorCmd::Dispatch {
+            envelope: RpcEnvelope {
+                route_key: "test/double".into(),
+                request_id: "caller-clock".into(),
+                payload: Some(bytes::Bytes::copy_from_slice(&1_i32.to_le_bytes())),
+                ..Default::default()
+            },
+            ctx: test_ctx(),
+            invocation: test_invocation(),
+            host_abi,
+            span: tracing::Span::none(),
+            reply,
+        })
+        .expect("enqueue guest dispatch");
+    assert!(
+        tokio::time::timeout(WATCHDOG, started_rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    );
+    tokio::time::advance(Duration::from_secs(2)).await;
+    let result = tokio::time::timeout(WATCHDOG, response)
+        .await
+        .expect("dispatch deadline watchdog")
+        .expect("dispatch reply");
+    assert!(matches!(result, Err(ActrError::TimedOut)));
+    handle.shutdown().await;
+}

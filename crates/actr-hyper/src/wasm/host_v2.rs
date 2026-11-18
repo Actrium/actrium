@@ -718,7 +718,7 @@ fn wasi_guest_runtime() -> WasmResult<Handle> {
 
 // Enter only while polling: holding an EnterGuard across an await would leak
 // the runtime context into unrelated tasks on the caller's executor.
-async fn with_wasi_runtime<F: std::future::Future>(
+pub(super) async fn with_wasi_runtime<F: std::future::Future>(
     runtime: Option<Handle>,
     future: F,
 ) -> F::Output {
@@ -833,6 +833,7 @@ async fn instantiate_parts_v2(
     })?;
 
     let mut state = HostState::new(limits);
+    state.set_wasi_runtime_isolation(wasi_runtime.is_some());
     state.set_wasi_filesystem(filesystem.clone());
     let mut store = Store::new(engine, state);
     // issue #346: install the per-store limiter and initial fuel/epoch budget.
@@ -1633,6 +1634,7 @@ impl WasmWorkloadV2 {
             }
 
             let wasi_runtime = self.wasi_runtime.clone();
+            let caller_runtime = wasi_runtime.as_ref().map(|_| Handle::current());
             let bindings = &self.bindings;
             let ledger_region = Arc::clone(&ledger);
             let pending_barrier_region = Arc::clone(&pending_barrier);
@@ -1648,16 +1650,19 @@ impl WasmWorkloadV2 {
                     .as_mut()
                     .expect("serviceable wasm instance must have a Store")
                     .run_concurrent(async move |accessor| {
-                        resident_region(
-                            accessor,
-                            bindings,
-                            cmd_rx_ref,
-                            &ledger_region,
-                            &pending_barrier_region,
-                            &deadline_tx_region,
-                            generation,
-                            dispatch_timeout,
-                            limits,
+                        with_wasi_runtime(
+                            caller_runtime,
+                            resident_region(
+                                accessor,
+                                bindings,
+                                cmd_rx_ref,
+                                &ledger_region,
+                                &pending_barrier_region,
+                                &deadline_tx_region,
+                                generation,
+                                dispatch_timeout,
+                                limits,
+                            ),
                         )
                         .await
                     });
