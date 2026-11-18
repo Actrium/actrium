@@ -713,12 +713,17 @@ final class RendererSurfaceHostView: NSView {
         RendererProcessPool.shared.sendInput(input, to: tabId)
     }
 
-    private func forwardKey(
+    /// fileprivate: IMECompositionView forwards its own key events here once it
+    /// owns first responder.
+    fileprivate func forwardKey(
         _ event: NSEvent,
         type: Actrium_Ipc_InputEvent.EventType
     ) {
-        guard allowsInput, let window, window.isKeyWindow,
-              window.firstResponder === self, let tabId else { return }
+        guard allowsInput, let window, window.isKeyWindow, let tabId,
+              window.firstResponder === self
+                  || window.firstResponder === imeCompositionView else {
+            return
+        }
         var input = Actrium_Ipc_InputEvent()
         input.type = type
         input.keyCode = UInt32(event.keyCode)
@@ -818,6 +823,16 @@ final class RendererSurfaceHostView: NSView {
         RendererProcessPool.shared.sendInput(up, to: tabId)
     }
 
+    /// Forwards a standard editing action (copy/paste/select-all/undo/redo)
+    /// to the Renderer's focused text input. The Host's menu bar captures the
+    /// corresponding command-key equivalents before any key event reaches
+    /// this view, so these actions arrive as selector dispatches on this
+    /// (empty) text view instead of as key events; executing them against
+    /// the local storage would do nothing.
+    func sendTextCommand(_ command: String) {
+        sendIMEPayload(name: "com.actrium.textCommand", payload: ["command": command])
+    }
+
     /// The IME client lost first responder (user focused another Host
     /// control); ask the Renderer to blur its text input as well.
     func imeCompositionDidResign() {
@@ -882,11 +897,82 @@ final class IMECompositionView: NSTextView {
 
     // MARK: Key delivery
 
+    /// Command-key equivalents (copy/paste/select-all/undo/redo, ...) belong
+    /// to the focused text input inside the Renderer. They are pure key
+    /// equivalents: AppKit does not route them through interpretKeyEvents,
+    /// so forwarding raw events leaves the Renderer unable to map them.
+    /// Resolve the command here and forward it as a named action instead.
+    /// Returning true stops the local NSTextView from consuming them against
+    /// its empty storage. Unmapped command keys return false so they fall
+    /// through to keyDown and are forwarded as raw events like any other
+    /// modified key.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // performKeyEquivalent reaches every view in the window hierarchy,
+        // not just the first responder: an IME view left in a recycled or
+        // inactive surface must not consume command keys meant elsewhere.
+        guard window?.firstResponder === self,
+              surfaceView?.allowsInput == true,
+              event.modifierFlags.contains(.command),
+              let command = Self.commandEquivalent(
+                characters: event.characters,
+                shift: event.modifierFlags.contains(.shift)
+              ) else { return false }
+        surfaceView?.sendTextCommand(command)
+        return true
+    }
+
+    /// Maps a command-key event to a named editing action, or nil when it is
+    /// not one of the equivalents this client forwards.
+    static func commandEquivalent(characters: String?, shift: Bool) -> String? {
+        switch (characters?.lowercased(), shift) {
+        case ("a", false): return "selectAll"
+        case ("c", false): return "copy"
+        case ("x", false): return "cut"
+        case ("v", false): return "paste"
+        case ("z", false): return "undo"
+        case ("z", true): return "redo"
+        default: return nil
+        }
+    }
+
     override func keyDown(with event: NSEvent) {
+        // Named command equivalents (copy/paste/select-all/undo/redo) travel
+        // as actions. Modified FUNCTION keys (Shift/Cmd+arrows, Home/End, ...)
+        // are forwarded raw so the Renderer reproduces the exact editing
+        // command — the same path that handled them before Host-side IME
+        // composition existed. Character keys (Shift+A, Caps Lock text,
+        // Option+Delete, Shift+Return, ...) must stay on the
+        // interpretKeyEvents path so the Host IME composes them.
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command),
+           let command = Self.commandEquivalent(
+                characters: event.characters,
+                shift: flags.contains(.shift)
+           ) {
+            surfaceView?.sendTextCommand(command)
+            return
+        }
+        if !flags.isEmpty, Self.isFunctionKey(event) {
+            surfaceView?.forwardKey(event, type: .keyDown)
+            surfaceView?.forwardKey(event, type: .keyUp)
+            return
+        }
         let previousModifiers = interpretingModifiers
-        interpretingModifiers = event.modifierFlags
+        interpretingModifiers = flags
         defer { interpretingModifiers = previousModifiers }
         interpretKeyEvents([event])
+    }
+
+    /// True when the event's characters identify a navigation/editing
+    /// function key (arrows, Home/End, PageUp/Down, F1-F12, and the
+    /// backspace/delete character) rather than a text character.
+    static func isFunctionKey(_ event: NSEvent) -> Bool {
+        guard let value = event.characters?.unicodeScalars.first?.value else { return false }
+        // 0x7F is the backspace/delete character (NSDeleteCharacter); it is
+        // not in the NSFunctionKey range but is an editing key (e.g.
+        // Option+Delete removes the previous word when forwarded raw).
+        if value == UInt32(NSDeleteCharacter) { return true }
+        return (Int(NSUpArrowFunctionKey)...Int(NSMenuFunctionKey)).contains(Int(value))
     }
 
     /// interpretKeyEvents turns unhandled keys into editing commands; map the
@@ -925,6 +1011,20 @@ final class IMECompositionView: NSTextView {
         }
         super.doCommand(by: aSelector)
     }
+
+    // MARK: Editing actions (menu key equivalents)
+
+    // The Host menu bar owns Cmd+C/V/X/A/Z/Shift-Z key equivalents and
+    // dispatches these selectors to the first responder (this view). Route
+    // them to the real text input inside the Renderer.
+    override func copy(_ sender: Any?) { surfaceView?.sendTextCommand("copy") }
+    override func cut(_ sender: Any?) { surfaceView?.sendTextCommand("cut") }
+    override func paste(_ sender: Any?) { surfaceView?.sendTextCommand("paste") }
+    override func selectAll(_ sender: Any?) { surfaceView?.sendTextCommand("selectAll") }
+    // `undo:`/`redo:` are not visible to Swift as overridable NSTextView API;
+    // plain @objc methods with the same selectors still win at runtime.
+    @objc func undo(_ sender: Any?) { surfaceView?.sendTextCommand("undo") }
+    @objc func redo(_ sender: Any?) { surfaceView?.sendTextCommand("redo") }
 
     override func resignFirstResponder() -> Bool {
         // Whatever takes over (address bar, another surface, ...), the

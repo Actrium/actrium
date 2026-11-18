@@ -12,6 +12,11 @@ struct IMETextPayload: Codable {
     var len: Int = 0
 }
 
+/// JSON payload for Host-forwarded editing actions (menu key equivalents).
+struct IMECommandPayload: Codable {
+    var command: String
+}
+
 /// Notification posted on the renderer's main queue after any
 /// `NSWindow.makeFirstResponder(_:)` call, carrying the window.
 let ActriumFirstResponderDidChangeNotification = Notification.Name(
@@ -283,6 +288,9 @@ final class RendererProcessController {
                     self.surfaces[tabId]?.applyInsertText(op.text)
                 case "com.actrium.textInputBlurRequest":
                     self.surfaces[tabId]?.resignTextInputFocus()
+                case "com.actrium.textCommand":
+                    guard let payload = try? JSONDecoder().decode(IMECommandPayload.self, from: Data(json.utf8)) else { return }
+                    self.surfaces[tabId]?.performTextCommand(payload.command)
                 case "com.actrium.textInputFocusReset":
                     // The Host dropped our pre-interaction focus report and
                     // its user-interaction gate just opened; force a fresh
@@ -607,6 +615,45 @@ private final class RendererTabSurface {
     private var lastReportedTextFocus = false
     private weak var focusedEditor: NSTextView?
     private var lastCaretRect: CGRect?
+    /// Snapshot-based undo/redo for Host-mirrored text commits. AppKit's
+    /// undoManager registrations go stale as soon as RN rewrites the text
+    /// storage, so undo is implemented by restoring previous snapshots
+    /// through the normal input-client path (which RN observes).
+    private struct EditSnapshot {
+        let string: String
+        let caret: Int
+    }
+    /// Per-control undo history. The window field editor is shared, so a
+    /// control's identity comes from the field editor's delegate. History
+    /// persists while the surface lives: switching away and back keeps a
+    /// control's undo stack, matching AppKit's own behavior.
+    private final class UndoHistoryBox {
+        var undo: [EditSnapshot] = []
+        var redo: [EditSnapshot] = []
+    }
+    /// Weak-keyed so an unmounted guest control's history disappears with
+    /// the control; a fresh control allocated at the same address must not
+    /// inherit a stale stack.
+    private let undoHistories = NSMapTable<AnyObject, UndoHistoryBox>.weakToStrongObjects()
+
+    private func currentControl() -> AnyObject? {
+        guard let editor = window.firstResponder as? NSTextView else { return nil }
+        if editor.isFieldEditor {
+            return editor.delegate.map { $0 as AnyObject }
+        }
+        return editor
+    }
+
+    private func withHistory(_ body: (UndoHistoryBox) -> Void) {
+        guard let control = currentControl() else { return }
+        let box = undoHistories.object(forKey: control) ?? {
+            let created = UndoHistoryBox()
+            undoHistories.setObject(created, forKey: control)
+            return created
+        }()
+        body(box)
+        if box.undo.count > 100 { box.undo.removeFirst(box.undo.count - 100) }
+    }
 
 
     var contextId: UInt32 {
@@ -686,6 +733,7 @@ private final class RendererTabSurface {
     }
 
     func close() {
+        undoHistories.removeAllObjects()
         accessibilityPublishWork?.cancel()
         accessibilityPublishWork = nil
         for observer in accessibilityObservers {
@@ -828,12 +876,20 @@ private final class RendererTabSurface {
             // Text composition happens in the Host process (TSM never engages
             // in this background, activation-prohibited process); dispatched
             // keys here are only non-text commands (arrows, enter, ...).
+            // Deleting, Return and Tab can mutate the text storage, so
+            // capture undo snapshots around them the same way mirrored
+            // inserts do.
+            let isDelete = input.type == .keyDown
+                && (input.keyCode == 51 || input.keyCode == 117
+                    || input.keyCode == 36 || input.keyCode == 48)
+            if isDelete { beginUndoableEdit() }
             if let textView = window.firstResponder as? NSTextView {
                 if input.type == .keyDown { textView.keyDown(with: event) }
                 else { textView.keyUp(with: event) }
             } else {
                 window.sendEvent(event)
             }
+            if isDelete { endUndoableEdit() }
             if input.type == .keyDown {
                 // Fabric publishes content changes after mounting. A caret
                 // movement alone does not need to flush the remote surface.
@@ -888,10 +944,108 @@ private final class RendererTabSurface {
     /// Applies Host-mirrored committed IME text to the focused text input.
     func applyInsertText(_ text: String) {
         guard let client = window.firstResponder as? NSTextInputClient else { return }
+        beginUndoableEdit()
         client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        endUndoableEdit()
         publishCaret()
         commit()
     }
+
+    /// The editor's string without any marked (in-progress composition)
+    /// text plus the caret, both in unmarked-string coordinates. Marked text
+    /// lives in the text storage but must not leak into undo snapshots.
+    private func currentEditSnapshot() -> EditSnapshot? {
+        guard let editor = window.firstResponder as? NSTextView else { return nil }
+        let marked = editor.markedRange()
+        let string = (marked.location != NSNotFound && marked.length > 0)
+            ? (editor.string as NSString).replacingCharacters(in: marked, with: "")
+            : editor.string
+        let caret = min(editor.selectedRange().location, (string as NSString).length)
+        return EditSnapshot(string: string, caret: caret)
+    }
+
+    private func beginUndoableEdit() {
+        guard let snapshot = currentEditSnapshot() else { return }
+        withHistory { box in
+            if box.undo.last?.string != snapshot.string { box.undo.append(snapshot) }
+            box.redo.removeAll()
+        }
+    }
+
+    private func endUndoableEdit() {
+        guard let snapshot = currentEditSnapshot() else { return }
+        withHistory { box in
+            if box.undo.last?.string != snapshot.string { box.undo.append(snapshot) }
+        }
+    }
+
+    private func restoreSnapshot(_ snapshot: String, caret: Int) {
+        guard let editor = window.firstResponder as? NSTextView, editor.isEditable else { return }
+        let current = editor.string
+        guard current != snapshot else {
+            editor.setSelectedRange(NSRange(location: caret, length: 0))
+            publishCaret()
+            return
+        }
+        let full = NSRange(location: 0, length: (current as NSString).length)
+        editor.setSelectedRange(full)
+        editor.insertText(snapshot, replacementRange: full)
+        editor.setSelectedRange(NSRange(location: caret, length: 0))
+        publishCaret()
+        commit()
+    }
+
+    private func undoTextEdit() {
+        guard window.firstResponder is NSTextView else { return }
+        withHistory { box in
+            guard box.undo.count > 1 else { return }
+            let current = box.undo.removeLast()
+            box.redo.append(current)
+            let target = box.undo[box.undo.count - 1]
+            // Undoing an insertion puts the caret back at the insertion
+            // point, not at the end of the restored text. All offsets are
+            // UTF-16 units to match NSTextView selection semantics.
+            let delta = (current.string as NSString).length - (target.string as NSString).length
+            let caret = max(0, min(current.caret - delta, (target.string as NSString).length))
+            restoreSnapshot(target.string, caret: caret)
+        }
+    }
+
+    private func redoTextEdit() {
+        guard window.firstResponder is NSTextView else { return }
+        withHistory { box in
+            guard let snapshot = box.redo.popLast() else { return }
+            if let current = currentEditSnapshot() {
+                box.undo.append(current)
+            }
+            restoreSnapshot(snapshot.string, caret: snapshot.caret)
+        }
+    }
+
+    /// Applies Host-forwarded editing actions (menu key equivalents) to the
+    /// focused text input. copy/cut/paste/selectAll run through AppKit's own
+    /// implementations on the real text storage; undo/redo restore snapshots
+    /// captured at each Host-mirrored text commit (AppKit's undoManager
+    /// registrations go stale once RN rewrites the text storage).
+    func performTextCommand(_ command: String) {
+        if command == "undo" { undoTextEdit(); return }
+        if command == "redo" { redoTextEdit(); return }
+        let selectors: [String: Selector] = [
+            "copy": #selector(NSText.copy(_:)),
+            "cut": #selector(NSText.cut(_:)),
+            "paste": #selector(NSText.paste(_:)),
+            "selectAll": #selector(NSText.selectAll(_:)),
+        ]
+        guard let selector = selectors[command] else { return }
+        let target: NSResponder? = (window.firstResponder as? NSResponder) ?? window
+        let mutates = command == "cut" || command == "paste"
+        if mutates { beginUndoableEdit() }
+        ActriumSendEditingAction(selector, target ?? NSApp)
+        if mutates { endUndoableEdit() }
+        publishCaret()
+        commit()
+    }
+
 
     /// The Host asked this text input to give up focus (its own IME client
     /// resigned first responder, e.g. the user focused the address bar).
