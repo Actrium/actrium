@@ -212,6 +212,9 @@ export function createNativeServiceEventSource(
 export interface HttpServiceEventSourceOptions {
   /** Maximum incomplete SSE frame size, measured in decoded UTF-16 units. */
   maxBufferedCharacters?: number;
+  /** React Native's XHR retains every received responseText character. Rotate
+   * the connection after this many characters to bound that buffer. */
+  maxXhrResponseCharacters?: number;
   /** A connection this old is considered stable and resets reconnect backoff. */
   stableConnectionMs?: number;
   initialRetryDelayMs?: number;
@@ -220,6 +223,9 @@ export interface HttpServiceEventSourceOptions {
 
 type SseConnectionResult = {
   retry: boolean;
+  /** A healthy connection reached its bounded response size and should be
+   * replaced immediately rather than reported as a failure. */
+  rotate?: boolean;
   error?: Error;
 };
 
@@ -274,15 +280,18 @@ export function createHttpServiceEventSource(
   options: HttpServiceEventSourceOptions = {}
 ): ServiceEventSource {
   const maxBufferedCharacters = options.maxBufferedCharacters ?? 1_048_576;
+  const maxXhrResponseCharacters = options.maxXhrResponseCharacters ?? 4_194_304;
   const stableConnectionMs = options.stableConnectionMs ?? 10_000;
   const initialRetryDelayMs = options.initialRetryDelayMs ?? 1_000;
   const maxRetryDelayMs = options.maxRetryDelayMs ?? 30_000;
   if (
     !Number.isFinite(maxBufferedCharacters) ||
+    !Number.isFinite(maxXhrResponseCharacters) ||
     !Number.isFinite(stableConnectionMs) ||
     !Number.isFinite(initialRetryDelayMs) ||
     !Number.isFinite(maxRetryDelayMs) ||
     maxBufferedCharacters <= 0 ||
+    maxXhrResponseCharacters <= 0 ||
     stableConnectionMs < 0 ||
     initialRetryDelayMs < 0 ||
     maxRetryDelayMs < 0
@@ -411,6 +420,19 @@ export function createHttpServiceEventSource(
             const text = xhr.responseText ?? '';
             acceptText(text.slice(offset));
             offset = text.length;
+            // React Native's XHR retains the entire response string. Rotate
+            // only at a frame boundary so consumed events stay bounded; the
+            // next request resumes with Last-Event-ID when the server sent one.
+            if (!settled && active && buffer.length === 0 &&
+                offset >= maxXhrResponseCharacters) {
+              finish({
+                retry: true,
+                rotate: true,
+                error: new Error(
+                  `Service event XHR response reached the ${maxXhrResponseCharacters}-character limit.`
+                ),
+              });
+            }
           };
           xhr.onreadystatechange = () => {
             if (settled || xhr.readyState < 2) return;
@@ -521,7 +543,7 @@ export function createHttpServiceEventSource(
             const result = await connect();
             cancelConnection = undefined;
             if (!active) break;
-            if (result.error) {
+            if (result.error && !result.rotate) {
               if (result.retry) {
                 console.warn('[Actrium] Service event stream failed:', result.error);
               } else {
@@ -529,6 +551,7 @@ export function createHttpServiceEventSource(
               }
             }
             if (!result.retry) break;
+            if (result.rotate) continue;
 
             const delayMs = Math.min(
               initialRetryDelayMs * 2 ** retryCount,

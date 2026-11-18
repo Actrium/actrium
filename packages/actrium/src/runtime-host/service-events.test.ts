@@ -796,4 +796,75 @@ describe('createHttpServiceEventSource', () => {
       }
     }
   });
+
+  test('rotates incremental XHR and resumes with Last-Event-ID', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalXhr = globalThis.XMLHttpRequest;
+    const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    globalThis.fetch = (() => new Promise<Response>(() => {})) as unknown as typeof fetch;
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { product: 'ReactNative' },
+      writable: true,
+    });
+    const requests: { headers: Record<string, string>; responseText: string }[] = [];
+    class FakeXhr {
+      readyState = 0;
+      status = 0;
+      responseText = '';
+      headers: Record<string, string> = {};
+      onreadystatechange: (() => void) | null = null;
+      onprogress: (() => void) | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      open(): void {}
+      setRequestHeader(name: string, value: string): void {
+        this.headers[name] = value;
+      }
+      abort(): void {}
+      send(): void {
+        const request = { headers: this.headers, responseText: '' };
+        requests.push(request);
+        this.readyState = 3;
+        this.status = 200;
+        if (requests.length === 1) {
+          this.responseText = [
+            'id: 1\nevent: a\ndata: {"payloadBase64":"AAEC"}\n\n',
+            'id: 2\nevent: a\ndata: {"payloadBase64":"AQID"}\n\n',
+            'id: 3\nevent: a\ndata: {"payloadBase64":"AgME"}\n\n',
+          ].join('');
+        } else {
+          this.responseText = 'id: 4\nevent: a\ndata: {"payloadBase64":"BAUG"}\n\n';
+        }
+        request.responseText = this.responseText;
+        this.onreadystatechange?.();
+        this.onprogress?.();
+      }
+    }
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const received: string[] = [];
+    try {
+      const source = createHttpServiceEventSource(
+        'https://example.com/events',
+        ['a'],
+        { maxXhrResponseCharacters: 100 }
+      );
+      const unsubscribe = source.subscribe((event) => received.push(event.payloadBase64));
+      await waitFor(() => received.length === 4 && requests.length === 2);
+      expect(received).toEqual(['AAEC', 'AQID', 'AgME', 'BAUG']);
+      expect(requests[0].headers['Last-Event-ID']).toBeUndefined();
+      expect(requests[1].headers['Last-Event-ID']).toBe('3');
+      unsubscribe();
+    } finally {
+      globalThis.fetch = originalFetch;
+      globalThis.XMLHttpRequest = originalXhr;
+      if (originalNavigator) {
+        Object.defineProperty(globalThis, 'navigator', originalNavigator);
+      } else {
+        delete (globalThis as { navigator?: Navigator }).navigator;
+      }
+    }
+  });
 });
