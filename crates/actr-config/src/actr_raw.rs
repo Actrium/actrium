@@ -173,6 +173,18 @@ pub struct RawCapabilitiesConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RawHyperConfig {
+    /// Runtime data directory consumed by the embedded Host.
+    #[serde(default)]
+    pub data_dir: Option<std::path::PathBuf>,
+
+    /// Embedded Host trust configuration.
+    #[serde(default)]
+    pub trust: Option<toml::Table>,
+
+    /// Enable the embedded Host membership controller.
+    #[serde(default)]
+    pub membership_controller_enabled: Option<bool>,
+
     /// Filesystem root for per-actor storage. Relative paths resolve against the
     /// config file's directory; a leading `~` is expanded.
     #[serde(default)]
