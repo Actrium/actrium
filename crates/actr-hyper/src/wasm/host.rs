@@ -232,6 +232,45 @@ fn directory_identity(file: &File) -> std::io::Result<(u64, u64)> {
     Ok((metadata.dev(), metadata.ino()))
 }
 
+#[cfg(target_os = "macos")]
+fn macos_filesystem_root(directory: &File) -> std::io::Result<bool> {
+    use std::ffi::{CStr, OsStr};
+    use std::mem::MaybeUninit;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+
+    fn mount_info(file: &File) -> std::io::Result<libc::statfs> {
+        let mut info = MaybeUninit::<libc::statfs>::uninit();
+        // SAFETY: the descriptor is live and the output buffer has the expected layout.
+        if unsafe { libc::fstatfs(file.as_raw_fd(), info.as_mut_ptr()) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: a successful fstatfs call initializes the buffer.
+        Ok(unsafe { info.assume_init() })
+    }
+
+    let info = mount_info(directory)?;
+    // SAFETY: f_mntonname is a NUL-terminated kernel-provided path.
+    let mount_path = unsafe { CStr::from_ptr(info.f_mntonname.as_ptr()) };
+    let mount_path = Path::new(OsStr::from_bytes(mount_path.to_bytes()));
+    let root = open_ambient_dir(mount_path, ambient_authority())?;
+    let root_info = mount_info(&root)?;
+    // SAFETY: both filesystem IDs are initialized values of the same C type.
+    let same_filesystem = unsafe {
+        libc::memcmp(
+            std::ptr::addr_of!(info.f_fsid).cast(),
+            std::ptr::addr_of!(root_info.f_fsid).cast(),
+            std::mem::size_of::<libc::fsid_t>(),
+        ) == 0
+    };
+    if !same_filesystem {
+        return Err(std::io::Error::other(
+            "WASI data volume changed during validation",
+        ));
+    }
+    Ok(directory_identity(directory)? == directory_identity(&root)?)
+}
+
 #[cfg(target_os = "linux")]
 fn linux_filesystem_root(parent: &File, directory: &File) -> Option<bool> {
     use std::os::fd::AsRawFd;
@@ -255,6 +294,16 @@ fn linux_filesystem_root(parent: &File, directory: &File) -> Option<bool> {
     // remains usable, even if it crosses a device boundary.
     let mounts = std::fs::read("/proc/self/mountinfo").ok()?;
     linux_mount_is_filesystem_root(&mounts, mount_id_for_dir)
+}
+
+#[cfg(target_os = "linux")]
+fn require_linux_mount_check(result: Option<bool>, directory: &Path) -> WasmResult<bool> {
+    result.ok_or_else(|| {
+        WasmError::LoadFailed(format!(
+            "cannot verify whether WASI data directory `{}` is a filesystem root; Linux mount metadata is unavailable",
+            directory.display()
+        ))
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -372,9 +421,13 @@ impl HostState {
         }
         let opened = open_dir_nofollow(&parent, Path::new(name)).map_err(open_error)?;
         let identity = directory_identity(&opened).map_err(open_error)?;
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         let mounted_root = identity.0 != directory_identity(&parent).map_err(open_error)?.0;
         #[cfg(target_os = "linux")]
-        let mounted_root = linux_filesystem_root(&parent, &opened).unwrap_or(mounted_root);
+        let mounted_root =
+            require_linux_mount_check(linux_filesystem_root(&parent, &opened), directory)?;
+        #[cfg(target_os = "macos")]
+        let mounted_root = macos_filesystem_root(&opened).map_err(open_error)?;
         if mounted_root || identity == directory_identity(&root).map_err(open_error)? {
             return Err(WasmError::LoadFailed(
                 "WASI data directory cannot be a filesystem root".into(),

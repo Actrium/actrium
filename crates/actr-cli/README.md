@@ -248,9 +248,60 @@ Legacy packages must first be rebuilt as `actr-package/2`. When a configured
 directory is ignored because the package lacks a declaration, the Host logs a
 warning and does not mount it.
 
+`actr build` produces a legacy archive. For a Service with a built WASM
+Component, create a separate `actr-package/2` manifest for `actr pkg pack`.
+The `[host]` declaration belongs in this package manifest:
+
+```toml
+format = "actr-package/2"
+
+[actor]
+publisher = "example.com"
+name = "my-service"
+version = "1.0.0"
+
+[workload]
+profile = "actr.component/1"
+entry = "workload/service.wasm"
+
+[host]
+profile = "actr.host/1"
+api = "^1.0.0"
+required-capabilities = ["wasi.data.read-write"]
+
+[signature]
+algorithm = "ed25519"
+key-id = "placeholder"
+
+[[files]]
+path = "workload/service.wasm"
+role = "workload"
+media-type = "application/wasm"
+size = 0
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+```
+
+Save it as `package-v2.toml`, set the actor identity to the existing publisher
+and Service name with a new release version, and put the built Component at
+`payload/workload/service.wasm`. The publisher must match the signing key.
+Pack and verify the archive with the Publisher key:
+
+```sh
+actr pkg pack --manifest-path package-v2.toml --payload-root payload \
+  --key publisher-key.json --output service.actr
+actr pkg verify --package service.actr --pubkey public-key.json
+```
+
+The packer recalculates the file size, SHA-256 and signing key ID. Add any
+required RPC contracts, dependencies and lock file to the manifest and payload
+for your Service. Update `actr.toml` to point to the new archive and retain its
+trust anchor and data directory grant.
+
 Relative paths resolve against the config file's directory. The directory
 cannot be a filesystem root. On macOS, the Host process needs read and
 search permissions on each ancestor of the resolved directory to validate the mount.
+On Linux, the Host requires access to `/proc/self/fdinfo` and
+`/proc/self/mountinfo` to verify the directory is not a filesystem root.
 Unknown keys in `[hyper]` are rejected so a misspelled access limit fails
 configuration loading.
 

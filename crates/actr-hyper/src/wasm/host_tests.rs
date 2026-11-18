@@ -50,6 +50,33 @@ fn wasi_preopen_rejects_filesystem_root() {
     );
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn wasi_preopen_rejects_macos_data_volume_root() {
+    let root = Path::new("/System/Volumes/Data");
+    let parent = File::open(root.parent().unwrap()).unwrap();
+    let volume = File::open(root).unwrap();
+    assert_eq!(
+        directory_identity(&parent).unwrap().0,
+        directory_identity(&volume).unwrap().0
+    );
+    assert!(macos_filesystem_root(&volume).unwrap());
+    let result = HostState::preopen_data_dir(root, WasiDataAccess::ReadOnly);
+    assert!(
+        matches!(result, Err(WasmError::LoadFailed(message)) if message.contains("filesystem root"))
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let ordinary = File::open(temp.path()).unwrap();
+    assert!(!macos_filesystem_root(&ordinary).unwrap());
+    HostState::preopen_data_dir(temp.path(), WasiDataAccess::ReadOnly).unwrap();
+    let alias = temp.path().join("volume-root");
+    std::os::unix::fs::symlink(root, &alias).unwrap();
+    let result = HostState::preopen_data_dir(&alias, WasiDataAccess::ReadOnly);
+    assert!(
+        matches!(result, Err(WasmError::LoadFailed(message)) if message.contains("filesystem root"))
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn wasi_mountinfo_distinguishes_filesystem_root_from_bound_subdirectory() {
@@ -59,6 +86,15 @@ fn wasi_mountinfo_distinguishes_filesystem_root_from_bound_subdirectory() {
     assert_eq!(linux_mount_is_filesystem_root(mounts, 41), Some(true));
     assert_eq!(linux_mount_is_filesystem_root(mounts, 42), Some(false));
     assert_eq!(linux_mount_is_filesystem_root(mounts, 4), None);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn wasi_mount_check_rejects_unavailable_metadata() {
+    let error = require_linux_mount_check(None, Path::new("/data")).unwrap_err();
+    assert!(error.to_string().contains("mount metadata is unavailable"));
+    assert!(require_linux_mount_check(Some(true), Path::new("/data")).unwrap());
+    assert!(!require_linux_mount_check(Some(false), Path::new("/data")).unwrap());
 }
 
 #[cfg(target_os = "linux")]
