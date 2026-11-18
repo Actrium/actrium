@@ -66,8 +66,9 @@ use futures_util::FutureExt as _;
 use futures_util::future::{BoxFuture, poll_fn};
 use futures_util::stream::{FuturesUnordered, StreamExt as _};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
+use tokio::runtime::{Builder, Handle, Runtime};
 use tokio::sync::{Semaphore, SemaphorePermit, mpsc, oneshot};
 use tracing::Instrument as _;
 
@@ -698,6 +699,24 @@ const MAX_CONCURRENT_WASI_PREOPENS: usize = 4;
 static WASI_PREOPEN_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_WASI_PREOPENS);
 const WASI_PREOPEN_QUOTA: &str = "concurrent WASI data directory opens";
 
+fn wasi_preopen_workers() -> WasmResult<&'static Handle> {
+    // The runtime owns only a blocking pool. Deadlines remain on the caller's
+    // runtime, whose blocking workers must stay available for compilation.
+    static WORKERS: OnceLock<std::io::Result<Runtime>> = OnceLock::new();
+    WORKERS
+        .get_or_init(|| {
+            Builder::new_current_thread()
+                .max_blocking_threads(MAX_CONCURRENT_WASI_PREOPENS)
+                .thread_name("actr-wasi-preopen")
+                .build()
+        })
+        .as_ref()
+        .map(Runtime::handle)
+        .map_err(|error| {
+            WasmError::LoadFailed(format!("cannot initialize WASI preopen workers: {error}"))
+        })
+}
+
 // Cancelling a queued blocking task does not immediately drop its captures.
 // Keep the reservation outside the task until the worker claims it.
 struct CancelQueuedOpen {
@@ -716,6 +735,7 @@ impl Drop for CancelQueuedOpen {
 }
 
 async fn run_wasi_preopen(
+    workers: &Handle,
     slots: &'static Semaphore,
     deadline: tokio::time::Instant,
     timeout: Duration,
@@ -726,7 +746,7 @@ async fn run_wasi_preopen(
         .map_err(|_| WasmError::ResourceLimitExceeded(WASI_PREOPEN_QUOTA))?;
     let reservation = Arc::new(Mutex::new(Some(permit)));
     let worker_reservation = Arc::clone(&reservation);
-    let task = tokio::task::spawn_blocking(move || {
+    let task = workers.spawn_blocking(move || {
         let _permit = worker_reservation
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -863,9 +883,13 @@ impl WasmWorkloadV2 {
         let deadline = tokio::time::Instant::now() + timeout;
         let wasi_filesystem = if let Some(directory) = wasi_data_dir {
             let directory = directory.to_path_buf();
-            run_wasi_preopen(&WASI_PREOPEN_SLOTS, deadline, timeout, move || {
-                HostState::preopen_data_dir(&directory)
-            })
+            run_wasi_preopen(
+                wasi_preopen_workers()?,
+                &WASI_PREOPEN_SLOTS,
+                deadline,
+                timeout,
+                move || HostState::preopen_data_dir(&directory),
+            )
             .await?
         } else {
             WasiFilesystemCtx::default()
@@ -2809,27 +2833,35 @@ mod preopen_tests {
     #[test]
     fn queued_wasi_preopen_timeout_releases_slot_before_worker_is_available() {
         static SLOTS: Semaphore = Semaphore::const_new(1);
-        let runtime = tokio::runtime::Builder::new_current_thread()
+        let workers = Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        let runtime = Builder::new_current_thread()
             .enable_time()
             .start_paused(true)
-            .max_blocking_threads(1)
             .build()
             .unwrap();
         runtime.block_on(async {
             let (ready, started) = oneshot::channel();
             let (unblock, blocked) = blocking_channel::channel::<()>();
-            let occupying = tokio::task::spawn_blocking(move || {
+            let occupying = workers.spawn_blocking(move || {
                 ready.send(()).unwrap();
                 let _ = blocked.recv();
             });
             started.await.unwrap();
 
             let (called, call) = oneshot::channel();
-            let open =
-                run_wasi_preopen(&SLOTS, Instant::now() + TEST_TIMEOUT, TEST_TIMEOUT, || {
+            let open = run_wasi_preopen(
+                workers.handle(),
+                &SLOTS,
+                Instant::now() + TEST_TIMEOUT,
+                TEST_TIMEOUT,
+                || {
                     let _ = called.send(());
                     Ok(WasiFilesystemCtx::default())
-                });
+                },
+            );
             tokio::pin!(open);
             assert!(futures_util::poll!(&mut open).is_pending());
             assert_eq!(SLOTS.available_permits(), 0);
@@ -2843,41 +2875,70 @@ mod preopen_tests {
         });
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn started_wasi_preopen_timeout_keeps_only_its_own_slot() {
+    #[test]
+    fn started_wasi_preopen_timeout_does_not_block_mount_free_attach() {
         static SLOTS: Semaphore = Semaphore::const_new(1);
-        let (ready, started) = oneshot::channel();
-        let (unblock, blocked) = blocking_channel::channel::<()>();
-        let task = tokio::spawn(run_wasi_preopen(
-            &SLOTS,
-            Instant::now() + TEST_TIMEOUT,
-            TEST_TIMEOUT,
-            move || {
-                ready.send(()).unwrap();
-                let _ = blocked.recv();
-                Ok(WasiFilesystemCtx::default())
-            },
-        ));
-        started.await.unwrap();
-        advance(TEST_TIMEOUT + Duration::from_millis(1)).await;
-        assert!(matches!(
-            task.await.unwrap(),
-            Err(WasmError::InvocationTimeout(_))
-        ));
-        assert_eq!(SLOTS.available_permits(), 0);
-        assert!(matches!(
-            run_wasi_preopen(&SLOTS, Instant::now() + TEST_TIMEOUT, TEST_TIMEOUT, || {
-                unreachable!("a second open must not start while the only slot is held")
-            })
-            .await,
-            Err(WasmError::ResourceLimitExceeded(WASI_PREOPEN_QUOTA)),
-        ));
-        let limits = WasmRuntimeLimits::default();
-        let _store = acquire_store(&limits).expect("directory open must not block Store admission");
-        let _instantiate =
-            acquire_instantiate(&limits).expect("directory open must not block instantiation");
+        let caller = Builder::new_current_thread()
+            .enable_time()
+            .start_paused(true)
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        caller.block_on(async {
+            let workers = wasi_preopen_workers().unwrap();
+            let (ready, started) = blocking_channel::channel();
+            let (unblock, blocked) = blocking_channel::channel::<()>();
+            let open = run_wasi_preopen(
+                workers,
+                &SLOTS,
+                Instant::now() + TEST_TIMEOUT,
+                TEST_TIMEOUT,
+                move || {
+                    ready.send(()).unwrap();
+                    let _ = blocked.recv();
+                    Ok(WasiFilesystemCtx::default())
+                },
+            );
+            tokio::pin!(open);
+            assert!(futures_util::poll!(&mut open).is_pending());
+            // Keep virtual time still until the blocking worker owns the permit.
+            started.recv_timeout(TEST_TIMEOUT).unwrap();
+            advance(TEST_TIMEOUT + Duration::from_millis(1)).await;
+            assert!(matches!(open.await, Err(WasmError::InvocationTimeout(_))));
+            assert_eq!(SLOTS.available_permits(), 0);
+            assert!(matches!(
+                run_wasi_preopen(
+                    workers,
+                    &SLOTS,
+                    Instant::now() + TEST_TIMEOUT,
+                    TEST_TIMEOUT,
+                    || { unreachable!("a second open must not start while the only slot is held") }
+                )
+                .await,
+                Err(WasmError::ResourceLimitExceeded(WASI_PREOPEN_QUOTA)),
+            ));
 
-        drop(unblock);
-        let _released = SLOTS.acquire().await.unwrap();
+            #[cfg(actr_wasm_fixture_available)]
+            {
+                tokio::time::resume();
+                let root = tempfile::tempdir().unwrap();
+                let node = tokio::time::timeout(
+                    Duration::from_secs(20),
+                    crate::tests::attach_wasi_fixture(&root, None, crate::WasiDataDir::Inherit),
+                )
+                .await
+                .expect("mount-free attach must not wait for the preopen worker");
+                node.attachment
+                    .unwrap()
+                    .node
+                    .workload_dispatch
+                    .shutdown()
+                    .await;
+                assert_eq!(SLOTS.available_permits(), 0);
+            }
+
+            drop(unblock);
+            let _released = SLOTS.acquire().await.unwrap();
+        });
     }
 }

@@ -172,6 +172,8 @@ async fn record_peer_hook<C: Context>(
 pub struct DoubleActor {
     in_flight: AtomicU32,
     max_seen: AtomicU32,
+    #[cfg(target_arch = "wasm32")]
+    wasi_writes: AtomicU32,
 }
 
 impl Default for DoubleActor {
@@ -179,6 +181,8 @@ impl Default for DoubleActor {
         Self {
             in_flight: AtomicU32::new(0),
             max_seen: AtomicU32::new(0),
+            #[cfg(target_arch = "wasm32")]
+            wasi_writes: AtomicU32::new(0),
         }
     }
 }
@@ -205,6 +209,21 @@ impl MessageDispatcher for DoubleDispatcher {
     ) -> ActorResult<Bytes> {
         match envelope.route_key.as_str() {
             "test/echo" => Ok(Bytes::from(envelope.payload.unwrap_or_default().to_vec())),
+            #[cfg(target_arch = "wasm32")]
+            "test/wasi-data-write" => {
+                std::fs::write("/data/fixture-state", envelope.payload.unwrap_or_default())
+                    .map_err(|error| {
+                        ActrError::Internal(format!("WASI data write failed: {error}"))
+                    })?;
+                let writes = workload.wasi_writes.fetch_add(1, Ordering::Relaxed) + 1;
+                Ok(Bytes::copy_from_slice(&writes.to_le_bytes()))
+            }
+            #[cfg(target_arch = "wasm32")]
+            "test/wasi-data-read" => std::fs::read("/data/fixture-state")
+                .map(Bytes::from)
+                .map_err(|error| ActrError::Internal(format!("WASI data read failed: {error}"))),
+            #[cfg(target_arch = "wasm32")]
+            "test/wasi-data-trap" => panic!("fixture WASI data trap"),
             "test/explicit" => {
                 let payload = envelope.payload.unwrap_or_default();
                 if payload.len() < 4 {

@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(unix)]
 #[test]
 fn wasi_preopen_rejects_replaced_directory() {
     let temp = tempfile::tempdir().unwrap();
@@ -13,6 +14,24 @@ fn wasi_preopen_rejects_replaced_directory() {
     std::fs::create_dir(&path).unwrap();
 
     let result = HostState::validated_data_preopen(&path, &expected);
+    assert!(
+        matches!(result, Err(WasmError::LoadFailed(message)) if message.contains("changed before preopen"))
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn wasi_preopen_rejects_different_directory_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = temp.path().canonicalize().unwrap();
+    let original = base.join("original");
+    let other = base.join("other");
+    std::fs::create_dir(&original).unwrap();
+    std::fs::create_dir(&other).unwrap();
+    let expected = HostState::open_expected_data_dir(&original).unwrap();
+    assert!(HostState::validated_data_preopen(&original, &expected).is_ok());
+
+    let result = HostState::validated_data_preopen(&other, &expected);
     assert!(
         matches!(result, Err(WasmError::LoadFailed(message)) if message.contains("changed before preopen"))
     );

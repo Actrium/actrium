@@ -5,6 +5,176 @@ use rand::rngs::OsRng;
 use std::sync::{Arc, Barrier};
 use tempfile::TempDir;
 
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+pub(crate) async fn attach_wasi_fixture(
+    root: &TempDir,
+    data_dir: Option<PathBuf>,
+    grant: WasiDataDir,
+) -> Node<Attached> {
+    use actr_pack::{ActorPackOptions, ActorPackageManifest};
+    use std::collections::BTreeMap;
+
+    let key = SigningKey::generate(&mut OsRng);
+    let manifest = ActorPackageManifest::from_toml(include_str!(
+        "../../actr-pack/tests/fixtures/registration-v2.toml"
+    ))
+    .unwrap();
+    let package = WorkloadPackage::new(
+        actr_pack::pack_actor_package(&ActorPackOptions {
+            manifest,
+            payloads: BTreeMap::from([(
+                "workload/echo.wasm".into(),
+                include_bytes!(env!("ACTR_WASM_FIXTURE")).to_vec(),
+            )]),
+            signing_key: key.clone(),
+        })
+        .unwrap(),
+    );
+    let trust = StaticTrust::new(key.verifying_key().to_bytes()).unwrap();
+    let mut hyper_config = HyperConfig::new(root.path().join("hyper"), Arc::new(trust));
+    hyper_config.wasi_data_dir = grant;
+    let hyper = Hyper::new(hyper_config).await.unwrap();
+    let mut config = linked_runtime_config(root);
+    config.wasi_data_dir = data_dir;
+    Node::from_hyper(hyper, config)
+        .attach(&package)
+        .await
+        .unwrap()
+}
+
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+async fn call_wasi_fixture(
+    actor: &crate::executor::ActorHandle,
+    route: &str,
+    payload: &'static [u8],
+) -> actr_protocol::ActorResult<bytes::Bytes> {
+    use crate::workload::{HostAbiFn, HostOperationResult, InvocationContext};
+    use actr_protocol::{ActrId, Direction, RpcEnvelope};
+
+    let ctx = crate::test_support::runtime_context_with_host_transport(
+        ActrId::default(),
+        Arc::new(crate::transport::HostTransport::new()),
+    );
+    let host_abi: HostAbiFn = Arc::new(|_| Box::pin(async { HostOperationResult::Done }));
+    actor
+        .dispatch_envelope(
+            RpcEnvelope {
+                route_key: route.into(),
+                request_id: route.into(),
+                direction: Some(Direction::Request as i32),
+                payload: Some(bytes::Bytes::from_static(payload)),
+                ..Default::default()
+            },
+            ctx,
+            InvocationContext {
+                self_id: ActrId::default(),
+                caller_id: None,
+                request_id: route.into(),
+            },
+            &host_abi,
+        )
+        .await
+}
+
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+#[tokio::test]
+async fn wasi_data_attach_reads_and_writes_original_directory_after_trap() {
+    let root = TempDir::new().unwrap();
+    let path = root.path().join("data");
+    std::fs::create_dir(&path).unwrap();
+    let node = attach_wasi_fixture(&root, Some(path.clone()), WasiDataDir::Inherit).await;
+    let actor = node.attachment.unwrap().node.workload_dispatch;
+    let writes = call_wasi_fixture(&actor, "test/wasi-data-write", b"before")
+        .await
+        .unwrap();
+    assert_eq!(writes.as_ref(), &1u32.to_le_bytes());
+    assert_eq!(
+        call_wasi_fixture(&actor, "test/wasi-data-read", b"")
+            .await
+            .unwrap(),
+        &b"before"[..],
+    );
+    assert_eq!(
+        std::fs::read(path.join("fixture-state")).unwrap(),
+        b"before"
+    );
+
+    #[cfg(unix)]
+    let original = {
+        let original = root.path().join("original");
+        std::fs::rename(&path, &original).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("fixture-state"), b"replacement").unwrap();
+        original
+    };
+    #[cfg(not(unix))]
+    let original = path.clone();
+
+    let error = call_wasi_fixture(&actor, "test/wasi-data-trap", b"")
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("trapped"), "{error}");
+    assert_eq!(
+        call_wasi_fixture(&actor, "test/wasi-data-read", b"")
+            .await
+            .unwrap(),
+        &b"before"[..],
+    );
+    let writes = call_wasi_fixture(&actor, "test/wasi-data-write", b"after")
+        .await
+        .unwrap();
+    assert_eq!(
+        writes.as_ref(),
+        &1u32.to_le_bytes(),
+        "the trap must reset guest memory"
+    );
+    assert_eq!(
+        std::fs::read(original.join("fixture-state")).unwrap(),
+        b"after"
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        std::fs::read(path.join("fixture-state")).unwrap(),
+        b"replacement"
+    );
+    actor.shutdown().await;
+}
+
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+#[tokio::test]
+async fn wasi_data_attach_respects_absent_and_disabled_grants() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("data");
+    std::fs::create_dir(&path).unwrap();
+    std::fs::write(path.join("fixture-state"), b"host only").unwrap();
+    for (runtime_path, grant) in [
+        (None, WasiDataDir::Inherit),
+        (Some(path.clone()), WasiDataDir::Disabled),
+    ] {
+        let node = attach_wasi_fixture(&dir, runtime_path, grant).await;
+        let actor = node.attachment.unwrap().node.workload_dispatch;
+        let error = call_wasi_fixture(&actor, "test/wasi-data-read", b"")
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("WASI data read failed"),
+            "{error}"
+        );
+        let error = call_wasi_fixture(&actor, "test/wasi-data-write", b"guest")
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("WASI data write failed"),
+            "{error}"
+        );
+        assert_eq!(
+            std::fs::read(path.join("fixture-state")).unwrap(),
+            b"host only"
+        );
+        actor.shutdown().await;
+    }
+}
+
 fn dev_config(dir: &TempDir) -> HyperConfig {
     let signing_key = SigningKey::generate(&mut OsRng);
     let pubkey = signing_key.verifying_key().to_bytes();
