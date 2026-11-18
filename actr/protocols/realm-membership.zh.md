@@ -65,7 +65,7 @@ Actr Host 以 HTTPS `POST <issuer.url>/membership` 发送 membership 请求（pr
 
 | `op` | 字段 | 谁可以发 | 效果 |
 | --- | --- | --- | --- |
-| `join` | `invite`（secret）、`public_key`、可选 `label` | 持有邀请者，用新 key 签名 | 兑换邀请，登记该 key；响应 `{realm, member_id, role, key_id}` |
+| `join` | `public_key`、可选 `label`、`invite`（邀请制必填） | 新设备用自己的 Realm key 签名 | 登记该 key，响应 `{realm, member_id, role, key_id}` |
 | `create_invite` | `role`（`editor`/`viewer`）或 `member_id`，加 `invite_expires_at` | 新成员邀请：owner；客户端邀请：owner，或成员为自己 | 响应 `{invite_id, invite, expires_at}`，`invite` 为文本形式，只返回这一次 |
 | `revoke_invite` | `invite_id` | owner，或该邀请的签发者 | 未用的邀请失效 |
 | `list_members` | 无 | 任何成员 | owner 得到全部成员、客户端与未用邀请；其他成员只得到自己的记录、客户端与自己签发的邀请 |
@@ -90,13 +90,19 @@ Actr Facility Provider 先检查角色，再查找目标：无权执行的请求
 ### 4.1 兑换规则
 
 Actr Facility Provider 在单个事务中兑换邀请：记录邀请已用，按邀请建立新成员或定位目标成员，登记 key。两个并发兑换
-最多一个成功；超过限额（`quota`）时邀请不被消耗。同一把 key 重复兑换同一邀请（响应丢失后的重试），只要
-该 key 仍未撤销、成员仍为 `active`，就返回首次的结果，否则返回 `invite_used`。
+最多一个成功；超过限额（`quota`）时邀请不被消耗。若兑换成功后响应丢失，
+AFP 在重试时检查请求是否由原先未撤销的 key 签名，以及成员是否仍为 `active`。
+任一条件不满足时返回 `invite_used`。通过这些检查后，Realm 可用时返回首次的结果，不可用时返回 `realm_unavailable`。
 
 - 带 `role` 的邀请建立新成员。`owner` 角色的邀请（owner 邀请）只由 Realm 签名 key 持有方或 Actr Facility Provider
   运营者签发（第 5 节）：Realm 尚无 owner 时建立 owner；已有 owner 时，新 key 成为该 owner 成员的客户端，
   owner 原有的全部客户端 key 撤销。
 - 带 `member_id` 的邀请为该成员登记新客户端，目标成员 **MUST** 仍为 `active`。
+
+免邀请加入要求 Realm 处于 `active` 状态、已启用且未过期，并且签名 Profile 中的 `policy.membership` 为 `open`。
+持有效邀请的设备按邀请角色加入。没有可兑换邀请时，Issuer 验证新设备签名后将其登记为 Viewer。
+两种方式共用活跃成员上限，首位 Owner 预留一个名额。
+最近 60 秒内成功免邀请加入的新成员计入限频，默认每分钟 10 人。同一设备重试返回已有成员身份。
 
 ### 4.2 owner 保护
 
@@ -120,6 +126,7 @@ Actr Facility Provider 以 JSON `{"error": "<code>", "message": "<text>"}` 返�
 | 409 | `invite_realm_mismatch` | 邀请属于另一个 Realm |
 | 409 | `owner_last_client`、`owner_must_transfer`、`conflict` | 违反 owner 保护、key 已登记或目标状态不符 |
 | 410 | `invite_expired`、`invite_used`、`invite_revoked` | 邀请已过期、已被使用、已被撤销 |
+| 429 | `join_rate_limited` | 免邀请加入达到频率上限，`Retry-After` 和 `retry_after_secs` 给出等待秒数 |
 | 429 | `quota` | 超过成员、客户端或未用邀请数量限制 |
 
 `realm_unavailable` 只在请求方已证明持有登记的 key 或有效邀请之后返回；否则一律 `client_unknown` 或

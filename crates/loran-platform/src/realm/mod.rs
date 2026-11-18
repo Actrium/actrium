@@ -18,6 +18,7 @@ pub mod validation;
 
 // Public API exports
 pub use acl::ActorAcl;
+pub use actr_protocol::realm_profile::{MembershipMode, RealmPolicy};
 pub use domain::RealmDomain;
 pub use error::RealmError;
 pub use issuer_key::{IssuerKeyState, RealmIssuerKey};

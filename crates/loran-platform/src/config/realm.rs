@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RealmConfig {
+    /// Legacy configuration. Only reusable_invite still changes invite redemption.
+    #[serde(default)]
+    pub dev_join: DevJoinConfig,
     /// Maximum number of pending and active Realms this instance hosts.
     /// Retired Realms do not count. Unset means no limit; `1` gives a
     /// dedicated single-Realm deployment.
@@ -39,6 +42,34 @@ pub struct RealmConfig {
     /// 100.
     #[serde(default)]
     pub max_open_invites_per_realm: Option<u32>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DevJoinConfig {
+    /// Reusable invitation redemption is opt-in. The legacy open value is ignored.
+    #[serde(default)]
+    pub mode: DevJoinMode,
+    /// Read for compatibility with older configurations. Open admission grants Viewer.
+    #[serde(default)]
+    pub default_role: DevJoinRole,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DevJoinMode {
+    #[default]
+    Off,
+    Open,
+    ReusableInvite,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DevJoinRole {
+    #[default]
+    Editor,
+    Viewer,
 }
 
 impl RealmConfig {
@@ -94,5 +125,21 @@ mod tests {
 
         let config: RealmConfig = toml::from_str("profile_refresh_secs = 999999").unwrap();
         assert_eq!(config.profile_refresh_secs(), 86_400);
+    }
+
+    #[test]
+    fn development_admission_defaults_closed_and_never_assigns_owner() {
+        let config: RealmConfig = toml::from_str("").unwrap();
+        assert_eq!(config.dev_join.mode, DevJoinMode::Off);
+        assert_eq!(config.dev_join.default_role, DevJoinRole::Editor);
+        for mode in ["off", "open", "reusable_invite"] {
+            let config: RealmConfig = toml::from_str(&format!(
+                "[dev_join]\nmode = {mode:?}\ndefault_role = \"viewer\""
+            ))
+            .unwrap();
+            assert_eq!(config.dev_join.default_role, DevJoinRole::Viewer);
+        }
+        assert!(toml::from_str::<RealmConfig>("[dev_join]\nmode = \"oops\"").is_err());
+        assert!(toml::from_str::<RealmConfig>("[dev_join]\ndefault_role = \"owner\"").is_err());
     }
 }

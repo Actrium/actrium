@@ -227,6 +227,7 @@ async fn get_admin_capabilities(State(state): State<Arc<AdminApiState>>) -> impl
         StatusCode::OK,
         Json(json!({
             "realm_writes_enabled": state.realm_writes_enabled,
+            "max_members_per_realm": state.service.platform_member_limit(),
             "superv_managed": !state.realm_writes_enabled,
         })),
     )
@@ -254,6 +255,7 @@ async fn list_realms(State(state): State<Arc<AdminApiState>>) -> impl IntoRespon
 #[derive(Deserialize)]
 struct CreateRealmBody {
     realm: String,
+    policy: Option<platform::realm::RealmPolicy>,
     #[serde(default = "default_true")]
     enabled: bool,
     #[serde(default)]
@@ -289,6 +291,7 @@ async fn create_realm(
     };
 
     let profile = ProfileChange {
+        policy: body.policy,
         selection: body.selection,
         display_name: body.display_name,
         ..Default::default()
@@ -511,6 +514,22 @@ async fn get_realm(
 struct UpdateRealmBody {
     enabled: Option<bool>,
     expires_at: Option<u64>,
+}
+
+async fn set_realm_policy(
+    State(state): State<Arc<AdminApiState>>,
+    Path(realm): Path<String>,
+    Json(policy): Json<platform::realm::RealmPolicy>,
+) -> Response {
+    if !state.realm_writes_enabled {
+        return realm_writes_disabled_response();
+    }
+    match state.service.set_realm_policy_direct(&realm, policy).await {
+        Ok(info) => {
+            Json(json!({ "success": true, "realm": realm_info_to_json(&info) })).into_response()
+        }
+        Err(status) => grpc_status_to_response(status),
+    }
 }
 
 async fn update_realm(
@@ -996,6 +1015,7 @@ pub fn build_admin_api_router(
         .route("/admin/api/realms", post(create_realm))
         .route("/admin/api/realms/{realm}", get(get_realm))
         .route("/admin/api/realms/{realm}", put(update_realm))
+        .route("/admin/api/realms/{realm}/admission", put(set_realm_policy))
         .route(
             "/admin/api/realms/{realm}/issuer-key/rotate",
             post(rotate_realm_issuer_key),
@@ -1170,6 +1190,14 @@ fn realm_info_to_json(info: &RealmInfo) -> Value {
         "updated_at": info.updated_at,
         "expires_at": info.expires_at,
         "status": info.status,
+        "policy": {
+            "membership": info.membership.as_deref().unwrap_or("invite-only"),
+            "open_joins_per_minute": info.open_joins_per_minute,
+            "max_members": info.max_members,
+        },
+        "admission_writable": info.admission_writable,
+        "active_members": info.active_members,
+        "effective_max_members": info.effective_max_members,
     })
 }
 

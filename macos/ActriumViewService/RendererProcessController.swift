@@ -5,6 +5,40 @@ import Foundation
 import QuartzCore
 import React
 
+/// JSON payload for Host-mirrored IME text operations.
+struct IMETextPayload: Codable {
+    var text: String
+    var loc: Int = 0
+    var len: Int = 0
+}
+
+/// Notification posted on the renderer's main queue after any
+/// `NSWindow.makeFirstResponder(_:)` call, carrying the window.
+let ActriumFirstResponderDidChangeNotification = Notification.Name(
+    "ActriumFirstResponderDidChangeNotification"
+)
+
+extension NSWindow {
+    /// Swizzled alongside the original `makeFirstResponder(_:)`; after the
+    /// real implementation runs, surfaces report text-input focus changes to
+    /// the Host so it can route IME composition there.
+    @objc func actrium_makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let accepted = actrium_makeFirstResponder(responder)
+        NotificationCenter.default.post(
+            name: ActriumFirstResponderDidChangeNotification,
+            object: self
+        )
+        return accepted
+    }
+
+    static func actrium_installFirstResponderHook() {
+        let original = class_getInstanceMethod(NSWindow.self, #selector(makeFirstResponder(_:)))
+        let swizzled = class_getInstanceMethod(NSWindow.self, #selector(actrium_makeFirstResponder(_:)))
+        guard let original, let swizzled else { return }
+        method_exchangeImplementations(original, swizzled)
+    }
+}
+
 /// Entry-point and lifecycle owner for a manually spawned Renderer Helper.
 @MainActor
 final class RendererProcessController {
@@ -263,9 +297,21 @@ final class RendererProcessController {
     }
 
     private func configureIPC() {
+        NSWindow.actrium_installFirstResponderHook()
+        NotificationCenter.default.addObserver(
+            forName: ActriumFirstResponderDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self, let window = note.object as? NSWindow else { return }
+            for (tabId, surface) in self.surfaces where surface.window === window {
+                self.reportTextInputFocus(tabId: tabId, surface: surface)
+            }
+        }
         connection.onHostEvent = { [weak self] name, json, tabId in
+            guard let self else { return }
             if name == GuestFileImportCall.responseEvent {
-                self?.receiveFileImport(json, tabId: tabId)
+                receiveFileImport(json, tabId: tabId)
                 return
             }
             if name == "com.actrium.rendererKeyboardFocus" {
@@ -273,35 +319,62 @@ final class RendererProcessController {
                 // Apply focus on the same queue as input so the next key
                 // event can reach the restored editor.
                 DispatchQueue.main.async {
-                    self?.surfaces[tabId]?.setKeyboardFocus(focused)
+                    self.surfaces[tabId]?.setKeyboardFocus(focused)
                 }
                 return
             }
-            if name == RealmServiceCall.responseEvent,
-               let response = try? JSONDecoder().decode(RealmServiceReply.self, from: Data(json.utf8)) {
-                self?.serviceCalls.removeValue(forKey: response.id)?(response)
+            if name == RealmServiceCall.responseEvent {
+                guard let response = try? JSONDecoder().decode(RealmServiceReply.self, from: Data(json.utf8)) else {
+                    return
+                }
+                self.serviceCalls.removeValue(forKey: response.id)?(response)
                 return
             }
             if name == RealmServiceEventSubscription.responseEvent,
                let response = try? JSONDecoder().decode(RealmServiceEventReply.self, from: Data(json.utf8)) {
-                let tabId = self?.serviceEventTabs[response.id]
-                let cancelled = self?.cancelledServiceEventSubscriptions.remove(response.id) != nil
-                self?.serviceEventSubscriptions.removeValue(forKey: response.id)?(response)
+                let tabId = self.serviceEventTabs[response.id]
+                let cancelled = self.cancelledServiceEventSubscriptions.remove(response.id) != nil
+                self.serviceEventSubscriptions.removeValue(forKey: response.id)?(response)
                 if cancelled && response.failure == nil, let tabId {
                     RendererProcessController.unsubscribeRealmServiceEvents(
                         tabId: tabId, subscriptionId: response.id
                     )
                 }
                 if cancelled || response.failure != nil {
-                    self?.serviceEventTabs.removeValue(forKey: response.id)
-                    self?.cancelledServiceEventSubscriptions.remove(response.id)
+                    self.serviceEventTabs.removeValue(forKey: response.id)
+                    self.cancelledServiceEventSubscriptions.remove(response.id)
                 }
                 return
             }
             if name == RealmServiceEventSubscription.eventEvent,
                let event = try? JSONDecoder().decode(RealmServiceEvent.self, from: Data(json.utf8)),
-               let tabId = self?.serviceEventTabs[event.subscriptionId] {
+               let tabId = self.serviceEventTabs[event.subscriptionId] {
                 RealmService.emit(event, tabId: tabId)
+                return
+            }
+            // IME composition runs in the Host process (TSM never engages in
+            // this background, activation-prohibited process); the Host
+            // mirrors marked/committed text back for the focused text input.
+            DispatchQueue.main.async {
+                switch name {
+                case "com.actrium.imeMarkedText":
+                    guard let op = try? JSONDecoder().decode(IMETextPayload.self, from: Data(json.utf8)) else { return }
+                    self.surfaces[tabId]?.applyMarkedText(op.text, selectedRange: NSRange(location: op.loc, length: op.len))
+                case "com.actrium.imeInsertText":
+                    guard let op = try? JSONDecoder().decode(IMETextPayload.self, from: Data(json.utf8)) else { return }
+                    self.surfaces[tabId]?.applyInsertText(op.text)
+                case "com.actrium.textInputBlurRequest":
+                    self.surfaces[tabId]?.resignTextInputFocus()
+                case "com.actrium.textInputFocusReset":
+                    // The Host dropped our pre-interaction focus report and
+                    // its user-interaction gate just opened; force a fresh
+                    // report so IME can activate on the already-focused field.
+                    if let surface = self.surfaces[tabId] {
+                        self.reportTextInputFocus(tabId: tabId, surface: surface, force: true)
+                    }
+                default:
+                    break
+                }
             }
         }
 
@@ -501,6 +574,32 @@ final class RendererProcessController {
         }
     }
 
+    /// Forwards the surface caret rect to the Host; nil hides the candidate
+    /// window anchor. Transport reuses the generic HostEvent channel.
+    /// Reports the surface's text-input focus state to the Host, unless it is
+    /// unchanged since the last report. `force` bypasses the dedupe latch.
+    private func reportTextInputFocus(tabId: String, surface: RendererTabSurface, force: Bool = false) {
+        if force {
+            surface.resetTextInputFocusDedupe()
+        }
+        surface.reportTextInputFocusIfChanged { focused in
+            try self.connection.sendHostEvent(
+                name: "com.actrium.textInputFocus",
+                userInfoJSON: "{\"focused\":\(focused)}",
+                tabId: tabId
+            )
+        }
+    }
+
+    func publishCaret(tabId: String, rect: CGRect?) {
+        guard let encoded = try? JSONEncoder().encode(rect) else { return }
+        try? connection.sendHostEvent(
+            name: "com.actrium.rendererCaret",
+            userInfoJSON: String(decoding: encoded, as: UTF8.self),
+            tabId: tabId
+        )
+    }
+
     func publishAccessibilityTree(tabId: String) {
         guard let surface = surfaces[tabId] else { return }
         try? connection.sendAccessibilityTree(surface.accessibilityTree())
@@ -585,6 +684,12 @@ private final class RendererTabSurface {
     private var accessibilityPublishWork: DispatchWorkItem?
     private var pressedRecognizers: [UInt32: [NSGestureRecognizer]] = [:]
     private var textInputPresses: Set<UInt32> = []
+    /// Last text-input focus state reported to the Host. The Host mirrors
+    /// IME composition for whichever surface owns the focused text input.
+    private var lastReportedTextFocus = false
+    private weak var focusedEditor: NSTextView?
+    private var lastCaretRect: CGRect?
+
 
     var contextId: UInt32 {
         context.contextId
@@ -802,11 +907,19 @@ private final class RendererTabSurface {
             ) else {
                 return
             }
+            // Text composition happens in the Host process (TSM never engages
+            // in this background, activation-prohibited process); dispatched
+            // keys here are only non-text commands (arrows, enter, ...).
             if let textView = window.firstResponder as? NSTextView {
                 if input.type == .keyDown { textView.keyDown(with: event) }
                 else { textView.keyUp(with: event) }
             } else {
                 window.sendEvent(event)
+            }
+            if input.type == .keyDown {
+                // Fabric publishes content changes after mounting. A caret
+                // movement alone does not need to flush the remote surface.
+                publishCaret()
             }
 
         case .mouseEntered, .mouseExited, .UNRECOGNIZED(_):
@@ -819,16 +932,113 @@ private final class RendererTabSurface {
         return container.hitTest(point)
     }
 
+
+
+    /// Compares the current first responder against the last reported
+    /// text-input focus state and reports changes through `report`.
+    func reportTextInputFocusIfChanged(_ report: (Bool) throws -> Void) {
+        let responder = window.firstResponder
+        let focused = (responder as? NSTextView)?.isEditable == true
+            || (responder as? NSTextField)?.isEditable == true
+        guard focused != lastReportedTextFocus else { return }
+        lastReportedTextFocus = focused
+        try? report(focused)
+        if focused { publishCaret() }
+    }
+
+    /// Flips the dedupe latch so the next `reportTextInputFocusIfChanged`
+    /// reports even when the focus state itself did not change.
+    func resetTextInputFocusDedupe() {
+        let responder = window.firstResponder
+        let focused = (responder as? NSTextView)?.isEditable == true
+            || (responder as? NSTextField)?.isEditable == true
+        lastReportedTextFocus = !focused
+    }
+
+    /// Applies Host-mirrored IME marked text to the focused text input.
+    func applyMarkedText(_ text: String, selectedRange: NSRange) {
+        guard let client = window.firstResponder as? NSTextInputClient else { return }
+        client.setMarkedText(
+            text,
+            selectedRange: selectedRange,
+            replacementRange: NSRange(location: NSNotFound, length: 0)
+        )
+        publishCaret()
+        commit()
+    }
+
+    /// Applies Host-mirrored committed IME text to the focused text input.
+    func applyInsertText(_ text: String) {
+        guard let client = window.firstResponder as? NSTextInputClient else { return }
+        client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        publishCaret()
+        commit()
+    }
+
+    /// The Host asked this text input to give up focus (its own IME client
+    /// resigned first responder, e.g. the user focused the address bar).
+    func resignTextInputFocus() {
+        if window.firstResponder is NSTextView || window.firstResponder is NSTextField {
+            window.makeFirstResponder(container)
+        }
+        focusedEditor = nil
+        lastCaretRect = nil
+        RendererProcessLifetime.shared.controller?.publishCaret(tabId: tabId, rect: nil)
+    }
+
     private func focusTextInput(_ view: NSView, at location: NSPoint, modifiers: NSEvent.ModifierFlags) {
         // AppKit's native mouse tracking waits synchronously for mouse-up.
         // Renderer mouse-up arrives on the main queue over IPC.
         let focused = window.makeFirstResponder(view)
         let editor = (view as? NSTextField)?.currentEditor() as? NSTextView ?? view as? NSTextView
+        focusedEditor = focused ? editor : nil
         guard focused, let editor, !modifiers.contains(.shift) else { return }
         let point = editor.convert(location, from: nil)
         let index = editor.characterIndexForInsertion(at: point)
         guard index != NSNotFound, index <= (editor.string as NSString).length else { return }
         editor.setSelectedRange(NSRange(location: index, length: 0))
+        publishCaret()
+    }
+
+    /// Publishes the caret rect to the Host so native IME UI (candidate
+    /// window) can anchor at the remotely rendered insertion point.
+    private func publishCaret() {
+        let rect = caretRect()
+        guard rect != lastCaretRect else { return }
+        lastCaretRect = rect
+        RendererProcessLifetime.shared.controller?.publishCaret(tabId: tabId, rect: rect)
+    }
+
+    private func caretRect() -> CGRect? {
+        // Prefer the stored editor but fall back to the current first
+        // responder: autoFocus / Tab / JS .focus() never pass through
+        // `focusTextInput`, leaving `focusedEditor` nil even though a text
+        // view owns first responder.
+        let editor = focusedEditor ?? (window.firstResponder as? NSTextView)
+        guard let editor, window.firstResponder === editor, editor.isEditable,
+              editor.selectedRange().length == 0 else {
+            return nil
+        }
+        let screenRect = editor.firstRect(forCharacterRange: editor.selectedRange(), actualRange: nil)
+        let localRect: NSRect
+        if editor.string.isEmpty {
+            // AppKit can return an empty character rectangle for an empty field.
+            let origin = editor.textContainerOrigin
+            let inset = editor.textContainer?.lineFragmentPadding ?? 0
+            let lineHeight = editor.font.map {
+                editor.layoutManager?.defaultLineHeight(for: $0) ?? $0.pointSize
+            } ?? NSFont.systemFontSize
+            let height = min(editor.bounds.height, lineHeight)
+            let rect = NSRect(x: origin.x + inset, y: editor.bounds.midY - height / 2,
+                              width: 2, height: height)
+            localRect = container.convert(rect, from: editor)
+        } else {
+            guard screenRect.height > 0 else {
+                return nil
+            }
+            localRect = container.convert(window.convertFromScreen(screenRect), from: nil)
+        }
+        return CGRect(x: localRect.minX, y: localRect.minY, width: 2, height: localRect.height)
     }
 
     private func forwardMouse(_ event: NSEvent, to recognizers: [NSGestureRecognizer]) {
