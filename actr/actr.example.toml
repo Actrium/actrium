@@ -49,6 +49,7 @@ endpoint = "http://localhost:8081/issuer"
 # [hyper]
 # data_dir = "~/.actr/hyper"
 # storage_root = "~/.actr/hyper/storage"
+# wasi_data_dir = "./workload-data" # Existing directory mounted at /data for WASM
 
 [discovery]
 visible = true

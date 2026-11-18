@@ -177,6 +177,11 @@ pub struct RawHyperConfig {
     #[serde(default)]
     pub storage_root: Option<std::path::PathBuf>,
 
+    /// Existing host directory exposed to a WASM workload at `/data`.
+    /// Relative paths resolve against the config file's directory.
+    #[serde(default)]
+    pub wasi_data_dir: Option<std::path::PathBuf>,
+
     /// Tombstone: the removed `storage_path_template` key. Kept only to produce
     /// an explicit migration error instead of letting Serde silently ignore it
     /// (the surrounding struct has no `deny_unknown_fields`).

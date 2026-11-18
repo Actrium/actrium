@@ -215,6 +215,7 @@ impl Nodes {
                 package_path: None,
                 web: None,
                 storage_root: None,
+                wasi_data_dir: None,
             };
             let mut node = Node::from_hyper(hyper, config)
                 .link(RecordingWorkload(journals[i].clone()))

@@ -111,6 +111,9 @@ pub struct RuntimeConfig {
     /// default (`<data_dir>/storage`). Actor storage uses a fixed hashed layout
     /// under this root (CWE-22 / CWE-73).
     pub storage_root: Option<PathBuf>,
+
+    /// Absolute host directory exposed to a WASM workload at `/data`.
+    pub wasi_data_dir: Option<PathBuf>,
 }
 
 /// Trust anchor config — a single `[[trust]]` table in `actr.toml`.
@@ -644,6 +647,7 @@ mod tests {
             package_path: None,
             web: None,
             storage_root: None,
+            wasi_data_dir: None,
         };
 
         assert_eq!(config.actr_type().name, "test-service");
