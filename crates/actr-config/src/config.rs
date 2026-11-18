@@ -114,6 +114,18 @@ pub struct RuntimeConfig {
 
     /// Absolute host directory exposed to a WASM workload at `/data`.
     pub wasi_data_dir: Option<PathBuf>,
+
+    /// Maximum access the deployment permits for the WASI data directory.
+    pub wasi_data_access: WasiDataAccess,
+}
+
+/// Access to a WASM workload's private data directory.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WasiDataAccess {
+    ReadOnly,
+    #[default]
+    ReadWrite,
 }
 
 /// Trust anchor config — a single `[[trust]]` table in `actr.toml`.
@@ -648,6 +660,7 @@ mod tests {
             web: None,
             storage_root: None,
             wasi_data_dir: None,
+            wasi_data_access: WasiDataAccess::default(),
         };
 
         assert_eq!(config.actr_type().name, "test-service");

@@ -16,7 +16,7 @@ workspace = true
 [features]
 # Native builds include the RTC implementation unconditionally.
 default = []
-wasm-engine = ["dep:cap-primitives", "dep:wasmtime", "dep:wasmtime-wasi", "dep:windows-sys"]
+wasm-engine = ["dep:cap-primitives", "dep:libc", "dep:wasmtime", "dep:wasmtime-wasi", "dep:windows-sys"]
 dynclib-engine = ["dep:libloading"]
 opentelemetry = [
   "actr-config/opentelemetry",
@@ -160,6 +160,9 @@ libloading = { version = "0.8", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { version = "0.2", optional = true }
 
 # Dispatch throughput / per-dispatch overhead benchmark. `harness = false`: it
 # is a plain `fn main()` that builds its own fixed-worker tokio runtime (the

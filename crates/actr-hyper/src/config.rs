@@ -10,7 +10,9 @@ use crate::error::HyperError;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::verify::TrustProvider;
 
-/// Controls the host directory exposed to a WASM workload at `/data`.
+/// Controls the deployer's directory grant for the WASI data capabilities.
+///
+/// Only a signed Component requesting the capability can use the grant.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, Default)]
 pub enum WasiDataDir {
@@ -19,18 +21,35 @@ pub enum WasiDataDir {
     Inherit,
     /// Do not expose a directory, even if runtime configuration requests one.
     Disabled,
-    /// Expose this existing absolute directory instead of the runtime setting.
+    /// Use this existing absolute directory, subject to the runtime access limit.
     Directory(PathBuf),
+    /// Use this existing absolute directory with at most read access.
+    ReadOnlyDirectory(PathBuf),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct WasiDataGrant<'a> {
+    pub(crate) directory: &'a Path,
+    pub(crate) access: actr_config::WasiDataAccess,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl WasiDataDir {
-    pub(crate) fn resolve<'a>(&'a self, runtime: Option<&'a Path>) -> Option<&'a Path> {
-        match self {
-            Self::Inherit => runtime,
-            Self::Disabled => None,
-            Self::Directory(path) => Some(path),
-        }
+    pub(crate) fn resolve<'a>(
+        &'a self,
+        runtime: Option<&'a Path>,
+        runtime_access: actr_config::WasiDataAccess,
+    ) -> Option<WasiDataGrant<'a>> {
+        let (directory, access) = match self {
+            Self::Inherit => (runtime?, runtime_access),
+            Self::Disabled => return None,
+            Self::Directory(path) => (path.as_path(), runtime_access),
+            Self::ReadOnlyDirectory(path) => {
+                (path.as_path(), actr_config::WasiDataAccess::ReadOnly)
+            }
+        };
+        Some(WasiDataGrant { directory, access })
     }
 }
 
@@ -359,6 +378,8 @@ impl std::fmt::Debug for HyperConfig {
 /// trust anchor lives inside `[hyper.trust]` (singular) and uses the
 /// same tag-dispatched schema as the top-level `[[trust]]` array so users
 /// can pick whichever style they prefer.
+/// Embedded Host keys must also be accepted by `actr_config::RawHyperConfig`,
+/// which is deserialized first with unknown fields denied.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub(crate) struct HyperSection {

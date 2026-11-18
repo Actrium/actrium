@@ -4,6 +4,7 @@ import { createHostModuleDispatch } from 'keel/contract';
 import { contract } from './contract';
 import type { FileImportPickInput, FileImportPickOutput } from './contract';
 import type { FrontCapability } from './capabilities';
+import type { AttachmentUploadManager } from './attachment-upload';
 import { createHostModules, type HostModules } from './host-modules';
 import { createTestServiceEventSource } from './service-events.test-utils';
 
@@ -257,6 +258,103 @@ describe('host:service implementation', () => {
     expect(subscriberCount()).toBe(0);
     emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
     expect(received).toEqual([]);
+  });
+});
+
+describe('host:service.attachmentUpload implementation', () => {
+  function createUploader(result: { attachmentId: string } = { attachmentId: 'a-1' }) {
+    const uploads: unknown[] = [];
+    const uploader = {
+      available: true,
+      upload: async (input: unknown) => {
+        uploads.push(input);
+        return result;
+      },
+      dispose: () => {},
+    };
+    return { uploader, uploads };
+  }
+
+  test('fails closed when the native bridge is unavailable', async () => {
+    const hostModules = createTestHostModules();
+    await expect(
+      hostModules['host:service'].uploadAttachment({
+        filename: 'a.txt',
+        base64: 'AAEC',
+      })
+    ).rejects.toThrow('native attachment upload bridge is unavailable');
+  });
+
+  test('authorizes the capability before uploading', async () => {
+    const { uploader, uploads } = createUploader();
+    const grants: string[] = [];
+    const hostModules = createHostModules({
+      hasServiceCapability: true,
+      hasServiceOnCapability: true,
+      callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
+      authorizeCapability: async (capability) => {
+        grants.push(capability);
+      },
+      writeClipboardText: async () => {},
+      attachmentUploader: uploader as unknown as AttachmentUploadManager,
+    });
+
+    await expect(
+      hostModules['host:service'].uploadAttachment({
+        filename: 'a.txt',
+        base64: 'AAEC',
+        type: 'image',
+      })
+    ).resolves.toEqual({ attachmentId: 'a-1' });
+    expect(grants).toEqual(['service.attachmentUpload']);
+    expect(uploads).toEqual([{ filename: 'a.txt', base64: 'AAEC', type: 'image' }]);
+  });
+
+  test('does not upload when authorization fails', async () => {
+    const { uploader, uploads } = createUploader();
+    const hostModules = createHostModules({
+      hasServiceCapability: true,
+      hasServiceOnCapability: true,
+      callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
+      authorizeCapability: async () => {
+        throw new Error('permission_required: service.attachmentUpload');
+      },
+      writeClipboardText: async () => {},
+      attachmentUploader: uploader as unknown as AttachmentUploadManager,
+    });
+
+    await expect(
+      hostModules['host:service'].uploadAttachment({
+        filename: 'a.txt',
+        base64: 'AAEC',
+      })
+    ).rejects.toThrow('permission_required');
+    expect(uploads).toEqual([]);
+  });
+
+  test('dispatches through the contract boundary', async () => {
+    const { uploader } = createUploader();
+    const dispatch = createHostModuleDispatch(
+      contract,
+      createHostModules({
+        hasServiceCapability: true,
+        hasServiceOnCapability: true,
+        callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
+        authorizeCapability: async () => {},
+        writeClipboardText: async () => {},
+        attachmentUploader: uploader as unknown as AttachmentUploadManager,
+      })
+    );
+
+    await expect(
+      dispatch['host:service'].uploadAttachment({
+        filename: 'a.txt',
+        base64: 'AAEC',
+      })
+    ).resolves.toEqual({ attachmentId: 'a-1' });
+    expect(() =>
+      dispatch['host:service'].uploadAttachment({ filename: 'a.txt', base64: 'AAE' })
+    ).toThrow('Boundary input validation failed');
   });
 });
 

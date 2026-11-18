@@ -45,6 +45,24 @@ RCT_EXTERN_METHOD(subscribeServiceEvents:(NSString *)tabId
 
 RCT_EXTERN_METHOD(unsubscribeServiceEvents:(NSString *)tabId
                   subscriptionId:(NSString *)subscriptionId)
+RCT_EXTERN_METHOD(prepareAttachmentUpload:(NSString *)tabId
+                  request:(NSDictionary *)request
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(sendAttachmentChunk:(NSString *)tabId
+                  request:(NSDictionary *)request
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(unregisterStream:(NSString *)tabId
+                  streamId:(NSString *)streamId
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(attachmentUploadAvailable:(NSString *)tabId
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 
 @end
 

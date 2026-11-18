@@ -282,6 +282,18 @@ export const USER_INFO_BRIDGE_CONTRACT = {
   },
 } as const;
 
+export const REALM_SERVICE_CONTRACT = {
+  moduleName: 'RealmService',
+  methods: {
+    prepareAttachmentUpload: 'prepareAttachmentUpload',
+    sendAttachmentChunk: 'sendAttachmentChunk',
+    unregisterStream: 'unregisterStream',
+  },
+  events: {
+    attachmentResult: 'RealmServiceAttachmentResult',
+  },
+} as const;
+
 export const AUTH_ENVIRONMENT_CONTRACT = {
   environments: {
     dev: 'dev',

@@ -17,8 +17,7 @@
 //! borrows non-overlapping across suspension points. The shape is lifted
 //! directly from the Phase 0.75 `component-spike-runconcurrent` host.
 
-use std::path::Path;
-
+use actr_config::WasiDataAccess;
 use actr_framework::guest::dynclib_abi as guest_abi;
 use actr_framework::guest::dynclib_abi::{
     HostCallRawV1, HostCallV1, HostDiscoverV1, HostRegisterStreamV1, HostResolveDependencyV1,
@@ -55,8 +54,9 @@ use super::runtime_limits::{
     quota_release_snapshot, record_instantiate_failure, record_timeout,
     wait_for_quota_release_after,
 };
-use crate::config::WasmRuntimeLimits;
+use crate::config::{WasiDataGrant, WasmRuntimeLimits};
 use crate::executor::{ActorCmd, LifecyclePhase};
+use crate::package_runtime::{WASI_DATA_READ_ONLY, WASI_DATA_READ_WRITE};
 use crate::workload::{
     HostAbiFn, HostOperation, HostOperationResult, InvocationContext, PackageHookEvent,
 };
@@ -919,19 +919,28 @@ impl WasmWorkloadV2 {
         limits: &WasmRuntimeLimits,
         epoch_ticker: Arc<EpochTicker>,
         uses_explicit_reply_boundary: bool,
-        wasi_data_dir: Option<&Path>,
+        wasi_data: Option<WasiDataGrant<'_>>,
     ) -> WasmResult<Self> {
-        let wasi_runtime = wasi_data_dir.map(|_| wasi_guest_runtime()).transpose()?;
         let timeout = limits.invocation_timeout;
         let deadline = tokio::time::Instant::now() + timeout;
-        let wasi_filesystem = if let Some(directory) = wasi_data_dir {
+        let wasi_filesystem = if let Some(WasiDataGrant { directory, access }) = wasi_data {
             let directory = directory.to_path_buf();
+            let capability = match access {
+                WasiDataAccess::ReadOnly => WASI_DATA_READ_ONLY,
+                WasiDataAccess::ReadWrite => WASI_DATA_READ_WRITE,
+            };
             run_wasi_preopen(
                 wasi_preopen_workers()?,
                 &WASI_PREOPEN_SLOTS,
                 deadline,
                 timeout,
-                move || HostState::preopen_data_dir(&directory),
+                move || {
+                    HostState::preopen_data_dir(&directory, access).map_err(|error| {
+                        WasmError::LoadFailed(format!(
+                            "cannot grant required capability `{capability}` from the configured WASI data directory: {error}"
+                        ))
+                    })
+                },
             )
             .await?
         } else {
@@ -941,6 +950,7 @@ impl WasmWorkloadV2 {
             record_timeout();
             return Err(WasmError::InvocationTimeout(timeout));
         }
+        let wasi_runtime = wasi_data.map(|_| wasi_guest_runtime()).transpose()?;
         let store_permit = acquire_store(limits)?;
         let permit = acquire_instantiate(limits)?;
         let (store, bindings) = instantiate_parts_v2(

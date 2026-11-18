@@ -288,9 +288,10 @@ describe('capability model data', () => {
   });
 
   test('only implemented capabilities count as host-supported', () => {
-    expect(HOST_SUPPORTED_CAPABILITIES.size).toBe(8);
+    expect(HOST_SUPPORTED_CAPABILITIES.size).toBe(9);
     expect(HOST_SUPPORTED_CAPABILITIES.has('service.call')).toBe(true);
     expect(HOST_SUPPORTED_CAPABILITIES.has('service.on')).toBe(true);
+    expect(HOST_SUPPORTED_CAPABILITIES.has('service.attachmentUpload')).toBe(true);
     expect(HOST_SUPPORTED_CAPABILITIES.has('host:clipboard.write')).toBe(true);
     expect(HOST_SUPPORTED_CAPABILITIES.has('host:file-import.pick')).toBe(true);
     expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.recognize')).toBe(true);
@@ -301,6 +302,15 @@ describe('capability model data', () => {
       if (HOST_SUPPORTED_CAPABILITIES.has(capability)) continue;
       expect(FRONT_CAPABILITY_DEFINITIONS[capability].implemented).toBe(false);
     }
+  });
+
+  test('service.attachmentUpload needs no grant and is implemented', () => {
+    expect(FRONT_CAPABILITY_DEFINITIONS['service.attachmentUpload']).toMatchObject({
+      requiresGrant: 'none',
+      requiresBroker: false,
+      requiresSandbox: true,
+      implemented: true,
+    });
   });
 
   test('placeholder capabilities never enter the effective set', () => {
