@@ -550,9 +550,11 @@ final class RendererProcessPool: ObservableObject {
                 return
             }
             if name == "com.actrium.textInputFocus" {
-                guard let tabId = UUID(uuidString: tab) else { return }
-                let focused = userInfoJSON.contains("\"focused\":true")
-                    || userInfoJSON.contains("\"focused\": true")
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let data = userInfoJSON.data(using: .utf8),
+                      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let focused = payload["focused"] as? Bool else { return }
                 NotificationCenter.default.post(
                     name: .rendererTextInputFocusChanged,
                     object: nil,

@@ -80,7 +80,17 @@ final class RendererSurfaceHostView: NSView {
     /// True after real user input (mouse/key) reached this surface. Host-side
     /// IME composition only engages for user-driven focus: a programmatic
     /// autoFocus at launch must not steal first responder from Host UI.
-    private var hasUserInteraction = false
+    private var hasUserInteraction = false {
+        didSet {
+            guard hasUserInteraction, !oldValue, tabId != nil else { return }
+            // The Renderer dedupes focus reports. A field focused
+            // programmatically before this gate opened already reported
+            // (and the Host dropped) state it will never repeat, so ask for
+            // a forced re-report; the click/key that opened the gate can then
+            // activate IME on that field.
+            sendIMEPayload(name: "com.actrium.textInputFocusReset", payload: [:])
+        }
+    }
     /// Last remote caret rect in view coordinates; anchors the IME candidate
     /// window through `caretScreenRect()`.
     private var lastCaretRect: CGRect?
@@ -305,6 +315,16 @@ final class RendererSurfaceHostView: NSView {
         super.prepareForReuse()
         configureTask?.cancel()
         configureTask = nil
+        // Drop per-tab interaction/IME state so the recycled surface cannot
+        // leak it into the next tab (the gate exists to stop programmatic
+        // autoFocus from stealing first responder).
+        hasUserInteraction = false
+        lastCaretRect = nil
+        if window?.firstResponder === imeCompositionView {
+            window?.makeFirstResponder(nil)
+        }
+        imeCompositionView?.removeFromSuperview()
+        imeCompositionView = nil
     }
 
     private func sendViewport(size: CGSize) {
@@ -886,6 +906,14 @@ final class IMECompositionView: NSTextView {
             #selector(NSResponder.cancelOperation(_:)): 53,
         ]
         if let keyCode = keyCodes[aSelector] {
+            // With no active composition, Esc means nothing here; forwarding
+            // it blurs the remote input and flashes the surface. While
+            // composing, TSM consumes Esc itself (it never reaches this
+            // command), so this only guards the no-candidate case.
+            if aSelector == #selector(NSResponder.cancelOperation(_:)),
+               forwardingMarkedText.isEmpty {
+                return
+            }
             surfaceView?.sendCommandKey(keyCode: keyCode)
             return
         }
@@ -923,7 +951,11 @@ final class IMECompositionView: NSTextView {
     }
 
     override func unmarkText() {
+        // Cancel composition remotely too; otherwise the Renderer keeps
+        // showing the previously mirrored marked range.
+        surfaceView?.sendMarkedText("", selectedRange: NSRange(location: 0, length: 0))
         forwardingMarkedText = ""
+        forwardingMarkedSelection = NSRange(location: 0, length: 0)
     }
 
     override func selectedRange() -> NSRange {

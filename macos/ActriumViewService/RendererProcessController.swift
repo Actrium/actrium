@@ -245,13 +245,7 @@ final class RendererProcessController {
         ) { [weak self] note in
             guard let self, let window = note.object as? NSWindow else { return }
             for (tabId, surface) in self.surfaces where surface.window === window {
-                surface.reportTextInputFocusIfChanged { focused in
-                    try self.connection.sendHostEvent(
-                        name: "com.actrium.textInputFocus",
-                        userInfoJSON: "{\"focused\":\(focused)}",
-                        tabId: tabId
-                    )
-                }
+                self.reportTextInputFocus(tabId: tabId, surface: surface)
             }
         }
         connection.onHostEvent = { [weak self] name, json, tabId in
@@ -289,6 +283,13 @@ final class RendererProcessController {
                     self.surfaces[tabId]?.applyInsertText(op.text)
                 case "com.actrium.textInputBlurRequest":
                     self.surfaces[tabId]?.resignTextInputFocus()
+                case "com.actrium.textInputFocusReset":
+                    // The Host dropped our pre-interaction focus report and
+                    // its user-interaction gate just opened; force a fresh
+                    // report so IME can activate on the already-focused field.
+                    if let surface = self.surfaces[tabId] {
+                        self.reportTextInputFocus(tabId: tabId, surface: surface, force: true)
+                    }
                 default:
                     break
                 }
@@ -493,6 +494,21 @@ final class RendererProcessController {
 
     /// Forwards the surface caret rect to the Host; nil hides the candidate
     /// window anchor. Transport reuses the generic HostEvent channel.
+    /// Reports the surface's text-input focus state to the Host, unless it is
+    /// unchanged since the last report. `force` bypasses the dedupe latch.
+    private func reportTextInputFocus(tabId: String, surface: RendererTabSurface, force: Bool = false) {
+        if force {
+            surface.resetTextInputFocusDedupe()
+        }
+        surface.reportTextInputFocusIfChanged { focused in
+            try self.connection.sendHostEvent(
+                name: "com.actrium.textInputFocus",
+                userInfoJSON: "{\"focused\":\(focused)}",
+                tabId: tabId
+            )
+        }
+    }
+
     func publishCaret(tabId: String, rect: CGRect?) {
         guard let encoded = try? JSONEncoder().encode(rect) else { return }
         try? connection.sendHostEvent(
@@ -848,6 +864,15 @@ private final class RendererTabSurface {
         if focused { publishCaret() }
     }
 
+    /// Flips the dedupe latch so the next `reportTextInputFocusIfChanged`
+    /// reports even when the focus state itself did not change.
+    func resetTextInputFocusDedupe() {
+        let responder = window.firstResponder
+        let focused = (responder as? NSTextView)?.isEditable == true
+            || (responder as? NSTextField)?.isEditable == true
+        lastReportedTextFocus = !focused
+    }
+
     /// Applies Host-mirrored IME marked text to the focused text input.
     func applyMarkedText(_ text: String, selectedRange: NSRange) {
         guard let client = window.firstResponder as? NSTextInputClient else { return }
@@ -903,7 +928,12 @@ private final class RendererTabSurface {
     }
 
     private func caretRect() -> CGRect? {
-        guard let editor = focusedEditor, window.firstResponder === editor, editor.isEditable,
+        // Prefer the stored editor but fall back to the current first
+        // responder: autoFocus / Tab / JS .focus() never pass through
+        // `focusTextInput`, leaving `focusedEditor` nil even though a text
+        // view owns first responder.
+        let editor = focusedEditor ?? (window.firstResponder as? NSTextView)
+        guard let editor, window.firstResponder === editor, editor.isEditable,
               editor.selectedRange().length == 0 else {
             return nil
         }
