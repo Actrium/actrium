@@ -843,7 +843,7 @@ async fn new_from_front_inner(
             .map_err(|e| ActrError::Internal {
                 msg: format!("Issuer registration failed: {e}"),
             })?;
-        Ok(Arc::new(ActrNode {
+        Ok::<Arc<ActrNode>, ActrError>(Arc::new(ActrNode {
             inner: Mutex::new(Some(registered)),
             network_event_handle: Mutex::new(None),
             front_event_router: event_router,
