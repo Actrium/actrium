@@ -8,6 +8,7 @@ import { Engine } from 'keel/host';
 import { type V1Linkage, createV1CapabilityManifest, v1ServiceDispatchId, writeV1Bundle } from 'keel/v1';
 import { contract } from './contract';
 import { createHostModules } from './host-modules';
+import type { AttachmentUploadManager } from './attachment-upload';
 import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
 
 /** The actual CLI entrypoint, exercised in a separate process. */
@@ -45,6 +46,60 @@ test('requires the package declaration for linked speech recognition', () => {
   const bundle = writeV1Bundle(linked, 'module.exports = {};');
   expect(verifyV1RuntimeGuest(bundle, profile, ['host:speech.recognize']).ok).toBe(true);
   expect(verifyV1RuntimeGuest(bundle, profile, ['host:microphone.record']).ok).toBe(false);
+});
+
+test('verifies and binds the fixed uploadAttachment transport', async () => {
+  const linked: V1Linkage = {
+    ...linkage,
+    links: [...linkage.links, ['host:service', 'uploadAttachment']],
+  };
+  const profile = JSON.stringify(createV1CapabilityManifest(linked, contract));
+  const bundle = writeV1Bundle(linked, 'module.exports = {};');
+  // The manifest records the fixed transport next to the business route.
+  expect(verifyV1RuntimeGuest(bundle, profile, [
+    'service.call',
+    'service.attachmentUpload',
+    'host:clipboard.write',
+  ]).ok).toBe(true);
+  // The transport needs its own declaration, not just service.call.
+  expect(
+    verifyV1RuntimeGuest(bundle, profile, ['service.call', 'host:clipboard.write']).ok
+  ).toBe(false);
+
+  const uploads: unknown[] = [];
+  const grants: string[] = [];
+  const authorize = async (capability: string) => {
+    grants.push(capability);
+  };
+  const uploader = {
+    available: true,
+    upload: async (input: unknown) => {
+      uploads.push(input);
+      return { attachmentId: 'a-1' };
+    },
+    dispose: () => {},
+  };
+  const implementations = createHostModules({
+    hasServiceCapability: true,
+    callActor: async () => ({ success: true, payloadBase64: '' }),
+    authorizeCapability: authorize,
+    writeClipboardText: async () => {},
+    attachmentUploader: uploader as unknown as AttachmentUploadManager,
+  });
+  const bound = bindV1HostModules(linked, implementations, authorize);
+  const dispatch = createHostModuleDispatch(bound.contract, bound.hostModules);
+  expect(Object.keys(dispatch).sort()).toEqual([
+    'host:clipboard',
+    'host:service',
+    v1ServiceDispatchId(sourceModule, 'call'),
+  ]);
+  await dispatch['host:service'].uploadAttachment({
+    filename: 'a.txt',
+    base64: 'AAEC',
+    type: 'image',
+  });
+  expect(grants).toContain('service.attachmentUpload');
+  expect(uploads).toEqual([{ filename: 'a.txt', base64: 'AAEC', type: 'image' }]);
 });
 
 test('exposes only linked Host methods and pins the route on the Host', async () => {
