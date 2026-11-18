@@ -4,9 +4,9 @@ import type { CapabilityManifestV1 } from './capability-verify';
 import {
   createHttpServiceEventSource,
   createNativeServiceEventSource,
-  createTestServiceEventSource,
   serviceEventsFromManifest,
 } from './service-events';
+import { createTestServiceEventSource } from './service-events.test-utils';
 
 async function waitFor(condition: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -189,6 +189,46 @@ describe('createNativeServiceEventSource', () => {
     expect(cancelled).toEqual(['subscription-1']);
   });
 
+  test('buffers events emitted before the native subscribe reply', async () => {
+    let resolveSubscription!: (id: string) => void;
+    const nativeModule = {
+      addListener: () => {},
+      removeListeners: () => {},
+      subscribeServiceEvents: () => new Promise<string>((resolve) => {
+        resolveSubscription = resolve;
+      }),
+      unsubscribeServiceEvents: () => {},
+    };
+    let emitNative!: (event: unknown) => void;
+    const source = createNativeServiceEventSource(nativeModule, 'tab-1', ['a'], () => ({
+      addListener: (_event, listener) => {
+        emitNative = listener;
+        return { remove: () => {} };
+      },
+    }));
+    const received: string[] = [];
+    const unsubscribe = source.subscribe((event) => received.push(event.payloadBase64));
+
+    emitNative({
+      tabId: 'tab-1', subscriptionId: 'subscription-early', event: 'a', payloadBase64: 'AAEC',
+    });
+    emitNative({
+      tabId: 'tab-1', subscriptionId: 'older-subscription', event: 'a', payloadBase64: 'BAUG',
+    });
+    expect(received).toEqual([]);
+
+    resolveSubscription('subscription-early');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(received).toEqual(['AAEC']);
+
+    emitNative({
+      tabId: 'tab-1', subscriptionId: 'subscription-early', event: 'a', payloadBase64: 'AQID',
+    });
+    expect(received).toEqual(['AAEC', 'AQID']);
+    unsubscribe();
+  });
+
   test('delivers an empty native payload and rejects malformed base64', async () => {
     const nativeModule = {
       addListener: () => {},
@@ -313,6 +353,55 @@ describe('createHttpServiceEventSource', () => {
         { event: 'b', payloadBase64: 'AQID' },
       ]);
       unsubscribe();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('shares one HTTP connection and closes it after the last unsubscribe', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    let requestSignal: AbortSignal | undefined;
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const encoder = new TextEncoder();
+    globalThis.fetch = (async (
+      _input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1]
+    ) => {
+      fetchCalls += 1;
+      requestSignal = init?.signal ?? undefined;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            streamController = controller;
+            controller.enqueue(encoder.encode('event: a\ndata: {"payloadBase64":"AAEC"}\n\n'));
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+      );
+    }) as unknown as typeof fetch;
+
+    try {
+      const source = createHttpServiceEventSource('https://example.com/events', ['a']);
+      const first: string[] = [];
+      const second: string[] = [];
+      const unsubscribeFirst = source.subscribe((event) => first.push(event.payloadBase64));
+      const unsubscribeSecond = source.subscribe((event) => second.push(event.payloadBase64));
+      await waitFor(() => first.length === 1 && second.length === 1);
+      expect(fetchCalls).toBe(1);
+
+      unsubscribeFirst();
+      expect(requestSignal?.aborted).toBe(false);
+      streamController.enqueue(
+        encoder.encode('event: a\ndata: {"payloadBase64":"AQID"}\n\n')
+      );
+      await waitFor(() => second.length === 2);
+      expect(first).toEqual(['AAEC']);
+      expect(second).toEqual(['AAEC', 'AQID']);
+      expect(fetchCalls).toBe(1);
+
+      unsubscribeSecond();
+      expect(requestSignal?.aborted).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
     }

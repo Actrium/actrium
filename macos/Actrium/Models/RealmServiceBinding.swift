@@ -39,17 +39,25 @@ extension RealmServiceFailure {
     }
 }
 
+protocol RealmServiceBindingHandle: AnyObject, Sendable {
+    var id: UUID { get }
+    func call(_ request: RealmServiceCall) async throws -> Data
+    func subscribe(events: [String]) async throws
+    func suspendEvents() async
+    func stop() async
+}
+
 @MainActor
 final class RealmServiceBindings {
     static let shared = RealmServiceBindings()
-    private var bindings: [UUID: RealmServiceBinding] = [:]
+    private var bindings: [UUID: any RealmServiceBindingHandle] = [:]
     private var bindingTabs: [UUID: UUID] = [:]
     private var subscriptions: [UUID: (bindingId: UUID, events: Set<String>)] = [:]
     private var pendingSubscriptions: [UUID: UUID] = [:]
     private var cancelledSubscriptions: Set<UUID> = []
     var eventHandler: ((UUID, RealmServiceEvent) -> Void)?
 
-    func attach(_ binding: RealmServiceBinding, to tabId: UUID) {
+    func attach(_ binding: any RealmServiceBindingHandle, to tabId: UUID) {
         remove(tabId)
         bindings[tabId] = binding
         bindingTabs[binding.id] = tabId
@@ -74,18 +82,30 @@ final class RealmServiceBindings {
             throw RealmServiceError(message: "The tab has no Realm Service.")
         }
         pendingSubscriptions[request.id] = tabId
+        // The actor may publish as soon as subscribe selects its event peer,
+        // before the subscribe reply crosses the Renderer/Host IPC boundary.
+        // Register first so publish can already address this subscription.
+        subscriptions[request.id] = (binding.id, Set(request.events))
         defer {
             pendingSubscriptions.removeValue(forKey: request.id)
             cancelledSubscriptions.remove(request.id)
         }
-        try await binding.subscribe(events: request.events)
-        guard bindings[tabId] === binding, !cancelledSubscriptions.contains(request.id) else {
+        func rollback() async {
+            subscriptions.removeValue(forKey: request.id)
             if !subscriptions.values.contains(where: { $0.bindingId == binding.id }) {
                 await binding.suspendEvents()
             }
+        }
+        do {
+            try await binding.subscribe(events: request.events)
+        } catch {
+            await rollback()
+            throw error
+        }
+        guard bindings[tabId] === binding, !cancelledSubscriptions.contains(request.id) else {
+            await rollback()
             throw CancellationError()
         }
-        subscriptions[request.id] = (binding.id, Set(request.events))
     }
 
     func unsubscribe(_ subscriptionId: UUID, tabId: UUID) {
@@ -128,7 +148,7 @@ private final class RealmServiceEventRelay: ActrBindings.ServiceEventListener, @
     }
 }
 
-actor RealmServiceBinding {
+actor RealmServiceBinding: RealmServiceBindingHandle {
     private struct Provider: Decodable {
         struct Signaling: Decodable {
             let url: String

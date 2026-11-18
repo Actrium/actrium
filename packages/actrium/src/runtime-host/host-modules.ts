@@ -87,6 +87,8 @@ export function createHostModules(options: {
     capability: FrontCapability,
     listener: () => void
   ) => () => void;
+  /** Track the complete Guest cleanup for engine reload/tab teardown. */
+  trackServiceEventSubscription?: (cleanup: () => void) => () => void;
   writeClipboardText: (text: string) => Promise<void>;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
 }): HostModules {
@@ -134,6 +136,7 @@ export function createHostModules(options: {
         let allowed = false;
         let disposed = false;
         let stopWatchingRevocation: (() => void) | undefined;
+        let stopTracking: (() => void) | undefined;
         const unsubscribe = options.serviceEventSource.subscribe((event) => {
           if (!allowed || disposed) return;
           try {
@@ -148,8 +151,13 @@ export function createHostModules(options: {
           allowed = false;
           stopWatchingRevocation?.();
           stopWatchingRevocation = undefined;
+          stopTracking?.();
+          stopTracking = undefined;
           unsubscribe();
         };
+        const untrack = options.trackServiceEventSubscription?.(cleanup);
+        if (disposed) untrack?.();
+        else stopTracking = untrack;
         void options.authorizeCapability('service.on').then(
           () => {
             if (disposed) return;

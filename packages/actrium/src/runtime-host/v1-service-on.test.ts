@@ -6,14 +6,14 @@ import { CapabilityAuthorizer, type NativeCapabilitySnapshot } from './capabilit
 
 import { contract } from './contract';
 import { createHostModules } from './host-modules';
-import { createTestServiceEventSource } from './service-events';
+import { createTestServiceEventSource } from './service-events.test-utils';
 import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
 
 const eventName = 'notes.v1.changed';
 const sourceModule = `host:service/${eventName}`;
 
 function makeHostModules() {
-  const { source, emit } = createTestServiceEventSource([eventName]);
+  const { source, emit } = createTestServiceEventSource([eventName, 'notes.v1.other']);
   const snapshot: NativeCapabilitySnapshot = {
     schemaVersion: 1,
     revision: 1,
@@ -77,6 +77,8 @@ describe('v1 service.on linkage', () => {
     // Wait for host-modules.on authorization to resolve.
     await Promise.resolve();
 
+    emit({ event: 'notes.v1.other', payloadBase64: 'BAUG' });
+    expect(received).toEqual([]);
     emit({ event: eventName, payloadBase64: 'AAEC' });
     expect(received).toEqual([{ event: eventName, payloadBase64: 'AAEC' }]);
 

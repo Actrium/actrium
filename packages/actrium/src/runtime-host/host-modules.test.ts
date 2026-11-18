@@ -5,7 +5,7 @@ import { contract } from './contract';
 import type { FileImportPickInput, FileImportPickOutput } from './contract';
 import type { FrontCapability } from './capabilities';
 import { createHostModules, type HostModules } from './host-modules';
-import { createTestServiceEventSource } from './service-events';
+import { createTestServiceEventSource } from './service-events.test-utils';
 
 const input = { route: 'echo.EchoService.Echo', payloadBase64: 'AAEC' };
 
@@ -15,6 +15,7 @@ function createTestHostModules(options?: {
   serviceEventSource?: ReturnType<typeof createTestServiceEventSource>['source'];
   authorizeCapability?: (capability: FrontCapability) => Promise<void>;
   onCapabilityRevoked?: (capability: FrontCapability, listener: () => void) => () => void;
+  trackServiceEventSubscription?: (cleanup: () => void) => () => void;
   writeClipboardText?: (text: string) => Promise<void>;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
 }): HostModules {
@@ -25,6 +26,7 @@ function createTestHostModules(options?: {
     serviceEventSource: options?.serviceEventSource,
     authorizeCapability: options?.authorizeCapability ?? (async () => {}),
     onCapabilityRevoked: options?.onCapabilityRevoked,
+    trackServiceEventSubscription: options?.trackServiceEventSubscription,
     writeClipboardText: options?.writeClipboardText ?? (async () => {}),
     pickFiles: options?.pickFiles,
   });
@@ -196,6 +198,41 @@ describe('host:service implementation', () => {
     expect(subscriptions).toBe(1);
     revoke();
     expect(subscriptions).toBe(0);
+  });
+
+  test('engine teardown removes both transport and revocation listeners', async () => {
+    let transportSubscriptions = 0;
+    const revocationListeners = new Set<() => void>();
+    const trackedCleanups = new Set<() => void>();
+    const hostModules = createTestHostModules({
+      serviceEventSource: {
+        subscribe: () => {
+          transportSubscriptions += 1;
+          return () => { transportSubscriptions -= 1; };
+        },
+      },
+      onCapabilityRevoked: (_capability, listener) => {
+        revocationListeners.add(listener);
+        return () => { revocationListeners.delete(listener); };
+      },
+      trackServiceEventSubscription: (cleanup) => {
+        trackedCleanups.add(cleanup);
+        return () => { trackedCleanups.delete(cleanup); };
+      },
+    });
+    const unsubscribe = hostModules['host:service'].on(() => {});
+    await Promise.resolve();
+    expect(transportSubscriptions).toBe(1);
+    expect(revocationListeners.size).toBe(1);
+    expect(trackedCleanups.size).toBe(1);
+
+    for (const cleanup of [...trackedCleanups]) cleanup();
+    expect(transportSubscriptions).toBe(0);
+    expect(revocationListeners.size).toBe(0);
+    expect(trackedCleanups.size).toBe(0);
+
+    unsubscribe?.();
+    expect(transportSubscriptions).toBe(0);
   });
 
   test('unsubscribes when service.on authorization is rejected', async () => {

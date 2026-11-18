@@ -109,7 +109,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
     const authorize = async () => {};
     const implementations = createHostModules({
       hasServiceCapability: true,
-    hasServiceOnCapability: true,
+      hasServiceOnCapability: true,
       callActor: async ({ route: sentRoute }) => {
         calls.push(sentRoute);
         return { success: true, payloadBase64: '' };

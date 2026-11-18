@@ -70,9 +70,16 @@ export function createNativeServiceEventSource(
   let emitterSubscription: { remove(): void } | undefined;
   let nativeSubscriptionId: string | undefined;
   let generation = 0;
+  // Native registers the subscription before its async subscribe reply returns.
+  // Keep those early events by generation until the reply identifies which
+  // native subscription they belong to. A finite buffer prevents a stale or
+  // malicious emitter from growing memory while authorization is pending.
+  const earlyEvents: { subscriptionId: string; event: ServiceEvent }[] = [];
+  const maxEarlyEvents = 256;
 
   const stop = () => {
     generation += 1;
+    earlyEvents.length = 0;
     emitterSubscription?.remove();
     emitterSubscription = undefined;
     if (nativeSubscriptionId) {
@@ -94,12 +101,14 @@ export function createNativeServiceEventSource(
         !body ||
         body.tabId !== tabId ||
         typeof body.subscriptionId !== 'string' ||
-        body.subscriptionId !== nativeSubscriptionId ||
         typeof body.event !== 'string' ||
         !allowedEvents.has(body.event)
       ) {
         return;
       }
+      // Once the reply is known, late events from an older native subscription
+      // must not enter the current generation.
+      if (nativeSubscriptionId && body.subscriptionId !== nativeSubscriptionId) return;
       let event: ServiceEvent;
       try {
         // The contract is the single authority for payload validation. Empty
@@ -112,7 +121,18 @@ export function createNativeServiceEventSource(
         console.warn('[Actrium] Ignoring a malformed native Service event:', error);
         return;
       }
-      deliver([...handlers.keys()], event);
+      if (nativeSubscriptionId) {
+        deliver([...handlers.keys()], event);
+        return;
+      }
+      if (earlyEvents.length >= maxEarlyEvents) {
+        console.warn('[Actrium] Service event subscription exceeded its early-event buffer.');
+        handlers.clear();
+        handlerCount = 0;
+        stop();
+        return;
+      }
+      earlyEvents.push({ subscriptionId: body.subscriptionId, event });
     });
     void nativeModule.subscribeServiceEvents(tabId, events).then(
       (subscriptionId) => {
@@ -128,6 +148,13 @@ export function createNativeServiceEventSource(
           return;
         }
         nativeSubscriptionId = subscriptionId;
+        const pending = earlyEvents.splice(0);
+        for (const item of pending) {
+          if (current !== generation) break;
+          if (item.subscriptionId === subscriptionId) {
+            deliver([...handlers.keys()], item.event);
+          }
+        }
       },
       (error) => {
         if (current !== generation) return;
@@ -168,34 +195,6 @@ export function createNativeServiceEventSource(
         handlerCount = Math.max(0, handlerCount - 1);
         if (handlerCount === 0) stop();
       };
-    },
-  };
-}
-
-/** Create a test event source that allows tests to inject events manually. */
-export function createTestServiceEventSource(events: string[]): {
-  source: ServiceEventSource;
-  emit(event: ServiceEvent): void;
-  subscriberCount(): number;
-} {
-  const handlers = new Set<ServiceEventHandler>();
-  return {
-    source: {
-      subscribe(handler) {
-        handlers.add(handler);
-        return () => {
-          handlers.delete(handler);
-        };
-      },
-    },
-    emit(event) {
-      if (!events.includes(event.event)) {
-        throw new Error(`Event "${event.event}" is not in the allowed test event set.`);
-      }
-      deliver([...handlers], event);
-    },
-    subscriberCount() {
-      return handlers.size;
     },
   };
 }
@@ -247,8 +246,8 @@ function retryableHttpStatus(status: number): boolean {
  *
  * Streaming fetch is used where available. React Native's whatwg-fetch does not
  * expose response.body, so those hosts automatically use incremental XHR
- * responseText instead. Reconnects resume with Last-Event-ID when the server
- * supplied an id; servers that do not persist IDs retain the documented
+ * responseText instead. All handlers on this source share one SSE connection.
+ * Reconnects resume with Last-Event-ID when the server supplied an id; servers that do not persist IDs retain the documented
  * no-replay behavior.
  */
 export function createHttpServiceEventSource(
@@ -273,8 +272,18 @@ export function createHttpServiceEventSource(
     throw new Error('Invalid Service event stream limits.');
   }
 
-  return {
-    subscribe(handler) {
+  const handlers = new Map<ServiceEventHandler, number>();
+  let handlerCount = 0;
+  let generation = 0;
+  let stopStream: (() => void) | undefined;
+
+  const stop = () => {
+    generation += 1;
+    stopStream?.();
+    stopStream = undefined;
+  };
+
+  const start = () => {
       const url = new URL(eventsUrl, typeof location !== 'undefined' ? location.href : undefined);
       for (const event of events) url.searchParams.append('event', event);
 
@@ -332,7 +341,7 @@ export function createHttpServiceEventSource(
             // A valid event proves the stream is making progress, even if the
             // server closes it before the stable-connection timer fires.
             retryCount = 0;
-            deliver([handler], frame.event);
+            deliver([...handlers.keys()], frame.event);
           }
           if (buffer.length > maxBufferedCharacters) {
             finish({
@@ -492,7 +501,7 @@ export function createHttpServiceEventSource(
       };
 
       void consume();
-      return () => {
+      stopStream = () => {
         if (!active) return;
         active = false;
         cancelConnection?.();
@@ -501,6 +510,35 @@ export function createHttpServiceEventSource(
         retryTimer = undefined;
         finishRetrySleep?.();
         finishRetrySleep = undefined;
+      };
+  };
+
+  return {
+    subscribe(handler) {
+      const wasEmpty = handlerCount === 0;
+      handlers.set(handler, (handlers.get(handler) ?? 0) + 1);
+      handlerCount += 1;
+      if (wasEmpty) {
+        try {
+          start();
+        } catch (error) {
+          handlers.delete(handler);
+          handlerCount -= 1;
+          stop();
+          throw error;
+        }
+      }
+      let active = true;
+      const subscriptionGeneration = generation;
+      return () => {
+        if (!active) return;
+        active = false;
+        if (subscriptionGeneration !== generation) return;
+        const remaining = (handlers.get(handler) ?? 0) - 1;
+        if (remaining > 0) handlers.set(handler, remaining);
+        else handlers.delete(handler);
+        handlerCount = Math.max(0, handlerCount - 1);
+        if (handlerCount === 0) stop();
       };
     },
   };

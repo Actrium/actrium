@@ -269,34 +269,24 @@ export const StandaloneGuestApp: React.FC<Props> = ({
               );
         }
       } catch {
-        // Verification below will surface the malformed manifest; keep the
-        // source undefined so the engine can still load non-event guests.
+        // Verification above has already surfaced the malformed manifest; keep
+        // the source undefined so the engine can still load non-event guests.
       }
     }
 
-    // Track every service event subscription so engine reload/tab close can
-    // tear them down even if the Guest forgets to unsubscribe.
-    const eventSubscriptions: (() => void)[] = [];
-    const trackedServiceEventSource: ServiceEventSource | undefined =
-      serviceEventSource
-        ? {
-            subscribe(handler) {
-              let active = true;
-              const unsubscribe = serviceEventSource!.subscribe((event) => {
-                if (active) handler(event);
-              });
-              const cleanup = () => {
-                if (!active) return;
-                active = false;
-                unsubscribe();
-                const index = eventSubscriptions.indexOf(cleanup);
-                if (index >= 0) eventSubscriptions.splice(index, 1);
-              };
-              eventSubscriptions.push(cleanup);
-              return cleanup;
-            },
-          }
-        : undefined;
+    // Track complete Host cleanups, including revocation listeners, so engine
+    // reload/tab close works even if the Guest forgets to unsubscribe.
+    const eventSubscriptions = new Set<() => void>();
+    const trackServiceEventSubscription = (cleanup: () => void): (() => void) => {
+      if (disposed) {
+        cleanup();
+        return () => {};
+      }
+      eventSubscriptions.add(cleanup);
+      return () => {
+        eventSubscriptions.delete(cleanup);
+      };
+    };
 
     const fileImport = NativeModules.GuestFileImport as FileImportBridge | undefined;
     const nativePick = fileImport?.pick?.bind(fileImport, tab.id, tab.reloadKey ?? 0);
@@ -308,10 +298,11 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       hasServiceCapability,
       hasServiceOnCapability,
       callActor: callServiceActor,
-      serviceEventSource: trackedServiceEventSource,
+      serviceEventSource,
       authorizeCapability: (capability) => authorizer.authorize(capability),
       onCapabilityRevoked: (capability, listener) =>
         authorizer.onRevoked(capability, listener),
+      trackServiceEventSubscription,
       writeClipboardText,
       pickFiles: nativePick && ((input) => nativePick(
         input.source ?? 'files', input.accept ?? [], input.multiple ?? false
@@ -429,8 +420,8 @@ export const StandaloneGuestApp: React.FC<Props> = ({
 
     return () => {
       disposed = true;
-      for (const unsubscribe of [...eventSubscriptions]) unsubscribe();
-      eventSubscriptions.length = 0;
+      for (const cleanup of [...eventSubscriptions]) cleanup();
+      eventSubscriptions.clear();
       unsubscribeEvents();
       unsubscribeUpdate();
       engine.destroy();
