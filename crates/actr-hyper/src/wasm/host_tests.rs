@@ -8,12 +8,12 @@ fn wasi_preopen_rejects_replaced_directory() {
     let path = base.join("data");
     std::fs::create_dir(&path).unwrap();
     let expected = HostState::open_expected_data_dir(&path).unwrap();
-    assert!(HostState::validated_data_preopen(&path, &expected).is_ok());
+    assert!(HostState::validated_data_preopen(&path, &expected, WasiDataAccess::ReadWrite).is_ok());
 
     std::fs::rename(&path, base.join("original")).unwrap();
     std::fs::create_dir(&path).unwrap();
 
-    let result = HostState::validated_data_preopen(&path, &expected);
+    let result = HostState::validated_data_preopen(&path, &expected, WasiDataAccess::ReadWrite);
     assert!(
         matches!(result, Err(WasmError::LoadFailed(message)) if message.contains("changed before preopen"))
     );
@@ -29,9 +29,11 @@ fn wasi_preopen_rejects_different_directory_identity() {
     std::fs::create_dir(&original).unwrap();
     std::fs::create_dir(&other).unwrap();
     let expected = HostState::open_expected_data_dir(&original).unwrap();
-    assert!(HostState::validated_data_preopen(&original, &expected).is_ok());
+    assert!(
+        HostState::validated_data_preopen(&original, &expected, WasiDataAccess::ReadWrite).is_ok()
+    );
 
-    let result = HostState::validated_data_preopen(&other, &expected);
+    let result = HostState::validated_data_preopen(&other, &expected, WasiDataAccess::ReadWrite);
     assert!(
         matches!(result, Err(WasmError::LoadFailed(message)) if message.contains("changed before preopen"))
     );
@@ -42,10 +44,47 @@ fn wasi_preopen_rejects_filesystem_root() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().canonicalize().unwrap();
     let root = path.ancestors().last().unwrap();
-    let result = HostState::preopen_data_dir(root);
+    let result = HostState::preopen_data_dir(root, WasiDataAccess::ReadWrite);
     assert!(
         matches!(result, Err(WasmError::LoadFailed(message)) if message.contains("filesystem root"))
     );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn wasi_mountinfo_distinguishes_filesystem_root_from_bound_subdirectory() {
+    let mounts = br"41 30 0:81 / /vol rw - tmpfs tmpfs rw
+42 30 0:81 /notes\040data /bound rw - tmpfs tmpfs rw
+";
+    assert_eq!(linux_mount_is_filesystem_root(mounts, 41), Some(true));
+    assert_eq!(linux_mount_is_filesystem_root(mounts, 42), Some(false));
+    assert_eq!(linux_mount_is_filesystem_root(mounts, 4), None);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires a Linux filesystem root at ACTR_TEST_WASI_VOLUME and a bind-mounted subdirectory at ACTR_TEST_WASI_BIND"]
+fn wasi_preopen_checks_real_linux_mounts() {
+    let fixture = |name: &str| std::path::PathBuf::from(std::env::var_os(name).expect(name));
+    let volume = fixture("ACTR_TEST_WASI_VOLUME");
+    let bound = fixture("ACTR_TEST_WASI_BIND");
+    for (path, expected_root) in [(&volume, true), (&bound, false)] {
+        let path = path.canonicalize().unwrap();
+        let parent = File::open(path.parent().unwrap()).unwrap();
+        let directory = File::open(&path).unwrap();
+        assert_eq!(
+            linux_filesystem_root(&parent, &directory),
+            Some(expected_root),
+            "{}",
+            path.display()
+        );
+    }
+
+    let result = HostState::preopen_data_dir(&volume, WasiDataAccess::ReadOnly);
+    assert!(
+        matches!(result, Err(WasmError::LoadFailed(message)) if message.contains("filesystem root"))
+    );
+    HostState::preopen_data_dir(&bound, WasiDataAccess::ReadOnly).unwrap();
 }
 
 #[test]

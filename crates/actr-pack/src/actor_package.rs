@@ -21,6 +21,10 @@ pub const ACTOR_PACKAGE_FORMAT_V2: &str = "actr-package/2";
 /// Superseded format identifier; rejected with a migration hint.
 const ACTOR_PACKAGE_FORMAT_V1: &str = "actr-package/1";
 pub const KEEL_GUEST_PROFILE_V1: &str = "keel.guest/1";
+/// Component capability for a read-only WASI data directory.
+pub const WASI_DATA_READ_ONLY: &str = "wasi.data.read-only";
+/// Component capability for a read-write WASI data directory.
+pub const WASI_DATA_READ_WRITE: &str = "wasi.data.read-write";
 const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 const MAX_SIGNATURE_BYTES: usize = 64;
 
@@ -329,6 +333,45 @@ impl ActorPackageManifest {
             return Err(PackError::InvalidPackage(
                 "[workload.keel] requires the keel.guest/1 profile".to_string(),
             ));
+        }
+
+        if self.workload.profile == "actr.component/1" {
+            let mut seen = BTreeSet::new();
+            for capability in self
+                .host
+                .required_capabilities
+                .iter()
+                .chain(&self.host.optional_capabilities)
+            {
+                let valid = capability.split('.').all(|segment| {
+                    let mut bytes = segment.bytes();
+                    bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())
+                        && bytes.all(|byte| {
+                            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                        })
+                });
+                if !valid {
+                    return Err(PackError::InvalidPackage(format!(
+                        "invalid actr.component/1 capability ID `{capability}`"
+                    )));
+                }
+                if !seen.insert(capability) {
+                    return Err(PackError::InvalidPackage(format!(
+                        "duplicate actr.component/1 capability ID `{capability}`"
+                    )));
+                }
+            }
+            let requires = |id| {
+                self.host
+                    .required_capabilities
+                    .iter()
+                    .any(|capability| capability == id)
+            };
+            if requires(WASI_DATA_READ_ONLY) && requires(WASI_DATA_READ_WRITE) {
+                return Err(PackError::InvalidPackage(format!(
+                    "`{WASI_DATA_READ_ONLY}` and `{WASI_DATA_READ_WRITE}` are mutually exclusive"
+                )));
+            }
         }
 
         if self.files.is_empty() {

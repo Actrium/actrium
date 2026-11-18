@@ -65,6 +65,7 @@ fn test_runtime_config(
         web: None,
         storage_root: None,
         wasi_data_dir: None,
+        wasi_data_access: actr_config::WasiDataAccess::default(),
     }
 }
 

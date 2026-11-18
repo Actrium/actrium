@@ -171,6 +171,7 @@ pub struct RawCapabilitiesConfig {
 /// (`{storage_root}/actors/v1/<sha256-hex>/store.sqlite3`); the actor identity
 /// never contributes a path component (CWE-22 / CWE-73).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct RawHyperConfig {
     /// Filesystem root for per-actor storage. Relative paths resolve against the
     /// config file's directory; a leading `~` is expanded.
@@ -182,9 +183,11 @@ pub struct RawHyperConfig {
     #[serde(default)]
     pub wasi_data_dir: Option<std::path::PathBuf>,
 
-    /// Tombstone: the removed `storage_path_template` key. Kept only to produce
-    /// an explicit migration error instead of letting Serde silently ignore it
-    /// (the surrounding struct has no `deny_unknown_fields`).
+    /// Maximum guest access to that directory. Defaults to read-write.
+    #[serde(default)]
+    pub wasi_data_access: crate::config::WasiDataAccess,
+
+    /// Recognize the removed key so the parser can report its replacement.
     #[serde(default, rename = "storage_path_template")]
     pub removed_storage_path_template: Option<String>,
 }

@@ -208,13 +208,25 @@ Two TOML files, easily confused:
 
 ### WASM workload data
 
-Set `[hyper].wasi_data_dir` in `actr.toml` to expose an existing directory to a
-packaged WASM workload at `/data` with read and write access. Relative paths
-resolve against the directory containing the config file.
+For an `actr-package/2` Component, declare the required capability in the signed
+package manifest:
+
+```toml
+[host]
+profile = "actr.host/1"
+api = "^1.0.0"
+required-capabilities = ["wasi.data.read-only"]
+```
+
+Use `wasi.data.read-write` instead if the workload needs to modify data. A
+package can declare at most one of these capabilities.
+
+The deployer grants access to a specific, existing directory in `actr.toml`:
 
 ```toml
 [hyper]
 wasi_data_dir = "./workload-data"
+wasi_data_access = "read-only"
 ```
 
 ```sh
@@ -222,14 +234,25 @@ mkdir -p "$PWD/workload-data"
 actr run --config actr.toml
 ```
 
-Use a dedicated directory for each workload. Leaving the setting unset keeps
-the mount disabled. The directory cannot be a filesystem root. On macOS, the
-host process also needs read and search permissions on each ancestor of the
-resolved directory so it can validate the mount.
+Use a dedicated directory per workload. The Host exposes it at `/data` with
+the access requested by the signed package. The deployment setting is a
+ceiling: a read-only package gets a read-only mount even when the ceiling is
+`"read-write"` (the default). A package that requires write access fails to
+attach under a read-only grant. Without a signed data capability, the
+directory is not mounted.
 
-Embedded hosts using `Node::from_hyper` inherit this setting by default.
-`HyperConfig` can explicitly disable it with `WasiDataDir::Disabled` or
-replace it with `WasiDataDir::Directory` using an absolute path.
+Relative paths resolve against the config file's directory. The directory
+cannot be a filesystem root. On macOS, the Host process needs read and
+search permissions on each ancestor of the resolved directory to validate the mount.
+Unknown keys in `[hyper]` are rejected so a misspelled access limit fails
+configuration loading.
+
+Embedded hosts using `Node::from_hyper` inherit the directory and access limit
+from the runtime configuration by default. `HyperConfig` can deny the grant
+with `WasiDataDir::Disabled`, override the path with `WasiDataDir::Directory`
+while keeping the deployment access limit, or use
+`WasiDataDir::ReadOnlyDirectory` to supply an explicitly read-only absolute
+directory. Restart or reattach the workload to apply a grant change.
 
 Commands that touch `manifest.toml` use `--manifest-path` / `-m`.
 Commands that touch `actr.toml` use `--config` / `-c`.

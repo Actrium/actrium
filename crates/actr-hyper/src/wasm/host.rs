@@ -37,6 +37,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use actr_config::WasiDataAccess;
 use actr_framework::{Deliver, ReplyOutcome};
 use cap_primitives::ambient_authority;
 use cap_primitives::fs::{open_ambient_dir, open_dir_nofollow};
@@ -48,7 +49,7 @@ use wasmtime_wasi::filesystem::{Descriptor, WasiFilesystemCtx, WasiFilesystemCtx
 use wasmtime_wasi::p2::bindings::filesystem::preopens::Host as WasiPreopens;
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-use crate::config::WasmRuntimeLimits;
+use crate::config::{WasiDataGrant, WasmRuntimeLimits};
 use crate::workload::{HostAbiFn, InvocationContext};
 
 use super::host_v2::WasmWorkloadV2;
@@ -231,6 +232,43 @@ fn directory_identity(file: &File) -> std::io::Result<(u64, u64)> {
     Ok((metadata.dev(), metadata.ino()))
 }
 
+#[cfg(target_os = "linux")]
+fn linux_filesystem_root(parent: &File, directory: &File) -> Option<bool> {
+    use std::os::fd::AsRawFd;
+
+    fn mount_id(file: &File) -> Option<u64> {
+        std::fs::read_to_string(format!("/proc/self/fdinfo/{}", file.as_raw_fd()))
+            .ok()?
+            .lines()
+            .find_map(|line| line.strip_prefix("mnt_id:"))?
+            .trim()
+            .parse()
+            .ok()
+    }
+
+    let mount_id_for_dir = mount_id(directory)?;
+    if mount_id_for_dir == mount_id(parent)? {
+        return Some(false);
+    }
+
+    // Match the opened mount by ID so a bind mount of a subdirectory
+    // remains usable, even if it crosses a device boundary.
+    let mounts = std::fs::read("/proc/self/mountinfo").ok()?;
+    linux_mount_is_filesystem_root(&mounts, mount_id_for_dir)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_mount_is_filesystem_root(mounts: &[u8], mount_id: u64) -> Option<bool> {
+    let id = mount_id.to_string();
+    for line in mounts.split(|byte| *byte == b'\n') {
+        let mut fields = line.split(|byte| *byte == b' ');
+        if fields.next() == Some(id.as_bytes()) {
+            return Some(fields.nth(2)? == b"/");
+        }
+    }
+    None
+}
+
 #[cfg(windows)]
 fn directory_identity(file: &File) -> std::io::Result<(u64, [u8; 16])> {
     use std::mem::{MaybeUninit, size_of};
@@ -281,7 +319,10 @@ impl HostState {
         self.isolate_wasi_runtime = enabled;
     }
 
-    pub(super) fn preopen_data_dir(directory: &Path) -> WasmResult<WasiFilesystemCtx> {
+    pub(super) fn preopen_data_dir(
+        directory: &Path,
+        access: WasiDataAccess,
+    ) -> WasmResult<WasiFilesystemCtx> {
         if !directory.is_absolute() {
             return Err(WasmError::LoadFailed(
                 "WASI data directory must be an absolute path".into(),
@@ -294,7 +335,7 @@ impl HostState {
             ))
         })?;
         let expected = Self::open_expected_data_dir(&directory)?;
-        Self::validated_data_preopen(&directory, &expected)
+        Self::validated_data_preopen(&directory, &expected, access)
     }
 
     fn open_expected_data_dir(directory: &Path) -> WasmResult<File> {
@@ -308,6 +349,12 @@ impl HostState {
             ));
         }
         let relative = directory.strip_prefix(root).expect("root is a path prefix");
+        let mut components = relative.components();
+        let invalid_path =
+            || WasmError::LoadFailed("WASI data directory must have a canonical path".into());
+        let Some(PathComponent::Normal(name)) = components.next_back() else {
+            return Err(invalid_path());
+        };
         let open_error = |error| {
             WasmError::LoadFailed(format!(
                 "cannot open WASI data directory `{}`: {error}",
@@ -316,28 +363,37 @@ impl HostState {
         };
         // Walk from the root by handle so a replaced component cannot redirect the expected open.
         let root = open_ambient_dir(root, ambient_authority()).map_err(open_error)?;
-        let mut current = root.try_clone().map_err(open_error)?;
-        for component in relative.components() {
-            let PathComponent::Normal(name) = component else {
-                return Err(WasmError::LoadFailed(
-                    "WASI data directory must have a canonical path".into(),
-                ));
+        let mut parent = root.try_clone().map_err(open_error)?;
+        for component in components {
+            let PathComponent::Normal(ancestor) = component else {
+                return Err(invalid_path());
             };
-            current = open_dir_nofollow(&current, Path::new(name)).map_err(open_error)?;
+            parent = open_dir_nofollow(&parent, Path::new(ancestor)).map_err(open_error)?;
         }
-        if directory_identity(&current).map_err(open_error)?
-            == directory_identity(&root).map_err(open_error)?
-        {
+        let opened = open_dir_nofollow(&parent, Path::new(name)).map_err(open_error)?;
+        let identity = directory_identity(&opened).map_err(open_error)?;
+        let mounted_root = identity.0 != directory_identity(&parent).map_err(open_error)?.0;
+        #[cfg(target_os = "linux")]
+        let mounted_root = linux_filesystem_root(&parent, &opened).unwrap_or(mounted_root);
+        if mounted_root || identity == directory_identity(&root).map_err(open_error)? {
             return Err(WasmError::LoadFailed(
                 "WASI data directory cannot be a filesystem root".into(),
             ));
         }
-        Ok(current)
+        Ok(opened)
     }
 
-    fn validated_data_preopen(directory: &Path, expected: &File) -> WasmResult<WasiFilesystemCtx> {
+    fn validated_data_preopen(
+        directory: &Path,
+        expected: &File,
+        access: WasiDataAccess,
+    ) -> WasmResult<WasiFilesystemCtx> {
+        let perms = match access {
+            WasiDataAccess::ReadOnly => FsPerms::ReadOnly,
+            WasiDataAccess::ReadWrite => FsPerms::ReadWrite,
+        };
         let mut wasi = WasiCtxBuilder::new();
-        wasi.preopened_dir(directory, "/data", FsPerms::ReadWrite)
+        wasi.preopened_dir(directory, "/data", perms)
             .map_err(|error| {
                 WasmError::LoadFailed(format!(
                     "cannot preopen WASI data directory `{}`: {error}",
@@ -829,7 +885,7 @@ impl WasmHost {
     /// `actr:workload/host@0.6.0` linker, and runs `Component::instantiate_async`.
     pub(crate) async fn instantiate(
         &self,
-        wasi_data_dir: Option<&Path>,
+        wasi_data: Option<WasiDataGrant<'_>>,
     ) -> WasmResult<WasmWorkloadV2> {
         probe_world(&self.component, &self.engine)?;
         WasmWorkloadV2::instantiate(
@@ -838,7 +894,7 @@ impl WasmHost {
             &self.limits,
             Arc::clone(&self.epoch_ticker),
             self.uses_explicit_reply_boundary,
-            wasi_data_dir,
+            wasi_data,
         )
         .await
     }

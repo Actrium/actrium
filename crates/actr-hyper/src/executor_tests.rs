@@ -921,7 +921,10 @@ async fn mounted_interleaved_guest_uses_caller_clock_and_host_runtime() {
     let host = crate::wasm::WasmHost::compile(wasm_actor_fixture::WASM_ACTOR_FIXTURE)
         .expect("compile fixture component");
     let workload = host
-        .instantiate(Some(data.path()))
+        .instantiate(Some(crate::config::WasiDataGrant {
+            directory: data.path(),
+            access: actr_config::WasiDataAccess::ReadWrite,
+        }))
         .await
         .expect("instantiate mounted fixture");
     let handle = spawn_runner_with_mode(
