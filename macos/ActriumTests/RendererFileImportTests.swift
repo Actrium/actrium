@@ -1,4 +1,6 @@
 import ActriumIPC
+import AppKit
+import Combine
 import Foundation
 import Testing
 @testable import Actrium
@@ -49,7 +51,15 @@ struct RendererFileImportTests {
         let store = CapabilityPermissionStore.shared
         let capability = GuestFileImportCall.capability
         let permissions = [capability]
+        let expected = "File import is unavailable for this tab."
+        var received = false
+        let updates = NotificationCenter.default.publisher(for: .rendererAccessibilityUpdated).sink { notification in
+            guard let tree = notification.userInfo?["tree"] as? Actrium_Ipc_AccessibilityTree,
+                  tree.tabID == tabId.uuidString else { return }
+            received = tree.nodes.contains { $0.label.contains(expected) }
+        }
         defer {
+            updates.cancel()
             pool.releaseRenderer(for: tabId)
             store.clearSessionGrants(tabId: tabId)
         }
@@ -64,30 +74,35 @@ struct RendererFileImportTests {
         ])
 
         let deadline = ContinuousClock.now + .seconds(8)
-        var result: String?
-        while result == nil && ContinuousClock.now < deadline {
+        while !received && ContinuousClock.now < deadline {
+            pool.requestAccessibilityTree(for: tabId)
             try await Task.sleep(for: .milliseconds(100))
-            result = DevToolsManager.shared.consoleLogs.first {
-                $0.source.contains(String(tabId.uuidString.prefix(8))) && $0.message.contains("File import is unavailable")
-            }?.message
         }
-        #expect(result?.contains("File import is unavailable for this tab.") == true)
+        #expect(received)
     }
 
     private static let probeManifest = """
     {"schemaVersion":1,"keelApi":"1.0","guestEntry":"workload/guest.js",
-     "imports":["host:file-import"],"components":[],
+     "imports":["host:file-import","keel/guest","react"],"components":["Text"],
      "hostModules":{"file-import":{"rpc":["pick"]}}}
     """
 
     private static let probeBundle = """
-    // keel:v1-linkage {"guestEntry":"workload/guest.js","links":[["host:file-import","pick"]]}
+    // keel:v1-linkage {"guestEntry":"workload/guest.js","links":[["host:file-import","pick"],["keel/guest","Text"],["react"]]}
+    var React = require('react');
+    var Text = require('keel/guest').Text;
     var picker = globalThis.__keel.hostModules['host:file-import'];
-    picker.pick({ source: 'photos', multiple: true }).then(function () {
-      console.error('Unexpected file selection.');
-    }, function (error) {
-      console.error(String(error.message || error));
-    });
-    module.exports = { default: function FileImportProbe() { return null; } };
+    function FileImportProbe() {
+      var report = React.useState('Waiting for the picker.');
+      React.useEffect(function () {
+        picker.pick({ source: 'photos', multiple: true }).then(function () {
+          report[1]('Unexpected file selection.');
+        }, function (error) {
+          report[1](String(error.message || error));
+        });
+      }, []);
+      return React.createElement(Text, { accessible: true, accessibilityLabel: report[0] }, report[0]);
+    }
+    module.exports = { default: FileImportProbe };
     """
 }

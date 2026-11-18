@@ -10,7 +10,26 @@ final class RendererFileImport {
         let hostModules: [String: Module]
     }
 
-    private var pendingTabs: Set<UUID> = []
+    private struct Pending {
+        let id: UUID
+        let reloadKey: Int
+        let window: NSWindow
+        let authorizedWindow: () -> NSWindow?
+        let picker: any FileImportPicking
+        let task: Task<Void, Never>
+        let complete: (GuestFileImportReply) -> Void
+    }
+
+    private let makePicker: () -> any FileImportPicking
+    private var pending: [UUID: Pending] = [:]
+
+    convenience init() {
+        self.init(makePicker: { NativeFilePicker() })
+    }
+
+    init(makePicker: @escaping () -> any FileImportPicking) {
+        self.makePicker = makePicker
+    }
 
     static func isDeclared(manifest: String?, permissions: [String]) -> Bool {
         guard permissions.contains(GuestFileImportCall.capability) || permissions.contains("host:file-import"),
@@ -20,8 +39,22 @@ final class RendererFileImport {
         return usage.hostModules["file-import"]?.rpc?.contains("pick") == true
     }
 
+    func update(tabId: UUID, reloadKey: Int) {
+        guard let request = pending[tabId] else { return }
+        if request.reloadKey != reloadKey || request.authorizedWindow() !== request.window {
+            cancel(tabId: tabId)
+        }
+    }
+
+    func cancel(tabId: UUID) {
+        guard let request = pending.removeValue(forKey: tabId) else { return }
+        request.task.cancel()
+        request.picker.cancel()
+        request.complete(GuestFileImportReply(id: request.id, error: "The file selection was cancelled."))
+    }
+
     func reply(
-        to json: String, tabId: UUID, authorizedWindow: (Int) -> NSWindow?
+        to json: String, tabId: UUID, authorizedWindow: @escaping (Int) -> NSWindow?
     ) async throws -> String? {
         guard json.utf8.count <= 32 * 1024 else { return nil }
         let call = try JSONDecoder().decode(GuestFileImportCall.self, from: Data(json.utf8))
@@ -30,17 +63,34 @@ final class RendererFileImport {
     }
 
     private func pick(
-        _ call: GuestFileImportCall, tabId: UUID, authorizedWindow: () -> NSWindow?
+        _ call: GuestFileImportCall, tabId: UUID, authorizedWindow: @escaping () -> NSWindow?
     ) async -> GuestFileImportReply {
         guard call.hasValidArguments, let window = authorizedWindow(), window.isKeyWindow else {
             return GuestFileImportReply(id: call.id, error: "File import is unavailable for this tab.")
         }
-        guard window.attachedSheet == nil, pendingTabs.insert(tabId).inserted else {
+        guard window.attachedSheet == nil, pending[tabId] == nil else {
             return GuestFileImportReply(id: call.id, error: "A selection dialog is already open.")
         }
-        defer { pendingTabs.remove(tabId) }
+        let picker = makePicker()
+        return await withCheckedContinuation { continuation in
+            let task = Task {
+                let reply = await select(call, picker: picker, window: window, authorizedWindow: authorizedWindow)
+                finish(tabId: tabId, reply: reply)
+            }
+            pending[tabId] = Pending(
+                id: call.id, reloadKey: call.reloadKey, window: window, authorizedWindow: authorizedWindow,
+                picker: picker, task: task, complete: { continuation.resume(returning: $0) }
+            )
+        }
+    }
+
+    private func select(
+        _ call: GuestFileImportCall, picker: any FileImportPicking, window: NSWindow,
+        authorizedWindow: () -> NSWindow?
+    ) async -> GuestFileImportReply {
         do {
-            let files = try await NativeFilePicker.pick(call, in: window)
+            let files = try await picker.pick(call, in: window)
+            try Task.checkCancellation()
             guard authorizedWindow() === window else {
                 return GuestFileImportReply(id: call.id, error: "File import authorization changed.")
             }
@@ -50,13 +100,37 @@ final class RendererFileImport {
             return GuestFileImportReply(id: call.id, error: message)
         }
     }
+
+    private func finish(tabId: UUID, reply: GuestFileImportReply) {
+        guard pending[tabId]?.id == reply.id else { return }
+        pending.removeValue(forKey: tabId)?.complete(reply)
+    }
 }
 
-nonisolated private enum NativeFilePicker {
+@MainActor
+protocol FileImportPicking: AnyObject {
+    func pick(_ call: GuestFileImportCall, in window: NSWindow) async throws -> [GuestFileImportReply.File]
+    func cancel()
+}
+
+@MainActor
+private final class NativeFilePicker: FileImportPicking {
     private typealias File = GuestFileImportReply.File
     private static let maxCount = 10
+    private var cancelPresentation: (() -> Void)?
+    private var loadingPhoto: CheckedContinuation<File, Error>?
+    private var photoProgress: Progress?
+    private var readingFiles: Task<[File], Error>?
 
-    enum Failure: LocalizedError {
+    func cancel() {
+        cancelPresentation?()
+        readingFiles?.cancel()
+        let progress = photoProgress
+        finishPhoto(.failure(CancellationError()))
+        progress?.cancel()
+    }
+
+    nonisolated enum Failure: LocalizedError {
         case tooManyFiles, tooLarge, unsupportedFilter, unreadableItem
 
         var errorDescription: String? {
@@ -69,45 +143,52 @@ nonisolated private enum NativeFilePicker {
         }
     }
 
-    @MainActor
-    static func pick(_ call: GuestFileImportCall, in window: NSWindow) async throws -> [GuestFileImportReply.File] {
+    func pick(_ call: GuestFileImportCall, in window: NSWindow) async throws -> [GuestFileImportReply.File] {
+        try Task.checkCancellation()
         switch call.source {
         case .files: return try await pickFiles(call, in: window)
         case .photos: return try await pickPhotos(multiple: call.multiple, in: window)
         }
     }
 
-    @MainActor
-    private static func pickFiles(_ call: GuestFileImportCall, in window: NSWindow) async throws -> [File] {
+    private func pickFiles(_ call: GuestFileImportCall, in window: NSWindow) async throws -> [File] {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = call.multiple
-        panel.allowedContentTypes = try call.accept.map(contentType)
+        panel.allowedContentTypes = try call.accept.map(Self.contentType)
+        cancelPresentation = { panel.cancel(nil) }
+        defer { cancelPresentation = nil }
         guard await panel.beginSheetModal(for: window) == .OK else { return [] }
+        try Task.checkCancellation()
         let urls = panel.urls
-        guard urls.count <= maxCount else { throw Failure.tooManyFiles }
-        return try await Task.detached {
+        guard urls.count <= Self.maxCount else { throw Failure.tooManyFiles }
+        let reading = Task.detached {
             var remaining = GuestFileImportCall.maxBytes
             return try urls.map { url in
-                let file = try readFile(url, limit: remaining)
+                let file = try Self.readFile(url, limit: remaining)
                 remaining -= file.data.count
                 return file
             }
-        }.value
+        }
+        readingFiles = reading
+        defer { readingFiles = nil }
+        return try await reading.value
     }
 
-    @MainActor
-    private static func pickPhotos(multiple: Bool, in window: NSWindow) async throws -> [File] {
+    private func pickPhotos(multiple: Bool, in window: NSWindow) async throws -> [File] {
         var configuration = PHPickerConfiguration()
         configuration.filter = .images
         configuration.preferredAssetRepresentationMode = .current
-        configuration.selectionLimit = multiple ? maxCount : 1
+        configuration.selectionLimit = multiple ? Self.maxCount : 1
         if multiple { configuration.selection = .ordered }
         let picker = PHPickerViewController(configuration: configuration)
         let selection = PhotoSelection()
+        cancelPresentation = { selection.cancel() }
+        defer { cancelPresentation = nil }
         let results = await selection.select(with: picker, in: window)
-        guard results.count <= maxCount else { throw Failure.tooManyFiles }
+        try Task.checkCancellation()
+        guard results.count <= Self.maxCount else { throw Failure.tooManyFiles }
         var files: [File] = []
         var remaining = GuestFileImportCall.maxBytes
         for result in results {
@@ -118,22 +199,32 @@ nonisolated private enum NativeFilePicker {
         return files
     }
 
-    private static func loadPhoto(_ provider: NSItemProvider, limit: Int) async throws -> File {
+    private func loadPhoto(_ provider: NSItemProvider, limit: Int) async throws -> File {
+        try Task.checkCancellation()
         guard let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else {
             throw Failure.unreadableItem
         }
         return try await withCheckedThrowingContinuation { continuation in
-            _ = provider.loadFileRepresentation(forTypeIdentifier: type) { url, error in
-                continuation.resume(with: Result {
+            loadingPhoto = continuation
+            photoProgress = provider.loadFileRepresentation(forTypeIdentifier: type) { [weak self] url, error in
+                let result = Result {
                     if let error { throw error }
                     guard let url else { throw Failure.unreadableItem }
-                    return try readFile(url, limit: limit)
-                })
+                    return try Self.readFile(url, limit: limit)
+                }
+                Task { @MainActor in self?.finishPhoto(result) }
             }
         }
     }
 
-    private static func contentType(for filter: String) throws -> UTType {
+    private func finishPhoto(_ result: Result<File, Error>) {
+        let continuation = loadingPhoto
+        loadingPhoto = nil
+        photoProgress = nil
+        continuation?.resume(with: result)
+    }
+
+    nonisolated private static func contentType(for filter: String) throws -> UTType {
         switch filter {
         case "*/*": return .item
         case "image/*": return .image
@@ -148,7 +239,8 @@ nonisolated private enum NativeFilePicker {
         }
     }
 
-    private static func readFile(_ url: URL, limit: Int) throws -> File {
+    nonisolated private static func readFile(_ url: URL, limit: Int) throws -> File {
+        try Task.checkCancellation()
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
@@ -161,6 +253,7 @@ nonisolated private enum NativeFilePicker {
 
         var bytes = Data()
         while let block = try handle.read(upToCount: min(64 * 1024, limit - bytes.count + 1)), !block.isEmpty {
+            try Task.checkCancellation()
             guard block.count <= limit - bytes.count else { throw Failure.tooLarge }
             bytes.append(block)
         }
@@ -171,9 +264,16 @@ nonisolated private enum NativeFilePicker {
 @MainActor
 private final class PhotoSelection: NSObject, PHPickerViewControllerDelegate {
     private var results: [PHPickerResult] = []
+    private var sheet: NSWindow?
+
+    func cancel() {
+        if let sheet { sheet.sheetParent?.endSheet(sheet) }
+    }
 
     func select(with picker: PHPickerViewController, in window: NSWindow) async -> [PHPickerResult] {
         let sheet = NSWindow(contentViewController: picker)
+        self.sheet = sheet
+        defer { self.sheet = nil }
         sheet.title = "Choose Photos"
         sheet.setContentSize(NSSize(width: 640, height: 480))
         picker.delegate = self

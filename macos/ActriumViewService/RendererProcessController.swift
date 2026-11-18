@@ -97,7 +97,7 @@ final class RendererProcessController {
     private let arguments: Arguments
     private let connection: IPCHelperConnection
     private var serviceCalls: [UUID: (RealmServiceReply) -> Void] = [:]
-    private var fileImports: [String: (id: UUID, reply: (GuestFileImportReply) -> Void)] = [:]
+    private var fileImports: [String: (id: UUID, reloadKey: Int, reply: (GuestFileImportReply) -> Void)] = [:]
 
     static func pickFiles(
         _ call: GuestFileImportCall, tabId: String, reply: @escaping (GuestFileImportReply) -> Void
@@ -112,12 +112,11 @@ final class RendererProcessController {
             try controller.connection.sendHostEvent(
                 name: GuestFileImportCall.requestEvent, userInfoJSON: String(decoding: data, as: UTF8.self), tabId: tabId
             )
-            controller.fileImports[tabId] = (call.id, reply)
+            controller.fileImports[tabId] = (call.id, call.reloadKey, reply)
         } catch {
             reply(GuestFileImportReply(id: call.id, error: "Could not contact the file picker."))
         }
     }
-
 
     static func callRealmService(
         tabId: String,
@@ -310,6 +309,9 @@ final class RendererProcessController {
             config = decoded
         }
 
+        if let pending = fileImports[tabId], pending.reloadKey != Int(request.reloadKey) {
+            cancelFileImport(tabId)
+        }
         config["tabId"] = tabId
         if config["title"] == nil {
             config["title"] = request.title
@@ -418,11 +420,15 @@ final class RendererProcessController {
     }
 
     private func destroyTab(_ tabId: String) {
-        if let pending = fileImports.removeValue(forKey: tabId) {
-            pending.reply(GuestFileImportReply(id: pending.id, error: "The picker tab closed."))
-        }
+        cancelFileImport(tabId)
         surfaces.removeValue(forKey: tabId)?.close()
         reactNativeHost.destroyRendererEntry(tabId: tabId)
+    }
+
+    private func cancelFileImport(_ tabId: String) {
+        if let pending = fileImports.removeValue(forKey: tabId) {
+            pending.reply(GuestFileImportReply(id: pending.id, error: "The picker document changed or closed."))
+        }
     }
 
     private func receiveFileImport(_ json: String, tabId: String) {

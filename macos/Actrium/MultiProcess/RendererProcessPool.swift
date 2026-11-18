@@ -167,6 +167,7 @@ final class RendererProcessPool: ObservableObject {
     }
 
     func releaseRenderer(for tabId: UUID) {
+        fileImport.cancel(tabId: tabId)
         guard let workerId = tabWorkerMap.removeValue(forKey: tabId),
               let worker = workers[workerId] else {
             return
@@ -212,6 +213,7 @@ final class RendererProcessPool: ObservableObject {
             throw RendererProcessPoolError.rendererExited("Tab has no allocated renderer")
         }
         try await waitUntilReady(worker)
+        fileImport.update(tabId: tabId, reloadKey: config["reloadKey"] as? Int ?? 0)
 
         guard JSONSerialization.isValidJSONObject(config),
               let data = try? JSONSerialization.data(withJSONObject: config),
@@ -366,6 +368,7 @@ final class RendererProcessPool: ObservableObject {
     }
 
     func shutdown() {
+        for tabId in tabWorkerMap.keys { fileImport.cancel(tabId: tabId) }
         let activeWorkers = Array(workers.values)
         for worker in activeWorkers {
             terminate(worker, reason: "Actrium is terminating")
@@ -666,6 +669,7 @@ final class RendererProcessPool: ObservableObject {
 
         let affectedTabs = worker.tabs
         for tabId in affectedTabs {
+            fileImport.cancel(tabId: tabId)
             tabWorkerMap.removeValue(forKey: tabId)
         }
         if let fingerprint = worker.fingerprint {
