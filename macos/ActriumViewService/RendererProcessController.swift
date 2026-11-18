@@ -113,6 +113,12 @@ final class RendererProcessController {
                 name: GuestFileImportCall.requestEvent, userInfoJSON: String(decoding: data, as: UTF8.self), tabId: tabId
             )
             controller.fileImports[tabId] = (call.id, call.reloadKey, reply)
+            let requestId = call.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(GuestFileImportCall.timeoutSeconds)) {
+                [weak controller] in
+                guard let controller, controller.fileImports[tabId]?.id == requestId else { return }
+                controller.cancelFileImport(tabId, message: "The file selection timed out.")
+            }
         } catch {
             reply(GuestFileImportReply(id: call.id, error: "Could not contact the file picker."))
         }
@@ -425,9 +431,9 @@ final class RendererProcessController {
         reactNativeHost.destroyRendererEntry(tabId: tabId)
     }
 
-    private func cancelFileImport(_ tabId: String) {
+    private func cancelFileImport(_ tabId: String, message: String = "The picker document changed or closed.") {
         if let pending = fileImports.removeValue(forKey: tabId) {
-            pending.reply(GuestFileImportReply(id: pending.id, error: "The picker document changed or closed."))
+            pending.reply(GuestFileImportReply(id: pending.id, error: message))
         }
     }
 

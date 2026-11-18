@@ -10,6 +10,10 @@ final class RendererFileImport {
         let hostModules: [String: Module]
     }
 
+    private struct RequestIdentity: Decodable {
+        let id: UUID
+    }
+
     private struct Pending {
         let id: UUID
         let reloadKey: Int
@@ -21,13 +25,18 @@ final class RendererFileImport {
     }
 
     private let makePicker: () -> any FileImportPicking
+    private let timeout: TimeInterval
     private var pending: [UUID: Pending] = [:]
 
     convenience init() {
         self.init(makePicker: { NativeFilePicker() })
     }
 
-    init(makePicker: @escaping () -> any FileImportPicking) {
+    init(
+        timeout: TimeInterval = TimeInterval(GuestFileImportCall.timeoutSeconds),
+        makePicker: @escaping () -> any FileImportPicking
+    ) {
+        self.timeout = timeout
         self.makePicker = makePicker
     }
 
@@ -46,18 +55,25 @@ final class RendererFileImport {
         }
     }
 
-    func cancel(tabId: UUID) {
+    func cancel(tabId: UUID, message: String = "The file selection was cancelled.") {
         guard let request = pending.removeValue(forKey: tabId) else { return }
         request.task.cancel()
         request.picker.cancel()
-        request.complete(GuestFileImportReply(id: request.id, error: "The file selection was cancelled."))
+        request.complete(GuestFileImportReply(id: request.id, error: message))
     }
 
     func reply(
         to json: String, tabId: UUID, authorizedWindow: @escaping (Int) -> NSWindow?
     ) async throws -> String? {
-        guard json.utf8.count <= 32 * 1024 else { return nil }
-        let call = try JSONDecoder().decode(GuestFileImportCall.self, from: Data(json.utf8))
+        let data = Data(json.utf8)
+        guard data.count <= GuestFileImportCall.maxRequestBytes else {
+            AppLogger.reactNative.warning("Rejected an oversized file import request.")
+            let identity = try JSONDecoder().decode(RequestIdentity.self, from: data)
+            return try GuestFileImportReply(
+                id: identity.id, error: "The file import request exceeds 32 KiB."
+            ).encodedJSON()
+        }
+        let call = try JSONDecoder().decode(GuestFileImportCall.self, from: data)
         let reply = await pick(call, tabId: tabId) { authorizedWindow(call.reloadKey) }
         return try reply.encodedJSON()
     }
@@ -81,6 +97,11 @@ final class RendererFileImport {
                 id: call.id, reloadKey: call.reloadKey, window: window, authorizedWindow: authorizedWindow,
                 picker: picker, task: task, complete: { continuation.resume(returning: $0) }
             )
+            let requestId = call.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
+                guard let self, self.pending[tabId]?.id == requestId else { return }
+                self.cancel(tabId: tabId, message: "The file selection timed out.")
+            }
         }
     }
 
@@ -126,6 +147,7 @@ private final class NativeFilePicker: FileImportPicking {
         cancelPresentation?()
         readingFiles?.cancel()
         let progress = photoProgress
+        // Consume the continuation first so a late provider callback cannot resume it twice.
         finishPhoto(.failure(CancellationError()))
         progress?.cancel()
     }

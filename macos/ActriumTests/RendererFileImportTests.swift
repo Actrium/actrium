@@ -30,6 +30,25 @@ struct RendererFileImportTests {
         #expect(decoded.files.isEmpty)
     }
 
+    @Test func oversizedRequestsReturnACorrelatedErrorBeforeAuthorization() async throws {
+        let call = GuestFileImportCall(reloadKey: 1, source: .photos, accept: [], multiple: true)
+        let data = try JSONEncoder().encode(call)
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["padding"] = String(repeating: "x", count: GuestFileImportCall.maxRequestBytes)
+        let oversized = String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+        var authorizationRequested = false
+        let reply = try await RendererFileImport().reply(to: oversized, tabId: UUID()) { _ in
+            authorizationRequested = true
+            return nil
+        }
+        let encoded = try #require(reply)
+        let decoded = try JSONDecoder().decode(GuestFileImportReply.self, from: Data(encoded.utf8))
+        #expect(decoded.id == call.id)
+        #expect(decoded.error == "The file import request exceeds 32 KiB.")
+        #expect(decoded.files.isEmpty)
+        #expect(!authorizationRequested)
+    }
+
     @Test func aSessionGrantIsScopedToItsTabAndCanBeCleared() {
         let tabId = UUID()
         let appId = "test-file-import/\(UUID().uuidString)"

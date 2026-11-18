@@ -36,6 +36,25 @@ struct RendererFileImportLifecycleTests {
         #expect(result.files.map(\.name) == ["current.txt"])
     }
 
+    @Test func aTimedOutRequestReleasesItsPickerAndAllowsRetry() async throws {
+        let window = PickerTestWindow(contentRect: .zero, styleMask: [], backing: .buffered, defer: true)
+        let stalled = ControlledPicker()
+        let retry = ControlledPicker(result: .success([.init(name: "retry.txt", data: Data())]))
+        var pickers = [stalled, retry]
+        let broker = RendererFileImport(timeout: 0.1, makePicker: { pickers.removeFirst() })
+        let tabId = UUID()
+        defer { stalled.finish(.success([])) }
+        let pending = Task { try await request(broker, tabId: tabId, reloadKey: 1) { window } }
+        try await stalled.waitUntilStarted()
+        let result = try await pending.value
+        #expect(result.error == "The file selection timed out.")
+        #expect(result.files.isEmpty)
+        #expect(stalled.cancelled)
+        let selected = try await request(broker, tabId: tabId, reloadKey: 1) { window }
+        #expect(selected.error == nil)
+        #expect(selected.files.map(\.name) == ["retry.txt"])
+    }
+
     @Test func closingTheTabReleasesItsRequestWithoutWaitingForTheProvider() async throws {
         let window = PickerTestWindow(contentRect: .zero, styleMask: [], backing: .buffered, defer: true)
         let picker = ControlledPicker()

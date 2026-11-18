@@ -4,6 +4,8 @@ public struct GuestFileImportCall: Codable, Sendable {
     public static let capability = "host:file-import.pick"
     public static let requestEvent = "com.actrium.fileImport.request"
     public static let responseEvent = "com.actrium.fileImport.response"
+    public static let timeoutSeconds = 300
+    public static let maxRequestBytes = 32 * 1024
 
     // Leave room for Base64, JSON and protobuf framing in the 10,000,000-byte IPC limit.
     public static let maxBytes = 7 * 1024 * 1024
