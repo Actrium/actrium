@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import ActriumIPC
 
 /// Application delegate - manages AppKit windows
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
@@ -74,6 +75,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         _ = TabProcessManager.shared
 
         // Prewarm the browser-style homogeneous Renderer pool.
+        RendererProcessPool.shared.fileImportWindow = { [weak self] tabId, reloadKey in
+            self?.fileImportWindow(tabId: tabId, reloadKey: reloadKey)
+        }
         Task { @MainActor in
             _ = RendererProcessPool.shared.verifyRendererHelper()
             await RendererProcessPool.shared.prewarmInitialRenderersAsync()
@@ -91,6 +95,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         Task.detached(priority: .utility) {
             ActrPackageDownloadService.cleanupOrphanedTemporaryDownloads()
         }
+    }
+
+    private func fileImportWindow(tabId: UUID, reloadKey: Int) -> NSWindow? {
+        guard let controller = windowControllers.first(where: { $0.viewModel.currentTabId == tabId }),
+              controller.viewModel.actriumMode == .focus(tabId: tabId),
+              let tab = controller.viewModel.currentTab, tab.reloadNonce == reloadKey,
+              RendererFileImport.isDeclared(manifest: tab.capabilityManifestJSON, permissions: tab.permissions),
+              CapabilityPermissionStore.shared.hasGrant(
+                tabId: tabId, appId: tab.appId, capability: GuestFileImportCall.capability
+              ) else { return nil }
+        return controller.window
     }
 
     private func setupNotifications() {

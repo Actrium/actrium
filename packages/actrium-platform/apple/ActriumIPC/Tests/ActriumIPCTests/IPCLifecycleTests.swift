@@ -73,6 +73,34 @@ final class IPCLifecycleTests: XCTestCase {
         client.disconnect()
     }
 
+    func testFileImportReplyFitsInOneFrameAtTheByteLimit() throws {
+        var descriptors: [Int32] = [-1, -1]
+        XCTAssertEqual(Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors), 0)
+        let broker = IPCConnection(tabId: "attachments", connectedSocket: descriptors[0])
+        let renderer = IPCHelperConnection(tabId: "attachments", connectedSocket: descriptors[1])
+        defer {
+            renderer.disconnect()
+            broker.stop()
+        }
+        let received = expectation(description: "attachment reply received")
+        let bytes = Data(repeating: 0xFF, count: GuestFileImportCall.maxBytes)
+        let response = GuestFileImportReply(id: UUID(), files: [.init(name: "photo.heic", data: bytes)])
+        renderer.onHostEvent = { name, json, tabId in
+            XCTAssertEqual(name, GuestFileImportCall.responseEvent)
+            XCTAssertEqual(tabId, "attachments")
+            let decoded = try? JSONDecoder().decode(GuestFileImportReply.self, from: Data(json.utf8))
+            XCTAssertEqual(decoded?.id, response.id)
+            XCTAssertEqual(decoded?.files.first?.data, bytes)
+            received.fulfill()
+        }
+        try broker.start()
+        try renderer.connect()
+        try broker.sendHostEvent(
+            name: GuestFileImportCall.responseEvent, userInfoJSON: response.encodedJSON(), tabId: "attachments"
+        )
+        wait(for: [received], timeout: 3)
+    }
+
     func testFilesystemListenerAcceptsAnotherClientAfterDisconnect() throws {
         let path = "/tmp/ipc-lifecycle-\(UUID().uuidString).sock"
         let server = IPCServer(socketPath: path)

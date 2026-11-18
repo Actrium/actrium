@@ -23,7 +23,7 @@ import {
   capabilitiesFromSnapshotJSON,
   CapabilityAuthorizer,
 } from './capability-authorization';
-import { contract } from './contract';
+import { contract, type FileImportPickInput, type FileImportPickOutput } from './contract';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
@@ -123,6 +123,13 @@ const writeClipboardText = async (text: string): Promise<void> => {
 
 type CapabilityPermissionBridge = {
   requestGrant?: (tabId: string, capability: string) => void;
+};
+
+type FileImportBridge = {
+  pick?: (
+    tabId: string, reloadKey: number, source: NonNullable<FileImportPickInput['source']>,
+    accept: string[], multiple: boolean
+  ) => Promise<FileImportPickOutput>;
 };
 
 const requestNativeCapabilityGrant = (
@@ -235,11 +242,20 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       logToNative(`[StandaloneGuestApp] service call ${request.route}`);
       return callHttpService(tab.serviceCallUrl, request);
     };
+    const fileImport = NativeModules.GuestFileImport as FileImportBridge | undefined;
+    const nativePick = fileImport?.pick?.bind(fileImport, tab.id, tab.reloadKey ?? 0);
+    if (v1?.ok && v1.linkage.links.some(([id]) => id === 'host:file-import') && !nativePick) {
+      setError('File import is unavailable for this application.');
+      return;
+    }
     const hostModules = createHostModules({
       hasServiceCapability,
       callActor: callServiceActor,
       authorizeCapability: (capability) => authorizer.authorize(capability),
       writeClipboardText,
+      pickFiles: nativePick && ((input) => nativePick(
+        input.source ?? 'files', input.accept ?? [], input.multiple ?? false
+      )),
     });
     // Expose exactly the verified method and component set to this Guest Engine.
     const linked = v1?.ok ? v1 : undefined;

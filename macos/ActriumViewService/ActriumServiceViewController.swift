@@ -1443,6 +1443,7 @@ final class ServiceReactNativeHost {
         if let recentHistory = config["recentHistory"] { tabDict["recentHistory"] = recentHistory }
         if let historyGroups = config["historyGroups"] { tabDict["historyGroups"] = historyGroups }
         if let historyItems = config["historyItems"] { tabDict["historyItems"] = historyItems }
+        if let historyPage = config["historyPage"] { tabDict["historyPage"] = historyPage }
 
         // Update container size
         if let width = config["containerWidth"] as? Double,
@@ -1968,6 +1969,7 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     }
     // Copy other tab properties
     if let historyItems = config["historyItems"] { tabDict["historyItems"] = historyItems }
+    if let historyPage = config["historyPage"] { tabDict["historyPage"] = historyPage }
     if let bookmarks = config["bookmarks"] { tabDict["bookmarks"] = bookmarks }
     if let recentHistory = config["recentHistory"] { tabDict["recentHistory"] = recentHistory }
 

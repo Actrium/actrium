@@ -94,7 +94,7 @@ private final class WindowChromeTintView: NSView {
 /// One geometry contract shared by the SwiftUI header and the AppKit drag
 /// mask. Keeping these values together prevents the draggable area from
 /// drifting into the Tabs/Tabs Group container as the layout evolves.
-private enum CompactToolbarLayout {
+enum CompactToolbarLayout {
     /// Head and tail surfaces own the large outer corners directly. Keeping
     /// that rule on each logical surface avoids coupling corner treatment to
     /// the ScrollView's clipping viewport.
@@ -124,13 +124,15 @@ private enum CompactToolbarLayout {
     }
 
     static func maximumTabStripWidth(in toolbarWidth: CGFloat, isFullScreen: Bool) -> CGFloat {
-        max(
+        let actionCount = CGFloat(CompactToolbarAction.allCases.count)
+        return max(
             0,
             toolbarWidth
                 - horizontalPadding * 2
                 - leadingReserve(isFullScreen: isFullScreen)
-                - itemSpacing * 3
-                - buttonSize * 2
+                // One space on each side of the strip, plus the gaps between buttons.
+                - itemSpacing * (actionCount + 1)
+                - buttonSize * actionCount
         )
     }
 
@@ -152,27 +154,12 @@ private enum CompactToolbarLayout {
         )
     }
 
-    static func newTabButtonFrame(in bounds: NSRect) -> NSRect {
-        let maxX = bounds.maxX
-            - horizontalPadding
-            - buttonSize
-            - itemSpacing
-        return centeredRect(
-            minX: maxX - buttonSize,
-            maxX: maxX,
-            height: buttonSize,
-            in: bounds
-        )
-    }
-
-    static func overviewButtonFrame(in bounds: NSRect) -> NSRect {
-        let maxX = bounds.maxX - horizontalPadding
-        return centeredRect(
-            minX: maxX - buttonSize,
-            maxX: maxX,
-            height: buttonSize,
-            in: bounds
-        )
+    static func actionButtonFrames(in bounds: NSRect) -> [CompactToolbarAction: NSRect] {
+        let step = buttonSize + itemSpacing
+        return Dictionary(uniqueKeysWithValues: CompactToolbarAction.allCases.reversed().enumerated().map { index, action in
+            let maxX = bounds.maxX - horizontalPadding - CGFloat(index) * step
+            return (action, centeredRect(minX: maxX - buttonSize, maxX: maxX, height: buttonSize, in: bounds))
+        })
     }
 
     private static func tabStripMinX(in bounds: NSRect, isFullScreen: Bool) -> CGFloat {
@@ -535,7 +522,7 @@ private final class InteractiveToolbarHostingView: NSHostingView<AnyView> {
 }
 
 /// Covers the full compact header but only participates in hit testing outside
-/// the Tabs/Tabs Group container and the actual new/overview button bounds.
+/// the Tabs/Tabs Group container and the actual action button bounds.
 /// Everything else—leading chrome, header padding, vertical bands and gaps
 /// around controls—is a deliberate window-drag region.
 private final class CompactToolbarWindowDragRegion: NSView {
@@ -553,20 +540,10 @@ private final class CompactToolbarWindowDragRegion: NSView {
         // miss whenever this view's frame origin is non-zero.
         guard !isHidden, frame.contains(point) else { return nil }
         let localPoint = convert(point, from: superview)
-        let excludedFrames = [
-            CompactToolbarLayout.tabStripFrame(
-                in: bounds,
-                isFullScreen: isFullScreen,
-                contentWidth: tabStripWidth
-            ),
-            CompactToolbarLayout.newTabButtonFrame(
-                in: bounds
-            ),
-            CompactToolbarLayout.overviewButtonFrame(
-                in: bounds
-            ),
-        ]
-        return excludedFrames.contains(where: { $0.contains(localPoint) }) ? nil : self
+        let frames = compactToolbarInteractionFrames(
+            in: bounds, isFullScreen: isFullScreen, tabStripWidth: tabStripWidth
+        )
+        return frames.containsInteractivePoint(localPoint) ? nil : self
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -738,8 +715,9 @@ struct MainWindowTabsView: View {
                 Spacer(minLength: itemSpacing)
 
                 HStack(spacing: itemSpacing) {
-                    newTabButton
-                    overviewButton
+                    ForEach(CompactToolbarAction.allCases, id: \.self) { action in
+                        headerButton(for: action)
+                    }
                 }
             }
             .padding(.horizontal, CompactToolbarLayout.horizontalPadding)
@@ -2164,6 +2142,23 @@ struct MainWindowTabsView: View {
     }
 
     // MARK: - Buttons
+
+    @ViewBuilder
+    private func headerButton(for action: CompactToolbarAction) -> some View {
+        switch action {
+        case .newTab: newTabButton
+        case .history: systemTabButton(.history)
+        case .bookmarks: systemTabButton(.bookmarks)
+        case .overview: overviewButton
+        }
+    }
+
+    private func systemTabButton(_ type: SystemTabType) -> some View {
+        toolbarButton(type.icon, help: type.title) {
+            exitEditingMode()
+            viewModel.openSystemTab(type)
+        }
+    }
 
     private var newTabButton: some View {
         toolbarButton("plus", help: "New Tab") {

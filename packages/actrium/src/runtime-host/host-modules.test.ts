@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createHostModuleDispatch } from 'keel/contract';
 
 import { contract } from './contract';
+import type { FileImportPickInput, FileImportPickOutput } from './contract';
 import type { FrontCapability } from './capabilities';
 import { createHostModules, type HostModules } from './host-modules';
 
@@ -11,12 +12,14 @@ function createTestHostModules(options?: {
   hasServiceCapability?: boolean;
   authorizeCapability?: (capability: FrontCapability) => Promise<void>;
   writeClipboardText?: (text: string) => Promise<void>;
+  pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
 }): HostModules {
   return createHostModules({
     hasServiceCapability: options?.hasServiceCapability ?? true,
     callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
     authorizeCapability: options?.authorizeCapability ?? (async () => {}),
     writeClipboardText: options?.writeClipboardText ?? (async () => {}),
+    pickFiles: options?.pickFiles,
   });
 }
 
@@ -164,6 +167,32 @@ describe('host:clipboard implementation', () => {
   });
 });
 
+describe('host:file-import implementation', () => {
+  test('authorizes before opening the selected native picker', async () => {
+    const calls: unknown[] = [];
+    const files = [{ name: 'photo.heic', base64: 'AAEC' }];
+    const dispatch = createHostModuleDispatch(contract, createTestHostModules({
+      authorizeCapability: async (capability) => { calls.push(capability); },
+      pickFiles: async ({ source, multiple }) => {
+        calls.push({ source, multiple });
+        return { files };
+      },
+    }));
+    await expect(dispatch['host:file-import'].pick({ source: 'photos', multiple: true })).resolves.toEqual({ files });
+    expect(calls).toEqual(['host:file-import.pick', { source: 'photos', multiple: true }]);
+  });
+
+  test('does not open a native picker when authorization fails', async () => {
+    let opened = false;
+    const modules = createTestHostModules({
+      authorizeCapability: async () => { throw new Error('permission_denied'); },
+      pickFiles: async () => { opened = true; return { files: [] }; },
+    });
+    await expect(modules['host:file-import'].pick({})).rejects.toThrow('permission_denied');
+    expect(opened).toBe(false);
+  });
+});
+
 describe('placeholder host modules', () => {
   const placeholderCalls: ReadonlyArray<{
     capability: string;
@@ -204,10 +233,6 @@ describe('placeholder host modules', () => {
       capability: 'host:navigate.navigate',
       call: (hostModules) =>
         hostModules['host:navigate'].navigate({ path: '/settings' }),
-    },
-    {
-      capability: 'host:file-import.pick',
-      call: (hostModules) => hostModules['host:file-import'].pick({}),
     },
     {
       capability: 'host:file-export.save',

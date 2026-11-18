@@ -120,13 +120,17 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// History view model reference for recording ACTR app visits
     weak var historyVM: HistoryViewModel?
     private let browserDataRepository = BrowserDataRepository.shared
+    private let saveBrowserSession: ([Tab], UUID?) -> Void
 
     var currentTab: Tab? {
         guard let currentTabId = currentTabId else { return nil }
         return tabs.first(where: { $0.id == currentTabId })
     }
 
-    init() {
+    init(saveBrowserSession: @escaping ([Tab], UUID?) -> Void = { tabs, currentTabId in
+        BrowserDataRepository.shared.saveSession(tabs: tabs, currentTabId: currentTabId)
+    }) {
+        self.saveBrowserSession = saveBrowserSession
         // Initialize slot positions first
         initializeSlotPositions()
 
@@ -143,7 +147,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     private func persistBrowserPageSession() {
-        browserDataRepository.saveSession(tabs: tabs, currentTabId: currentTabId)
+        saveBrowserSession(tabs, currentTabId)
     }
 
     func requestAddressBarFocus(
@@ -186,13 +190,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// Returns the existing tab if already open, otherwise creates a new one
     @discardableResult
     func openSystemTab(_ type: SystemTabType) -> Tab {
+        defer { persistBrowserPageSession() }
+        shouldAutoFocusAddressBar = false
         // Check if a system tab of this type is already open
         if let existingTab = tabs.first(where: { $0.systemTabType == type }) {
             // Switch to existing tab
             currentTabId = existingTab.id
             actriumMode = .focus(tabId: existingTab.id)
             logger.debug("🔄 Switch to an existing system label: \(type.title)")
-            persistBrowserPageSession()
             return existingTab
         }
 
@@ -209,7 +214,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         actriumMode = .focus(tabId: newTab.id)
 
         logger.notice("📱 Created System Label: \(type.title) (\(type.aboutURL.absoluteString)), Location: \(self.tabs.count - 1)")
-        persistBrowserPageSession()
         return newTab
     }
 
@@ -260,7 +264,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         // If this is the last tab, exit application after closing
         if tabs.count == 1 {
             logger.debug("🚪 Close last tab, apply the exit is about to be completed")
-            browserDataRepository.saveSession(tabs: [], currentTabId: nil)
+            saveBrowserSession([], nil)
             NSApplication.shared.terminate(nil)
             return
         }
@@ -787,6 +791,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     /// Navigation Current Tab To Assign URL Or apply ID
+    func openURLInNewTab(_ url: URL) {
+        // These flows manage their own tabs when they recover an instance or import a package.
+        if !ActrInstanceAddress.isLocalInstanceURL(url), !ActrPackageLinkPolicy.isPackageDownloadURL(url) {
+            addNewTab(focusAddressBar: false)
+        }
+        navigateCurrentTab(to: url.absoluteString)
+    }
+
     /// Unified navigation portal - Process all types of input
     /// - If the input is about: URLNavigator to the corresponding system application
     /// - If the input is actro:// URLLoad Actrium Apply
@@ -889,29 +901,21 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 return
             }
 
-            // Check if it's an actro:// URL for Actrium apps.
-            // Legacy app-scheme links are still accepted as aliases.
-            // Two formats supported:
-            // - actro://bundleId - lookup by bundleId in database
-            // - actro:///absolute/path - local file path (three slashes)
+            // Resolve registered package IDs and absolute package paths.
             if ActriumAppURLScheme.isSupported(url.scheme) {
                 var sourcePath: String?
 
-                // Check if it's a local path (actro:///path/to/app)
-                // URL parsing: actro:///path -> host is nil/empty, path is /path
-                if let host = url.host, !host.isEmpty {
-                    // bundleId mode: actro://com.example.app - lookup in database
-                    logger.notice("📱 [navigateCurrentTab] Navigator to Actrium Apply (bundleId): \(host)")
+                if let bundleId = ActriumAppURLScheme.bundleId(from: url) {
+                    logger.notice("📱 [navigateCurrentTab] Navigator to Actrium Apply (bundleId): \(bundleId)")
                     let appRepo = AppRepository()
-                    if let app = appRepo.getByBundleId(host) {
+                    if let app = appRepo.getByBundleId(bundleId) {
                         sourcePath = app.sourcePath
-                        appRepo.updateLastUsed(bundleId: host)
+                        appRepo.updateLastUsed(bundleId: bundleId)
                     } else {
-                        logger.warning("⚠️ [navigateCurrentTab] No applications found: \(host)")
+                        logger.warning("⚠️ [navigateCurrentTab] No applications found: \(bundleId)")
                         return
                     }
                 } else {
-                    // local path mode: actro:///Users/example-dev-2/path/to/app
                     sourcePath = url.path
                     logger.notice("📂 [navigateCurrentTab] Navigator to Local Actrium Apply: \(sourcePath ?? "")")
                 }
@@ -2330,8 +2334,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     /// actro://<bundleId> resolves via AppRepository; actro:///path is a direct path.
     private func actroSourcePath(for url: URL) -> String? {
-        if let host = url.host, !host.isEmpty {
-            return AppRepository().getByBundleId(host)?.sourcePath
+        if let bundleId = ActriumAppURLScheme.bundleId(from: url) {
+            return AppRepository().getByBundleId(bundleId)?.sourcePath
         }
         return url.path
     }

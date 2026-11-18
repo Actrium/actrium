@@ -24,6 +24,7 @@ final class XPCNotificationBridge {
     static let deleteHistoryItem = Notification.Name("xpc.deleteHistoryItem")
     static let restoreHistoryGroup = Notification.Name("xpc.restoreHistoryGroup")
     static let clearHistory = Notification.Name("xpc.clearHistory")
+    static let setHistoryPage = Notification.Name("xpc.setHistoryPage")
     static let openURLFromStartPage = Notification.Name("xpc.openURLFromStartPage")
     static let capabilityPermissionRequest = Notification.Name(
         "xpc.capabilityPermissionRequest"
