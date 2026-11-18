@@ -182,6 +182,7 @@ name = "recovery_latency"
 harness = false
 
 [dev-dependencies]
+libc = "0.2"
 rcgen = "0.14.8"
 tokio = { workspace = true, features = ["test-util"] }
 rand.workspace = true

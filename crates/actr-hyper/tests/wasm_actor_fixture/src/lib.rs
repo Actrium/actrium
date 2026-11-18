@@ -223,6 +223,15 @@ impl MessageDispatcher for DoubleDispatcher {
                 .map(Bytes::from)
                 .map_err(|error| ActrError::Internal(format!("WASI data read failed: {error}"))),
             #[cfg(target_arch = "wasm32")]
+            "test/wasi-data-block" => {
+                std::fs::write("/data/ready", b"ready").map_err(|error| {
+                    ActrError::Internal(format!("marker write failed: {error}"))
+                })?;
+                std::fs::read("/data/fixture-state")
+                    .map(Bytes::from)
+                    .map_err(|error| ActrError::Internal(format!("WASI data read failed: {error}")))
+            }
+            #[cfg(target_arch = "wasm32")]
             "test/wasi-data-trap" => panic!("fixture WASI data trap"),
             "test/explicit" => {
                 let payload = envelope.payload.unwrap_or_default();

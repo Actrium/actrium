@@ -224,6 +224,7 @@ dependencies = [
  "hex",
  "hmac 0.12.1",
  "if-addrs",
+ "libc",
  "libloading",
  "loran-platform",
  "loran-relay-protocol",

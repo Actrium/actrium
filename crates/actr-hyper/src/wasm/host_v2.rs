@@ -694,6 +694,42 @@ fn wit_payload_type_to_proto(payload_type: WitPayloadType) -> PayloadType {
 // Instantiation
 // ─────────────────────────────────────────────────────────────────────────────
 
+// WASI filesystem operations use the ambient Tokio blocking pool. A separate
+// runtime keeps a stalled guest operation away from the caller's blocking pool.
+// A started filesystem operation cannot be canceled; four stalled operations
+// can exhaust this pool until the underlying I/O returns.
+fn wasi_guest_runtime() -> WasmResult<Handle> {
+    static RUNTIME: OnceLock<std::io::Result<Runtime>> = OnceLock::new();
+    RUNTIME
+        .get_or_init(|| {
+            Builder::new_multi_thread()
+                .worker_threads(2)
+                .max_blocking_threads(4)
+                .thread_name("actr-wasi-guest")
+                .enable_all()
+                .build()
+        })
+        .as_ref()
+        .map(|runtime| runtime.handle().clone())
+        .map_err(|error| {
+            WasmError::LoadFailed(format!("cannot initialize WASI guest runtime: {error}"))
+        })
+}
+
+// Enter only while polling: holding an EnterGuard across an await would leak
+// the runtime context into unrelated tasks on the caller's executor.
+async fn with_wasi_runtime<F: std::future::Future>(
+    runtime: Option<Handle>,
+    future: F,
+) -> F::Output {
+    let mut future = std::pin::pin!(future);
+    poll_fn(|cx| {
+        let _guard = runtime.as_ref().map(Handle::enter);
+        future.as_mut().poll(cx)
+    })
+    .await
+}
+
 // A stalled host filesystem must not consume the quota for creating or rebuilding Stores.
 const MAX_CONCURRENT_WASI_PREOPENS: usize = 4;
 static WASI_PREOPEN_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_WASI_PREOPENS);
@@ -779,6 +815,7 @@ async fn instantiate_parts_v2(
     filesystem: &WasiFilesystemCtx,
     deadline: tokio::time::Instant,
     _instantiate_permit: QuotaPermit,
+    wasi_runtime: Option<Handle>,
 ) -> WasmResult<(Store<HostState>, ActrWorkloadGuestV2)> {
     let mut linker: Linker<HostState> = Linker::new(engine);
     wasmtime_wasi::p2::add_to_linker_async(&mut linker).map_err(|e| {
@@ -810,7 +847,10 @@ async fn instantiate_parts_v2(
     let bindings = match crate::timer::timeout_at(
         crate::timer::ids::WASM_INSTANTIATION,
         deadline,
-        ActrWorkloadGuestV2::instantiate_async(&mut store, component, &linker),
+        with_wasi_runtime(
+            wasi_runtime,
+            ActrWorkloadGuestV2::instantiate_async(&mut store, component, &linker),
+        ),
     )
     .await
     {
@@ -849,6 +889,7 @@ pub(crate) struct WasmWorkloadV2 {
     limits: WasmRuntimeLimits,
     store: Option<Store<HostState>>,
     wasi_filesystem: WasiFilesystemCtx,
+    wasi_runtime: Option<Handle>,
     bindings: ActrWorkloadGuestV2,
     _epoch_ticker: Arc<EpochTicker>,
     _store_permit: StorePermit,
@@ -879,6 +920,7 @@ impl WasmWorkloadV2 {
         uses_explicit_reply_boundary: bool,
         wasi_data_dir: Option<&Path>,
     ) -> WasmResult<Self> {
+        let wasi_runtime = wasi_data_dir.map(|_| wasi_guest_runtime()).transpose()?;
         let timeout = limits.invocation_timeout;
         let deadline = tokio::time::Instant::now() + timeout;
         let wasi_filesystem = if let Some(directory) = wasi_data_dir {
@@ -907,6 +949,7 @@ impl WasmWorkloadV2 {
             &wasi_filesystem,
             deadline,
             permit,
+            wasi_runtime.clone(),
         )
         .await?;
         tracing::info!("wasm Component instantiated (v2 async world)");
@@ -916,6 +959,7 @@ impl WasmWorkloadV2 {
             limits: *limits,
             store: Some(store),
             wasi_filesystem,
+            wasi_runtime,
             bindings,
             _epoch_ticker: epoch_ticker,
             _store_permit: store_permit,
@@ -986,6 +1030,7 @@ impl WasmWorkloadV2 {
             &self.wasi_filesystem,
             deadline,
             permit,
+            self.wasi_runtime.clone(),
         )
         .await
         {
@@ -1101,6 +1146,7 @@ impl WasmWorkloadV2 {
                 reply_deadline,
             );
         let inv = invocation_ctx_to_wit(&ctx, token, expects_response, reply_enabled);
+        let wasi_runtime = self.wasi_runtime.clone();
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1115,7 +1161,7 @@ impl WasmWorkloadV2 {
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
             self.limits.invocation_timeout,
-            region_fut,
+            with_wasi_runtime(wasi_runtime, region_fut),
         )
         .await
         {
@@ -1240,6 +1286,7 @@ impl WasmWorkloadV2 {
         // then bound the whole run_concurrent region with the wall-clock
         // timeout. fuel/epoch preempt non-yielding compute; the timeout bounds
         // a guest that awaits a host import indefinitely.
+        let wasi_runtime = self.wasi_runtime.clone();
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1254,7 +1301,7 @@ impl WasmWorkloadV2 {
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
             self.limits.invocation_timeout,
-            region_fut,
+            with_wasi_runtime(wasi_runtime, region_fut),
         )
         .await
         {
@@ -1279,6 +1326,7 @@ impl WasmWorkloadV2 {
             .data_mut()
             .alloc_invocation(ctx.clone(), host_abi.clone());
         let inv = invocation_ctx_to_wit(&ctx, token, false, false);
+        let wasi_runtime = self.wasi_runtime.clone();
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1293,7 +1341,7 @@ impl WasmWorkloadV2 {
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
             self.limits.invocation_timeout,
-            region_fut,
+            with_wasi_runtime(wasi_runtime, region_fut),
         )
         .await
         {
@@ -1318,6 +1366,7 @@ impl WasmWorkloadV2 {
             .data_mut()
             .alloc_invocation(ctx.clone(), host_abi.clone());
         let inv = invocation_ctx_to_wit(&ctx, token, false, false);
+        let wasi_runtime = self.wasi_runtime.clone();
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1332,7 +1381,7 @@ impl WasmWorkloadV2 {
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
             self.limits.invocation_timeout,
-            region_fut,
+            with_wasi_runtime(wasi_runtime, region_fut),
         )
         .await
         {
@@ -1398,6 +1447,7 @@ impl WasmWorkloadV2 {
         };
         let inv = invocation_ctx_to_wit(&ctx, token, false, false);
 
+        let wasi_runtime = self.wasi_runtime.clone();
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1412,7 +1462,7 @@ impl WasmWorkloadV2 {
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
             self.limits.invocation_timeout,
-            region_fut,
+            with_wasi_runtime(wasi_runtime, region_fut),
         )
         .await
         {
@@ -1465,6 +1515,7 @@ impl WasmWorkloadV2 {
             .alloc_invocation(ctx.clone(), host_abi.clone());
         let inv = invocation_ctx_to_wit(&ctx, token, false, false);
 
+        let wasi_runtime = self.wasi_runtime.clone();
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1476,7 +1527,7 @@ impl WasmWorkloadV2 {
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
             self.limits.invocation_timeout,
-            region_fut,
+            with_wasi_runtime(wasi_runtime, region_fut),
         )
         .await
         {
@@ -1581,6 +1632,7 @@ impl WasmWorkloadV2 {
                 return;
             }
 
+            let wasi_runtime = self.wasi_runtime.clone();
             let bindings = &self.bindings;
             let ledger_region = Arc::clone(&ledger);
             let pending_barrier_region = Arc::clone(&pending_barrier);
@@ -1609,6 +1661,7 @@ impl WasmWorkloadV2 {
                         )
                         .await
                     });
+                let region = with_wasi_runtime(wasi_runtime, region);
                 tokio::pin!(region);
                 loop {
                     tokio::select! {

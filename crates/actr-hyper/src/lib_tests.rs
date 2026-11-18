@@ -76,6 +76,89 @@ async fn call_wasi_fixture(
         .await
 }
 
+#[cfg(all(unix, feature = "wasm-engine", actr_wasm_fixture_available))]
+#[test]
+fn stalled_guest_file_io_does_not_block_mount_free_attach() {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::time::Duration;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let mounted_root = TempDir::new().unwrap();
+        let other_root = TempDir::new().unwrap();
+        let data = mounted_root.path().join("data");
+        std::fs::create_dir(&data).unwrap();
+        let fifo = data.join("fixture-state");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let mounted =
+            attach_wasi_fixture(&mounted_root, Some(data.clone()), WasiDataDir::Inherit).await;
+        let actor = mounted.attachment.unwrap().node.workload_dispatch;
+        let request_actor = actor.clone();
+        let mut request = tokio::spawn(async move {
+            call_wasi_fixture(&request_actor, "test/wasi-data-block", b"").await
+        });
+        let marker = data.join("ready");
+        let ready = tokio::time::timeout(Duration::from_secs(20), async {
+            while !marker.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        // Give the guest time to issue the FIFO open after creating the marker.
+        let blocked = tokio::time::timeout(Duration::from_millis(200), &mut request)
+            .await
+            .is_err();
+        let timed_out = if blocked {
+            match tokio::time::timeout(Duration::from_secs(10), &mut request).await {
+                Ok(Ok(Err(actr_protocol::ActrError::TimedOut))) => true,
+                Ok(Ok(Err(actr_protocol::ActrError::Internal(message)))) => {
+                    message.contains("WASM invocation timed out")
+                }
+                _ => false,
+            }
+        } else {
+            false
+        };
+        let attached = tokio::time::timeout(
+            Duration::from_secs(20),
+            attach_wasi_fixture(&other_root, None, WasiDataDir::Inherit),
+        )
+        .await;
+        // Release a started FIFO open, including when the attach timed out.
+        let release = std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(fifo);
+        let release_error = release.err();
+        actor.shutdown().await;
+        assert!(ready.is_ok(), "the guest did not reach the FIFO open");
+        assert!(blocked, "guest file operation did not block");
+        assert!(timed_out, "the guest invocation did not time out");
+        assert!(
+            release_error.is_none(),
+            "failed to release the FIFO reader: {release_error:?}"
+        );
+        let other = attached.expect("mount-free attach was blocked by guest file I/O");
+        other
+            .attachment
+            .unwrap()
+            .node
+            .workload_dispatch
+            .shutdown()
+            .await;
+    });
+}
+
 #[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
 #[tokio::test]
 async fn wasi_data_attach_reads_and_writes_original_directory_after_trap() {
