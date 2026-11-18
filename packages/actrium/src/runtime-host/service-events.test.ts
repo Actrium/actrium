@@ -739,4 +739,61 @@ describe('createHttpServiceEventSource', () => {
       globalThis.XMLHttpRequest = originalXhr;
     }
   });
+
+  test('uses incremental XHR before awaiting fetch on React Native', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalXhr = globalThis.XMLHttpRequest;
+    const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    let fetchCalls = 0;
+    // React Native's whatwg-fetch does not resolve until the open SSE
+    // response ends, so this promise deliberately never settles.
+    globalThis.fetch = (() => {
+      fetchCalls += 1;
+      return new Promise<Response>(() => {});
+    }) as unknown as typeof fetch;
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { product: 'ReactNative' },
+      writable: true,
+    });
+    class FakeXhr {
+      readyState = 0;
+      status = 0;
+      responseText = '';
+      onreadystatechange: (() => void) | null = null;
+      onprogress: (() => void) | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      open(): void {}
+      setRequestHeader(): void {}
+      abort(): void {}
+      send(): void {
+        this.readyState = 3;
+        this.status = 200;
+        this.responseText = 'event: a\ndata: {"payloadBase64":"AAEC"}\n\n';
+        this.onreadystatechange?.();
+        this.onprogress?.();
+      }
+    }
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    const received: string[] = [];
+    try {
+      const source = createHttpServiceEventSource('https://example.com/events', ['a']);
+      const unsubscribe = source.subscribe((event) => received.push(event.payloadBase64));
+      await waitFor(() => received.length === 1);
+      expect(received).toEqual(['AAEC']);
+      expect(fetchCalls).toBe(0);
+      unsubscribe();
+    } finally {
+      globalThis.fetch = originalFetch;
+      globalThis.XMLHttpRequest = originalXhr;
+      if (originalNavigator) {
+        Object.defineProperty(globalThis, 'navigator', originalNavigator);
+      } else {
+        delete (globalThis as { navigator?: Navigator }).navigator;
+      }
+    }
+  });
 });

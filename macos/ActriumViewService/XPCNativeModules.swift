@@ -92,16 +92,18 @@ final class RealmService: RCTEventEmitter {
             return
         }
         let subscription = RealmServiceEventSubscription(id: UUID(), events: events)
-        RendererProcessController.subscribeRealmServiceEvents(
-            tabId: tabId, subscription: subscription
-        ) { response in
-            if let failure = response.failure {
-                reject(failure.code, failure.message, NSError(
-                    domain: failure.domain ?? "RealmService", code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: failure.message]
-                ))
-            } else {
-                resolve(subscription.id.uuidString)
+        DispatchQueue.main.async {
+            RendererProcessController.subscribeRealmServiceEvents(
+                tabId: tabId, subscription: subscription
+            ) { response in
+                if let failure = response.failure {
+                    reject(failure.code, failure.message, NSError(
+                        domain: failure.domain ?? "RealmService", code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: failure.message]
+                    ))
+                } else {
+                    resolve(subscription.id.uuidString)
+                }
             }
         }
     }
@@ -109,7 +111,11 @@ final class RealmService: RCTEventEmitter {
     @objc(unsubscribeServiceEvents:subscriptionId:)
     func unsubscribeServiceEvents(_ tabId: String, subscriptionId: String) {
         guard let id = UUID(uuidString: subscriptionId) else { return }
-        RendererProcessController.unsubscribeRealmServiceEvents(tabId: tabId, subscriptionId: id)
+        DispatchQueue.main.async {
+            RendererProcessController.unsubscribeRealmServiceEvents(
+                tabId: tabId, subscriptionId: id
+            )
+        }
     }
 
     override func supportedEvents() -> [String]! { ["realmServiceEvent"] }

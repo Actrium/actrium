@@ -251,12 +251,20 @@ function retryableHttpStatus(status: number): boolean {
   return true;
 }
 
+/** React Native's whatwg-fetch resolves only after XHR `load`, which never
+ * happens for a long-lived SSE response. Prefer incremental XHR on that host. */
+function prefersIncrementalXhr(): boolean {
+  return typeof navigator !== 'undefined' &&
+    (navigator as Navigator & { product?: string }).product === 'ReactNative';
+}
+
 /**
  * Create an event source backed by an HTTP Server-Sent Events endpoint.
  *
  * Streaming fetch is used where available. React Native's whatwg-fetch does not
- * expose response.body, so those hosts automatically use incremental XHR
- * responseText instead. All handlers on this source share one SSE connection.
+ * resolve until the response completes, and its Response has no body, so those
+ * hosts use incremental XHR responseText instead. All handlers on this source
+ * share one SSE connection.
  * Reconnects resume with Last-Event-ID when the server supplied an id; servers that do not persist IDs retain the documented
  * no-replay behavior.
  */
@@ -434,7 +442,7 @@ export function createHttpServiceEventSource(
           }
         };
 
-        if (typeof fetch !== 'function') {
+        if (typeof fetch !== 'function' || prefersIncrementalXhr()) {
           startXhr();
         } else {
           const controller = new AbortController();
