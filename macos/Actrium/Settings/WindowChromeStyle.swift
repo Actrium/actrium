@@ -74,7 +74,7 @@ enum WindowChromeStyle: String, CaseIterable, Identifiable {
         let isDark = AppColors.usesDarkAppearance
         return switch self {
         case .clearGlass:
-            NSColor(calibratedWhite: isDark ? 0.36 : 0.92, alpha: 0.18)
+            NSColor(calibratedWhite: isDark ? 0.36 : 0.92, alpha: 1)
         case .graphiteGlass:
             NSColor(calibratedRed: 0.24, green: 0.27, blue: 0.32,
                     alpha: isDark ? 0.36 : 0.24)
