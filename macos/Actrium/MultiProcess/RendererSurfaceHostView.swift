@@ -906,7 +906,12 @@ final class IMECompositionView: NSTextView {
     /// through to keyDown and are forwarded as raw events like any other
     /// modified key.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard event.modifierFlags.contains(.command),
+        // performKeyEquivalent reaches every view in the window hierarchy,
+        // not just the first responder: an IME view left in a recycled or
+        // inactive surface must not consume command keys meant elsewhere.
+        guard window?.firstResponder === self,
+              surfaceView?.allowsInput == true,
+              event.modifierFlags.contains(.command),
               let command = Self.commandEquivalent(
                 characters: event.characters,
                 shift: event.modifierFlags.contains(.shift)
@@ -931,10 +936,12 @@ final class IMECompositionView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         // Named command equivalents (copy/paste/select-all/undo/redo) travel
-        // as actions; every other modified key (Shift/Option/Cmd+arrows, ...)
-        // is forwarded raw so the Renderer reproduces the exact editing
-        // command through interpretKeyEvents — the same path that handled
-        // these keys before Host-side IME composition existed.
+        // as actions. Modified FUNCTION keys (Shift/Cmd+arrows, Home/End, ...)
+        // are forwarded raw so the Renderer reproduces the exact editing
+        // command — the same path that handled them before Host-side IME
+        // composition existed. Character keys (Shift+A, Caps Lock text,
+        // Option+Delete, Shift+Return, ...) must stay on the
+        // interpretKeyEvents path so the Host IME composes them.
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if flags.contains(.command),
            let command = Self.commandEquivalent(
@@ -944,12 +951,24 @@ final class IMECompositionView: NSTextView {
             surfaceView?.sendTextCommand(command)
             return
         }
-        if !flags.isEmpty {
+        if !flags.isEmpty, Self.isFunctionKey(event) {
             surfaceView?.forwardKey(event, type: .keyDown)
             surfaceView?.forwardKey(event, type: .keyUp)
             return
         }
         interpretKeyEvents([event])
+    }
+
+    /// True when the event's characters identify a navigation/editing
+    /// function key (arrows, Home/End, PageUp/Down, F1-F12, and the
+    /// backspace/delete character) rather than a text character.
+    static func isFunctionKey(_ event: NSEvent) -> Bool {
+        guard let value = event.characters?.unicodeScalars.first?.value else { return false }
+        // 0x7F is the backspace/delete character (NSDeleteCharacter); it is
+        // not in the NSFunctionKey range but is an editing key (e.g.
+        // Option+Delete removes the previous word when forwarded raw).
+        if value == UInt32(NSDeleteCharacter) { return true }
+        return (Int(NSUpArrowFunctionKey)...Int(NSMenuFunctionKey)).contains(Int(value))
     }
 
     /// interpretKeyEvents turns unhandled keys into editing commands; map the
