@@ -623,8 +623,32 @@ private final class RendererTabSurface {
         let string: String
         let caret: Int
     }
-    private var undoStack: [EditSnapshot] = []
-    private var redoStack: [EditSnapshot] = []
+    /// Per-control undo history. The window field editor is shared, so a
+    /// control's identity comes from the field editor's delegate. History
+    /// persists while the surface lives: switching away and back keeps a
+    /// control's undo stack, matching AppKit's own behavior.
+    private struct UndoHistory {
+        var undo: [EditSnapshot] = []
+        var redo: [EditSnapshot] = []
+    }
+    private var undoHistories: [ObjectIdentifier: UndoHistory] = [:]
+
+    private func currentControlKey() -> ObjectIdentifier? {
+        guard let editor = window.firstResponder as? NSTextView else { return nil }
+        if editor.isFieldEditor {
+            guard let owner = editor.delegate else { return nil }
+            return ObjectIdentifier(owner as AnyObject)
+        }
+        return ObjectIdentifier(editor)
+    }
+
+    private func withHistory(_ body: (inout UndoHistory) -> Void) {
+        guard let key = currentControlKey() else { return }
+        var history = undoHistories[key] ?? UndoHistory()
+        body(&history)
+        if history.undo.count > 100 { history.undo.removeFirst(history.undo.count - 100) }
+        undoHistories[key] = history
+    }
 
 
     var contextId: UInt32 {
@@ -704,6 +728,7 @@ private final class RendererTabSurface {
     }
 
     func close() {
+        undoHistories.removeAll()
         accessibilityPublishWork?.cancel()
         accessibilityPublishWork = nil
         for observer in accessibilityObservers {
@@ -846,10 +871,12 @@ private final class RendererTabSurface {
             // Text composition happens in the Host process (TSM never engages
             // in this background, activation-prohibited process); dispatched
             // keys here are only non-text commands (arrows, enter, ...).
-            // Deleting mutates the text storage, so capture an undo snapshot
-            // around it the same way mirrored inserts do.
+            // Deleting, Return and Tab can mutate the text storage, so
+            // capture undo snapshots around them the same way mirrored
+            // inserts do.
             let isDelete = input.type == .keyDown
-                && (input.keyCode == 51 || input.keyCode == 117)
+                && (input.keyCode == 51 || input.keyCode == 117
+                    || input.keyCode == 36 || input.keyCode == 48)
             if isDelete { beginUndoableEdit() }
             if let textView = window.firstResponder as? NSTextView {
                 if input.type == .keyDown { textView.keyDown(with: event) }
@@ -934,14 +961,17 @@ private final class RendererTabSurface {
 
     private func beginUndoableEdit() {
         guard let snapshot = currentEditSnapshot() else { return }
-        if undoStack.last?.string != snapshot.string { undoStack.append(snapshot) }
-        redoStack.removeAll()
+        withHistory { history in
+            if history.undo.last?.string != snapshot.string { history.undo.append(snapshot) }
+            history.redo.removeAll()
+        }
     }
 
     private func endUndoableEdit() {
         guard let snapshot = currentEditSnapshot() else { return }
-        if undoStack.last?.string != snapshot.string { undoStack.append(snapshot) }
-        if undoStack.count > 100 { undoStack.removeFirst(undoStack.count - 100) }
+        withHistory { history in
+            if history.undo.last?.string != snapshot.string { history.undo.append(snapshot) }
+        }
     }
 
     private func restoreSnapshot(_ snapshot: String, caret: Int) {
@@ -961,25 +991,30 @@ private final class RendererTabSurface {
     }
 
     private func undoTextEdit() {
-        guard undoStack.count > 1,
-              window.firstResponder is NSTextView else { return }
-        let current = undoStack.removeLast()
-        redoStack.append(current)
-        let target = undoStack[undoStack.count - 1]
-        // Undoing an insertion puts the caret back at the insertion point,
-        // not at the end of the restored text.
-        let delta = current.string.count - target.string.count
-        let caret = max(0, min(current.caret - delta, (target.string as NSString).length))
-        restoreSnapshot(target.string, caret: caret)
+        guard window.firstResponder is NSTextView else { return }
+        withHistory { history in
+            guard history.undo.count > 1 else { return }
+            let current = history.undo.removeLast()
+            history.redo.append(current)
+            let target = history.undo[history.undo.count - 1]
+            // Undoing an insertion puts the caret back at the insertion
+            // point, not at the end of the restored text. All offsets are
+            // UTF-16 units to match NSTextView selection semantics.
+            let delta = (current.string as NSString).length - (target.string as NSString).length
+            let caret = max(0, min(current.caret - delta, (target.string as NSString).length))
+            restoreSnapshot(target.string, caret: caret)
+        }
     }
 
     private func redoTextEdit() {
-        guard let snapshot = redoStack.popLast(),
-              window.firstResponder is NSTextView else { return }
-        if let current = currentEditSnapshot() {
-            undoStack.append(current)
+        guard window.firstResponder is NSTextView else { return }
+        withHistory { history in
+            guard let snapshot = history.redo.popLast() else { return }
+            if let current = currentEditSnapshot() {
+                history.undo.append(current)
+            }
+            restoreSnapshot(snapshot.string, caret: snapshot.caret)
         }
-        restoreSnapshot(snapshot.string, caret: snapshot.caret)
     }
 
     /// Applies Host-forwarded editing actions (menu key equivalents) to the
@@ -1015,8 +1050,9 @@ private final class RendererTabSurface {
         }
         focusedEditor = nil
         lastCaretRect = nil
-        undoStack.removeAll()
-        redoStack.removeAll()
+        if let key = currentControlKey() {
+            undoHistories.removeValue(forKey: key)
+        }
         RendererProcessLifetime.shared.controller?.publishCaret(tabId: tabId, rect: nil)
     }
 
