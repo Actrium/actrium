@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use crate::error::{ActrError, ActrResult};
 use crate::lifecycle::ProgramRelease;
-use crate::types::ActrId;
+use crate::types::{ActrId, ActrType};
 
 /// Service runtime compatibility tuple.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -52,6 +52,7 @@ pub struct ActriumRoute {
 /// Configuration for an Actrium Service host.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ActriumServiceConfig {
+    /// Leave empty to use the registered Node's own Actor identity.
     pub service_actor_id: String,
     pub allowed_front_actor_types: Vec<String>,
     pub program: ProgramRelease,
@@ -276,6 +277,200 @@ impl ActriumAttachParams {
     }
 }
 
+/// Compatibility metadata derived from a verified Front archive and the
+/// Realm's selected Service release.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ActriumSessionMetadata {
+    pub program: ProgramRelease,
+    pub package_digest: Vec<u8>,
+    pub guest_digest: Vec<u8>,
+    pub protocol_fingerprint: Vec<u8>,
+    pub runtime: ActriumRuntime,
+    pub program_capabilities: Vec<String>,
+    pub routes: Vec<ActriumRoute>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FrontCapabilityManifest {
+    keel_api: String,
+    host_modules: BTreeMap<String, FrontHostModule>,
+}
+
+#[derive(serde::Deserialize)]
+struct FrontHostModule {
+    rpc: Option<Vec<String>>,
+}
+
+fn invalid_session_metadata(message: impl Into<String>) -> ActrError {
+    ActrError::InvalidArgument {
+        msg: format!("invalid Actrium Front session metadata: {}", message.into()),
+    }
+}
+
+/// Verify a Front archive and derive the exact compatibility declarations used
+/// by both the local peer runtime and an outbound Attach. The Realm-selected
+/// Service digest is a lowercase/uppercase hex SHA-256, while FFI records carry
+/// the raw 32-byte representation.
+#[uniffi::export]
+pub fn actrium_session_metadata_for_front(
+    front_archive: Vec<u8>,
+    trusted_front_key: Vec<u8>,
+    service_type: ActrType,
+    service_package_digest_hex: String,
+) -> ActrResult<ActriumSessionMetadata> {
+    use sha2::Digest as _;
+
+    const ACTRIUM_VERSION_V1: &str = "1.0.0";
+    const FRONT_HOST_API_V1: &str = "1.0";
+    const SERVICE_CAPABILITY: &str = "service";
+
+    let key_bytes: [u8; 32] = trusted_front_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| invalid_session_metadata("the Front Ed25519 key must contain 32 bytes"))?;
+    let trusted_front_key = ed25519_dalek::VerifyingKey::from_bytes(&key_bytes)
+        .map_err(|error| invalid_session_metadata(error.to_string()))?;
+    let inspected = actr_pack::verify_actor_package(&front_archive, &trusted_front_key)
+        .map_err(|error| invalid_session_metadata(error.to_string()))?;
+    inspected
+        .manifest
+        .validate_workload_payload(&front_archive)
+        .map_err(|error| invalid_session_metadata(error.to_string()))?;
+
+    let package_digest = hex::decode(service_package_digest_hex)
+        .map_err(|error| invalid_session_metadata(format!("Service digest: {error}")))?;
+    if package_digest.len() != 32 {
+        return Err(invalid_session_metadata(
+            "Service digest must contain 32 bytes",
+        ));
+    }
+
+    let service_version = semver::Version::parse(&service_type.version)
+        .map_err(|error| invalid_session_metadata(format!("Service version: {error}")))?;
+    let dependency = inspected
+        .manifest
+        .dependencies
+        .get("service")
+        .ok_or_else(|| invalid_session_metadata("[dependencies.service] is required"))?;
+    let expected_actor = format!("{}/{}", service_type.publisher, service_type.name);
+    if !dependency.required || dependency.actor != expected_actor {
+        return Err(invalid_session_metadata(format!(
+            "the selected Service {expected_actor} does not match the Front dependency"
+        )));
+    }
+    let dependency_requirement = semver::VersionReq::parse(&dependency.version)
+        .map_err(|error| invalid_session_metadata(format!("Service dependency: {error}")))?;
+    if !dependency_requirement.matches(&service_version) {
+        return Err(invalid_session_metadata(format!(
+            "Service version {service_version} does not satisfy {}",
+            dependency.version
+        )));
+    }
+
+    // The manifest carries a version requirement, whereas Attach carries the
+    // concrete Host implementation version selected by this v1 native Host.
+    let host_requirement = semver::VersionReq::parse(&inspected.manifest.host.api)
+        .map_err(|error| invalid_session_metadata(format!("Host API requirement: {error}")))?;
+    if !host_requirement.matches(&semver::Version::parse("1.0.0").expect("valid Host version")) {
+        return Err(invalid_session_metadata(format!(
+            "Host API {FRONT_HOST_API_V1} does not satisfy {}",
+            inspected.manifest.host.api
+        )));
+    }
+
+    let guest = actr_pack::read_actor_workload(&front_archive, &inspected)
+        .map_err(|error| invalid_session_metadata(error.to_string()))?;
+    let guest_digest = sha2::Sha256::digest(&guest).to_vec();
+
+    let capabilities_path = inspected
+        .manifest
+        .workload
+        .keel
+        .as_ref()
+        .and_then(|keel| keel.capabilities.as_deref())
+        .ok_or_else(|| invalid_session_metadata("the Keel capability manifest is required"))?;
+    let capability_bytes = actr_pack::read_actor_package_file(
+        &front_archive,
+        &inspected,
+        capabilities_path,
+        actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
+    )
+    .map_err(|error| invalid_session_metadata(error.to_string()))?;
+    let capabilities: FrontCapabilityManifest = serde_json::from_slice(&capability_bytes)
+        .map_err(|error| invalid_session_metadata(format!("capability manifest: {error}")))?;
+    let rpc_routes = capabilities
+        .host_modules
+        .get(SERVICE_CAPABILITY)
+        .or_else(|| capabilities.host_modules.get("host:service"))
+        .and_then(|module| module.rpc.as_ref())
+        .ok_or_else(|| invalid_session_metadata("hostModules.service.rpc is required"))?;
+    let routes: BTreeSet<String> = rpc_routes.iter().cloned().collect();
+    if routes.is_empty() || routes.iter().any(|route| route.is_empty()) {
+        return Err(invalid_session_metadata(
+            "hostModules.service.rpc must contain nonempty routes",
+        ));
+    }
+    let routes = routes
+        .into_iter()
+        .map(|route| ActriumRoute {
+            route,
+            capabilities: vec![SERVICE_CAPABILITY.to_owned()],
+        })
+        .collect();
+
+    let contract_path = dependency
+        .contract
+        .as_deref()
+        .ok_or_else(|| invalid_session_metadata("the Service Proto contract is required"))?;
+    let contract_bytes = actr_pack::read_actor_package_file(
+        &front_archive,
+        &inspected,
+        contract_path,
+        actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
+    )
+    .map_err(|error| invalid_session_metadata(error.to_string()))?;
+    let contract = String::from_utf8(contract_bytes).map_err(|error| {
+        invalid_session_metadata(format!("Service Proto is not UTF-8: {error}"))
+    })?;
+    let contract_name = contract_path
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| invalid_session_metadata("the Service Proto basename is empty"))?;
+    let fingerprint = actr_service_compat::Fingerprint::calculate_service_semantic_fingerprint(&[
+        actr_service_compat::ProtoFile {
+            name: contract_name.to_owned(),
+            content: contract,
+            path: None,
+        },
+    ])
+    .map_err(|error| invalid_session_metadata(error.to_string()))?;
+    let fingerprint_hex = fingerprint
+        .strip_prefix("service_semantic:")
+        .ok_or_else(|| invalid_session_metadata("unexpected Service fingerprint encoding"))?;
+    let protocol_fingerprint = hex::decode(fingerprint_hex)
+        .map_err(|error| invalid_session_metadata(format!("Service fingerprint: {error}")))?;
+
+    Ok(ActriumSessionMetadata {
+        program: ProgramRelease {
+            publisher: service_type.publisher,
+            name: service_type.name,
+            version: service_type.version,
+        },
+        package_digest,
+        guest_digest,
+        protocol_fingerprint,
+        runtime: ActriumRuntime {
+            actrium_version: ACTRIUM_VERSION_V1.to_owned(),
+            front_host_api: FRONT_HOST_API_V1.to_owned(),
+            keel_api: capabilities.keel_api,
+        },
+        program_capabilities: vec![SERVICE_CAPABILITY.to_owned()],
+        routes,
+    })
+}
+
 /// FFI wrapper for an Actrium peer session.
 #[derive(uniffi::Object)]
 pub struct ActrPeerSessionWrapper {
@@ -328,9 +523,12 @@ impl ActrPeerSessionWrapper {
 
 pub(crate) fn actrium_service_for_node(
     node: &actr_hyper::Node<actr_hyper::Registered>,
-    config: ActriumServiceConfig,
+    mut config: ActriumServiceConfig,
     policies: Arc<ActriumServicePolicies>,
 ) -> ActrResult<actrium_runtime::InMemorySessionService> {
+    if config.service_actor_id.is_empty() {
+        config.service_actor_id = node.actor_id().to_string_repr();
+    }
     let service_signing_key =
         node.actrium_actor_signing_key()
             .map_err(|error| ActrError::Internal {
@@ -389,6 +587,150 @@ pub(crate) mod tests {
         }
     }
 
+    fn front_package_for_test(host_api: &str) -> (Vec<u8>, ed25519_dalek::SigningKey) {
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
+        let manifest = actr_pack::ActorPackageManifest {
+            format: actr_pack::ACTOR_PACKAGE_FORMAT_V2.to_owned(),
+            actor: actr_pack::ActorDescriptor {
+                publisher: "example.com".into(),
+                name: "documents-front".into(),
+                version: "1.0.0".into(),
+            },
+            workload: actr_pack::WorkloadDescriptor {
+                profile: actr_pack::KEEL_GUEST_PROFILE_V1.to_owned(),
+                entry: "workload/guest.js".into(),
+                rpc_contract: None,
+                keel: Some(actr_pack::KeelGuestDescriptor {
+                    runtime: "js".into(),
+                    guest_api: actr_pack::KEEL_GUEST_PROFILE_V1.to_owned(),
+                    capabilities: Some("workload/capabilities.json".into()),
+                    contract: None,
+                }),
+            },
+            host: actr_pack::HostRequirements {
+                profile: "actr.host/1".into(),
+                api: host_api.into(),
+                required_capabilities: Vec::new(),
+                optional_capabilities: Vec::new(),
+            },
+            dependencies: BTreeMap::from([(
+                "service".into(),
+                actr_pack::ActorDependency {
+                    actor: "example.com/documents".into(),
+                    version: "=1.0.0".into(),
+                    contract: Some("contracts/service.proto".into()),
+                    required: true,
+                },
+            )]),
+            extensions: actr_pack::PackageExtensions { actrium: None },
+            signature: actr_pack::SignatureDescriptor {
+                algorithm: "ed25519".into(),
+                key_id: "filled-by-pack".into(),
+            },
+            files: [
+                ("workload/guest.js", "workload", "text/javascript"),
+                ("workload/capabilities.json", "profile", "application/json"),
+                ("contracts/service.proto", "contract", "text/plain"),
+            ]
+            .into_iter()
+            .map(|(path, role, media_type)| actr_pack::PackageFileEntry {
+                path: path.into(),
+                role: role.into(),
+                media_type: media_type.into(),
+                size: 0,
+                sha256: "0".repeat(64),
+            })
+            .collect(),
+        };
+        let payloads = BTreeMap::from([
+            (
+                "workload/guest.js".into(),
+                b"globalThis.documents = true;".to_vec(),
+            ),
+            (
+                "workload/capabilities.json".into(),
+                br#"{"schemaVersion":1,"keelApi":"1.0","guestEntry":"workload/guest.js","imports":["host:service"],"hostModules":{"service":{"rpc":["documents/write","documents/read"]}}}"#.to_vec(),
+            ),
+            (
+                "contracts/service.proto".into(),
+                br#"syntax = "proto3";
+package documents.v1;
+message ReadRequest {}
+message ReadResponse {}
+service Documents { rpc Read(ReadRequest) returns (ReadResponse); }
+"#
+                .to_vec(),
+            ),
+        ]);
+        let package = actr_pack::pack_actor_package(&actr_pack::ActorPackOptions {
+            manifest,
+            payloads,
+            signing_key: signing_key.clone(),
+        })
+        .expect("pack the Front fixture");
+        (package, signing_key)
+    }
+
+    fn selected_service_type() -> ActrType {
+        ActrType {
+            publisher: "example.com".into(),
+            name: "documents".into(),
+            version: "1.0.0".into(),
+        }
+    }
+
+    #[test]
+    fn front_session_metadata_uses_verified_package_payloads() {
+        use sha2::Digest as _;
+
+        let (package, signing_key) = front_package_for_test("^1.0.0");
+        let metadata = actrium_session_metadata_for_front(
+            package,
+            signing_key.verifying_key().to_bytes().to_vec(),
+            selected_service_type(),
+            "04".repeat(32),
+        )
+        .expect("derive verified Front metadata");
+
+        assert_eq!(metadata.package_digest, vec![4; 32]);
+        assert_eq!(
+            metadata.guest_digest,
+            sha2::Sha256::digest(b"globalThis.documents = true;").to_vec()
+        );
+        assert_eq!(metadata.protocol_fingerprint.len(), 32);
+        assert_eq!(metadata.runtime.actrium_version, "1.0.0");
+        assert_eq!(metadata.runtime.front_host_api, "1.0");
+        assert_eq!(metadata.runtime.keel_api, "1.0");
+        assert_eq!(metadata.program_capabilities, vec!["service"]);
+        assert_eq!(
+            metadata
+                .routes
+                .iter()
+                .map(|route| route.route.as_str())
+                .collect::<Vec<_>>(),
+            vec!["documents/read", "documents/write"]
+        );
+        assert!(
+            metadata
+                .routes
+                .iter()
+                .all(|route| route.capabilities == vec!["service"])
+        );
+    }
+
+    #[test]
+    fn front_session_metadata_rejects_an_unsupported_host_api() {
+        let (package, signing_key) = front_package_for_test("^2.0.0");
+        let error = actrium_session_metadata_for_front(
+            package,
+            signing_key.verifying_key().to_bytes().to_vec(),
+            selected_service_type(),
+            "04".repeat(32),
+        )
+        .expect_err("the concrete v1 Host cannot satisfy a v2-only requirement");
+        assert!(error.to_string().contains("does not satisfy"));
+    }
+
     #[test]
     fn service_config_uses_the_process_identity_and_node_key() {
         let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
@@ -402,6 +744,56 @@ pub(crate) mod tests {
         assert_eq!(
             config.service_signing_key.verifying_key(),
             expected_public_key
+        );
+    }
+
+    #[test]
+    fn metadata_from_the_real_counterapp_front() {
+        use base64::Engine as _;
+        use sha2::Digest as _;
+
+        let (Some(front_path), Some(service_path), Some(key_path)) = (
+            std::env::var_os("COUNTERAPP_FRONT"),
+            std::env::var_os("COUNTERAPP_SERVICE"),
+            std::env::var_os("COUNTERAPP_PUBKEY"),
+        ) else {
+            return;
+        };
+        let front = std::fs::read(front_path).expect("read front.actr");
+        let service = std::fs::read(service_path).expect("read service.actr");
+        let key_document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(key_path).expect("read the public key"))
+                .expect("the public key file is JSON");
+        let trusted_key = base64::engine::general_purpose::STANDARD
+            .decode(key_document["public_key"].as_str().expect("public_key"))
+            .expect("the public key is base64");
+        let service_digest = hex::encode(sha2::Sha256::digest(&service));
+
+        let metadata = actrium_session_metadata_for_front(
+            front,
+            trusted_key,
+            ActrType {
+                publisher: "publisher.develenv.com".into(),
+                name: "counterapp-service".into(),
+                version: "0.1.0".into(),
+            },
+            service_digest,
+        )
+        .expect("the real CounterApp Front yields valid session metadata");
+
+        assert_eq!(metadata.program.publisher, "publisher.develenv.com");
+        assert_eq!(metadata.program.name, "counterapp-service");
+        assert_eq!(metadata.program.version, "0.1.0");
+        assert_eq!(metadata.runtime.actrium_version, "1.0.0");
+        assert_eq!(metadata.runtime.front_host_api, "1.0");
+        assert_eq!(metadata.runtime.keel_api, "1.0");
+        assert_eq!(metadata.program_capabilities, vec!["service"]);
+        assert_eq!(metadata.routes.len(), 1);
+        assert_eq!(metadata.routes[0].route, "echo.v1.EchoService.Echo");
+        assert_eq!(metadata.routes[0].capabilities, vec!["service".to_string()]);
+        assert_eq!(
+            hex::encode(&metadata.guest_digest),
+            "f0118a1e4ab675ceb56315bba0056feb9b7aad08aa500fae555ebec1f97dce96"
         );
     }
 

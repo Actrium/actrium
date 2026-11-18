@@ -179,6 +179,37 @@ impl ActrNode {
         .await
     }
 
+    /// Create a Realm Front runtime from a verified Front archive and an
+    /// OS-managed Realm identity.
+    ///
+    /// The Guest is rendered by the platform Host; this node owns only the
+    /// Front Actor identity, the network side, and the Actrium session client.
+    #[uniffi::constructor(async_runtime = "tokio")]
+    pub async fn new_from_front_with_membership(
+        config_path: String,
+        front_archive: Vec<u8>,
+        service_type: ActrType,
+        membership: Arc<crate::RealmMembership>,
+        actor_key_namespace: Option<String>,
+    ) -> ActrResult<Arc<Self>> {
+        run_on_tokio_runtime("Front membership bootstrap", async move {
+            let init =
+                Node::from_config_file(&config_path)
+                    .await
+                    .map_err(|e| ActrError::Config {
+                        msg: format!("Failed to load runtime config `{config_path}`: {e}"),
+                    })?;
+            crate::logger::init_observability(init.runtime_config().observability.clone());
+            let service_type: actr_protocol::ActrType = service_type.into();
+            let attached = init
+                .attach_front(&WorkloadPackage::new(front_archive), &service_type)
+                .await
+                .map_err(|e| ActrError::Config { msg: e.to_string() })?;
+            register_linked_node(membership.bind(attached)?, actor_key_namespace).await
+        })
+        .await
+    }
+
     /// Linked workloads use the same platform signer for their full credential lifecycle.
     #[uniffi::constructor(async_runtime = "tokio")]
     pub async fn new_from_linked_workload_with_membership(
@@ -959,15 +990,10 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
         let node = linked_node_for_test(&config_path)
             .await
             .expect("linked workload node should be created");
-        let service_actor_id = node
-            .inner
-            .lock()
-            .as_ref()
-            .expect("registered node")
-            .actor_id()
-            .to_string_repr();
         let mut config = crate::session::tests::service_config_for_test();
-        config.service_actor_id = service_actor_id;
+        // Hosts cannot read the pre-start Node identity through FFI. An empty
+        // Service ActorId therefore selects the registered Node's own identity.
+        config.service_actor_id.clear();
         config.routes.clear();
 
         let error = match node

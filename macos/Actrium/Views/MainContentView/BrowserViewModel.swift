@@ -1526,11 +1526,21 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     trustedPublicKey: trustedKey,
                     profile: profile
                 )
-                let serviceType = try ActrBindings.verifyRealmFront(
+                guard let serviceType = Self.actrType(from: profile.serviceType) else {
+                    throw NSError(
+                        domain: "ActrDiscovery", code: 27,
+                        userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                            "The Realm Profile names an invalid Service type.",
+                            comment: "Actr Realm service type error")])
+                }
+                // Derive the exact Attach compatibility declarations from the
+                // verified Front payloads and the Service release selected by
+                // the Realm Profile.
+                let sessionMetadata = try ActrBindings.actriumSessionMetadataForFront(
                     frontArchive: packageBytes,
-                    trustedPublicKey: trustedKey,
-                    frontType: profile.packageType,
-                    serviceType: profile.serviceType
+                    trustedFrontKey: trustedKey,
+                    serviceType: serviceType,
+                    servicePackageDigestHex: profile.serviceSha256
                 )
                 logger.notice("🔐 [navigateCurrentTab] Verified Realm Front \(profile.packageType) for Service \(profile.serviceType)")
 
@@ -1550,7 +1560,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     else { return nil }
                     return data
                 }
-                let frontDirectory = try ActrPackageCache.extractArchiveIfNeeded(cachedArchiveURL, digest: digest) {
+                _ = try ActrPackageCache.extractArchiveIfNeeded(cachedArchiveURL, digest: digest) {
                     try self.validateExtractedPackage(
                         at: $0,
                         requireSignature: true,
@@ -1572,17 +1582,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 )
                 logger.notice("🔐 [navigateCurrentTab] Package verified: digest matches the Realm Profile, manifest signature verified with \(publisherKeys.count) publisher key(s)")
 
-                let manifest = try readPackageManifest(fromRoot: frontDirectory)
-                let binding = try manifest.capabilityManifestJSON.map { capabilities in
-                    try RealmServiceBinding(
-                        profile: profile,
-                        verifiedProfileBody: profileData,
-                        front: packageBytes,
-                        serviceType: serviceType,
-                        trustedFrontKey: trustedKey,
-                        capabilitiesJSON: capabilities
-                    )
-                }
+                let binding = try RealmServiceBinding(
+                    profile: profile,
+                    verifiedProfileBody: profileData,
+                    front: packageBytes,
+                    metadata: sessionMetadata,
+                    trustedFrontKey: trustedKey
+                )
                 guard let tabIndex = tabs.firstIndex(where: {
                     $0.id == replacingTabId && $0.url == URL(string: address)
                         && $0.reloadNonce == navigationNonce
@@ -1596,7 +1602,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     replacingTabId: replacingTabId
                 ) != nil else { return }
                 tabs[tabIndex].url = URL(string: address)
-                if let binding { RealmServiceBindings.shared.attach(binding, to: replacingTabId) }
+                RealmServiceBindings.shared.attach(binding, to: replacingTabId)
                 objectWillChange.send()
                 persistBrowserPageSession()
                 schedulePackageCacheEviction()
@@ -1629,6 +1635,16 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 domain: "ActrDiscovery", code: 21,
                 userInfo: [NSLocalizedDescriptionKey: insecureMessage])
         }
+    }
+
+    /// Parse an Actor type written as `publisher/program@version`.
+    private static func actrType(from string: String) -> ActrBindings.ActrType? {
+        let parts = string.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[1].isEmpty else { return nil }
+        let name = parts[0].split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        guard name.count == 2, !name[0].isEmpty, !name[1].isEmpty else { return nil }
+        return ActrBindings.ActrType(
+            publisher: String(name[0]), name: String(name[1]), version: String(parts[1]))
     }
 
     /// Small bounded fetch for discovery documents (authority descriptor,
