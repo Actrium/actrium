@@ -8,6 +8,7 @@ import { Engine } from 'keel/host';
 import { type V1Linkage, createV1CapabilityManifest, v1ServiceDispatchId, writeV1Bundle } from 'keel/v1';
 import { contract } from './contract';
 import { createHostModules } from './host-modules';
+import { createTestServiceEventSource } from './service-events.test-utils';
 import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
 
 /** The actual CLI entrypoint, exercised in a separate process. */
@@ -75,6 +76,91 @@ test('exposes only linked Host methods and pins the route on the Host', async ()
   expect(calls).toEqual([route]);
   expect(grants).toEqual(['service.call', 'host:clipboard.write']);
   expect(clipboard).toEqual(['Echo']);
+});
+
+test('verifies and binds a fixed event subscription', async () => {
+  const eventLinkage: V1Linkage = {
+    guestEntry: 'workload/guest.js',
+    links: [[sourceModule, 'on']],
+  };
+  const eventManifest = createV1CapabilityManifest(eventLinkage, contract);
+  const bundle = writeV1Bundle(eventLinkage, 'module.exports = {};');
+  const verified = verifyV1RuntimeGuest(
+    bundle,
+    JSON.stringify(eventManifest),
+    ['service.on']
+  );
+  expect(verified).toMatchObject({ ok: true });
+  if (!verified.ok) throw new Error(verified.details.join(' '));
+
+  const { source, emit, subscriberCount } = createTestServiceEventSource([
+    route,
+    'echo.v1.EchoService.Other',
+  ]);
+  const authorize = async () => {};
+  const implementations = createHostModules({
+    hasServiceCapability: true,
+    hasServiceOnCapability: true,
+    callActor: async () => ({ success: true, payloadBase64: '' }),
+    serviceEventSource: source,
+    authorizeCapability: authorize,
+    writeClipboardText: async () => {},
+  });
+  const bound = bindV1HostModules(verified.linkage, implementations, authorize);
+  const dispatch = createHostModuleDispatch(bound.contract, bound.hostModules);
+  const id = v1ServiceDispatchId(sourceModule, 'on');
+  const received: { event: string; payloadBase64: string }[] = [];
+  const on = dispatch[id].on as (
+    handler: (event: { event: string; payloadBase64: string }) => void
+  ) => () => void;
+  const unsubscribe = on((event) => received.push(event));
+  await Promise.resolve();
+
+  expect(subscriberCount()).toBe(1);
+  emit({ event: 'echo.v1.EchoService.Other', payloadBase64: 'BAUG' });
+  emit({ event: route, payloadBase64: 'AAEC' });
+  expect(received).toEqual([{ event: route, payloadBase64: 'AAEC' }]);
+
+  unsubscribe?.();
+  expect(subscriberCount()).toBe(0);
+});
+
+test('verifies and binds a call and on link with the same business name', () => {
+  const sharedLinkage: V1Linkage = {
+    guestEntry: 'workload/guest.js',
+    links: [
+      [sourceModule, 'call'],
+      [sourceModule, 'on'],
+    ],
+  };
+  const sharedManifest = createV1CapabilityManifest(sharedLinkage, contract);
+  const bundle = writeV1Bundle(sharedLinkage, 'module.exports = {};');
+  const verified = verifyV1RuntimeGuest(
+    bundle,
+    JSON.stringify(sharedManifest),
+    ['service.call', 'service.on']
+  );
+  expect(verified).toMatchObject({ ok: true });
+  if (!verified.ok) throw new Error(verified.details.join(' '));
+
+  const authorize = async () => {};
+  const bound = bindV1HostModules(
+    verified.linkage,
+    createHostModules({
+      hasServiceCapability: true,
+      hasServiceOnCapability: true,
+      callActor: async () => ({ success: true, payloadBase64: '' }),
+      serviceEventSource: createTestServiceEventSource([route]).source,
+      authorizeCapability: authorize,
+      writeClipboardText: async () => {},
+    }),
+    authorize
+  );
+  const id = v1ServiceDispatchId(sourceModule, 'call');
+  expect(bound.contract.hostModules[id]?.call).toBeDefined();
+  expect(bound.contract.hostModules[id]?.on).toBeDefined();
+  expect(bound.hostModules[id].call).toBeDefined();
+  expect(bound.hostModules[id].on).toBeDefined();
 });
 
 test('rejects a fixed tell link while tell is unimplemented even on a linked call route', () => {
