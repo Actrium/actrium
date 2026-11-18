@@ -141,10 +141,10 @@ struct DevToolsNetworkRequest: Identifiable {
     let id = UUID()
     let requestId: String
     var tabId: String?
-    var url: String
-    var method: String
+    var url: String?
+    var method: String?
     var requestType: DevToolsNetworkRequestType = .http
-    var startTime: Date
+    var startTime: Date?
     var endTime: Date?
     var status: Int?
     var ok: Bool?
@@ -156,13 +156,14 @@ struct DevToolsNetworkRequest: Identifiable {
     var state: DevToolsNetworkRequestState = .pending
 
     var duration: TimeInterval? {
-        guard let endTime else { return nil }
+        guard let startTime, let endTime, endTime >= startTime else { return nil }
         return endTime.timeIntervalSince(startTime)
     }
 
     var statusText: String {
         if error != nil { return "Error" }
         if let status { return "\(status)" }
+        if endTime != nil { return "N/A" }
         return "Pending"
     }
 
@@ -174,15 +175,18 @@ struct DevToolsNetworkRequest: Identifiable {
             return .red
         case .completed:
             if let status, status >= 400 { return .red }
-            return .green
+            if status != nil || ok == true { return .green }
+            return .gray
         }
     }
 
-    var displayHost: String {
-        URL(string: url)?.host ?? ""
+    var displayHost: String? {
+        guard let url else { return nil }
+        return URL(string: url)?.host
     }
 
-    var displayPathWithQuery: String {
+    var displayPathWithQuery: String? {
+        guard let url else { return nil }
         guard let components = URLComponents(string: url) else { return url }
         var path = components.path.isEmpty ? "/" : components.path
         if let query = components.percentEncodedQuery, !query.isEmpty {
@@ -808,11 +812,11 @@ class DevToolsManager: ObservableObject {
         case "APP_FETCH_REQUEST":
             guard let payload = message.payload,
                   let dict = parseJSONDictionary(payload),
-                  let requestId = dict["requestId"] as? String,
-                  let url = dict["url"] as? String else { return }
+                  let requestId = dict["requestId"] as? String else { return }
 
+            let url = dict["url"] as? String
             let options = dict["options"]
-            let method = (options as? [String: Any])?["method"] as? String ?? "GET"
+            let method = (options as? [String: Any])?["method"] as? String
             let headers = normalizeHeaders((options as? [String: Any])?["headers"])
             let body = normalizeBody((options as? [String: Any])?["body"])
 
@@ -854,22 +858,21 @@ class DevToolsManager: ObservableObject {
     private func upsertNetworkRequestStart(
         requestId: String,
         tabId: String?,
-        url: String,
-        method: String,
+        url: String?,
+        method: String?,
         startTime: Date,
         requestHeaders: [String: String]?,
         requestBody: String?
     ) {
         if let index = networkRequests.firstIndex(where: { $0.requestId == requestId && ($0.tabId == tabId || tabId == nil || $0.tabId == nil) }) {
             var req = networkRequests[index]
-            // Fill missing info for placeholders created from response.
+            // A late request only fills metadata missing from a response-only record.
             req.tabId = req.tabId ?? tabId
-            if req.url == "unknown" { req.url = url }
-            if req.method == "GET" { req.method = method }
-            // Only move startTime earlier.
-            if startTime < req.startTime { req.startTime = startTime }
-            req.requestHeaders = requestHeaders ?? req.requestHeaders
-            req.requestBody = requestBody ?? req.requestBody
+            if req.url == nil { req.url = url }
+            if req.method == nil { req.method = method }
+            if req.startTime == nil { req.startTime = startTime }
+            req.requestHeaders = req.requestHeaders ?? requestHeaders
+            req.requestBody = req.requestBody ?? requestBody
             if req.endTime == nil { req.state = .pending }
             networkRequests[index] = req
             networkRequestsVersion += 1
@@ -902,25 +905,26 @@ class DevToolsManager: ObservableObject {
     ) {
         if let index = networkRequests.firstIndex(where: { $0.requestId == requestId && ($0.tabId == tabId || tabId == nil || $0.tabId == nil) }) {
             var req = networkRequests[index]
+            req.tabId = req.tabId ?? tabId
             req.endTime = endTime
             req.ok = ok
             req.status = status
             req.error = error
             req.responseHeaders = responseHeaders ?? req.responseHeaders
             req.responseBody = responseBody ?? req.responseBody
-            req.state = (error != nil || ok == false || (status ?? 0) >= 400) ? .failed : .completed
+            req.state = (error != nil || ok == false || status.map { $0 >= 400 } == true) ? .failed : .completed
             networkRequests[index] = req
             networkRequestsVersion += 1
             return
         }
 
-        // Response arrived before request start log (or request start missing) - create a placeholder.
+        // Response arrived before request start log (or request start is missing).
         var req = DevToolsNetworkRequest(
             requestId: requestId,
             tabId: tabId,
-            url: "unknown",
-            method: "GET",
-            startTime: endTime
+            url: nil,
+            method: nil,
+            startTime: nil
         )
         req.endTime = endTime
         req.ok = ok
@@ -928,7 +932,7 @@ class DevToolsManager: ObservableObject {
         req.error = error
         req.responseHeaders = responseHeaders
         req.responseBody = responseBody
-        req.state = (error != nil || ok == false || (status ?? 0) >= 400) ? .failed : .completed
+        req.state = (error != nil || ok == false || status.map { $0 >= 400 } == true) ? .failed : .completed
         networkRequests.append(req)
         networkRequestsVersion += 1
         trimNetworkIfNeeded()

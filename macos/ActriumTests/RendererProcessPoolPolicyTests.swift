@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import Actrium
 
@@ -57,5 +58,50 @@ struct RendererProcessPoolPolicyTests {
                 requestedFingerprint: "system.history"
             )
         )
+    }
+
+    @Test func snapshotMapsTabsToOneSharedWorker() {
+        let firstTab = UUID()
+        let secondTab = UUID()
+        let shared = RendererProcessSnapshot(
+            id: "renderer-shared",
+            pid: 42,
+            fingerprint: "actr.sha256:a",
+            tabIDs: [firstTab, secondTab],
+            state: .ready
+        )
+        let snapshot = RendererProcessPoolSnapshot(processes: [shared])
+
+        #expect(snapshot.processes.count == 1)
+        #expect(snapshot.process(for: firstTab) == shared)
+        #expect(snapshot.process(for: secondTab) == shared)
+        #expect(snapshot.state(for: firstTab) == .ready)
+        #expect(snapshot.process(for: UUID()) == nil)
+        #expect(snapshot.state(for: UUID()) == nil)
+    }
+
+    @Test func snapshotPreservesStartingAndTerminatingStates() {
+        let startingTab = UUID()
+        let terminatingTab = UUID()
+        let snapshot = RendererProcessPoolSnapshot(processes: [
+            RendererProcessSnapshot(
+                id: "renderer-starting",
+                pid: 41,
+                fingerprint: nil,
+                tabIDs: [startingTab],
+                state: .starting
+            ),
+            RendererProcessSnapshot(
+                id: "renderer-terminating",
+                pid: 42,
+                fingerprint: "actr.sha256:a",
+                tabIDs: [terminatingTab],
+                state: .terminating
+            ),
+        ])
+
+        #expect(snapshot.state(for: startingTab) == .starting)
+        #expect(snapshot.state(for: terminatingTab) == .terminating)
+        #expect(snapshot.process(for: terminatingTab)?.tabIDs == [terminatingTab])
     }
 }

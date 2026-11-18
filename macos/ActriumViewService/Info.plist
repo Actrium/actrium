@@ -12,6 +12,10 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Use the microphone when you start speech recognition in an Actrium app.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Convert speech to text using Apple Speech Recognition, which may process audio on Apple servers.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 </dict>

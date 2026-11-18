@@ -231,6 +231,9 @@ importers:
       '@babel/runtime':
         specifier: ^7.28.4
         version: 7.29.7
+      '@boomsi/rn-speech-recognition':
+        specifier: 3.2.0
+        version: 3.2.0(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)
       askit:
         specifier: file:../actrium-app-sdk
         version: link:../actrium-app-sdk
@@ -5993,6 +5996,11 @@ snapshots:
     dependencies:
       react: 19.0.0
       react-native: 0.79.6(@babel/core@7.29.7)(@react-native-community/cli@18.0.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0)
+
+  '@boomsi/rn-speech-recognition@3.2.0(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)':
+    dependencies:
+      react: 19.0.0
+      react-native: 0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0)
 
   '@eslint-community/eslint-utils@4.10.1(eslint@8.57.1)':
     dependencies:

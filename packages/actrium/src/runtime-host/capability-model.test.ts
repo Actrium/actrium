@@ -285,10 +285,14 @@ describe('capability model data', () => {
   });
 
   test('only implemented capabilities count as host-supported', () => {
-    expect(HOST_SUPPORTED_CAPABILITIES.size).toBe(3);
+    expect(HOST_SUPPORTED_CAPABILITIES.size).toBe(7);
     expect(HOST_SUPPORTED_CAPABILITIES.has('service.call')).toBe(true);
     expect(HOST_SUPPORTED_CAPABILITIES.has('host:clipboard.write')).toBe(true);
     expect(HOST_SUPPORTED_CAPABILITIES.has('host:file-import.pick')).toBe(true);
+    expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.recognize')).toBe(true);
+    expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.onInterimResult')).toBe(true);
+    expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.stop')).toBe(true);
+    expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.onStateChange')).toBe(true);
     for (const capability of FRONT_CAPABILITIES) {
       if (HOST_SUPPORTED_CAPABILITIES.has(capability)) continue;
       expect(FRONT_CAPABILITY_DEFINITIONS[capability].implemented).toBe(false);

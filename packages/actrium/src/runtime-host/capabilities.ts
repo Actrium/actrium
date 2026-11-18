@@ -66,6 +66,18 @@ export const FRONT_CAPABILITY_SPECS = {
     hostModule: 'host:microphone',
     hostMethod: 'record',
   },
+  'host:speech.recognize': {
+    module: 'host:speech',
+    hostModule: 'host:speech',
+    hostMethod: 'recognize',
+  },
+  'host:speech.onInterimResult': {
+    module: 'host:speech',
+    hostModule: 'host:speech',
+    hostMethod: 'onInterimResult',
+  },
+  'host:speech.stop': { module: 'host:speech', hostModule: 'host:speech', hostMethod: 'stop' },
+  'host:speech.onStateChange': { module: 'host:speech', hostModule: 'host:speech', hostMethod: 'onStateChange' },
   'host:location.getCurrentPosition': {
     module: 'host:location',
     hostModule: 'host:location',

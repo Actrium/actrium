@@ -16,7 +16,7 @@ workspace = true
 [features]
 # Native builds include the RTC implementation unconditionally.
 default = []
-wasm-engine = ["dep:wasmtime", "dep:wasmtime-wasi"]
+wasm-engine = ["dep:cap-primitives", "dep:wasmtime", "dep:wasmtime-wasi", "dep:windows-sys"]
 dynclib-engine = ["dep:libloading"]
 opentelemetry = [
   "actr-config/opentelemetry",
@@ -151,11 +151,15 @@ turn_crate = { workspace = true, optional = true }
 webrtc-util = { workspace = true, optional = true }
 
 # WASM Runtime (optional, native-only)
+cap-primitives = { version = "4.0.3", optional = true }
 wasmtime = { workspace = true, optional = true }
 wasmtime-wasi = { workspace = true, optional = true }
 
 # Dynclib Runtime (native shared library, optional)
 libloading = { version = "0.8", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"], optional = true }
 
 # Dispatch throughput / per-dispatch overhead benchmark. `harness = false`: it
 # is a plain `fn main()` that builds its own fixed-worker tokio runtime (the
@@ -178,8 +182,9 @@ name = "recovery_latency"
 harness = false
 
 [dev-dependencies]
+libc = "0.2"
 rcgen = "0.14.8"
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 rand.workspace = true
 base64.workspace = true
 hmac.workspace = true

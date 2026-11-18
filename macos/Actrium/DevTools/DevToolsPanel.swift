@@ -1396,15 +1396,18 @@ struct DevToolsNetworkView: View {
 
                 if !searchText.isEmpty {
                     let q = searchText.lowercased()
-                    let matchesUrl = req.url.lowercased().contains(q)
-                    let matchesMethod = req.method.lowercased().contains(q)
+                    let matchesUrl = req.url?.lowercased().contains(q) == true
+                    let matchesMethod = req.method?.lowercased().contains(q) == true
                     let matchesStatus = req.statusText.lowercased().contains(q)
                     if !(matchesUrl || matchesMethod || matchesStatus) { return false }
                 }
 
                 return true
             }
-            .sorted { $0.startTime > $1.startTime }
+            .sorted {
+                ($0.startTime ?? $0.endTime ?? .distantPast) >
+                    ($1.startTime ?? $1.endTime ?? .distantPast)
+            }
     }
 
     private var selectedRequest: DevToolsNetworkRequest? {
@@ -1526,20 +1529,20 @@ private struct DevToolsNetworkRowView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(request.method)
+            Text(request.method ?? "N/A")
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundColor(.secondary)
                 .frame(width: 45, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(request.displayPathWithQuery)
+                Text(request.displayPathWithQuery ?? "N/A")
                     .font(.system(size: 11))
                     .lineLimit(1)
                     .truncationMode(.middle)
 
                 HStack(spacing: 6) {
-                    if !request.displayHost.isEmpty {
-                        Text(request.displayHost)
+                    if let host = request.displayHost, !host.isEmpty {
+                        Text(host)
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundColor(Color(nsColor: .tertiaryLabelColor))
                             .lineLimit(1)
@@ -1565,23 +1568,31 @@ private struct DevToolsNetworkRowView: View {
                     .foregroundColor(.secondary)
                     .frame(width: 60, alignment: .trailing)
             } else {
-                ProgressView()
-                    .scaleEffect(0.5)
+                Text("N/A")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
                     .frame(width: 60, alignment: .trailing)
             }
         }
         .contextMenu {
             Button("Copy URL") {
-                DevToolsClipboard.copy(request.url)
+                if let url = request.url {
+                    DevToolsClipboard.copy(url)
+                }
             }
+            .disabled(request.url == nil)
             Button("Copy as cURL") {
-                DevToolsClipboard.copy(DevToolsCurlBuilder.build(from: request))
+                if let command = DevToolsCurlBuilder.build(from: request) {
+                    DevToolsClipboard.copy(command)
+                }
             }
+            .disabled(request.url == nil || request.method == nil)
             Button("Open in Browser") {
-                if let url = URL(string: request.url) {
+                if let urlString = request.url, let url = URL(string: urlString) {
                     NSWorkspace.shared.open(url)
                 }
             }
+            .disabled(request.url.flatMap { URL(string: $0) } == nil)
         }
         .padding(.vertical, 2)
     }
@@ -1591,7 +1602,8 @@ private struct DevToolsNetworkDetailView: View {
     let request: DevToolsNetworkRequest
 
     private var queryItems: [(String, String)] {
-        guard let components = URLComponents(string: request.url),
+        guard let url = request.url,
+              let components = URLComponents(string: url),
               let items = components.queryItems, !items.isEmpty else { return [] }
         return items.map { ($0.name, $0.value ?? "") }
     }
@@ -1601,7 +1613,7 @@ private struct DevToolsNetworkDetailView: View {
             // Header
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top, spacing: 8) {
-                    Text(request.url)
+                    Text(request.url ?? "N/A")
                         .font(.system(size: 12, weight: .medium))
                         .textSelection(.enabled)
                         .lineLimit(2)
@@ -1610,25 +1622,31 @@ private struct DevToolsNetworkDetailView: View {
 
                     HStack(spacing: 6) {
                         Button {
-                            DevToolsClipboard.copy(request.url)
+                            if let url = request.url {
+                                DevToolsClipboard.copy(url)
+                            }
                         } label: {
                             Image(systemName: "doc.on.doc")
                                 .font(.system(size: 11))
                         }
                         .buttonStyle(.borderless)
+                        .disabled(request.url == nil)
                         .help("Copy URL")
 
                         Button {
-                            DevToolsClipboard.copy(DevToolsCurlBuilder.build(from: request))
+                            if let command = DevToolsCurlBuilder.build(from: request) {
+                                DevToolsClipboard.copy(command)
+                            }
                         } label: {
                             Image(systemName: "terminal")
                                 .font(.system(size: 11))
                         }
                         .buttonStyle(.borderless)
+                        .disabled(request.url == nil || request.method == nil)
                         .help("Copy as cURL")
 
                         Button {
-                            if let url = URL(string: request.url) {
+                            if let urlString = request.url, let url = URL(string: urlString) {
                                 NSWorkspace.shared.open(url)
                             }
                         } label: {
@@ -1636,12 +1654,13 @@ private struct DevToolsNetworkDetailView: View {
                                 .font(.system(size: 11))
                         }
                         .buttonStyle(.borderless)
+                        .disabled(request.url.flatMap { URL(string: $0) } == nil)
                         .help("Open in Browser")
                     }
                 }
 
                 HStack(spacing: 8) {
-                    Text(request.method)
+                    Text(request.method ?? "N/A")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -1654,6 +1673,10 @@ private struct DevToolsNetworkDetailView: View {
 
                     if let duration = request.duration {
                         Text(String(format: "%.0fms", duration * 1000))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("N/A")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
@@ -1669,11 +1692,11 @@ private struct DevToolsNetworkDetailView: View {
                     DevToolsSectionView(title: "General") {
                         DevToolsKeyValueView(items: [
                             ("Request ID", request.requestId),
-                            ("URL", request.url),
-                            ("Method", request.method),
-                            ("Status", request.status.map(String.init) ?? "Pending"),
-                            ("Start", request.startTime.formatted(.dateTime.hour().minute().second())),
-                            ("Duration", request.duration.map { String(format: "%.0fms", $0 * 1000) } ?? "-"),
+                            ("URL", request.url ?? "N/A"),
+                            ("Method", request.method ?? "N/A"),
+                            ("Status", request.statusText),
+                            ("Start", request.startTime?.formatted(.dateTime.hour().minute().second()) ?? "N/A"),
+                            ("Duration", request.duration.map { String(format: "%.0fms", $0 * 1000) } ?? "N/A"),
                         ])
                     }
 
@@ -1813,11 +1836,12 @@ private enum DevToolsClipboard {
     }
 }
 
-private enum DevToolsCurlBuilder {
-    static func build(from request: DevToolsNetworkRequest) -> String {
+enum DevToolsCurlBuilder {
+    static func build(from request: DevToolsNetworkRequest) -> String? {
+        guard let url = request.url, let method = request.method else { return nil }
         var parts: [String] = ["curl"]
         parts.append("-X")
-        parts.append(shellQuote(request.method))
+        parts.append(shellQuote(method))
 
         if let headers = request.requestHeaders {
             for key in headers.keys.sorted() {
@@ -1827,12 +1851,12 @@ private enum DevToolsCurlBuilder {
             }
         }
 
-        if let body = request.requestBody, !body.isEmpty, request.method.uppercased() != "GET" {
+        if let body = request.requestBody, !body.isEmpty, method.uppercased() != "GET" {
             parts.append("--data-raw")
             parts.append(shellQuote(body))
         }
 
-        parts.append(shellQuote(request.url))
+        parts.append(shellQuote(url))
         return parts.joined(separator: " ")
     }
 
