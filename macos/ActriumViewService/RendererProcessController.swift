@@ -627,27 +627,32 @@ private final class RendererTabSurface {
     /// control's identity comes from the field editor's delegate. History
     /// persists while the surface lives: switching away and back keeps a
     /// control's undo stack, matching AppKit's own behavior.
-    private struct UndoHistory {
+    private final class UndoHistoryBox {
         var undo: [EditSnapshot] = []
         var redo: [EditSnapshot] = []
     }
-    private var undoHistories: [ObjectIdentifier: UndoHistory] = [:]
+    /// Weak-keyed so an unmounted guest control's history disappears with
+    /// the control; a fresh control allocated at the same address must not
+    /// inherit a stale stack.
+    private let undoHistories = NSMapTable<AnyObject, UndoHistoryBox>.weakToStrongObjects()
 
-    private func currentControlKey() -> ObjectIdentifier? {
+    private func currentControl() -> AnyObject? {
         guard let editor = window.firstResponder as? NSTextView else { return nil }
         if editor.isFieldEditor {
-            guard let owner = editor.delegate else { return nil }
-            return ObjectIdentifier(owner as AnyObject)
+            return editor.delegate.map { $0 as AnyObject }
         }
-        return ObjectIdentifier(editor)
+        return editor
     }
 
-    private func withHistory(_ body: (inout UndoHistory) -> Void) {
-        guard let key = currentControlKey() else { return }
-        var history = undoHistories[key] ?? UndoHistory()
-        body(&history)
-        if history.undo.count > 100 { history.undo.removeFirst(history.undo.count - 100) }
-        undoHistories[key] = history
+    private func withHistory(_ body: (UndoHistoryBox) -> Void) {
+        guard let control = currentControl() else { return }
+        let box = undoHistories.object(forKey: control) ?? {
+            let created = UndoHistoryBox()
+            undoHistories.setObject(created, forKey: control)
+            return created
+        }()
+        body(box)
+        if box.undo.count > 100 { box.undo.removeFirst(box.undo.count - 100) }
     }
 
 
@@ -728,7 +733,7 @@ private final class RendererTabSurface {
     }
 
     func close() {
-        undoHistories.removeAll()
+        undoHistories.removeAllObjects()
         accessibilityPublishWork?.cancel()
         accessibilityPublishWork = nil
         for observer in accessibilityObservers {
@@ -961,16 +966,16 @@ private final class RendererTabSurface {
 
     private func beginUndoableEdit() {
         guard let snapshot = currentEditSnapshot() else { return }
-        withHistory { history in
-            if history.undo.last?.string != snapshot.string { history.undo.append(snapshot) }
-            history.redo.removeAll()
+        withHistory { box in
+            if box.undo.last?.string != snapshot.string { box.undo.append(snapshot) }
+            box.redo.removeAll()
         }
     }
 
     private func endUndoableEdit() {
         guard let snapshot = currentEditSnapshot() else { return }
-        withHistory { history in
-            if history.undo.last?.string != snapshot.string { history.undo.append(snapshot) }
+        withHistory { box in
+            if box.undo.last?.string != snapshot.string { box.undo.append(snapshot) }
         }
     }
 
@@ -992,11 +997,11 @@ private final class RendererTabSurface {
 
     private func undoTextEdit() {
         guard window.firstResponder is NSTextView else { return }
-        withHistory { history in
-            guard history.undo.count > 1 else { return }
-            let current = history.undo.removeLast()
-            history.redo.append(current)
-            let target = history.undo[history.undo.count - 1]
+        withHistory { box in
+            guard box.undo.count > 1 else { return }
+            let current = box.undo.removeLast()
+            box.redo.append(current)
+            let target = box.undo[box.undo.count - 1]
             // Undoing an insertion puts the caret back at the insertion
             // point, not at the end of the restored text. All offsets are
             // UTF-16 units to match NSTextView selection semantics.
@@ -1008,10 +1013,10 @@ private final class RendererTabSurface {
 
     private func redoTextEdit() {
         guard window.firstResponder is NSTextView else { return }
-        withHistory { history in
-            guard let snapshot = history.redo.popLast() else { return }
+        withHistory { box in
+            guard let snapshot = box.redo.popLast() else { return }
             if let current = currentEditSnapshot() {
-                history.undo.append(current)
+                box.undo.append(current)
             }
             restoreSnapshot(snapshot.string, caret: snapshot.caret)
         }
@@ -1050,9 +1055,6 @@ private final class RendererTabSurface {
         }
         focusedEditor = nil
         lastCaretRect = nil
-        if let key = currentControlKey() {
-            undoHistories.removeValue(forKey: key)
-        }
         RendererProcessLifetime.shared.controller?.publishCaret(tabId: tabId, rect: nil)
     }
 
