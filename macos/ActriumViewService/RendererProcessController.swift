@@ -610,6 +610,10 @@ private final class RendererTabSurface {
     private var accessibilityPublishWork: DispatchWorkItem?
     private var pressedRecognizers: [UInt32: [NSGestureRecognizer]] = [:]
     private var textInputPresses: Set<UInt32> = []
+    /// Character index where the current text drag started. AppKit's
+    /// mouse-tracking selection cannot run here (mouse events arrive
+    /// asynchronously over IPC), so drag selection is driven manually.
+    private var dragSelectionAnchor: Int?
     /// Last text-input focus state reported to the Host. The Host mirrors
     /// IME composition for whichever surface owns the focused text input.
     private var lastReportedTextFocus = false
@@ -842,8 +846,31 @@ private final class RendererTabSurface {
                 let recognizers = ancestors.flatMap(\.gestureRecognizers)
                 forwardMouse(event, to: recognizers)
                 pressedRecognizers[input.button] = recognizers
+            } else if input.type == .mouseMove, input.button == 0,
+                      textInputPresses.contains(0),
+                      let anchor = dragSelectionAnchor,
+                      let editor = window.firstResponder as? NSTextView {
+                // Drive drag selection manually (see dragSelectionAnchor).
+                let point = editor.convert(location, from: nil)
+                let index = editor.characterIndexForInsertion(at: point)
+                if index != NSNotFound {
+                    let range = NSRange(
+                        location: min(anchor, index),
+                        length: abs(index - anchor)
+                    )
+                    if editor.selectedRange() != range {
+                        editor.setSelectedRange(range)
+                        editor.scrollRangeToVisible(range)
+                        publishCaret()
+                        commit()
+                    }
+                }
+                return
             } else if input.type == .mouseUp {
-                if textInputPresses.remove(input.button) != nil { return }
+                if textInputPresses.remove(input.button) != nil {
+                    dragSelectionAnchor = nil
+                    return
+                }
                 if let recognizers = pressedRecognizers.removeValue(forKey: input.button) {
                     forwardMouse(event, to: recognizers)
                 }
@@ -1064,10 +1091,12 @@ private final class RendererTabSurface {
         let focused = window.makeFirstResponder(view)
         let editor = (view as? NSTextField)?.currentEditor() as? NSTextView ?? view as? NSTextView
         focusedEditor = focused ? editor : nil
-        guard focused, let editor, !modifiers.contains(.shift) else { return }
+        guard focused, let editor else { return }
         let point = editor.convert(location, from: nil)
         let index = editor.characterIndexForInsertion(at: point)
         guard index != NSNotFound, index <= (editor.string as NSString).length else { return }
+        dragSelectionAnchor = index
+        guard !modifiers.contains(.shift) else { return }
         editor.setSelectedRange(NSRange(location: index, length: 0))
         publishCaret()
     }
