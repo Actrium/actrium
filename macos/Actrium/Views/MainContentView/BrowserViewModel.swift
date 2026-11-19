@@ -36,11 +36,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     @Published var currentTabId: UUID? {
         didSet {
             guard currentTabId != oldValue else { return }
-            if let oldValue, transferredRealmLinks[oldValue] != nil {
+            if let oldValue, deferredRealmLinks[oldValue] != nil {
                 realmLoads[oldValue] = nil
                 if pendingInviteRedeem?.tabId == oldValue { pendingInviteRedeem = nil }
             }
-            openSelectedTransferredRealm()
+            openSelectedDeferredRealm()
         }
     }
     // Default that all tabs are left-side panel visible; overrides are recorded only when user switching
@@ -92,8 +92,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     @Published var pendingInviteRedeem: PendingInviteRedeem? {
         didSet {
             guard let dismissed = oldValue, pendingInviteRedeem == nil else { return }
-            if currentTabId == dismissed.tabId { transferredRealmLinks[dismissed.tabId] = nil }
-            openSelectedTransferredRealm()
+            if currentTabId == dismissed.tabId { deferredRealmLinks[dismissed.tabId] = nil }
+            openSelectedDeferredRealm()
         }
     }
 
@@ -131,8 +131,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private var localFrontApprovals: [UUID: LocalFrontApproval] = [:]
     private var realmLoads: [UUID: UUID] = [:]
-    // Transferred Realm tabs wait for selection before discovery can request consent.
-    private var transferredRealmLinks: [UUID: ActrUriInfo] = [:]
+    // Transferred and restored Realm tabs wait for selection before requesting consent.
+    private var deferredRealmLinks: [UUID: ActrUriInfo] = [:]
 
     // MARK: - Instance Creation (15-B B6)
     // Confirm → serviceCreate → URI replace (replace, not push; history keeps only the
@@ -156,7 +156,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     /// History view model reference for recording ACTR app visits
     weak var historyVM: HistoryViewModel?
-    private let browserDataRepository = BrowserDataRepository.shared
     private let saveBrowserSession: ([Tab], UUID?) -> Void
     private let chooseLocalFrontFile: (NSOpenPanel) -> URL?
     private let fetchRealmDocument: @MainActor (URL, String) async throws -> Data
@@ -321,7 +320,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         localFrontApprovals[id] = nil
         if !preserveRealmLoad {
             realmLoads[id] = nil
-            transferredRealmLinks[id] = nil
+            deferredRealmLinks[id] = nil
             if pendingInviteRedeem?.tabId == id { pendingInviteRedeem = nil }
         }
         TabSnapshotCacheManager.shared.invalidate(tabId: id)
@@ -495,7 +494,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             Self.clearRealmContent(&newTab)
         }
         if let transferredLink, !transferredLink.isLocal {
-            transferredRealmLinks[newTab.id] = transferredLink
+            deferredRealmLinks[newTab.id] = transferredLink
         }
 
         let targetIndex = min(max(0, index), tabs.count)
@@ -507,8 +506,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         persistBrowserPageSession()
     }
 
-    private func openSelectedTransferredRealm() {
-        guard let id = currentTabId, let link = transferredRealmLinks[id],
+    private func openSelectedDeferredRealm() {
+        guard let id = currentTabId, let link = deferredRealmLinks[id],
               realmLoads[id] == nil, pendingInviteRedeem == nil,
               let index = tabs.firstIndex(where: { $0.id == id }),
               let address = tabs[index].url else { return }
@@ -880,7 +879,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         if tabs[index].url != url {
             localFrontApprovals[tabId] = nil
             realmLoads[tabId] = nil
-            transferredRealmLinks[tabId] = nil
+            deferredRealmLinks[tabId] = nil
         }
         tabs[index].url = url
         logger.notice("🔗 [updateTabURL] Tab \(tabId) URL updated from \(oldURL) to \(url.absoluteString)")
@@ -927,7 +926,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         localFrontApprovals[currentTabId] = nil
         realmLoads[currentTabId] = nil
-        transferredRealmLinks[currentTabId] = nil
+        deferredRealmLinks[currentTabId] = nil
 
         // 0. actr:// Realm links — the core parser owns the decision
         // (case-insensitive scheme, format rules, local-Realm ownership).
@@ -1138,7 +1137,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     func invalidateRealmLoadsForWindowClose() {
         realmLoads.removeAll()
-        transferredRealmLinks.removeAll()
+        deferredRealmLinks.removeAll()
         pendingInviteRedeem = nil
     }
 
@@ -1579,7 +1578,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 if realmLoads[replacingTabId] == load {
                     realmLoads[replacingTabId] = nil
                     if pendingInviteRedeem?.tabId != replacingTabId {
-                        transferredRealmLinks[replacingTabId] = nil
+                        deferredRealmLinks[replacingTabId] = nil
                     }
                 }
             }
@@ -1826,9 +1825,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
               let url = URL(string: "https://\(domain)/.well-known/actr") else {
             throw RealmServiceError(message: "The package type does not name a Publisher domain.")
         }
-        let data = try await Self.fetchBoundedDocument(
-            from: url,
-            insecureMessage: NSLocalizedString(
+        let data = try await fetchRealmDocument(
+            url,
+            NSLocalizedString(
                 "The publisher information was served over an insecure connection.",
                 comment: "Actr publisher insecure transport error")
         )
@@ -2670,10 +2669,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     private var didRestoreSession = false
 
     /// One-shot launch restore; called from AppDelegate after startup.
-    func restoreSessionIfNeeded() {
+    func restoreSessionIfNeeded(
+        loadSession: @MainActor () -> BrowserDataRepository.RestoredSession? = {
+            BrowserDataRepository.shared.restoreSession()
+        }
+    ) {
         guard !didRestoreSession else { return }
         didRestoreSession = true
-        guard let session = browserDataRepository.restoreSession(), !session.tabs.isEmpty else { return }
+        guard let session = loadSession(), !session.tabs.isEmpty else { return }
         logger.notice("🔄 [RestoreSession] restoring \(session.tabs.count) session tab(s)")
 
         // The persisted session is the source of truth on launch: drop the
@@ -2710,7 +2713,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     tabSlotPositions[tab.id] = tabs.count - 1
                     restoredTabIds.append(tab.id)
                     tabId = tab.id
-                    handleResolvedRealmLink(info, input: url.absoluteString, tabIndex: tabs.count - 1)
+                    deferredRealmLinks[tab.id] = info
                 } else {
                     tabId = nil
                     restoreInstanceTab(address: url, title: sessionTab.title, isActiveTab: index == session.activeTabIndex)

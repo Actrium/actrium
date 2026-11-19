@@ -1,3 +1,4 @@
+import AppKit
 import ActrBindings
 import ActriumCore
 import CryptoKit
@@ -362,6 +363,70 @@ final class RealmAdmissionTests: XCTestCase {
     }
 
     @MainActor
+    func testRestoredBackgroundLocalFrontRequestsAccessOnSelection() async throws {
+        let preferences = try makePreferences()
+        preferences.set([realmName], forKey: "actr.redeemedRealms")
+        let signer = Curve25519.Signing.PrivateKey()
+        let descriptor = try authorityDescriptor(
+            sequence: 1, signer: signer, signerId: "realm-key", keys: ["realm-key": signer]
+        )
+        let publisherRoot = Curve25519.Signing.PrivateKey()
+        let frontKey = packageKey(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation, status: "active")
+        let keyId = try XCTUnwrap(frontKey["id"])
+        let publisher = try publisherDescriptor(sequence: 1, root: publisherRoot, keys: [frontKey])
+        let (body, _) = try profile(membership: "invite-only", signer: signer, localFrontKeyId: keyId)
+        let documents = [
+            "realm.example/.well-known/actr": Data(descriptor.utf8),
+            "realm.example/realm/echo": body,
+            "publisher.example/.well-known/actr": Data(publisher.utf8)
+        ]
+
+        var requests: [String] = []
+        var prompts = 0
+        let viewModel = BrowserViewModel(
+            chooseLocalFrontFile: { panel in
+                prompts += 1
+                XCTAssertTrue(panel.message.contains("front.actr"))
+                XCTAssertTrue(panel.message.contains(keyId))
+                return nil
+            },
+            realmPreferences: preferences,
+            fetchRealmDocument: { url, _ in
+                let key = (url.host ?? "") + url.path
+                requests.append(key)
+                return try XCTUnwrap(documents[key])
+            },
+            saveBrowserSession: { _, _ in }
+        )
+        let webAddress = "https://web.example/"
+        let realmAddress = "actr://realm.example/echo"
+        viewModel.restoreSessionIfNeeded {
+            BrowserDataRepository.RestoredSession(tabs: [
+                .init(title: "Web", address: webAddress),
+                .init(title: "Echo", address: realmAddress)
+            ], activeTabIndex: 0)
+        }
+        defer { viewModel.invalidateRealmLoadsForWindowClose() }
+        XCTAssertEqual(viewModel.currentTab?.url?.absoluteString, webAddress)
+        let frontTab = try XCTUnwrap(viewModel.tabs.first { $0.url?.absoluteString == realmAddress })
+        await Task.yield()
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertEqual(prompts, 0)
+
+        viewModel.switchToTab(id: frontTab.id)
+        let deadline = ContinuousClock.now + .seconds(2)
+        while prompts == 0 && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(requests, [
+            "realm.example/.well-known/actr", "realm.example/realm/echo", "publisher.example/.well-known/actr"
+        ])
+        XCTAssertEqual(prompts, 1)
+        XCTAssertNil(viewModel.pendingInviteRedeem)
+        XCTAssertNil(viewModel.currentTab?.guestExtractedPath)
+    }
+
+    @MainActor
     func testOnlyAcceptedRetirementClearsRunningFronts() async throws {
         let preferences = try makePreferences()
         let signer = Curve25519.Signing.PrivateKey()
@@ -559,13 +624,20 @@ final class RealmAdmissionTests: XCTestCase {
     private func profile(
         membership: String, sequence: Int = 1, status: String = "active",
         signer: Curve25519.Signing.PrivateKey = Curve25519.Signing.PrivateKey(),
-        keyId: String = "realm-key", realm: String? = nil
+        keyId: String = "realm-key", realm: String? = nil, localFrontKeyId: String? = nil
     ) throws -> (Data, String) {
         let publicKey = signer.publicKey.rawRepresentation.base64EncodedString()
         let keys = try sign([
             "sequence": 1,
             "keys": [["id": keyId, "algorithm": "Ed25519", "public_key": publicKey, "status": "active"]]
         ], with: signer, keyId: keyId)
+        var front: [String: Any] = archive("echo-front", digest: "b")
+        if let localFrontKeyId {
+            front["href"] = "front.actr"
+            front["sha256"] = nil
+            front["dependencies"] = ["service": "service"]
+            front["local_path"] = ["signing_key_id": localFrontKeyId, "allow_rebuild": true] as [String: Any]
+        }
         let body = try sign([
             "schema": "actr.realm/v1",
             "sequence": sequence,
@@ -574,7 +646,7 @@ final class RealmAdmissionTests: XCTestCase {
             "front_package": "front",
             "packages": [
                 "service": archive("echo", digest: "a"),
-                "front": archive("echo-front", digest: "b")
+                "front": front
             ],
             "issuer": [
                 "url": "https://issuer.example",
