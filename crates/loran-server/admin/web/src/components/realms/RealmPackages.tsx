@@ -4,9 +4,28 @@ import { api, type RealmPackageSelection, type RealmPackageState } from "../../l
 
 const input = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono";
 
+interface PackageDraft {
+  primaryPackage: string;
+  frontPackage: string;
+  packagesJson: string;
+}
+
+function parsePackages(text: string): RealmPackageSelection["packages"] {
+  let packages: unknown;
+  try {
+    packages = JSON.parse(text);
+  } catch {
+    throw new Error("Enter valid JSON for the package map.");
+  }
+  if (packages === null || typeof packages !== "object" || Array.isArray(packages)) {
+    throw new Error("Packages JSON must be an object keyed by package reference.");
+  }
+  return packages as RealmPackageSelection["packages"];
+}
+
 export function RealmPackages({ realm, onClose }: { realm: string; onClose: () => void }) {
   const [snapshot, setSnapshot] = useState<RealmPackageState>();
-  const [selection, setSelection] = useState<RealmPackageSelection>();
+  const [draft, setDraft] = useState<PackageDraft>();
   const [error, setError] = useState("");
   const [result, setResult] = useState("");
   const [saving, setSaving] = useState(false);
@@ -14,7 +33,11 @@ export function RealmPackages({ realm, onClose }: { realm: string; onClose: () =
 
   function accept(state: RealmPackageState) {
     setSnapshot(state);
-    setSelection(state.selection);
+    setDraft({
+      primaryPackage: state.selection.primary_package,
+      frontPackage: state.selection.front_package,
+      packagesJson: JSON.stringify(state.selection.packages, null, 2),
+    });
   }
 
   useEffect(() => {
@@ -28,14 +51,19 @@ export function RealmPackages({ realm, onClose }: { realm: string; onClose: () =
   }, [realm]);
 
   async function submit(rollback: boolean) {
-    const target = rollback ? snapshot?.previous_selection : selection;
-    if (!snapshot || !target) return;
-    const key = JSON.stringify([target, snapshot.sequence, rollback]);
-    if (pending.current?.key !== key) pending.current = { key, id: crypto.randomUUID().replace(/-/g, "") };
-    setSaving(true);
+    if (!snapshot || !draft || saving) return;
     setError("");
     setResult("");
     try {
+      const target = rollback ? snapshot.previous_selection : {
+        primary_package: draft.primaryPackage.trim(),
+        front_package: draft.frontPackage.trim(),
+        packages: parsePackages(draft.packagesJson),
+      };
+      if (!target) return;
+      const key = JSON.stringify([target, snapshot.sequence, rollback]);
+      if (pending.current?.key !== key) pending.current = { key, id: crypto.randomUUID().replace(/-/g, "") };
+      setSaving(true);
       const response = await api.updateRealmPackages(realm, {
         selection: target,
         operation: { operation_id: pending.current.id, expected_sequence: snapshot.sequence, rollback },
@@ -57,7 +85,7 @@ export function RealmPackages({ realm, onClose }: { realm: string; onClose: () =
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <section className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
+      <section className="mx-4 max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Realm packages</h2>
@@ -69,26 +97,31 @@ export function RealmPackages({ realm, onClose }: { realm: string; onClose: () =
         </div>
         {error && <p role="alert" className="my-3 whitespace-pre-wrap text-sm text-red-600">{error}</p>}
         {result && <p role="status" className="my-3 text-sm text-green-700">{result}</p>}
-        {selection && snapshot && (
+        {draft && snapshot && (
           <form onSubmit={handleSubmit} className="space-y-4">
-            {(["primary_package", "front_package"] as const).map((role) => {
-              const name = role === "primary_package" ? "Service" : "Front";
-              const reference = selection[role];
-              const pkg = selection.packages[reference];
-              return (
-                <fieldset key={role} className="grid gap-1">
-                  <legend className="text-sm font-medium text-gray-700">{name} package</legend>
-                  {(["href", "sha256", "type"] as const).map((field) => (
-                    <input key={field} aria-label={`${name} ${field}`} required value={pkg[field] ?? ""}
-                      placeholder={{ href: "HTTPS download URL", sha256: "SHA-256", type: "publisher.example/program@1.0.0" }[field]}
-                      pattern={field === "sha256" ? "[0-9a-f]{64}" : undefined} className={input}
-                      onChange={(event) => setSelection({ ...selection, packages: { ...selection.packages,
-                        [reference]: { ...pkg, [field]: event.target.value.trim() },
-                      } })} />
-                  ))}
-                </fieldset>
-              );
-            })}
+            <fieldset disabled={saving} className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1 text-sm font-medium text-gray-700">
+                  Primary Service reference
+                  <input required spellCheck={false} value={draft.primaryPackage} className={input}
+                    onChange={(event) => setDraft({ ...draft, primaryPackage: event.target.value })} />
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-gray-700">
+                  Front reference
+                  <input required spellCheck={false} value={draft.frontPackage} className={input}
+                    onChange={(event) => setDraft({ ...draft, frontPackage: event.target.value })} />
+                </label>
+              </div>
+              <div className="grid gap-1">
+                <label htmlFor="realm-packages-json" className="text-sm font-medium text-gray-700">Packages JSON</label>
+                <textarea id="realm-packages-json" required spellCheck={false} wrap="off" rows={16}
+                  aria-describedby="realm-packages-json-hint" value={draft.packagesJson} className={`${input} resize-y`}
+                  onChange={(event) => setDraft({ ...draft, packagesJson: event.target.value })} />
+                <p id="realm-packages-json-hint" className="text-xs text-gray-500">
+                  Each key is a package reference. Use <code>dependencies</code> to map a package&apos;s aliases to references in this JSON.
+                </p>
+              </div>
+            </fieldset>
             {snapshot.previous_selection && (
               <p className="text-xs text-gray-500">Rollback restores Profile packages from before the last release.</p>
             )}
