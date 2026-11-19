@@ -50,6 +50,7 @@ use wasmtime_wasi::p2::bindings::filesystem::preopens::Host as WasiPreopens;
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use crate::config::{WasiDataGrant, WasmRuntimeLimits};
+use crate::request_scope::RequestScope;
 use crate::workload::{HostAbiFn, InvocationContext};
 
 use super::host_v2::WasmWorkloadV2;
@@ -154,17 +155,13 @@ pub(crate) struct HostState {
 }
 
 /// Poll and drop a host ABI future in the runtime that accepted its invocation.
-struct CallerRuntimeFuture {
-    runtime: tokio::runtime::Handle,
-    future: Option<
-        std::pin::Pin<
-            Box<dyn std::future::Future<Output = crate::workload::HostOperationResult> + Send>,
-        >,
-    >,
+pub(super) struct CallerRuntimeFuture<F: std::future::Future + ?Sized> {
+    pub(super) runtime: tokio::runtime::Handle,
+    pub(super) future: Option<std::pin::Pin<Box<F>>>,
 }
 
-impl std::future::Future for CallerRuntimeFuture {
-    type Output = crate::workload::HostOperationResult;
+impl<F: std::future::Future + ?Sized> std::future::Future for CallerRuntimeFuture<F> {
+    type Output = F::Output;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
@@ -180,7 +177,7 @@ impl std::future::Future for CallerRuntimeFuture {
     }
 }
 
-impl Drop for CallerRuntimeFuture {
+impl<F: std::future::Future + ?Sized> Drop for CallerRuntimeFuture<F> {
     fn drop(&mut self) {
         let _guard = self.runtime.enter();
         drop(self.future.take());
@@ -191,7 +188,8 @@ impl Drop for CallerRuntimeFuture {
 /// [`HostState::invocations`].
 pub(crate) struct InvocationEntry {
     pub(crate) ctx: InvocationContext,
-    caller_runtime: Option<tokio::runtime::Handle>,
+    pub(super) caller_runtime: Option<tokio::runtime::Handle>,
+    pub(super) request_scope: Option<Arc<RequestScope>>,
     pub(crate) host_abi: HostAbiFn,
     pub(crate) reply_deliver: Option<Arc<dyn Deliver>>,
     /// Whether expiry should emit an error RESPONSE. TELL invocations still
@@ -388,20 +386,11 @@ impl HostState {
     pub(super) fn egress_invocation(
         &self,
         token: u64,
-    ) -> Option<(
-        Arc<crate::egress::EgressBroker>,
-        InvocationContext,
-        HostAbiFn,
-    )> {
+    ) -> Option<(&Arc<crate::egress::EgressBroker>, &InvocationEntry)> {
         if self.egress_token != Some(token) {
             return None;
         }
-        let entry = self.invocations.get(&token)?;
-        Some((
-            self.egress.clone()?,
-            entry.ctx.clone(),
-            entry.host_abi.clone(),
-        ))
+        Some((self.egress.as_ref()?, self.invocations.get(&token)?))
     }
 
     pub(super) fn set_wasi_runtime_isolation(&mut self, enabled: bool) {
@@ -543,13 +532,14 @@ impl HostState {
     /// thread into the guest's `invocation-ctx` (V2 world). Tokens are
     /// monotonic within a Store's lifetime.
     pub(crate) fn alloc_invocation(&mut self, ctx: InvocationContext, host_abi: HostAbiFn) -> u64 {
-        self.alloc_invocation_with_reply(ctx, host_abi, None, false, None, None)
+        self.alloc_invocation_with_reply(ctx, host_abi, None, false, None, None, None)
     }
 
     /// Allocate an invocation and retain the host-side reply sink used by the
     /// synchronous Rust guest `Reply<T>` bridge. Non-dispatch lifecycle and
     /// observation entries do not need a reply sink and use
     /// [`Self::alloc_invocation`] above.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn alloc_invocation_with_reply(
         &mut self,
         ctx: InvocationContext,
@@ -558,6 +548,7 @@ impl HostState {
         expects_response: bool,
         reply_claimed: Option<Arc<AtomicBool>>,
         reply_deadline: Option<Instant>,
+        request_scope: Option<Arc<RequestScope>>,
     ) -> u64 {
         self.sweep_expired_deferred_replies(crate::lifecycle::dedup::INFLIGHT_TTL, Instant::now());
         // The guest runtime isolates filesystem work; host operations belong to
@@ -611,6 +602,7 @@ impl HostState {
             InvocationEntry {
                 ctx,
                 caller_runtime,
+                request_scope,
                 host_abi,
                 reply_deliver,
                 expects_response,
@@ -837,6 +829,12 @@ impl HostState {
 
     pub(crate) fn invocation_count(&self) -> usize {
         self.invocations.len()
+    }
+
+    pub(super) fn has_scoped_dispatch(&self) -> bool {
+        self.invocations
+            .values()
+            .any(|entry| entry.request_scope.is_some() && !entry.dispatch_finished)
     }
 
     /// Expire deferred replies whose pump-side outstanding reply has reached

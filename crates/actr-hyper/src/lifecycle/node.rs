@@ -33,7 +33,7 @@ use actr_runtime_mailbox::{DeadLetterQueue, Mailbox};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, watch};
 use tokio_util::sync::CancellationToken;
@@ -1185,9 +1185,11 @@ async fn host_operation_handler(
     use actr_protocol::{DataChunk, PayloadType};
 
     match pending {
-        HostOperation::ScopedActorCall { request, deadline } => {
-            scoped_actor_call(&ctx, request, deadline).await
-        }
+        HostOperation::ScopedActorCall {
+            request,
+            deadline,
+            dispatch_id,
+        } => scoped_actor_call(&ctx, request, deadline, &dispatch_id).await,
         HostOperation::CallRaw(req) => {
             match ctx
                 .call_raw(
@@ -1421,6 +1423,7 @@ async fn scoped_actor_call(
     ctx: &crate::context::RuntimeContext,
     request: actr_framework::guest::dynclib_abi::HostCallRawV1,
     deadline: tokio::time::Instant,
+    dispatch_id: &OnceLock<String>,
 ) -> crate::workload::HostOperationResult {
     use crate::workload::HostOperationResult;
 
@@ -1431,7 +1434,7 @@ async fn scoped_actor_call(
             guest_rpc_payload_type(request.payload_type),
             Bytes::from(request.payload),
             crate::transport::RpcDeadline::at(deadline),
-            true,
+            Some(dispatch_id),
         )
         .await
     {
@@ -1450,9 +1453,11 @@ async fn stream_callback_host_operation_handler(
     use actr_protocol::PayloadType;
 
     match pending {
-        HostOperation::ScopedActorCall { request, deadline } => {
-            scoped_actor_call(&ctx, request, deadline).await
-        }
+        HostOperation::ScopedActorCall {
+            request,
+            deadline,
+            dispatch_id,
+        } => scoped_actor_call(&ctx, request, deadline, &dispatch_id).await,
         HostOperation::CallRaw(req) => {
             match ctx
                 .call_raw(
@@ -2171,6 +2176,21 @@ impl Inner {
             (None, Some(deadline)) => Some(crate::request_scope::RequestScope::root_at(deadline)),
             (scope, None) => scope,
         };
+        #[cfg(feature = "wasm-engine")]
+        let broker = self.workload_dispatch.egress_broker().cloned();
+        #[cfg(feature = "wasm-engine")]
+        let scope = if scope.is_none() && broker.is_some() && envelope.timeout_ms > 0 {
+            // A regular remote call has a wire budget but no request scope.
+            let budget = Duration::from_millis(envelope.timeout_ms as u64);
+            let Some(deadline) = tokio::time::Instant::now().checked_add(budget) else {
+                return ready_continuation(Err(ActrError::InvalidArgument(
+                    "RPC timeout exceeds the supported deadline range".into(),
+                )));
+            };
+            Some(crate::request_scope::RequestScope::root_at(deadline))
+        } else {
+            scope
+        };
         if let Some(scope) = scope.as_ref().filter(|scope| !scope.is_active()) {
             tracing::debug!(
                 request_id = %envelope.request_id,
@@ -2187,7 +2207,6 @@ impl Inner {
         };
         #[cfg(feature = "wasm-engine")]
         let authorize_inbound = {
-            let broker = self.workload_dispatch.egress_broker().cloned();
             let invocation = dispatch_ctx.clone();
             let route = envelope.route_key.clone();
             move || match &broker {
@@ -2352,6 +2371,7 @@ impl Inner {
                         envelope.tracestate.clone(),
                         sink,
                         expects_response,
+                        scope.clone(),
                     );
                     // Start every admission unclaimed. Component dispatchers
                     // return a reserved deferred marker only after selecting
@@ -2408,6 +2428,8 @@ impl Inner {
         let outstanding_replies_for_fallback = self.outstanding_replies.clone();
         let allow_component_return_fallback = self.package_uses_explicit_reply_boundary;
         let finish = move |result: ActorResult<Bytes>| async move {
+            let mut dedup = dedup_state.lock().await;
+            let result = crate::request_scope::RequestScope::check_reply(scope.as_deref(), result);
             match &result {
                 Ok(_) => tracing::debug!(
                     request_id = %request_id,
@@ -2431,7 +2453,7 @@ impl Inner {
                 (Ok(_), true) => Ok(Bytes::new()),
                 _ => result.clone(),
             };
-            dedup_state.lock().await.complete(&dedup_key, cached);
+            dedup.complete(&dedup_key, cached);
             result
         };
 

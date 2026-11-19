@@ -1,7 +1,7 @@
 //! Embedding boundary for scoped WASM Service egress.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use actr_pack::egress::{EgressPermissions, HttpsPermission, PackagePrivacyContract};
@@ -10,6 +10,7 @@ use tokio::sync::Semaphore;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+use crate::request_scope::RequestScope;
 use crate::workload::{HostAbiFn, HostOperation, HostOperationResult, InvocationContext};
 
 const MAX_REQUEST: usize = 64 * 1024;
@@ -116,13 +117,17 @@ impl EgressBroker {
         alias: &str,
         route: String,
         payload: Vec<u8>,
+        scope: Option<&RequestScope>,
     ) -> ActorResult<Vec<u8>> {
         use actr_framework::guest::dynclib_abi::HostCallRawV1;
+        if scope.is_some_and(|scope| !scope.is_active()) {
+            return Err(ActrError::TimedOut);
+        }
         let _slot = self
             .concurrency
             .try_acquire()
             .map_err(|_| deny("egress concurrency limit"))?;
-        let scope = self
+        let permission = self
             .permissions
             .actor
             .get(alias)
@@ -143,7 +148,7 @@ impl EgressBroker {
             invocation,
             source_package_sha256: &self.digest,
             privacy_contract_sha256: &self.contract_sha256,
-            data_classes: &scope.data_classes,
+            data_classes: &permission.data_classes,
             alias,
             operation: EgressOperation::Actor {
                 route: &route,
@@ -158,7 +163,9 @@ impl EgressBroker {
             .filter(|target| target.realm == invocation.self_id.realm)
             .ok_or_else(|| deny("Actor binding is absent or outside the source Realm"))?;
         let deadline = permit.expires_at.min(Instant::now() + MAX_DURATION);
-        run_permitted(permit, deadline, async move {
+        let deadline = scope.map_or(deadline, |scope| deadline.min(scope.deadline()));
+        let dispatch_id = Arc::new(OnceLock::new());
+        let call = async {
             let timeout_ms = deadline
                 .saturating_duration_since(Instant::now())
                 .as_millis() as i64;
@@ -174,6 +181,7 @@ impl EgressBroker {
                     payload_type: PayloadType::RpcReliable as i32,
                 },
                 deadline,
+                dispatch_id: dispatch_id.clone(),
             })
             .await
             {
@@ -181,8 +189,8 @@ impl EgressBroker {
                 HostOperationResult::Error(error) => Err(error),
                 _ => Err(deny("Actor response failed or exceeds its limit")),
             }
-        })
-        .await
+        };
+        run_permitted(&permit, deadline, scope, Some(dispatch_id.as_ref()), call).await
     }
 
     pub(crate) async fn https_request(
@@ -190,7 +198,11 @@ impl EgressBroker {
         invocation: &InvocationContext,
         alias: &str,
         body: Vec<u8>,
+        scope: Option<&RequestScope>,
     ) -> ActorResult<Vec<u8>> {
+        if scope.is_some_and(|scope| !scope.is_active()) {
+            return Err(ActrError::TimedOut);
+        }
         let _slot = self
             .concurrency
             .try_acquire()
@@ -218,12 +230,24 @@ impl EgressBroker {
             },
         })?;
         let deadline = permit.expires_at.min(Instant::now() + MAX_DURATION);
+        let deadline = scope.map_or(deadline, |scope| deadline.min(scope.deadline()));
         run_permitted(
-            permit,
+            &permit,
             deadline,
+            scope,
+            None,
             fixed_https(
                 rule,
                 body,
+                || {
+                    if scope.is_some_and(|scope| !scope.is_active()) {
+                        return Err(ActrError::TimedOut);
+                    }
+                    if permit.revocation.is_cancelled() || Instant::now() >= deadline {
+                        return Err(deny("HTTPS grant inactive before send"));
+                    }
+                    Ok(())
+                },
                 #[cfg(test)]
                 self.https_fixture.as_ref(),
             ),
@@ -233,19 +257,36 @@ impl EgressBroker {
 }
 
 async fn run_permitted<T>(
-    permit: EgressPermit,
+    permit: &EgressPermit,
     deadline: Instant,
+    scope: Option<&RequestScope>,
+    dispatch_id: Option<&OnceLock<String>>,
     operation: impl std::future::Future<Output = ActorResult<T>>,
 ) -> ActorResult<T> {
+    let inactive = |cause: &str| match dispatch_id.and_then(OnceLock::get) {
+        Some(operation_id) => ActrError::DeliveryUncertain {
+            operation_id: operation_id.clone(),
+            cause: cause.to_owned(),
+        },
+        None if scope.is_some_and(|scope| !scope.is_active()) => ActrError::TimedOut,
+        None => deny(cause),
+    };
+    if Instant::now() >= deadline {
+        return Err(inactive("egress grant expired or timed out"));
+    }
     tokio::select! {
         biased;
-        _ = permit.revocation.cancelled() => Err(deny("egress grant revoked")),
+        _ = RequestScope::wait_cancelled(scope) => Err(inactive("request scope cancelled")),
+        _ = permit.revocation.cancelled() => Err(inactive("egress grant revoked")),
         _ = crate::timer::sleep_until(crate::timer::ids::WASM_EGRESS_DEADLINE, deadline) => {
-            Err(deny("egress grant expired or timed out"))
+            Err(inactive("egress grant expired or timed out"))
         },
         result = operation => {
-            if permit.revocation.is_cancelled() || Instant::now() >= deadline {
-                Err(deny("egress result belongs to an inactive grant"))
+            if scope.is_some_and(|scope| !scope.is_active())
+                || permit.revocation.is_cancelled()
+                || Instant::now() >= deadline
+            {
+                Err(inactive("egress result belongs to an inactive grant"))
             } else {
                 result
             }
@@ -262,6 +303,7 @@ struct HttpsFixture {
 async fn fixed_https(
     rule: &HttpsPermission,
     body: Vec<u8>,
+    check_before_send: impl FnOnce() -> ActorResult<()>,
     #[cfg(test)] fixture: Option<&HttpsFixture>,
 ) -> ActorResult<Vec<u8>> {
     let url = url::Url::parse(&rule.url).map_err(|_| deny("invalid signed HTTPS URL"))?;
@@ -326,6 +368,7 @@ async fn fixed_https(
     } else {
         request.body(body)
     };
+    check_before_send()?;
     let mut response = request
         .send()
         .await
@@ -452,17 +495,23 @@ files = []
         });
         let broker = EgressBroker::new(policy, "bb".repeat(32), contract, Some(&lock));
         let count = Arc::new(AtomicUsize::new(0));
+        let scope = RequestScope::root_at(Instant::now() + Duration::from_secs(2));
+        let scope_deadline = scope.deadline();
         let bridge: HostAbiFn = {
             let count = count.clone();
             Arc::new(move |operation| {
                 let count = count.clone();
                 let target = target.clone();
                 Box::pin(async move {
-                    let HostOperation::ScopedActorCall { request, .. } = operation else {
+                    let HostOperation::ScopedActorCall {
+                        request, deadline, ..
+                    } = operation
+                    else {
                         panic!("unexpected bridge operation");
                     };
                     assert_eq!(request.target, target);
                     assert_eq!(request.route_key, route);
+                    assert_eq!(deadline, scope_deadline);
                     count.fetch_add(1, Ordering::Relaxed);
                     HostOperationResult::Bytes(vec![42])
                 })
@@ -470,7 +519,14 @@ files = []
         };
         assert!(
             broker
-                .actor_call(&invocation, bridge.clone(), "index", route.into(), vec![])
+                .actor_call(
+                    &invocation,
+                    bridge.clone(),
+                    "index",
+                    route.into(),
+                    vec![],
+                    Some(&scope),
+                )
                 .await
                 .is_err()
         );
@@ -482,22 +538,55 @@ files = []
                     bridge.clone(),
                     "index",
                     "notes.Index.Forbidden".into(),
-                    vec![]
+                    vec![],
+                    Some(&scope),
                 )
                 .await
                 .is_err()
         );
         assert_eq!(
             broker
-                .actor_call(&invocation, bridge.clone(), "index", route.into(), vec![])
+                .actor_call(
+                    &invocation,
+                    bridge.clone(),
+                    "index",
+                    route.into(),
+                    vec![],
+                    Some(&scope),
+                )
                 .await
                 .unwrap(),
             vec![42]
         );
-        revocation.cancel();
+        let dispatched_bridge: HostAbiFn = Arc::new(move |operation| {
+            let revocation = revocation.clone();
+            Box::pin(async move {
+                let HostOperation::ScopedActorCall { dispatch_id, .. } = operation else {
+                    panic!("unexpected bridge operation");
+                };
+                dispatch_id.set("sent-request".into()).unwrap();
+                revocation.cancel();
+                std::future::pending().await
+            })
+        });
+        let error = broker
+            .actor_call(
+                &invocation,
+                dispatched_bridge,
+                "index",
+                route.into(),
+                vec![],
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "sent-request"
+        ));
         assert!(
             broker
-                .actor_call(&invocation, bridge, "index", route.into(), vec![])
+                .actor_call(&invocation, bridge, "index", route.into(), vec![], None)
                 .await
                 .is_err()
         );

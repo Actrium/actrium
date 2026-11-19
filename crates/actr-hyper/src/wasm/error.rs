@@ -28,6 +28,8 @@ pub enum WasmError {
     ResourceLimitExceeded(&'static str),
     #[error("WASM invocation timed out after {0:?}")]
     InvocationTimeout(std::time::Duration),
+    #[error("WASM invocation request scope expired or was cancelled")]
+    RequestScopeEnded,
 }
 
 const MAX_TRAP_MESSAGE_BYTES: usize = 512;

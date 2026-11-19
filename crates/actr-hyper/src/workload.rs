@@ -24,7 +24,7 @@ use bytes::Bytes;
 use prost::Message;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::context::RuntimeContext;
 
@@ -42,6 +42,7 @@ pub enum HostOperation {
     ScopedActorCall {
         request: HostCallRawV1,
         deadline: tokio::time::Instant,
+        dispatch_id: Arc<OnceLock<String>>,
     },
     Reply(Vec<u8>),
     ReplyError(ActrError),
@@ -747,7 +748,10 @@ impl Workload {
                         )
                         .await
                         .map(Bytes::from)
-                        .map_err(|e| ActrError::Internal(format!("workload dispatch failed: {e}")))
+                        .map_err(|error| match error {
+                            crate::wasm::WasmError::RequestScopeEnded => ActrError::TimedOut,
+                            _ => ActrError::Internal(format!("workload dispatch failed: {error}")),
+                        })
                 }
                 #[cfg(feature = "dynclib-engine")]
                 Workload::DynClib(workload) => {

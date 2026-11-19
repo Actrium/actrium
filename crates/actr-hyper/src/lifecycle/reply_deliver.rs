@@ -24,6 +24,7 @@ use tokio::sync::Mutex;
 
 use crate::lifecycle::dedup::{DedupKey, DedupState};
 use crate::lifecycle::outstanding_replies::{OutstandingReplies, ReplyAttemptId};
+use crate::request_scope::RequestScope;
 use crate::transport::HostTransport;
 
 const DELIVER_PENDING: u8 = 0;
@@ -60,6 +61,7 @@ struct ReplyShared {
     traceparent: Option<String>,
     tracestate: Option<String>,
     emit_response: bool,
+    scope: Option<Arc<RequestScope>>,
     /// Runtime captured at admission so a movable Reply can be completed
     /// from a non-Tokio callback thread without losing its outcome.
     runtime_handle: Option<tokio::runtime::Handle>,
@@ -106,6 +108,7 @@ impl ReplyDeliver {
         tracestate: Option<String>,
         sink: ReplySink,
         emit_response: bool,
+        scope: Option<Arc<RequestScope>>,
     ) -> (Self, Arc<AtomicBool>) {
         let state = Arc::new(AtomicU8::new(DELIVER_PENDING));
         let delivered = Arc::new(AtomicBool::new(false));
@@ -140,6 +143,7 @@ impl ReplyDeliver {
                     traceparent,
                     tracestate,
                     emit_response,
+                    scope,
                     runtime_handle,
                 },
                 sink: sink_clone,
@@ -245,7 +249,7 @@ impl ReplyDeliver {
     async fn deliver_async(self, outcome: ReplyOutcome, complete_dedup: bool) {
         let ReplyOutcome {
             request_id: _,
-            result,
+            mut result,
             emit_response,
         } = outcome;
 
@@ -255,15 +259,13 @@ impl ReplyDeliver {
             // cache the real result so a retry observes the recorded outcome.
             // Always use the request ID captured when this deliver was
             // admitted, not a mutable/retried request's ID.
+            let mut dedup = self.shared.dedup_state.lock().await;
+            result = RequestScope::check_reply(self.shared.scope.as_deref(), result);
             let cached = match (&result, emit_response) {
                 (Ok(_), false) => Ok(Bytes::new()),
                 _ => result.clone(),
             };
-            self.shared
-                .dedup_state
-                .lock()
-                .await
-                .complete(&self.shared.dedup_key, cached);
+            dedup.complete(&self.shared.dedup_key, cached);
         }
 
         // Release the outstanding-reply registry slot (RFC-0323 §5/§7 gauge).
@@ -279,6 +281,7 @@ impl ReplyDeliver {
         // NOT done here: per RFC-0323 §4 the EXPLICIT pump ACKs at
         // dispatch-completion (handler return), which already ran before this
         // spawned task fires. Only the reply half runs here.
+        let result = RequestScope::check_reply(self.shared.scope.as_deref(), result);
         if let Some(_msg_id) = &self.sink.msg_id {
             // Mailbox path
             let caller = self

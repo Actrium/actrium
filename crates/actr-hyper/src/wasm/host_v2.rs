@@ -48,7 +48,7 @@ use super::component_bindings_v2::actr::workload::types::{
     WebrtcUnavailableReason as WitWebrtcUnavailableReason,
 };
 use super::error::{WasmError, WasmResult};
-use super::host::{HostState, epoch_deadline_ticks};
+use super::host::{CallerRuntimeFuture, HostState, epoch_deadline_ticks};
 use super::runtime_limits::{
     EpochTicker, QuotaPermit, StorePermit, acquire_instantiate, acquire_invocation, acquire_store,
     quota_release_snapshot, record_instantiate_failure, record_timeout,
@@ -57,6 +57,7 @@ use super::runtime_limits::{
 use crate::config::{WasiDataGrant, WasmRuntimeLimits};
 use crate::executor::{ActorCmd, LifecyclePhase};
 use crate::package_runtime::{WASI_DATA_READ_ONLY, WASI_DATA_READ_WRITE};
+use crate::request_scope::RequestScope;
 use crate::workload::{
     HostAbiFn, HostOperation, HostOperationResult, InvocationContext, PackageHookEvent,
 };
@@ -66,7 +67,9 @@ use futures_util::FutureExt as _;
 use futures_util::future::{BoxFuture, poll_fn};
 use futures_util::stream::{FuturesUnordered, StreamExt as _};
 use std::collections::HashMap;
+use std::future::Future as _;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::task::Poll;
 use std::time::Duration;
 use tokio::runtime::{Builder, Handle, Runtime};
 use tokio::sync::{Semaphore, SemaphorePermit, mpsc, oneshot};
@@ -156,18 +159,40 @@ impl HostWithStore<HostState> for HostState {
         route: String,
         payload: Vec<u8>,
     ) -> wasmtime::Result<Result<Vec<u8>, WitActrError>> {
-        let Some((broker, invocation, bridge)) =
-            accessor.with(|mut a| a.get().egress_invocation(ctx_token))
-        else {
+        let Some((broker, invocation, bridge, scope, caller_runtime)) = accessor.with(|mut a| {
+            let (broker, entry) = a.get().egress_invocation(ctx_token)?;
+            Some((
+                broker.clone(),
+                entry.ctx.clone(),
+                entry.host_abi.clone(),
+                entry.request_scope.clone(),
+                entry.caller_runtime.clone(),
+            ))
+        }) else {
             return Ok(Err(actr_error_to_wit(
                 actr_protocol::ActrError::PermissionDenied(
                     "no scoped egress for this invocation".into(),
                 ),
             )));
         };
-        let result = broker
-            .actor_call(&invocation, bridge, &alias, route, payload)
-            .await;
+        let call = broker.actor_call(
+            &invocation,
+            bridge,
+            &alias,
+            route,
+            payload,
+            scope.as_deref(),
+        );
+        let result = match caller_runtime {
+            Some(runtime) => {
+                CallerRuntimeFuture {
+                    runtime,
+                    future: Some(Box::pin(call)),
+                }
+                .await
+            }
+            None => call.await,
+        };
         tracing::info!(succeeded = result.is_ok(), "scoped Actor egress result");
         Ok(result.map_err(actr_error_to_wit))
     }
@@ -178,16 +203,33 @@ impl HostWithStore<HostState> for HostState {
         alias: String,
         body: Vec<u8>,
     ) -> wasmtime::Result<Result<Vec<u8>, WitActrError>> {
-        let Some((broker, invocation, _)) =
-            accessor.with(|mut a| a.get().egress_invocation(ctx_token))
-        else {
+        let Some((broker, invocation, scope, caller_runtime)) = accessor.with(|mut a| {
+            let (broker, entry) = a.get().egress_invocation(ctx_token)?;
+            Some((
+                broker.clone(),
+                entry.ctx.clone(),
+                entry.request_scope.clone(),
+                entry.caller_runtime.clone(),
+            ))
+        }) else {
             return Ok(Err(actr_error_to_wit(
                 actr_protocol::ActrError::PermissionDenied(
                     "no scoped egress for this invocation".into(),
                 ),
             )));
         };
-        let result = broker.https_request(&invocation, &alias, body).await;
+        let request = broker.https_request(&invocation, &alias, body, scope.as_deref());
+        // Scope deadlines use the clock of the runtime that admitted the RPC.
+        let result = match caller_runtime {
+            Some(runtime) => {
+                CallerRuntimeFuture {
+                    runtime,
+                    future: Some(Box::pin(request)),
+                }
+                .await
+            }
+            None => request.await,
+        };
         tracing::info!(succeeded = result.is_ok(), "scoped HTTPS egress result");
         Ok(result.map_err(actr_error_to_wit))
     }
@@ -1135,11 +1177,7 @@ impl WasmWorkloadV2 {
     }
 
     fn timeout_poison(&mut self) -> WasmError {
-        self.poisoned = true;
-        if let Some(store) = self.store.as_mut() {
-            store.data_mut().clear_invocations();
-        }
-        drop(self.store.take());
+        self.discard_store();
         record_timeout();
         WasmError::InvocationTimeout(self.limits.invocation_timeout)
     }
@@ -1170,8 +1208,11 @@ impl WasmWorkloadV2 {
         expects_response: bool,
         reply_claimed: Option<Arc<std::sync::atomic::AtomicBool>>,
         reply_deadline: Option<tokio::time::Instant>,
-        scope: Option<Arc<crate::request_scope::RequestScope>>,
+        scope: Option<Arc<RequestScope>>,
     ) -> WasmResult<Vec<u8>> {
+        if scope.as_ref().is_some_and(|scope| !scope.is_active()) {
+            return Err(WasmError::RequestScopeEnded);
+        }
         self.ensure_instance().await?;
 
         let envelope = RpcEnvelope::decode(request_bytes).map_err(|e| {
@@ -1183,6 +1224,9 @@ impl WasmWorkloadV2 {
             broker
                 .authorize_inbound(&ctx, &envelope.route_key)
                 .map_err(|error| WasmError::ExecutionFailed(error.to_string()))?;
+        }
+        if scope.as_ref().is_some_and(|scope| !scope.is_active()) {
+            return Err(WasmError::RequestScopeEnded);
         }
         // #251 request-path diagnostics: record that the envelope crossed
         // from the host into the guest. Info-level so the default
@@ -1215,17 +1259,34 @@ impl WasmWorkloadV2 {
                 expects_response,
                 reply_claimed,
                 reply_deadline,
+                scope.clone(),
             );
         let inv = invocation_ctx_to_wit(&ctx, token, expects_response, reply_enabled);
         let wasi_runtime = self.wasi_runtime.clone();
+        let caller_runtime = wasi_runtime.as_ref().map(|_| Handle::current());
         let bindings = &self.bindings;
-        let region_fut = self
-            .store
-            .as_mut()
-            .expect("serviceable wasm instance must have a Store")
-            .run_concurrent(async move |accessor| {
+        let invocation_deadline = tokio::time::Instant::now() + self.limits.invocation_timeout;
+        let deadline = scope.as_ref().map_or(invocation_deadline, |scope| {
+            invocation_deadline.min(scope.deadline())
+        });
+        let region_scope = scope.clone();
+        let region = {
+            let store = self
+                .store
+                .as_mut()
+                .expect("serviceable wasm instance must have a Store");
+            if scope.is_some() {
+                yield_at_each_epoch(&mut store.as_context_mut());
+            }
+            let region = store.run_concurrent(async move |accessor| {
                 run_serial_export(accessor, token, async {
-                    if scope.as_ref().is_some_and(|scope| !scope.is_active()) {
+                    let scope_ended = {
+                        let _guard = caller_runtime.as_ref().map(Handle::enter);
+                        region_scope
+                            .as_ref()
+                            .is_some_and(|scope| !scope.is_active())
+                    };
+                    if scope_ended {
                         return Ok(Err(WitActrError::TimedOut));
                     }
                     bindings
@@ -1235,15 +1296,27 @@ impl WasmWorkloadV2 {
                 })
                 .await
             });
-        let region = match crate::timer::timeout(
-            crate::timer::ids::WASM_GUEST_INVOCATION,
-            self.limits.invocation_timeout,
-            with_wasi_runtime(wasi_runtime, region_fut),
-        )
-        .await
-        {
-            Ok(region) => region,
-            Err(_) => return Err(self.timeout_poison()),
+            let mut region = std::pin::pin!(with_wasi_runtime(wasi_runtime, region));
+            let poll_region = poll_fn(|cx| {
+                if tokio::time::Instant::now() >= deadline {
+                    return Poll::Ready(None);
+                }
+                region.as_mut().poll(cx).map(Some)
+            });
+            tokio::select! {
+                biased;
+                _ = RequestScope::wait_cancelled(scope.as_deref()) => None,
+                _ = crate::timer::sleep_until(crate::timer::ids::WASM_GUEST_INVOCATION, deadline) => None,
+                result = poll_region => result,
+            }
+        };
+        if scope.as_ref().is_some_and(|scope| !scope.is_active()) {
+            self.discard_store();
+            record_timeout();
+            return Err(WasmError::RequestScopeEnded);
+        }
+        let Some(region) = region else {
+            return Err(self.timeout_poison());
         };
 
         // Region closed: retire the token unless the guest returned the
@@ -1256,11 +1329,14 @@ impl WasmWorkloadV2 {
             Ok(Ok(Ok(bytes))) if bytes.as_slice() == DEFERRED_REPLY_SENTINEL
         );
         let (reply_completed, reply_claimed, fallback_deliver) = if !self.poisoned {
-            let state = self
+            let store = self
                 .store
                 .as_mut()
-                .expect("serviceable wasm instance must have a Store")
-                .data_mut();
+                .expect("serviceable wasm instance must have a Store");
+            if scope.is_some() {
+                store.epoch_deadline_trap();
+            }
+            let state = store.data_mut();
             if returned_deferred {
                 state.claim_invocation_reply(token);
             }
@@ -1767,7 +1843,7 @@ impl WasmWorkloadV2 {
                 tokio::pin!(region);
                 loop {
                     tokio::select! {
-                        result = &mut region => break ResidentRunExit::Region(result),
+                        biased;
                         Some(expired) = deadline_rx.recv() => {
                             let live = expired.generation == generation && ledger
                                 .lock()
@@ -1777,6 +1853,7 @@ impl WasmWorkloadV2 {
                                 break ResidentRunExit::TimedOut(expired.token);
                             }
                         }
+                        result = &mut region => break ResidentRunExit::Region(result),
                     }
                 }
             };
@@ -1791,7 +1868,8 @@ impl WasmWorkloadV2 {
                 ResidentRunExit::Region(Ok(RegionExit::GuestCallFailed { token, error })) => {
                     self.fail_all_and_inner_error(&ledger, token, error);
                 }
-                ResidentRunExit::TimedOut(token) => {
+                ResidentRunExit::TimedOut(token)
+                | ResidentRunExit::Region(Ok(RegionExit::RequestScopeEnded(token))) => {
                     self.fail_all_and_timeout(&ledger, token);
                 }
                 // A guest trap tore the whole region down. Fail every in-flight
@@ -1998,12 +2076,12 @@ impl Drop for DeadlineGuard {
 fn arm_deadline(
     generation: u64,
     token: u64,
-    timeout: Duration,
+    deadline: tokio::time::Instant,
     deadline_tx: &mpsc::UnboundedSender<DeadlineExpired>,
 ) -> DeadlineGuard {
     let deadline_tx = deadline_tx.clone();
     let task = tokio::spawn(async move {
-        crate::timer::sleep(crate::timer::ids::WASM_RESIDENT_DISPATCH, timeout).await;
+        crate::timer::sleep_until(crate::timer::ids::WASM_RESIDENT_DISPATCH, deadline).await;
         let _ = deadline_tx.send(DeadlineExpired { generation, token });
     });
     DeadlineGuard {
@@ -2036,6 +2114,8 @@ enum RegionExit {
     Shutdown,
     /// The caller dropped a reply while its guest entry was still active.
     CallerCanceled(u64),
+    /// The dispatch's inherited deadline or cancellation ended its request scope.
+    RequestScopeEnded(u64),
     /// An individual `call_concurrent` future returned a Wasmtime error. This
     /// is fatal to the shared Store even when the outer region stayed alive.
     GuestCallFailed { token: u64, error: wasmtime::Error },
@@ -2061,6 +2141,7 @@ enum BarrierNext {
 enum DispatchOutcome {
     Completed(wasmtime::Result<Result<Vec<u8>, WitActrError>>),
     CallerCanceled,
+    RequestScopeEnded,
 }
 
 /// Force every individual Wasmtime call error onto the Store-fatal path. The
@@ -2308,12 +2389,16 @@ async fn resident_region(
                                 expects_response,
                                 reply_claimed,
                                 reply_deadline,
+                                ctx.scope.clone(),
                             );
                             (token, state.invocation_count())
                         });
-                        let deadline = dispatch_timeout
+                        let invocation_timeout = dispatch_timeout
                             .unwrap_or(limits.invocation_timeout)
                             .min(limits.invocation_timeout);
+                        let scope = ctx.scope;
+                        let deadline = tokio::time::Instant::now() + invocation_timeout;
+                        let deadline = scope.as_ref().map_or(deadline, |scope| deadline.min(scope.deadline()));
                         let reply = ReplySlot::new(reply);
                         ledger
                             .lock()
@@ -2345,10 +2430,22 @@ async fn resident_region(
                         );
                         let call = wl.call_dispatch(accessor, wit_env, inv);
                         let fut = async move {
-                            let outcome = tokio::select! {
-                                biased;
-                                _ = reply.closed() => DispatchOutcome::CallerCanceled,
-                                result = call => DispatchOutcome::Completed(result),
+                            let scope_ended = || scope.as_ref().is_some_and(|scope| !scope.is_active());
+                            let outcome = if scope_ended() {
+                                DispatchOutcome::RequestScopeEnded
+                            } else {
+                                tokio::select! {
+                                    biased;
+                                    _ = reply.closed() => DispatchOutcome::CallerCanceled,
+                                    _ = RequestScope::wait_cancelled(scope.as_deref()) => DispatchOutcome::RequestScopeEnded,
+                                    result = call => {
+                                        if scope_ended() {
+                                            DispatchOutcome::RequestScopeEnded
+                                        } else {
+                                            DispatchOutcome::Completed(result)
+                                        }
+                                    }
+                                }
                             };
                             (
                                 token,
@@ -2368,14 +2465,10 @@ async fn resident_region(
                 }
             }
             Some((token, request_id, route_key, expects_response, outcome)) = inflight.next(), if !inflight.is_empty() => {
-                if matches!(outcome, DispatchOutcome::CallerCanceled) {
-                    return RegionExit::CallerCanceled(token);
-                }
                 let call = match outcome {
                     DispatchOutcome::Completed(result) => result,
-                    DispatchOutcome::CallerCanceled => unreachable!(
-                        "caller cancellation returned before guest result classification"
-                    ),
+                    DispatchOutcome::CallerCanceled => return RegionExit::CallerCanceled(token),
+                    DispatchOutcome::RequestScopeEnded => return RegionExit::RequestScopeEnded(token),
                 };
                 let call_result = match guest_call_completion(call) {
                     GuestCallCompletion::Completed(result) => result,
@@ -2534,7 +2627,7 @@ async fn run_barrier(
                     _deadline: arm_deadline(
                         generation,
                         token,
-                        limits.invocation_timeout,
+                        tokio::time::Instant::now() + limits.invocation_timeout,
                         deadline_tx,
                     ),
                 },
@@ -2609,7 +2702,7 @@ async fn run_barrier(
                     _deadline: arm_deadline(
                         generation,
                         token,
-                        limits.invocation_timeout,
+                        tokio::time::Instant::now() + limits.invocation_timeout,
                         deadline_tx,
                     ),
                 },
@@ -2680,7 +2773,7 @@ async fn run_barrier(
                     _deadline: arm_deadline(
                         generation,
                         token,
-                        limits.invocation_timeout,
+                        tokio::time::Instant::now() + limits.invocation_timeout,
                         deadline_tx,
                     ),
                 },
@@ -2787,7 +2880,12 @@ fn arm_region_budget(
         let mut store = access.as_context_mut();
         let fuel = budget.admission_target(store.get_fuel()?, live, limits.fuel_per_invocation);
         store.set_fuel(fuel)?;
-        store.set_epoch_deadline(epoch_deadline_ticks(limits));
+        if store.data().has_scoped_dispatch() {
+            yield_at_each_epoch(&mut store);
+        } else {
+            store.epoch_deadline_trap();
+            store.set_epoch_deadline(epoch_deadline_ticks(limits));
+        }
         Ok::<u64, wasmtime::Error>(fuel)
     })?;
     budget.record_admission(live);
@@ -2798,6 +2896,12 @@ fn arm_region_budget(
         "armed resident wasm fuel budget"
     );
     Ok(())
+}
+
+/// Yield even during compute-only guest code so the outer deadline can run.
+fn yield_at_each_epoch(store: &mut wasmtime::StoreContextMut<'_, HostState>) {
+    store.epoch_deadline_async_yield_and_update(1);
+    store.set_epoch_deadline(1);
 }
 
 fn clamp_region_budget(

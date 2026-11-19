@@ -190,6 +190,14 @@ impl RequestScope {
         &self.token
     }
 
+    #[cfg(feature = "wasm-engine")]
+    pub(crate) async fn wait_cancelled(scope: Option<&Self>) {
+        match scope {
+            Some(scope) => scope.token.cancelled().await,
+            None => std::future::pending().await,
+        }
+    }
+
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn deadline(&self) -> tokio::time::Instant {
         self.deadline
@@ -200,15 +208,24 @@ impl RequestScope {
     }
 
     pub(crate) fn deadline_passed(&self) -> bool {
-        self.deadline
-            .checked_duration_since(tokio::time::Instant::now())
-            .is_none()
+        tokio::time::Instant::now() >= self.deadline
     }
 
     /// False once cancelled or past the deadline; admission points gate
     /// Guest invocation on this.
     pub(crate) fn is_active(&self) -> bool {
         !self.is_cancelled() && !self.deadline_passed()
+    }
+
+    pub(crate) fn check_reply<T>(
+        scope: Option<&Self>,
+        result: actr_protocol::ActorResult<T>,
+    ) -> actr_protocol::ActorResult<T> {
+        if result.is_ok() && scope.is_some_and(|scope| !scope.is_active()) {
+            Err(actr_protocol::ActrError::TimedOut)
+        } else {
+            result
+        }
     }
 
     /// Remaining absolute budget, rounded up to whole milliseconds with a
