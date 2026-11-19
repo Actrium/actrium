@@ -783,6 +783,38 @@ describe('createHttpServiceEventSource', () => {
     }
   });
 
+  test('accepts a frame exactly at the limit with delimiters split across reads', async () => {
+    const originalFetch = globalThis.fetch;
+    const body = 'event: a\ndata: {"payloadBase64":"AAAA"}';
+    try {
+      for (const delimiter of ['\n\n', '\r\n\r\n']) {
+        for (let splitAt = 1; splitAt < delimiter.length; splitAt += 1) {
+          const received: unknown[] = [];
+          globalThis.fetch = (async () => new Response(new ReadableStream({
+            start(controller) {
+              const encoder = new TextEncoder();
+              // End one read inside the delimiter. The buffered prefix must not
+              // count toward the frame limit before its meaning is known.
+              controller.enqueue(encoder.encode(body + delimiter.slice(0, splitAt)));
+              controller.enqueue(encoder.encode(delimiter.slice(splitAt)));
+              controller.close();
+            },
+          }), { status: 200 })) as unknown as typeof fetch;
+          const source = createHttpServiceEventSource(
+            'https://example.com/events',
+            ['a'],
+            { initialRetryDelayMs: 1_000, maxBufferedCharacters: body.length }
+          );
+          const unsubscribe = source.subscribe((event) => { received.push(event); });
+          await waitFor(() => received.length === 1);
+          unsubscribe();
+        }
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('does not retry a permanent HTTP client error', async () => {
     const originalFetch = globalThis.fetch;
     const originalError = console.error;

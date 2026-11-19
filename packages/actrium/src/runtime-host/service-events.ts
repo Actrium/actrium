@@ -472,7 +472,12 @@ export function createHttpServiceEventSource(
             retryCount = 0;
             deliver([...handlers.keys()], frame.event);
           }
-          if (!settled && active && buffer.length > maxBufferedCharacters) {
+          // A trailing CR/LF may be the start of a two-line-ending delimiter
+          // rather than frame content. Keep it buffered and exclude it from
+          // the limit until the next read identifies it, so a frame exactly at
+          // the cap is not rejected based on transport chunk boundaries.
+          const bufferedFrameLength = buffer.length - trailingDelimiterPrefixLength(buffer);
+          if (!settled && active && bufferedFrameLength > maxBufferedCharacters) {
             finish({
               retry: true,
               error: new Error(
@@ -709,6 +714,18 @@ export function createHttpServiceEventSource(
       };
     },
   };
+}
+
+/**
+ * Length of a trailing substring that could still become an SSE delimiter.
+ * Delimiters are `\n\n`, `\n\r\n`, `\r\n\n`, and `\r\n\r\n`; only their proper
+ * prefixes can remain after the buffer has been split on complete delimiters.
+ */
+function trailingDelimiterPrefixLength(value: string): number {
+  for (const prefix of ['\r\n\r', '\n\r', '\r\n', '\n', '\r']) {
+    if (value.endsWith(prefix)) return prefix.length;
+  }
+  return 0;
 }
 
 /** Parse one SSE frame, retaining its resume ID even for filtered event names. */
