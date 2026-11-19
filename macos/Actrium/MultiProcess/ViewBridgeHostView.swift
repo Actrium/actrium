@@ -1485,7 +1485,7 @@ final class ViewBridgeCoordinator {
     }
 
     /// Cleaning XPC Resources
-    func cleanup() {
+    func cleanup(releaseRenderer: Bool = true) {
         // Clean up the throttle timer
         throttleTimer?.invalidate()
         throttleTimer = nil
@@ -1528,10 +1528,12 @@ final class ViewBridgeCoordinator {
         // Disconnect ViewBridge Connection
         hostView?.disconnect()
         hostView = nil
+        onConnectionEstablished = nil
         rendererHostView?.prepareForReuse()
+        rendererHostView?.tabId = nil
         rendererHostView = nil
 
-        if let tabId = tabId, allocatedServiceId != nil {
+        if releaseRenderer, let tabId = tabId, allocatedServiceId != nil {
             RendererProcessPool.shared.releaseRenderer(for: tabId)
             ipcLog("📦 Coordinator cleanup: Tab \(String(tabId.uuidString.prefix(8))) released renderer")
         }
@@ -1625,7 +1627,8 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
     }
 
     func removeCoordinator(for tabId: UUID) {
-        coordinators.removeValue(forKey: tabId)
+        coordinators.removeValue(forKey: tabId)?.cleanup(releaseRenderer: false)
+        RendererProcessPool.shared.releaseRenderer(for: tabId)
     }
 
     /// Internal approach: update all coordinators It's... isOverviewMode and notify services

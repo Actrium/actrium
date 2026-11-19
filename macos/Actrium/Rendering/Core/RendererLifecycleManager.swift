@@ -12,10 +12,11 @@ final class RendererLifecycleManager {
 
     private init() {}
 
-    /// Called when a tab is closed.
-    ///
-    /// This currently performs legacy helper cleanup as a compatibility fallback.
+    /// Release the tab's renderer and any legacy helper, including when the
+    /// tab will stay open to show a notice or load replacement content.
+    @MainActor
     func tabDidClose(_ tabId: UUID) {
+        ViewBridgeCoordinatorManager.shared.removeCoordinator(for: tabId)
         terminateRenderer(for: tabId)
     }
 

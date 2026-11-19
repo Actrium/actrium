@@ -162,7 +162,11 @@ impl RealmProfileRecord {
             }
         }
         if let Some(selection) = &profile.selection {
-            for package in selection.packages.values() {
+            for (package, digest) in selection
+                .packages
+                .values()
+                .filter_map(|package| package.fixed_digest().map(|digest| (package, digest)))
+            {
                 let count = sqlx::query(
                     "INSERT INTO realm_package_digest (realm, actor_type, sha256) VALUES (?, ?, ?)
                      ON CONFLICT(realm, actor_type) DO UPDATE SET sha256 = excluded.sha256
@@ -170,7 +174,7 @@ impl RealmProfileRecord {
                 )
                 .bind(name)
                 .bind(&package.r#type)
-                .bind(&package.sha256)
+                .bind(digest)
                 .execute(&mut *tx)
                 .await?
                 .rows_affected();

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use actr_protocol::realm_profile::RealmPackageSelection;
 use semver::{Version, VersionReq};
 
-use crate::{ActorPackageManifest, PackError};
+use crate::{ActorPackageManifest, PackError, PackageFileEntry};
 
 /// Check one verified source manifest against its Realm-selected dependencies.
 /// `locked_types` comes from that source's verified dependency lock, when present.
@@ -59,6 +59,8 @@ pub fn check_realm_package_dependencies(
 /// Check mapped edges between verified archives, including exported RPC contracts.
 /// Callers obtain the dependency closure before calling; cycles need no ordering.
 /// Unfetched, unrelated entries in the Profile are not asserted to be verified.
+/// An unavailable local Front defers its export check to the user-authorized Host.
+/// Its incoming aliases, selected types, locks and source contracts are still checked.
 pub fn check_realm_dependencies(
     selection: &RealmPackageSelection,
     manifests: &BTreeMap<String, ActorPackageManifest>,
@@ -77,36 +79,99 @@ pub fn check_realm_dependencies(
             let invalid = |message: &str| {
                 PackError::InvalidPackage(format!("{source}.{alias} -> {target}: {message}"))
             };
-            let target_manifest = manifests
-                .get(target)
-                .ok_or_else(|| invalid("target archive has not been verified"))?;
-            if target_manifest.actor_type() != selection.packages[target].r#type {
-                return Err(invalid(
-                    "target manifest type differs from its Realm selection",
-                ));
-            }
-            if let Some(path) = &manifest.dependencies[alias].contract {
-                let contract = manifest
-                    .files
-                    .iter()
-                    .find(|file| &file.path == path && file.role == "contract")
-                    .ok_or_else(|| invalid("dependency contract is not a signed contract file"))?;
-                let matches_export = if target_manifest.workload.profile == "actr.component/1" {
-                    let exported = target_manifest.component_rpc_contract()?;
-                    target_manifest.files.iter().any(|file| {
-                        Some(file.path.as_str()) == exported && file.sha256 == contract.sha256
-                    })
-                } else {
-                    target_manifest
-                        .local_rpc_contracts()
-                        .any(|file| file.sha256 == contract.sha256)
-                };
-                if !matches_export {
-                    return Err(invalid(
-                        "dependency contract differs from the target RPC export",
-                    ));
+            let contract = signed_dependency_contract(manifest, alias, &invalid)?;
+            let Some(target_manifest) = manifests.get(target) else {
+                if selection.packages[target].local_path.is_some() {
+                    continue;
                 }
-            }
+                return Err(invalid("target archive has not been verified"));
+            };
+            check_verified_target(
+                &selection.packages[target].r#type,
+                target_manifest,
+                contract,
+                &invalid,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Complete dependencies from a verified source to a specific verified target.
+/// Other mapped edges still have their source declarations checked.
+pub fn check_realm_dependencies_to(
+    selection: &RealmPackageSelection,
+    source: &str,
+    manifest: &ActorPackageManifest,
+    target: &str,
+    target_manifest: &ActorPackageManifest,
+    locked_types: &BTreeMap<String, String>,
+) -> Result<(), PackError> {
+    check_realm_package_dependencies(selection, source, manifest, locked_types)?;
+    for (alias, _) in selection.packages[source]
+        .dependencies
+        .iter()
+        .filter(|(_, mapped)| mapped.as_str() == target)
+    {
+        let invalid = |message: &str| {
+            PackError::InvalidPackage(format!("{source}.{alias} -> {target}: {message}"))
+        };
+        let contract = signed_dependency_contract(manifest, alias, &invalid)?;
+        check_verified_target(
+            &selection.packages[target].r#type,
+            target_manifest,
+            contract,
+            &invalid,
+        )?;
+    }
+    Ok(())
+}
+
+fn signed_dependency_contract<'a>(
+    manifest: &'a ActorPackageManifest,
+    alias: &str,
+    invalid: &impl Fn(&str) -> PackError,
+) -> Result<Option<&'a PackageFileEntry>, PackError> {
+    manifest.dependencies[alias]
+        .contract
+        .as_ref()
+        .map(|path| {
+            manifest
+                .files
+                .iter()
+                .find(|file| &file.path == path && file.role == "contract")
+                .ok_or_else(|| invalid("dependency contract is not a signed contract file"))
+        })
+        .transpose()
+}
+
+fn check_verified_target(
+    expected_type: &str,
+    manifest: &ActorPackageManifest,
+    contract: Option<&PackageFileEntry>,
+    invalid: &impl Fn(&str) -> PackError,
+) -> Result<(), PackError> {
+    if manifest.actor_type() != expected_type {
+        return Err(invalid(
+            "target manifest type differs from its Realm selection",
+        ));
+    }
+    if let Some(contract) = contract {
+        let matches_export = if manifest.workload.profile == "actr.component/1" {
+            let exported = manifest.component_rpc_contract()?;
+            manifest
+                .files
+                .iter()
+                .any(|file| Some(file.path.as_str()) == exported && file.sha256 == contract.sha256)
+        } else {
+            manifest
+                .local_rpc_contracts()
+                .any(|file| file.sha256 == contract.sha256)
+        };
+        if !matches_export {
+            return Err(invalid(
+                "dependency contract differs from the target RPC export",
+            ));
         }
     }
     Ok(())
@@ -165,6 +230,7 @@ mod tests {
                             sha256: "a".repeat(64),
                             r#type: manifest.actor_type(),
                             dependencies: BTreeMap::new(),
+                            local_path: None,
                             extensions: BTreeMap::new(),
                         },
                     )

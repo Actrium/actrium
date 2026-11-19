@@ -571,6 +571,18 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         )
     }
 
+    func prepareLocalFront() async throws {
+        let reference = try await connect()
+        _ = try await reference.discoverService(serviceType: serviceType)
+    }
+
+    private func findService(using reference: ActrRefWrapper) async throws -> ActrBindings.ActrId? {
+        if profile.packages.contains(where: { $0.reference == profile.frontPackage && $0.localPath != nil }) {
+            return try await reference.discoverService(serviceType: serviceType)
+        }
+        return try await reference.discover(targetType: serviceType, count: 1).first
+    }
+
     func subscribe(events requestedEvents: [String], generation: UInt64) async throws {
         let requested = Set(requestedEvents)
         guard !stopped, !requested.isEmpty, requested.isSubset(of: events) else {
@@ -626,7 +638,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                       await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
                     throw RealmServiceAttachmentUploadError.cancelled
                 }
-                guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
+                guard let target = try await findService(using: reference) else {
                     throw RealmServiceAttachmentUploadError.unavailable(
                         "The Realm's selected Service is not online.")
                 }

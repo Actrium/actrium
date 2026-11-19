@@ -154,12 +154,11 @@
       "type": "object",
       "required": [
         "href",
-        "sha256",
         "type"
       ],
       "properties": {
         "href": {
-          "$ref": "#/$defs/httpsUri"
+          "type": "string"
         },
         "sha256": {
           "type": "string",
@@ -171,6 +170,15 @@
           "description": "publisher/program@version; Publisher identity and version semantics require the Actor-type parser.",
           "type": "string",
           "pattern": "^[^/@\\s]+/[^/@\\s]+@[^/@\\s]+$"
+        },
+        "local_path": {
+          "type": "object",
+          "required": ["signing_key_id", "allow_rebuild"],
+          "additionalProperties": false,
+          "properties": {
+            "signing_key_id": {"type": "string", "pattern": "^actr-pub-[0-9a-f]{16}$"},
+            "allow_rebuild": {"type": "boolean"}
+          }
         },
         "dependencies": {
           "description": "Optional dependency alias to selected package reference map. The verifier checks that targets exist; consumers check aliases, types, versions, contracts and locks against the signed packages. Cycles are allowed and do not specify startup order.",
@@ -193,6 +201,39 @@
           }
         }
       },
+      "oneOf": [
+        {
+          "required": ["sha256"],
+          "not": {"required": ["local_path"]},
+          "properties": {"href": {"$ref": "#/$defs/httpsUri"}}
+        },
+        {
+          "required": ["local_path", "dependencies"],
+          "properties": {
+            "href": {
+              "not": {"pattern": "^\\s|\\s$"},
+              "anyOf": [
+                {"maxLength": 255, "pattern": "^[^/\\\\:\\u0000-\\u001f\\u007f-\\u009f]+\\.actr$"},
+                {
+                  "maxLength": 1023,
+                  "description": "An absolute path outside protected system directories. The Host enforces the limits on UTF-8 bytes.",
+                  "pattern": "^/(?:[^/\\\\:%\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]{1,255}/)*[^/\\\\:%\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]{1,250}\\.actr$",
+                  "not": {
+                    "anyOf": [
+                      {"pattern": "/\\.{1,2}/"},
+                      {"pattern": "^/(?:[pP][rR][iI][vV][aA][tT][eE]/)?(?:[bB][iI][nN]|[dD][eE][vV]|[eE][tT][cC]|[lL][iI][bB][rR][aA][rR][yY]|[nN][eE][tT]|[nN][eE][tT][wW][oO][rR][kK]|[pP][rR][oO][cC]|[rR][oO][oO][tT]|[rR][uU][nN]|[sS][bB][iI][nN]|[sS][yY][sS]|[sS][yY][sS][tT][eE][mM]|[uU][sS][rR]|[vV][aA][rR]/(?:[dD][bB]|[rR][oO][oO][tT]|[rR][uU][nN]))(?:/|$)"}
+                    ]
+                  }
+                }
+              ]
+            },
+            "dependencies": {"required": ["service"]}
+          },
+          "if": {"properties": {"local_path": {"properties": {"allow_rebuild": {"const": true}}}}},
+          "then": {"not": {"required": ["sha256"]}},
+          "else": {"required": ["sha256"]}
+        }
+      ],
       "additionalProperties": true
     },
     "httpsUri": {
