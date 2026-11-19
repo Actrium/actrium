@@ -56,7 +56,7 @@ test('a read-only package can only bind the declared storage method', async () =
   const checked: string[] = [];
   const authorizeCapability = async (name: string) => { checked.push(name); };
   const implementations = createHostModules({
-    hasServiceCapability: false,
+    hasServiceCapability: false, hasServiceOnCapability: false,
     callActor: async () => ({ success: false }),
     authorizeCapability,
     writeClipboardText: async () => {},
@@ -76,7 +76,7 @@ test('a read-only package can only bind the declared storage method', async () =
 test('storage validates inputs and authorizes each method before calling the backend', async () => {
   const sent: string[] = [];
   const implementations = createHostModules({
-    hasServiceCapability: false,
+    hasServiceCapability: false, hasServiceOnCapability: false,
     callActor: async () => ({ success: false }),
     writeClipboardText: async () => {},
     authorizeCapability: async (name) => {
@@ -101,7 +101,7 @@ test.each([
   ['emoji', '\u{1f332}', 4],
 ] as const)('storage enforces UTF-8 byte limits for %s', async (_, character, bytes) => {
   const methods = createHostModuleDispatch(contract, createHostModules({
-    hasServiceCapability: false,
+    hasServiceCapability: false, hasServiceOnCapability: false,
     callActor: async () => ({ success: false }),
     writeClipboardText: async () => {},
     authorizeCapability: async () => {},
@@ -121,7 +121,7 @@ test.each([
 
 test.each(['\ud800', '\udc00'])('storage rejects unpaired UTF-16 surrogates', (surrogate) => {
   const methods = createHostModuleDispatch(contract, createHostModules({
-    hasServiceCapability: false,
+    hasServiceCapability: false, hasServiceOnCapability: false,
     callActor: async () => ({ success: false }),
     writeClipboardText: async () => {},
     authorizeCapability: async () => {},
@@ -166,7 +166,7 @@ test('the v1 CLI and Guest Engine round-trip all three named storage methods', a
     const report = Promise.withResolvers<string>();
     const authorizeCapability = async () => {};
     const implementations = createHostModules({
-      hasServiceCapability: false,
+      hasServiceCapability: false, hasServiceOnCapability: false,
       callActor: async () => ({ success: false }),
       writeClipboardText: async () => {},
       authorizeCapability,
