@@ -66,6 +66,38 @@ final class RealmAdmissionTests: XCTestCase {
     }
 
     @MainActor
+    func testFixedPackageDigestsSurviveReselectionAndCacheUpgrade() throws {
+        let preferences = try makePreferences()
+        let signer = Curve25519.Signing.PrivateKey()
+        let original = try profile(membership: "open", signer: signer)
+        preferences.set([
+            "documents": [String(decoding: original.0, as: UTF8.self)], "signingKeys": original.1
+        ], forKey: "actr.acceptedRealmProfile.\(realmName)")
+
+        let localKeyId = try XCTUnwrap(packageKey(signer.publicKey.rawRepresentation, status: "active")["id"])
+        let alternate = try profile(
+            membership: "open", sequence: 2, signer: signer,
+            localFrontKeyId: localKeyId, frontName: "echo-alternate"
+        )
+        let current = try accept(alternate, preferences: preferences)
+        let changedOriginal = try profile(membership: "open", sequence: 3, signer: signer, frontDigest: "c")
+        XCTAssertThrowsError(try accept(changedOriginal, preferences: preferences)) { error in
+            guard case CoreError.RealmProfileInvalid(let message) = error else {
+                return XCTFail("Expected a fixed package digest conflict")
+            }
+            XCTAssertTrue(message.contains("fixed digest"))
+        }
+        XCTAssertTrue(RealmProfileStore.isCurrent(current, preferences: preferences))
+
+        let reselected = try profile(membership: "open", sequence: 3, signer: signer)
+        XCTAssertEqual(try accept(reselected, preferences: preferences).info.sequence, 3)
+        let fixedAlternate = try profile(
+            membership: "open", sequence: 4, signer: signer, frontName: "echo-alternate", frontDigest: "d"
+        )
+        XCTAssertEqual(try accept(fixedAlternate, preferences: preferences).info.sequence, 4)
+    }
+
+    @MainActor
     func testRevokedRetirementFallsBackToTheLastTrustedProfile() throws {
         let preferences = try makePreferences()
         let removed = Curve25519.Signing.PrivateKey()
@@ -86,10 +118,15 @@ final class RealmAdmissionTests: XCTestCase {
 
         let firstKeys = try acceptAuthority(initial, preferences: preferences)
         let savedActive = try profile(membership: "open", sequence: 4, signer: remaining, keyId: "remaining")
+        let removedSelection = try profile(
+            membership: "open", sequence: 5, signer: removed, keyId: "removed",
+            frontName: "echo-alternate", frontDigest: "c"
+        )
         let retired = try profile(
             membership: "open", sequence: 90, status: "retired", signer: removed, keyId: "removed"
         )
         _ = try accept((savedActive.0, firstKeys.signingKeysJson), preferences: preferences)
+        _ = try accept((removedSelection.0, firstKeys.signingKeysJson), preferences: preferences)
         XCTAssertThrowsError(try accept((retired.0, firstKeys.signingKeysJson), preferences: preferences)) { error in
             guard case CoreError.RealmRetired = error else { return XCTFail("Expected accepted retirement") }
         }
@@ -105,9 +142,16 @@ final class RealmAdmissionTests: XCTestCase {
         XCTAssertThrowsError(try accept((retired.0, firstKeys.signingKeysJson), preferences: preferences))
         let rollback = try profile(membership: "open", sequence: 3, signer: remaining, keyId: "remaining")
         XCTAssertThrowsError(try accept((rollback.0, current.signingKeysJson), preferences: preferences))
-        let replacement = try profile(membership: "open", sequence: 5, signer: remaining, keyId: "remaining")
+        let replacement = try profile(
+            membership: "open", sequence: 5, signer: remaining, keyId: "remaining",
+            frontName: "echo-alternate", frontDigest: "d"
+        )
         let restored = try accept((replacement.0, current.signingKeysJson), preferences: preferences)
         XCTAssertEqual(restored.info.sequence, 5)
+        let changedTrusted = try profile(
+            membership: "open", sequence: 6, signer: remaining, keyId: "remaining", frontDigest: "e"
+        )
+        XCTAssertThrowsError(try accept((changedTrusted.0, current.signingKeysJson), preferences: preferences))
 
         // Upgrade from the previous one-document cache, which held only the revoked retirement.
         let legacy = try makePreferences()
@@ -492,10 +536,19 @@ final class RealmAdmissionTests: XCTestCase {
             window.tabs[0].appId = "echo-front"
             window.tabs[0].guestScript = "active guest"
         }
+        let tabId = try XCTUnwrap(windows[0].currentTabId)
+        let coordinatorManager = ViewBridgeCoordinatorManager.shared
+        let coordinator = coordinatorManager.coordinator(for: tabId)
+        defer { coordinatorManager.removeCoordinator(for: tabId) }
+        let pool = RendererProcessPool.shared
+        let renderer = try pool.allocateRenderer(for: tabId, fingerprint: "system.realm-admission")
+        coordinator.tabId = tabId
+        coordinator.allocatedServiceId = renderer
 
         let stale = try profile(membership: "open", status: "retired", signer: signer)
         XCTAssertThrowsError(try accept(stale, preferences: preferences))
         XCTAssertTrue(windows.allSatisfy { $0.currentTab?.guestScript == "active guest" })
+        XCTAssertEqual(pool.rendererIdentifier(for: tabId), renderer)
 
         let retired = try profile(membership: "open", sequence: 3, status: "retired", signer: signer)
         XCTAssertThrowsError(try accept(retired, preferences: preferences)) { error in
@@ -505,6 +558,10 @@ final class RealmAdmissionTests: XCTestCase {
             XCTAssertEqual(name, self.realmName)
         }
         XCTAssertTrue(windows.allSatisfy { $0.currentTab?.appId == nil && $0.currentTab?.guestScript == nil })
+        XCTAssertEqual(windows[0].currentTabId, tabId)
+        XCTAssertNil(pool.rendererIdentifier(for: tabId))
+        XCTAssertNil(coordinator.allocatedServiceId)
+        XCTAssertFalse(coordinatorManager.coordinator(for: tabId) === coordinator)
         let reopened = try profile(membership: "open", sequence: 4, signer: signer)
         XCTAssertThrowsError(try accept(reopened, preferences: preferences))
     }
@@ -676,14 +733,15 @@ final class RealmAdmissionTests: XCTestCase {
     private func profile(
         membership: String, sequence: Int = 1, status: String = "active",
         signer: Curve25519.Signing.PrivateKey = Curve25519.Signing.PrivateKey(),
-        keyId: String = "realm-key", realm: String? = nil, localFrontKeyId: String? = nil
+        keyId: String = "realm-key", realm: String? = nil, localFrontKeyId: String? = nil,
+        frontName: String = "echo-front", frontDigest: String = "b"
     ) throws -> (Data, String) {
         let publicKey = signer.publicKey.rawRepresentation.base64EncodedString()
         let keys = try sign([
             "sequence": 1,
             "keys": [["id": keyId, "algorithm": "Ed25519", "public_key": publicKey, "status": "active"]]
         ], with: signer, keyId: keyId)
-        var front: [String: Any] = archive("echo-front", digest: "b")
+        var front: [String: Any] = archive(frontName, digest: frontDigest)
         if let localFrontKeyId {
             front["href"] = "front.actr"
             front["sha256"] = nil

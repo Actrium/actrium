@@ -331,6 +331,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         WebViewHolderManager.shared.remove(tabId: id)
         ViewBridgeHostViewManager.shared.remove(tabId: id)
         RealmServiceBindings.shared.remove(id)
+        RendererLifecycleManager.shared.tabDidClose(id)
         CapabilityPermissionStore.shared.clearSessionGrants(tabId: id)
     }
 
@@ -375,9 +376,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
         // Remove the location map of this tab
         tabSlotPositions.removeValue(forKey: id)
-
-        // Disable the window of the life cycle when you close the tab
-        RendererLifecycleManager.shared.tabDidClose(id)
 
         // Reorganization position: reduce all positions larger than the deleted position1
         for tabId in tabs.map({ $0.id }) {
@@ -526,7 +524,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
         tabs.remove(at: index)
         tabSlotPositions.removeValue(forKey: tabId)
-        RendererLifecycleManager.shared.tabDidClose(tabId)
 
         // Update current tab if needed
         if currentTabId == tabId {
@@ -1567,7 +1564,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         for index in affected {
             let tabId = tabs[index].id
             releaseTabRuntime(tabId, preserveRealmLoad: preserveRealmLoad)
-            RendererLifecycleManager.shared.tabDidClose(tabId)
             Self.clearRealmContent(&tabs[index])
         }
         objectWillChange.send()
@@ -2041,7 +2037,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let position = tabSlotPositions.removeValue(forKey: tabId) ?? index
         releaseTabRuntime(tabId)
         leftPanelVisibility[tabId] = nil
-        RendererLifecycleManager.shared.tabDidClose(tabId)
         RealmServiceBindings.shared.attach(binding, to: tab.id)
         localFrontApprovals[tab.id] = LocalFrontApproval(scope: scope, file: file)
         tabSlotPositions[tab.id] = position

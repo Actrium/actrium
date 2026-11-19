@@ -13,6 +13,29 @@ enum RealmProfileStore {
         let signingKeyId: String
     }
 
+    // Index the pinned digests by signer and exact Actor type so a revoked key
+    // cannot keep a digest pinned after all evidence from that key is dropped.
+    private typealias PackageDigestPins = [String: [String: String]]
+
+    private struct SignedPackages: Decodable {
+        struct Signature: Decodable {
+            let keyId: String
+        }
+
+        struct Package: Decodable {
+            struct LocalPath: Decodable {
+                let allowRebuild: Bool
+            }
+
+            let type: String
+            let sha256: String?
+            let localPath: LocalPath?
+        }
+
+        let signature: Signature
+        let packages: [String: Package]?
+    }
+
     static func acceptAuthority(
         body: String, domain: String, realmName: String, preferences: UserDefaults
     ) throws -> AuthorityDiscoveryInfo {
@@ -44,14 +67,16 @@ enum RealmProfileStore {
         body: String, realmName: String, signingKeysJSON: String, preferences: UserDefaults
     ) throws -> AcceptedRealm {
         let key = realmKey(realmName)
-        let documents = try preferences.dictionary(forKey: key).map(cachedDocuments) ?? []
+        let cached = preferences.dictionary(forKey: key)
+        let documents = try cached.map(cachedDocuments) ?? []
         // Authority discovery can advance in another Tab while this Profile is being fetched.
         let authority = authorityState(realmName, preferences: preferences)
         let currentKeys = authority?["signingKeys"] as? String ?? signingKeysJSON
         let acceptance = try ActriumCore.acceptRealmProfileSuccessor(
             body: body, realmName: realmName, signingKeysJson: currentKeys, previousDocuments: documents
         )
-        save(acceptance, signingKeysJSON: currentKeys, key: key, fallback: false, preferences: preferences)
+        let pins = try packageDigestPins(cached: cached, documents: documents, acceptance: acceptance)
+        save(acceptance, signingKeysJSON: currentKeys, pins: pins, key: key, fallback: false, preferences: preferences)
 
         guard let active = acceptance.profile else {
             NotificationCenter.default.post(name: didRetire, object: preferences, userInfo: ["realm": realmName])
@@ -65,10 +90,13 @@ enum RealmProfileStore {
     ) throws -> (body: Data, accepted: AcceptedRealm)? {
         guard let saved = preferences.dictionary(forKey: realmKey(realmName)),
               saved["authorityFallback"] as? Bool == true,
-              let keys = authorityState(realmName, preferences: preferences)?["signingKeys"] as? String,
-              let recovered = try ActriumCore.recoverRealmProfileBaseline(
-                  realmName: realmName, signingKeysJson: keys, previousDocuments: cachedDocuments(saved)
-              ) else { return nil }
+              let keys = authorityState(realmName, preferences: preferences)?["signingKeys"] as? String
+        else { return nil }
+        let documents = try cachedDocuments(saved)
+        guard let recovered = try ActriumCore.recoverRealmProfileBaseline(
+            realmName: realmName, signingKeysJson: keys, previousDocuments: documents
+        ) else { return nil }
+        _ = try packageDigestPins(cached: saved, documents: documents, acceptance: recovered)
         guard let active = recovered.profile else { throw CoreError.RealmRetired(message: realmName) }
         return (Data(recovered.body.utf8), AcceptedRealm(info: active, signingKeyId: recovered.signingKeyId))
     }
@@ -92,20 +120,70 @@ enum RealmProfileStore {
                 // A window can still be running an older accepted Profile.
                 let signerRemoved = recovered.baselineDocuments.count < documents.count
                 let fallback = signerRemoved || saved["authorityFallback"] as? Bool == true
-                save(recovered, signingKeysJSON: keys, key: key, fallback: fallback, preferences: preferences)
+                let pins = try packageDigestPins(cached: saved, documents: documents, acceptance: recovered)
+                save(recovered, signingKeysJSON: keys, pins: pins, key: key, fallback: fallback, preferences: preferences)
             } catch {
                 AppLogger.viewModel.warning("Could not reconcile the cached Realm Profile for \(realmName)")
             }
         }
     }
 
+    /// Only read package selections from Profiles already verified by the core.
+    private static func packageDigestPins(
+        cached: [String: Any]?, documents: [String], acceptance: RealmProfileAcceptance
+    ) throws -> PackageDigestPins {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        func decode(_ document: String) throws -> SignedPackages {
+            try decoder.decode(SignedPackages.self, from: Data(document.utf8))
+        }
+
+        let trustedSigners = Set(try acceptance.baselineDocuments.map { try decode($0).signature.keyId })
+        var pins: PackageDigestPins = [:]
+        if let stored = cached?["packageDigestPins"] {
+            guard let stored = stored as? PackageDigestPins else {
+                throw CoreError.RealmProfileInvalid(message: "The cached Realm package digests could not be read.")
+            }
+            pins = stored.filter { trustedSigners.contains($0.key) }
+        } else {
+            // Older installations only kept the accepted documents. Seed their
+            // pins before the next acceptance replaces a signer's last document.
+            for document in documents {
+                let profile = try decode(document)
+                if trustedSigners.contains(profile.signature.keyId) {
+                    try pinFixedDigests(from: profile, into: &pins)
+                }
+            }
+        }
+        try pinFixedDigests(from: decode(acceptance.body), into: &pins)
+        return pins
+    }
+
+    private static func pinFixedDigests(
+        from profile: SignedPackages, into pins: inout PackageDigestPins
+    ) throws {
+        guard let packages = profile.packages else { return }
+        for package in packages.values {
+            guard package.localPath?.allowRebuild != true, let digest = package.sha256 else { continue }
+            for previous in pins.values {
+                if let pinned = previous[package.type], pinned != digest {
+                    throw CoreError.RealmProfileInvalid(
+                        message: "The fixed digest for \(package.type) changed."
+                    )
+                }
+            }
+            pins[profile.signature.keyId, default: [:]][package.type] = digest
+        }
+    }
+
     private static func save(
-        _ acceptance: RealmProfileAcceptance, signingKeysJSON: String, key: String,
+        _ acceptance: RealmProfileAcceptance, signingKeysJSON: String, pins: PackageDigestPins, key: String,
         fallback: Bool, preferences: UserDefaults
     ) {
         var saved: [String: Any] = [
             "documents": acceptance.baselineDocuments,
             "signingKeys": signingKeysJSON,
+            "packageDigestPins": pins,
             "authorityFallback": fallback
         ]
         if let profile = acceptance.profile {
