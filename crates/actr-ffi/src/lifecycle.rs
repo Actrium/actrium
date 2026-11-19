@@ -465,6 +465,11 @@ impl From<actrium_runtime::LifecycleError> for ActrError {
             actrium_runtime::LifecycleError::ConcurrentCreation(key) => ActrError::Unavailable {
                 msg: format!("concurrent creation: {key}"),
             },
+            actrium_runtime::LifecycleError::ConcurrentLifecycleOperation => {
+                ActrError::Unavailable {
+                    msg: "another lifecycle operation or recovery is active".into(),
+                }
+            }
             actrium_runtime::LifecycleError::ConcurrentRecovery => ActrError::Unavailable {
                 msg: "cannot recover while another lifecycle operation is active".into(),
             },

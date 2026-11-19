@@ -5,10 +5,11 @@
 //! private key or provider credential is written to these files.
 
 use std::{
+    collections::HashMap,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -53,6 +54,8 @@ pub enum LifecycleError {
     ConcurrentStart(String),
     #[error("another lifecycle manager is already creating idempotency key {0}")]
     ConcurrentCreation(String),
+    #[error("another lifecycle operation or recovery is active")]
+    ConcurrentLifecycleOperation,
     #[error("cannot recover while another lifecycle operation or recovery is active")]
     ConcurrentRecovery,
     #[error("Service {actor_id} cannot Attach while lifecycle is {state:?}")]
@@ -411,6 +414,9 @@ struct Inner {
     root: PathBuf,
     sessions: Option<InMemorySessionService>,
     locks: [Arc<AsyncMutex<()>>; OPERATION_LOCK_STRIPES],
+    // One shared OS lock per live instance, retained across API calls. The
+    // files close automatically if this host process crashes.
+    active_guards: Mutex<HashMap<String, File>>,
 }
 
 /// Local durable lifecycle manager. Clones share operation locks and the
@@ -443,6 +449,7 @@ impl LifecycleService {
                 root,
                 sessions,
                 locks: std::array::from_fn(|_| Arc::new(AsyncMutex::new(()))),
+                active_guards: Mutex::new(HashMap::new()),
             }),
         })
     }
@@ -500,21 +507,40 @@ impl LifecycleService {
 
     fn lock_operation(&self) -> Result<File, LifecycleError> {
         let file = self.lifecycle_lock_file()?;
-        // The OS releases this shared lock if the owning process crashes.
-        // Keeping the File alive guards the complete durable operation.
-        file.lock_shared()?;
-        Ok(file)
+        // Never block an async executor behind recovery, which may itself be
+        // awaiting session invalidation. Callers can retry this busy result.
+        match file.try_lock_shared() {
+            Ok(()) => Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                Err(LifecycleError::ConcurrentLifecycleOperation)
+            }
+            Err(std::fs::TryLockError::Error(error)) => Err(error.into()),
+        }
     }
 
     fn lock_recovery(&self) -> Result<File, LifecycleError> {
         let file = self.lifecycle_lock_file()?;
         match file.try_lock() {
             Ok(()) => Ok(file),
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                Err(LifecycleError::ConcurrentRecovery)
-            }
-            Err(error) => Err(error.into()),
+            Err(std::fs::TryLockError::WouldBlock) => Err(LifecycleError::ConcurrentRecovery),
+            Err(std::fs::TryLockError::Error(error)) => Err(error.into()),
         }
+    }
+
+    fn retain_active_guard(&self, actor_id: &str, guard: File) {
+        self.inner
+            .active_guards
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(actor_id.into(), guard);
+    }
+
+    fn release_active_guard(&self, actor_id: &str) {
+        self.inner
+            .active_guards
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(actor_id);
     }
 
     pub fn creation_intent(
@@ -770,7 +796,7 @@ impl LifecycleService {
     {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
-        let _lifecycle_guard = self.lock_operation()?;
+        let lifecycle_guard = self.lock_operation()?;
         let _start_lock = self.acquire_start_lock(actor_id)?;
         let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Starting)?;
@@ -792,6 +818,7 @@ impl LifecycleService {
         instance.attachment = AttachmentState::Idle;
         instance.last_opened_at_epoch_secs = Some(now_epoch_secs());
         self.persist_transition(&mut instance, LifecycleState::Running)?;
+        self.retain_active_guard(actor_id, lifecycle_guard);
         Ok(instance)
     }
 
@@ -806,6 +833,7 @@ impl LifecycleService {
         let runtime_instance_id = self.invalidate_and_rotate().await?;
         instance.runtime_instance_id = runtime_instance_id;
         self.persist_transition(&mut instance, LifecycleState::Stopped)?;
+        self.release_active_guard(actor_id);
         Ok(instance)
     }
 
@@ -816,7 +844,7 @@ impl LifecycleService {
     pub async fn restart(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
-        let _lifecycle_guard = self.lock_operation()?;
+        let lifecycle_guard = self.lock_operation()?;
         let _start_lock = self.acquire_start_lock(actor_id)?;
         let mut instance = self.instance(actor_id)?;
         if !matches!(
@@ -841,6 +869,7 @@ impl LifecycleService {
         instance.health = Health::Unknown;
         instance.attachment = AttachmentState::Idle;
         self.persist_transition(&mut instance, LifecycleState::Starting)?;
+        self.retain_active_guard(actor_id, lifecycle_guard);
         Ok(instance)
     }
 
@@ -853,7 +882,7 @@ impl LifecycleService {
     ) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
-        let _lifecycle_guard = self.lock_operation()?;
+        let lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
         // Only a pending start can commit Running. In particular, do not let a
         // stale completion revive a suspended instance through the ordinary
@@ -871,32 +900,35 @@ impl LifecycleService {
         instance.attachment = AttachmentState::Idle;
         instance.last_opened_at_epoch_secs = Some(now_epoch_secs());
         self.persist_transition(&mut instance, LifecycleState::Running)?;
+        self.retain_active_guard(actor_id, lifecycle_guard);
         Ok(instance)
     }
 
     pub async fn suspend(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
-        let _lifecycle_guard = self.lock_operation()?;
+        let lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Suspended)?;
         instance.desired_state = DesiredState::Running;
         instance.reachability = Reachability::Offline;
         instance.health = Health::Unknown;
         self.persist_transition(&mut instance, LifecycleState::Suspended)?;
+        self.retain_active_guard(actor_id, lifecycle_guard);
         Ok(instance)
     }
 
     pub async fn resume(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
-        let _lifecycle_guard = self.lock_operation()?;
+        let lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Running)?;
         instance.desired_state = DesiredState::Running;
         instance.reachability = Reachability::Online;
         instance.health = Health::Healthy;
         self.persist_transition(&mut instance, LifecycleState::Running)?;
+        self.retain_active_guard(actor_id, lifecycle_guard);
         Ok(instance)
     }
 
@@ -908,6 +940,7 @@ impl LifecycleService {
         ensure_transition(&instance, LifecycleState::Archived)?;
         self.mark_offline(&mut instance, DesiredState::Archived);
         self.persist_transition(&mut instance, LifecycleState::Archived)?;
+        self.release_active_guard(actor_id);
         Ok(instance)
     }
 
@@ -920,6 +953,7 @@ impl LifecycleService {
         self.mark_offline(&mut instance, DesiredState::Stopped);
         instance.runtime_instance_id = self.invalidate_and_rotate().await?;
         self.persist_transition(&mut instance, LifecycleState::Trashed)?;
+        self.release_active_guard(actor_id);
         Ok(instance)
     }
 
@@ -932,6 +966,7 @@ impl LifecycleService {
         ensure_transition(&instance, LifecycleState::Stopped)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
         self.persist_transition(&mut instance, LifecycleState::Stopped)?;
+        self.release_active_guard(actor_id);
         Ok(instance)
     }
 
@@ -951,6 +986,7 @@ impl LifecycleService {
         instance.placement = placement;
         instance.runtime_location = placement.location().into();
         self.persist_transition(&mut instance, LifecycleState::Stopped)?;
+        self.release_active_guard(actor_id);
         Ok(instance)
     }
 
@@ -965,7 +1001,11 @@ impl LifecycleService {
         self.persist_transition(&mut instance, LifecycleState::Deleting)?;
         instance.runtime_instance_id = self.invalidate_and_rotate().await?;
         self.persist(&mut instance)?;
-        self.finish_purge(instance).await
+        let result = self.finish_purge(instance).await;
+        if result.is_ok() {
+            self.release_active_guard(actor_id);
+        }
+        result
     }
 
     /// Upgrades are migrations: the replacement gets a new ActorId while the
@@ -1356,6 +1396,20 @@ fn remove_tree_if_exists(path: &Path) -> Result<(), std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn operation_lock_contention_returns_busy_on_the_current_executor() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let service = LifecycleService::open(temp.path()).unwrap();
+        let _recovery = service.lock_recovery().unwrap();
+
+        // This runs on the current-thread runtime. A blocking shared-lock
+        // acquisition would deadlock instead of returning this retryable error.
+        assert!(matches!(
+            service.stop("not-created").await.unwrap_err(),
+            LifecycleError::ConcurrentLifecycleOperation
+        ));
+    }
 
     #[test]
     fn operation_lock_stripes_stay_bounded_and_preserve_key_identity() {

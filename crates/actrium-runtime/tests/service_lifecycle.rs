@@ -567,6 +567,63 @@ async fn lifecycle_start_lock_excludes_a_second_manager_on_the_same_directory() 
 }
 
 #[tokio::test]
+async fn lifecycle_recovery_defers_to_live_and_restarting_services() {
+    let temp = TempDir::new().unwrap();
+    let first_manager = LifecycleService::open(temp.path()).unwrap();
+    let second_manager = LifecycleService::open(temp.path()).unwrap();
+    let created = create(&first_manager, "live-service-recovery").await;
+    let actor_id = created.actor_id;
+    let running = first_manager.start(&actor_id).await.unwrap();
+
+    assert!(matches!(
+        second_manager.recover().await.unwrap_err(),
+        LifecycleError::ConcurrentRecovery
+    ));
+    assert_eq!(
+        first_manager.instance(&actor_id).unwrap().lifecycle_state,
+        LifecycleState::Running
+    );
+    assert_eq!(
+        first_manager
+            .instance(&actor_id)
+            .unwrap()
+            .runtime_instance_id,
+        running.runtime_instance_id
+    );
+
+    let pending = first_manager.restart(&actor_id).await.unwrap();
+    assert_eq!(pending.lifecycle_state, LifecycleState::Starting);
+    assert!(matches!(
+        second_manager.recover().await.unwrap_err(),
+        LifecycleError::ConcurrentRecovery
+    ));
+    assert_eq!(
+        first_manager.instance(&actor_id).unwrap().lifecycle_state,
+        LifecycleState::Starting
+    );
+
+    first_manager
+        .mark_running(&actor_id, &pending.runtime_instance_id)
+        .await
+        .unwrap();
+    assert!(matches!(
+        second_manager.recover().await.unwrap_err(),
+        LifecycleError::ConcurrentRecovery
+    ));
+    assert_eq!(
+        first_manager.instance(&actor_id).unwrap().lifecycle_state,
+        LifecycleState::Running
+    );
+
+    first_manager.stop(&actor_id).await.unwrap();
+    second_manager.recover().await.unwrap();
+    assert_eq!(
+        second_manager.instance(&actor_id).unwrap().lifecycle_state,
+        LifecycleState::Stopped
+    );
+}
+
+#[tokio::test]
 async fn lifecycle_trash_retains_private_state_and_restore_reuses_identity() {
     let temp = TempDir::new().unwrap();
     let service = LifecycleService::open(temp.path()).unwrap();
