@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ActriumCore
 import Actr
 import ActrBindings
@@ -66,6 +67,19 @@ final class PendingRealmInvites {
 enum RealmJoinService {
     typealias InviteExchange = @MainActor (RealmProfileInfo, String, String, Bool) async throws -> String
 
+    enum Invite {
+        case explicit(String)
+        case sharedLink(String)
+
+        var code: String {
+            switch self {
+            case .explicit(let code), .sharedLink(let code): return code
+            }
+        }
+    }
+
+    typealias InviteAdmission = (profile: VerifiedProfile, result: RealmJoinResult?)
+
     struct VerifiedProfile {
         let body: Data
         let accepted: RealmProfileStore.AcceptedRealm
@@ -98,11 +112,11 @@ enum RealmJoinService {
         let policy: Policy
     }
 
-    static func joinOpen(_ profile: VerifiedProfile, label: String) async throws {
+    static func joinOpen(_ profile: VerifiedProfile, label: String, preferences: UserDefaults = .standard) async throws {
         guard profile.isOpen else {
             throw joinError("This Realm requires an invite.")
         }
-        _ = try await join(profile.info, inviteText: "", label: label, allowInsecureDevelopment: false)
+        _ = try await join(profile.info, inviteText: "", label: label, allowInsecureDevelopment: false, preferences: preferences)
     }
 
     static func resolveProfile(
@@ -111,11 +125,13 @@ enum RealmJoinService {
         signingKeysJSON: String,
         preferences: UserDefaults,
         fetch: @MainActor (URL) async throws -> Data,
-        checkCurrent: @MainActor () throws -> Void
+        checkCurrent: @MainActor () throws -> Void,
+        validateProfile: @MainActor (Data) throws -> Void = { _ in }
     ) async throws -> VerifiedProfile {
         do {
             let body = try await fetch(url)
             try checkCurrent()
+            try validateProfile(body)
             return try VerifiedProfile(
                 body: body, realmName: realmName, signingKeysJSON: signingKeysJSON, preferences: preferences
             )
@@ -127,6 +143,7 @@ enum RealmJoinService {
             guard let fallback = try RealmProfileStore.fallbackRealm(
                 realmName, preferences: preferences
             ) else { throw error }
+            try validateProfile(fallback.body)
             AppLogger.viewModel.warning("Using the last trusted Realm Profile for \(realmName) after signing key revocation.")
             return try VerifiedProfile(body: fallback.body, accepted: fallback.accepted)
         }
@@ -150,8 +167,7 @@ enum RealmJoinService {
         preferences: UserDefaults = .standard,
         fetchDocument: (@MainActor (URL) async throws -> Data)? = nil,
         exchange: InviteExchange? = nil,
-        checkCurrent: @MainActor () throws -> Void = { try Task.checkCancellation() },
-        beforeExchange: @MainActor () -> Void = {}
+        checkCurrent: @MainActor () throws -> Void = { try Task.checkCancellation() }
     ) async throws -> RealmJoinResult {
         try checkCurrent()
         let fetch = fetchDocument ?? Self.fetchBoundedDocument
@@ -198,45 +214,125 @@ enum RealmJoinService {
             preferences: preferences, fetch: fetch, checkCurrent: checkCurrent
         )
         return try await redeemVerifiedInvite(
-            resolved, inviteText: inviteText, label: label,
-            allowInsecureDevelopment: allowInsecureDevelopment, preferences: preferences,
-            exchange: exchange, checkCurrent: checkCurrent, beforeExchange: beforeExchange
+            resolved, code: inviteText, label: label, allowInsecureDevelopment: allowInsecureDevelopment,
+            preferences: preferences, exchange: exchange, checkCurrent: checkCurrent
         )
     }
 
-    /// Uses the current verified Profile for the invite's Realm.
-    static func redeemVerifiedInvite(
-        _ admission: VerifiedProfile,
-        inviteText: String,
-        label: String,
-        allowInsecureDevelopment: Bool = false,
-        preferences: UserDefaults,
-        exchange: InviteExchange?,
+    static func address(forInvite code: String) throws -> String {
+        let realm = try inviteRealm(code)
+        let parts = realm.split(separator: "@", maxSplits: 1)
+        guard parts.count == 2 else { throw joinError("The invite names a malformed Realm.") }
+        return "actr://\(parts[1])/\(parts[0])"
+    }
+
+    static func joinWithInvite(
+        _ admission: VerifiedProfile, invite: Invite, label: String, preferences: UserDefaults,
+        exchange: InviteExchange?, checkMembership: @MainActor (VerifiedProfile) async throws -> Bool,
         checkCurrent: @MainActor () throws -> Void,
+        validateProfile: @MainActor (VerifiedProfile) throws -> Void,
         beforeExchange: @MainActor () -> Void
+    ) async throws -> InviteAdmission {
+        guard try inviteRealm(invite.code) == admission.info.realmName else {
+            throw joinError("This invite belongs to another Realm.")
+        }
+
+        var current = admission
+        while case .sharedLink = invite {
+            try checkCurrent()
+            current = try currentProfile(current, preferences: preferences)
+            let alreadyMember = try await checkMembership(current)
+            try checkCurrent()
+            guard RealmProfileStore.isCurrent(current.accepted, preferences: preferences) else { continue }
+            if alreadyMember {
+                try validateProfile(current)
+                return (current, nil)
+            }
+            break
+        }
+        let result = try await redeemVerifiedInvite(
+            current, code: invite.code, label: label, preferences: preferences, exchange: exchange,
+            checkCurrent: checkCurrent, validateProfile: validateProfile, beforeExchange: beforeExchange
+        )
+        return (result.admission, result)
+    }
+
+    private static func currentProfile(_ profile: VerifiedProfile, preferences: UserDefaults) throws -> VerifiedProfile {
+        if RealmProfileStore.isCurrent(profile.accepted, preferences: preferences) { return profile }
+        guard let updated = try RealmProfileStore.currentRealm(profile.info.realmName, preferences: preferences) else {
+            throw joinError("The verified Realm Profile changed before redemption.")
+        }
+        return try VerifiedProfile(body: updated.body, accepted: updated.accepted)
+    }
+
+    private static func redeemVerifiedInvite(
+        _ admission: VerifiedProfile, code: String, label: String, allowInsecureDevelopment: Bool = false,
+        preferences: UserDefaults, exchange: InviteExchange?, checkCurrent: @MainActor () throws -> Void,
+        validateProfile: @MainActor (VerifiedProfile) throws -> Void = { _ in },
+        beforeExchange: @MainActor () -> Void = {}
     ) async throws -> RealmJoinResult {
         try checkCurrent()
-        var current = admission
-        // Another tab can accept a newer Profile while this invite is queued.
-        // Refresh in the same exchange so its admission reservation stays held.
-        if !RealmProfileStore.isCurrent(current.accepted, preferences: preferences),
-           let updated = try RealmProfileStore.currentRealm(current.info.realmName, preferences: preferences) {
-            current = try VerifiedProfile(body: updated.body, accepted: updated.accepted)
-        }
+        // Refresh under the same admission reservation before sending the code.
+        let current = try currentProfile(admission, preferences: preferences)
+        try validateProfile(current)
         guard RealmProfileStore.isCurrent(current.accepted, preferences: preferences) else {
             throw joinError("The verified Realm Profile changed before redemption.")
         }
-        let profile = current.info
-        let parts = profile.realmName.split(separator: "@", maxSplits: 1)
-        guard parts.count == 2, let instanceURL = URL(string: "actr://\(parts[1])/\(parts[0])") else {
-            throw joinError("The instance address could not be built.")
-        }
-
-        // Keep a confirmed result even if the tab closes while the Issuer responds.
-        let redeem = exchange ?? Self.join(_:inviteText:label:allowInsecureDevelopment:)
+        let address = try address(forInvite: code)
         beforeExchange()
-        let memberJSON = try await redeem(profile, inviteText, label, allowInsecureDevelopment)
+        let json = try await exchangeInvite(
+            current.info, code: code, label: label, allowInsecureDevelopment: allowInsecureDevelopment,
+            preferences: preferences, exchange: exchange
+        )
+        // The device keeps confirmed membership even if the tab has closed.
+        return try joinResult(json, admission: current, address: address)
+    }
 
+    static func hasConfirmedMembership(_ profile: VerifiedProfile, preferences: UserDefaults) async throws -> Bool {
+        let membership = try membershipClient(for: profile.info, allowInsecureDevelopment: false)
+        let keyId = membership.keyId()
+        let confirmation = confirmationKey(for: profile.info, keyId: keyId)
+        if preferences.bool(forKey: confirmation) { return true }
+        let json: String
+        do {
+            json = try await membership.members()
+        } catch ActrBindings.RealmMembershipError.Rejected(let status, let code)
+            where status == 403 && code == "client_unknown" {
+            return false
+        }
+        guard let reply = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+              reply["realm"] as? String == profile.info.realmName,
+              let members = reply["members"] as? [[String: Any]],
+              members.contains(where: { member in
+                  guard member["status"] as? String == "active",
+                        let clients = member["clients"] as? [[String: Any]] else { return false }
+                  return clients.contains { $0["key_id"] as? String == keyId && $0["revoked_at"] is NSNull }
+              }) else {
+            throw joinError("The Issuer did not confirm membership for this device.")
+        }
+        preferences.set(true, forKey: confirmation)
+        return true
+    }
+
+    private static func inviteRealm(_ code: String) throws -> String {
+        guard let invite = try? ActriumCore.decodeActrInvite(inviteText: code) else {
+            throw joinError("The Realm invite code is invalid.")
+        }
+        return invite.realmName
+    }
+
+    private static func exchangeInvite(
+        _ profile: RealmProfileInfo, code: String, label: String, allowInsecureDevelopment: Bool,
+        preferences: UserDefaults, exchange: InviteExchange?
+    ) async throws -> String {
+        if let exchange { return try await exchange(profile, code, label, allowInsecureDevelopment) }
+        return try await join(
+            profile, inviteText: code, label: label,
+            allowInsecureDevelopment: allowInsecureDevelopment, preferences: preferences
+        )
+    }
+
+    private static func joinResult(_ memberJSON: String, admission: VerifiedProfile, address: String) throws -> RealmJoinResult {
         guard let member = try JSONSerialization.jsonObject(with: Data(memberJSON.utf8))
                 as? [String: Any],
             let memberId = member["member_id"] as? String,
@@ -244,8 +340,11 @@ enum RealmJoinService {
             let keyId = member["key_id"] as? String else {
             throw joinError("The join response could not be read.")
         }
+        guard let instanceURL = URL(string: address) else {
+            throw joinError("The instance address could not be built.")
+        }
         return RealmJoinResult(
-            admission: current,
+            admission: admission,
             memberId: memberId,
             role: role,
             keyId: keyId,
@@ -259,15 +358,36 @@ enum RealmJoinService {
         _ profile: RealmProfileInfo,
         inviteText: String,
         label: String,
-        allowInsecureDevelopment: Bool
+        allowInsecureDevelopment: Bool,
+        preferences: UserDefaults
     ) async throws -> String {
-        let membership = try RealmIdentityStore().membership(
+        let membership = try membershipClient(for: profile, allowInsecureDevelopment: allowInsecureDevelopment)
+        let keyId = membership.keyId()
+        let json = try await membership.join(invite: inviteText, label: label)
+        guard let member = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+              member["realm"] as? String == profile.realmName, member["key_id"] as? String == keyId else {
+            throw joinError("The join response could not be read.")
+        }
+        // This confirmation belongs to the signer even if the navigation was cancelled.
+        preferences.set(true, forKey: confirmationKey(for: profile, keyId: keyId))
+        return json
+    }
+
+    private static func membershipClient(
+        for profile: RealmProfileInfo, allowInsecureDevelopment: Bool
+    ) throws -> ActrBindings.RealmMembership {
+        try RealmIdentityStore().membership(
             realm: profile.realmName,
             providerId: profile.providerId,
             issuer: profile.issuerUrl,
             allowInsecureDevelopment: allowInsecureDevelopment
         )
-        return try await membership.join(invite: inviteText, label: label)
+    }
+
+    private static func confirmationKey(for profile: RealmProfileInfo, keyId: String) -> String {
+        let scope = [profile.realmName, profile.providerId, profile.issuerUrl, keyId].joined(separator: "\u{0}")
+        let digest = SHA256.hash(data: Data(scope.utf8)).map { String(format: "%02x", $0) }.joined()
+        return "actr.realmMembership.\(digest)"
     }
 
     private static func joinError(_ message: String) -> NSError {

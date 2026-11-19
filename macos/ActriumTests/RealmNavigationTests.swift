@@ -11,16 +11,24 @@ final class RealmNavigationTests: XCTestCase {
     private let realmName = "echo@realm.example"
     private let realmURI = "actr://realm.example/echo"
 
+    private let realmTrustDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+
+    deinit {
+        try? FileManager.default.removeItem(at: realmTrustDirectory)
+    }
+
     @MainActor
     func testBackgroundInviteSurvivesThePreviousWebPageChangingURL() async throws {
         let documents = try discoveryDocuments(membership: "invite-only")
         let profile = NavigationGate()
         let view = BrowserViewModel(
             realmPreferences: try makePreferences(),
+            realmTrustDirectory: realmTrustDirectory,
             fetchRealmDocument: { url, _ in
                 if url.path == "/realm/echo" { await profile.wait() }
                 return try XCTUnwrap(documents[url.absoluteString])
             },
+            confirmRealmMembership: { _ in false },
             saveBrowserSession: { _, _ in }
         )
         defer { profile.release() }
@@ -96,10 +104,12 @@ final class RealmNavigationTests: XCTestCase {
         defer { profile.release() }
         let view = BrowserViewModel(
             realmPreferences: try makePreferences(),
+            realmTrustDirectory: realmTrustDirectory,
             fetchRealmDocument: { url, _ in
                 if url.path == "/realm/echo" { await profile.wait() }
                 return try XCTUnwrap(documents[url.absoluteString])
             },
+            confirmRealmMembership: { _ in false },
             saveBrowserSession: { _, _ in }
         )
         view.navigateCurrentTab(to: "https://old.example/")
@@ -145,6 +155,7 @@ final class RealmNavigationTests: XCTestCase {
         unexpectedDiscovery.isInverted = true
         let view = BrowserViewModel(
             realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
             fetchRealmDocument: { url, _ in
                 if join.waiting { unexpectedDiscovery.fulfill() }
                 return try XCTUnwrap(documents[url.absoluteString])
@@ -155,6 +166,7 @@ final class RealmNavigationTests: XCTestCase {
                 await join.wait()
                 return #"{"member_id":"member","role":"viewer","key_id":"key"}"#
             },
+            confirmRealmMembership: { _ in false },
             saveBrowserSession: { _, _ in }
         )
         view.navigateCurrentTab(to: realmURI)
@@ -201,11 +213,9 @@ final class RealmNavigationTests: XCTestCase {
         let instanceURL = try XCTUnwrap(URL(string: realmURI))
         let linkURL = try invite.map { try linkCarryingInvite($0, to: instanceURL) } ?? instanceURL
         var documents = try discoveryDocuments(membership: membership, frontDigest: frontDigest)
-        documents["https://publisher.example/.well-known/actr"] = try JSONSerialization.data(withJSONObject: [
-            "publisher": ["keys": [[
-                "id": fixture.keyId, "public_key": fixture.publicKey.base64EncodedString(), "status": "active"
-            ]]]
-        ])
+        documents["https://publisher.example/.well-known/actr"] = try publisherDescriptor(
+            keyId: fixture.keyId, publicKey: fixture.publicKey
+        )
         let profile = NavigationGate()
         let join = NavigationGate()
         defer {
@@ -219,6 +229,7 @@ final class RealmNavigationTests: XCTestCase {
         var savedAddresses: [String] = []
         let view = BrowserViewModel(
             realmPreferences: try makePreferences(),
+            realmTrustDirectory: realmTrustDirectory,
             appRepository: apps,
             fetchRealmDocument: { url, _ in
                 if url.path == "/realm/echo", !profile.waiting { await profile.wait() }
@@ -241,6 +252,7 @@ final class RealmNavigationTests: XCTestCase {
                 joined = true
                 return #"{"member_id":"member","role":"editor","key_id":"key"}"#
             },
+            confirmRealmMembership: { _ in false },
             downloadRealmArchive: { url in
                 XCTAssertEqual(url.absoluteString, "https://publisher.example/echo-front.actr")
                 XCTAssertTrue(joined)
@@ -333,6 +345,7 @@ final class RealmNavigationTests: XCTestCase {
         var joinOrder: [String] = []
         let view = BrowserViewModel(
             realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
             pendingRealmInvites: PendingRealmInvites(),
             fetchRealmDocument: { url, _ in
                 if url.host == "publisher.example" { throw CancellationError() }
@@ -362,6 +375,7 @@ final class RealmNavigationTests: XCTestCase {
                 inviteSettled = true
                 return #"{"member_id":"editor","role":"editor","key_id":"key"}"#
             },
+            confirmRealmMembership: { _ in false },
             saveBrowserSession: { _, _ in }
         )
         func acceptedSequence() -> UInt64? {
@@ -417,6 +431,7 @@ final class RealmNavigationTests: XCTestCase {
         var openAttempts = 0
         let view = BrowserViewModel(
             realmPreferences: try makePreferences(),
+            realmTrustDirectory: realmTrustDirectory,
             pendingRealmInvites: PendingRealmInvites(),
             fetchRealmDocument: { url, _ in
                 if url.path == "/realm/echo" {
@@ -433,6 +448,7 @@ final class RealmNavigationTests: XCTestCase {
                 XCTFail("The superseded invite reached the Issuer")
                 throw CancellationError()
             },
+            confirmRealmMembership: { _ in false },
             saveBrowserSession: { _, _ in }
         )
         view.tabs[0].url = address
@@ -480,6 +496,7 @@ final class RealmNavigationTests: XCTestCase {
         }
         let invitedWindow = BrowserViewModel(
             realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
             pendingRealmInvites: pendingInvites,
             fetchRealmDocument: fetch,
             joinOpenRealm: joinOpen,
@@ -491,13 +508,16 @@ final class RealmNavigationTests: XCTestCase {
                 inviteSettled = true
                 return #"{"member_id":"editor","role":"editor","key_id":"key"}"#
             },
+            confirmRealmMembership: { _ in false },
             saveBrowserSession: { _, _ in }
         )
         let plainWindow = inAnotherWindow ? BrowserViewModel(
             realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
             pendingRealmInvites: pendingInvites,
             fetchRealmDocument: fetch,
             joinOpenRealm: joinOpen,
+            confirmRealmMembership: { _ in false },
             saveBrowserSession: { _, _ in }
         ) : invitedWindow
 
@@ -554,6 +574,7 @@ final class RealmNavigationTests: XCTestCase {
         let preferences = try makePreferences()
         let view = BrowserViewModel(
             realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
             pendingRealmInvites: PendingRealmInvites(),
             fetchRealmDocument: { url, _ in
                 if url.host == "publisher.example" { throw CancellationError() }
@@ -577,6 +598,7 @@ final class RealmNavigationTests: XCTestCase {
                 if !firstJoinFinished { earlySecondJoin.fulfill() }
                 return #"{"member_id":"second","role":"editor","key_id":"key"}"#
             },
+            confirmRealmMembership: { _ in false },
             saveBrowserSession: { _, _ in }
         )
 
@@ -636,6 +658,7 @@ final class RealmNavigationTests: XCTestCase {
         unwantedWork.isInverted = true
         let view = BrowserViewModel(
             realmPreferences: try makePreferences(),
+            realmTrustDirectory: realmTrustDirectory,
             fetchRealmDocument: { url, _ in
                 if url.path == "/realm/echo" { await profile.wait() }
                 return try XCTUnwrap(documents[url.absoluteString])
@@ -644,6 +667,7 @@ final class RealmNavigationTests: XCTestCase {
                 unwantedWork.fulfill()
                 throw CancellationError()
             },
+            confirmRealmMembership: { _ in false },
             downloadRealmArchive: { _ in
                 unwantedWork.fulfill()
                 throw CancellationError()
@@ -699,6 +723,32 @@ final class RealmNavigationTests: XCTestCase {
             "https://\(domain)/.well-known/actr": descriptor,
             "https://\(domain)/realm/\(realmId)": body
         ]
+    }
+
+    private func publisherDescriptor(keyId: String, publicKey: Data) throws -> Data {
+        let root = Curve25519.Signing.PrivateKey()
+        let now = Date()
+        let formatter = ISO8601DateFormatter()
+        let signed = try sign([
+            "schema": "actr.publisher/v1",
+            "domain": "publisher.example",
+            "sequence": 1,
+            "profile_signing_keys": [[
+                "id": "realm-key", "algorithm": "Ed25519", "status": "active",
+                "public_key": root.publicKey.rawRepresentation.base64EncodedString()
+            ]],
+            "keys": [[
+                "id": keyId, "algorithm": "Ed25519", "status": "active",
+                "public_key": publicKey.base64EncodedString()
+            ]],
+            "profile_issued_at": formatter.string(from: now.addingTimeInterval(-60)),
+            "profile_expires_at": formatter.string(from: now.addingTimeInterval(3600))
+        ], with: root)
+        return try JSONSerialization.data(withJSONObject: [
+            "version": 1, "authority": "actr://publisher.example",
+            "services": [["rel": "contracts", "href": "https://publisher.example/contracts"]],
+            "publisher": try JSONSerialization.jsonObject(with: signed)
+        ])
     }
 
     private func profile(

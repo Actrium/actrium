@@ -539,7 +539,7 @@ struct WorkspaceMainView: View {
                             shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
                             refreshAction: { viewModel.reloadCurrentTab() },
                             onNavigate: { input in
-                                viewModel.navigateCurrentTab(to: input)
+                                viewModel.navigateCurrentTab(to: input, fromAddressBar: true)
                                 isAddressBarFirstResponder = false
                             },
                             bookmarkPopoverContent: {
@@ -582,6 +582,22 @@ struct WorkspaceMainView: View {
                 }
                 }  // end if !useNativeToolbar
             }
+        .overlay(alignment: .topTrailing) {
+            if let offer = viewModel.currentRealmUpdate {
+                HStack(spacing: 12) {
+                    Text(offer.title)
+                    Button("Later") { viewModel.deferRealmUpdate(offer) }
+                    Button("Update") { viewModel.confirmRealmUpdate(offer) }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("realm-update-accept")
+                }
+                .padding(12)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                .padding(.top, viewModel.toolbarHeight + 8)
+                .padding(.trailing, 12)
+                .accessibilityIdentifier("realm-update-notice")
+            }
+        }
         // 🔑 Treatment of raw toolbar button to switch the mode request (through ModeTransitionController)
         .onReceive(NotificationCenter.default.publisher(for: .toggleFocusOverviewRequested)) { _ in
             toggleFocusOverview()
@@ -788,13 +804,14 @@ struct WorkspaceMainView: View {
                 viewModel.actrUriNotice = nil
             }
         }
-        // ━━━━ Invite-code redeem sheet (temporary flow) ━━━━
-        .sheet(item: $viewModel.pendingInviteRedeem) { pending in
+        // Show only the active tab's invite prompt. Other tabs keep their own requests.
+        .sheet(item: Binding(get: { viewModel.pendingInviteRedeem }, set: { _ in })) { pending in
             InviteCodeRedeemSheet(
                 pending: pending,
                 onConfirm: { code in viewModel.confirmInviteRedeem(pending, code: code) },
                 onCancel: { viewModel.cancelInviteRedeem(pending) }
             )
+            .interactiveDismissDisabled()
         }
     }
 

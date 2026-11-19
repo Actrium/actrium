@@ -39,16 +39,24 @@ enum RealmProfileStore {
     static func acceptAuthority(
         body: String, domain: String, realmName: String, preferences: UserDefaults
     ) throws -> AuthorityDiscoveryInfo {
+        try acceptPinnedAuthority(body: body, domain: domain, realmName: realmName, preferences: preferences).descriptor
+    }
+
+    static func acceptPinnedAuthority(
+        body: String, domain: String, realmName: String, preferences: UserDefaults,
+        fallbackPins: String? = nil
+    ) throws -> RealmAuthorityAcceptance {
         let key = authorityKey(domain)
         let previous = preferences.dictionary(forKey: key)
         let legacy = preferences.dictionary(forKey: realmKey(realmName))?["signingKeys"] as? String
         let accepted = try ActriumCore.acceptRealmAuthority(
-            body: body, domain: domain, previousPinsJson: previous?["pins"] as? String,
+            body: body, domain: domain, previousPinsJson: previous?["pins"] as? String ?? fallbackPins,
             legacySigningKeysJson: legacy
         )
         let keyIds = accepted.descriptor.signingKeys.map(\.id)
         preferences.set([
             "pins": accepted.pinsJson,
+            "signedKeys": accepted.signedKeysJson,
             "signingKeys": accepted.descriptor.signingKeysJson,
             "signingKeyIds": keyIds
         ], forKey: key)
@@ -60,7 +68,7 @@ enum RealmProfileStore {
             )
             reconcileRevokedSigners(domain: domain, authority: accepted.descriptor, preferences: preferences)
         }
-        return accepted.descriptor
+        return accepted
     }
 
     static func acceptRealm(
@@ -226,12 +234,21 @@ enum RealmProfileStore {
         return true
     }
 
+    static func pinnedAuthority(
+        for realmName: String, preferences: UserDefaults
+    ) -> (pins: String, signedKeys: String)? {
+        guard let authority = authorityState(realmName, preferences: preferences),
+              let pins = authority["pins"] as? String,
+              let signedKeys = authority["signedKeys"] as? String else { return nil }
+        return (pins, signedKeys)
+    }
+
     static func acceptPublisher(
-        body: String, domain: String, preferences: UserDefaults
+        body: String, domain: String, preferences: UserDefaults, fallbackPins: String? = nil
     ) throws -> PublisherProfileInfo {
         let key = publisherKey(domain)
         let saved = preferences.dictionary(forKey: key)
-        let pins = saved?["pins"] as? String ?? preferences.string(forKey: key)
+        let pins = saved?["pins"] as? String ?? preferences.string(forKey: key) ?? fallbackPins
         let accepted = try ActriumCore.acceptRealmPackagePublisher(
             body: body, domain: domain, previousPinsJson: pins
         )

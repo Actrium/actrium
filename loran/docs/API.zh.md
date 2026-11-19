@@ -333,6 +333,13 @@ Realm 以 Realm 名寻址，`@` 编码为 `%40`：
 - `GET /admin/api/realms/{realm}/members`：只读的成员、客户端（key id、公钥、名称、登记 / 最近使用 /
   撤销时间）与未用邀请，供支持与滥用排查；运营者处置滥用用停用或退役，不直接改成员；
 - `GET /admin/api/realms/{realm}/profile`：已接受的 Realm Profile（原样 JSON），没有则 `404`；
+- `GET /admin/api/realms/{realm}/packages` 读取当前包表、Profile 序号和可回滚的上一份包表。`PUT` 提交完整
+  `selection`，以及 `operation.expected_sequence`、`operation.operation_id`。后台和当前签名 Profile 比较，
+  相同配置返回 `changed: false`，变更包表时校验归档、依赖及 RPC 契约。回滚通过 `operation.rollback: true`
+  提交上一份包表，走同样的校验。此入口用于 Loran 签名的 Realm。部署时将 `LORAN_PACKAGE_VERIFIER` 指向
+  支持 `realm check-selection --trust-dir` 的 `actr` 可执行文件。Owner 和 Admin 的包发布共用该校验器，
+  Publisher 信任记录保存在 `sqlite_path/realm-package-trust`。部署时可用
+  `actr realm check-selection --probe-realm` 检查 Service 是否就绪。
 - `GET`/`PUT /admin/api/realms/{realm}`：读取；`PUT` 只收 `enabled` 与 `expires_at`，
   `enabled = false` 即停用、`true` 即恢复，Realm 名不可修改；
 - `POST /admin/api/realms/{realm}/issuer-key/rotate`：开始轮换该 `active` Realm 的 issuer key

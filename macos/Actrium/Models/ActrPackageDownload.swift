@@ -75,15 +75,17 @@ struct ActrUriNotice: Identifiable {
     var detail: String? = nil
 }
 
-/// Pending invite-code redemption (temporary flow): an actr:// link entered in
-/// the address bar waits for an invite code first; on "Redeem" the
-/// Rust-provided method takes over the follow-up flow.
+/// An invite prompt belongs to the navigation that requested it.
 struct PendingInviteRedeem: Identifiable {
     let id = UUID()
     let tabId: UUID
+    let navigationNonce: Int
     let uri: String
     let domain: String
-    let realmName: String
+
+    func matches(_ tab: Tab) -> Bool {
+        tab.id == tabId && tab.reloadNonce == navigationNonce
+    }
 }
 
 enum ActrPackageDownloadError: LocalizedError {
