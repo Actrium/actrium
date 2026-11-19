@@ -23,6 +23,7 @@ HOSTED_LABELS = frozenset(
         "macos-latest",
         "macos-15",
         "macos-15-intel",
+        "macos-26",
         "windows-latest",
         "windows-11-arm",
     }

@@ -1519,6 +1519,51 @@ EOF
   rm -rf "$temp_dir"
 }
 
+test_report_keeps_required_macos_failures() (
+  reset_release_train_state
+
+  local temp_dir macos_state result
+  temp_dir=$(mktemp -d)
+  trap 'rm -rf "$temp_dir"' EXIT
+
+  VERSION="1.2.3"
+  STAGE="report"
+  RELEASE_SHA="abc123"
+  REPORT_DIR="$temp_dir"
+  STATE_FILE="$temp_dir/report.tsv"
+  REPORT_MARKDOWN="$temp_dir/report.md"
+  REPORT_JSON="$temp_dir/report.json"
+  macos_state="$(stage_state_file publish-actrium-macos)"
+  printf 'actr\tcli\tcli_binary\t1.2.3\tsuccess\tpublished\t-\tabc123\n' >"$(stage_state_file publish-cli-binaries)"
+
+  for result in failure cancelled skipped; do
+    MACOS_RELEASE_JOB_RESULT="$result" generate_report
+    assert_eq failure "$(jq -r .overall_status "$REPORT_JSON")" "required macOS job $result without state"
+    grep -Fq $'\tfailure\tjob_'"$result"$'\t-\tabc123' "$STATE_FILE"
+  done
+
+  MACOS_RELEASE_JOB_RESULT=success generate_report
+  assert_eq failure "$(jq -r .overall_status "$REPORT_JSON")" "required macOS state missing"
+  grep -Fq $'\tfailure\tmissing_state\t' "$STATE_FILE"
+
+  printf 'Actrium macOS DMG\tpublish-actrium-macos\tmacos_dmg\t1.2.3\tsuccess\tpublished\t-\tabc123\n' >"$macos_state"
+  MACOS_RELEASE_JOB_RESULT=success generate_report
+  assert_eq success "$(jq -r .overall_status "$REPORT_JSON")" "successful macOS job with state"
+
+  MACOS_RELEASE_JOB_RESULT=failure generate_report
+  assert_eq failure "$(jq -r .overall_status "$REPORT_JSON")" "failed job with stale success state"
+  assert_eq job_failure "$(jq -r '.components[]|select(.kind=="macos_dmg")|.mode' "$REPORT_JSON")" "failed job overrides success row"
+
+  printf 'Actrium macOS DMG\tpublish-actrium-macos\tmacos_dmg\t1.2.3\tfailure\tverification_failed\t-\tabc123\n' >"$macos_state"
+  MACOS_RELEASE_JOB_RESULT=failure generate_report
+  assert_eq verification_failed "$(jq -r '.components[]|select(.kind=="macos_dmg")|.mode' "$REPORT_JSON")" "detailed macOS failure"
+
+  rm "$macos_state"
+  MACOS_RELEASE_JOB_RESULT="" generate_report
+  assert_eq success "$(jq -r .overall_status "$REPORT_JSON")" "intentional skip without state"
+  assert_eq 1 "$(jq -r '.components|length' "$REPORT_JSON")" "intentional skip adds no macOS row"
+)
+
 test_release_prepare_stages_workload_lockfile() {
   local stage_function
   stage_function=$(declare -f stage_release_version_files)
@@ -2678,6 +2723,7 @@ test_release_train_workflow_publish_typescript_uses_script_stage
 test_release_train_workflow_downloads_only_typescript_native_artifacts
 test_release_prepare_workflow_skips_release_commits
 test_report_stage_merges_state_files
+test_report_keeps_required_macos_failures
 test_release_prepare_stages_workload_lockfile
 test_release_prepare_stages_actr_facade_manifest
 test_notify_wechat_includes_nuget_packages
