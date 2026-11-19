@@ -75,17 +75,45 @@ private final class RealmServiceAttachmentResultCallback: ActrBindings.DataChunk
     }
 }
 
+/// A lock-protected intake snapshot for the nonisolated Rust event callback.
+/// The MainActor registry remains authoritative; queued delivery rechecks each
+/// captured subscription ID so a replacement can never inherit an old event.
+private final class RealmServiceEventRoutingSnapshot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var subscriptions: [UUID: (bindingId: UUID, events: Set<String>)] = [:]
+
+    func replace(with subscriptions: [UUID: (bindingId: UUID, events: Set<String>)]) {
+        lock.lock()
+        self.subscriptions = subscriptions
+        lock.unlock()
+    }
+
+    func matching(bindingId: UUID, event: String) -> [UUID] {
+        lock.lock()
+        defer { lock.unlock() }
+        return subscriptions.compactMap { subscriptionId, subscription in
+            subscription.bindingId == bindingId && subscription.events.contains(event)
+                ? subscriptionId : nil
+        }
+    }
+}
+
 @MainActor
 final class RealmServiceBindings {
     static let shared = RealmServiceBindings()
     private var bindings: [UUID: any RealmServiceBindingHandle] = [:]
     private var bindingTabs: [UUID: UUID] = [:]
     private var subscriptions: [UUID: (bindingId: UUID, events: Set<String>)] = [:]
+    private let routingSnapshot = RealmServiceEventRoutingSnapshot()
     private var pendingSubscriptions: [UUID: UUID] = [:]
     private var cancelledSubscriptions: Set<UUID> = []
     private var eventGeneration: UInt64 = 0
     private var bindingEventGenerations: [UUID: UInt64] = [:]
     var eventHandler: ((UUID, RealmServiceEvent) -> Void)?
+
+    private func updateRoutingSnapshot() {
+        routingSnapshot.replace(with: subscriptions)
+    }
 
     func attach(_ binding: any RealmServiceBindingHandle, to tabId: UUID) {
         remove(tabId)
@@ -98,6 +126,7 @@ final class RealmServiceBindings {
         bindingTabs.removeValue(forKey: binding.id)
         bindingEventGenerations.removeValue(forKey: binding.id)
         subscriptions = subscriptions.filter { $0.value.bindingId != binding.id }
+        updateRoutingSnapshot()
         Task { await binding.stop() }
     }
 
@@ -120,12 +149,14 @@ final class RealmServiceBindings {
         // before the subscribe reply crosses the Renderer/Host IPC boundary.
         // Register first so publish can already address this subscription.
         subscriptions[request.id] = (binding.id, Set(request.events))
+        updateRoutingSnapshot()
         defer {
             pendingSubscriptions.removeValue(forKey: request.id)
             cancelledSubscriptions.remove(request.id)
         }
         func rollback() async {
             subscriptions.removeValue(forKey: request.id)
+            updateRoutingSnapshot()
             if !subscriptions.values.contains(where: { $0.bindingId == binding.id }) {
                 // This request may be an older, superseded generation. If it
                 // removes the last routing entry, tear down the latest peer
@@ -151,8 +182,9 @@ final class RealmServiceBindings {
             cancelledSubscriptions.insert(subscriptionId)
             return
         }
-        guard let removed = subscriptions.removeValue(forKey: subscriptionId),
-              let tab = bindingTabs[removed.bindingId], tab == tabId,
+        guard let removed = subscriptions.removeValue(forKey: subscriptionId) else { return }
+        updateRoutingSnapshot()
+        guard let tab = bindingTabs[removed.bindingId], tab == tabId,
               let binding = bindings[tabId] else { return }
         if !subscriptions.values.contains(where: { $0.bindingId == removed.bindingId }),
            let generation = bindingEventGenerations[removed.bindingId] {
@@ -177,6 +209,7 @@ final class RealmServiceBindings {
         for (subscriptionId, _) in retired {
             subscriptions.removeValue(forKey: subscriptionId)
         }
+        updateRoutingSnapshot()
         // Keep this robust even if a pending registration has not entered the
         // early-routing table yet. The late reply still rolls back through
         // cancelledSubscriptions, but no renderer-owned pending state remains.
@@ -196,10 +229,16 @@ final class RealmServiceBindings {
     }
 
     nonisolated func publish(bindingId: UUID, event: String, payload: Data) {
+        // Capture ownership before hopping to the MainActor. Enumerating only
+        // inside the task would let a replacement subscription inherit an
+        // event that arrived while its predecessor was still registered.
+        let eligible = routingSnapshot.matching(bindingId: bindingId, event: event)
         Task { @MainActor in
             guard let tabId = bindingTabs[bindingId] else { return }
-            for (subscriptionId, subscription) in subscriptions
-            where subscription.bindingId == bindingId && subscription.events.contains(event) {
+            for subscriptionId in eligible {
+                guard let subscription = subscriptions[subscriptionId],
+                      subscription.bindingId == bindingId,
+                      subscription.events.contains(event) else { continue }
                 eventHandler?(tabId, RealmServiceEvent(
                     subscriptionId: subscriptionId, event: event, payload: payload
                 ))

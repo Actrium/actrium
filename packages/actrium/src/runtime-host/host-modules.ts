@@ -156,29 +156,21 @@ export function createHostModules(options: {
           throw new Error('Service event source is not available.');
         }
 
-        // Authorization gates initial delivery and continuous snapshot/session
-        // revocation tears down the underlying native or HTTP transport.
-        let allowed = false;
+        // Authorize before opening the native or HTTP transport. The cleanup
+        // handle remains synchronous and also cancels a pending authorization.
         let disposed = false;
+        let unsubscribeTransport: (() => void) | undefined;
         let stopWatchingRevocation: (() => void) | undefined;
         let stopTracking: (() => void) | undefined;
-        const unsubscribe = options.serviceEventSource.subscribe((event) => {
-          if (!allowed || disposed) return;
-          try {
-            handler(event);
-          } catch (error) {
-            console.warn('[Actrium] Service event handler failed:', error);
-          }
-        });
         const cleanup = () => {
           if (disposed) return;
           disposed = true;
-          allowed = false;
           stopWatchingRevocation?.();
           stopWatchingRevocation = undefined;
           stopTracking?.();
           stopTracking = undefined;
-          unsubscribe();
+          unsubscribeTransport?.();
+          unsubscribeTransport = undefined;
         };
         const untrack = options.trackServiceEventSubscription?.(cleanup);
         if (disposed) untrack?.();
@@ -186,16 +178,30 @@ export function createHostModules(options: {
         void options.authorizeCapability('service.on').then(
           () => {
             if (disposed) return;
-            allowed = true;
-            const stopWatching = options.onCapabilityRevoked?.('service.on', cleanup);
-            if (disposed) stopWatching?.();
-            else stopWatchingRevocation = stopWatching;
+            try {
+              unsubscribeTransport = options.serviceEventSource!.subscribe((event) => {
+                if (disposed) return;
+                try {
+                  handler(event);
+                } catch (error) {
+                  console.warn('[Actrium] Service event handler failed:', error);
+                }
+              });
+              if (disposed) {
+                unsubscribeTransport?.();
+                unsubscribeTransport = undefined;
+                return;
+              }
+              const stopWatching = options.onCapabilityRevoked?.('service.on', cleanup);
+              if (disposed) stopWatching?.();
+              else stopWatchingRevocation = stopWatching;
+            } catch (error) {
+              console.warn('[Actrium] Service event subscription failed:', error);
+              cleanup();
+            }
           },
           (error) => {
-            console.warn(
-              '[Actrium] service.on authorization failed; subscription closed:',
-              error
-            );
+            console.warn('[Actrium] service.on authorization rejected:', error);
             cleanup();
           }
         );

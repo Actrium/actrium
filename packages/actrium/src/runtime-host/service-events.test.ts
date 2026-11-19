@@ -262,8 +262,7 @@ describe('createNativeServiceEventSource', () => {
     unsubscribe();
   });
 
-  test('an old unsubscribe cannot tear down a replacement native generation', async () => {
-    let rejectFirst!: (error: Error) => void;
+  test('retries transient native startup failure without losing the Guest handler', async () => {
     let calls = 0;
     const cancelled: string[] = [];
     const nativeModule = {
@@ -271,31 +270,40 @@ describe('createNativeServiceEventSource', () => {
       removeListeners: () => {},
       subscribeServiceEvents: () => {
         calls += 1;
-        if (calls === 1) {
-          return new Promise<string>((_resolve, reject) => { rejectFirst = reject; });
-        }
-        return Promise.resolve('replacement-subscription');
+        if (calls === 1) return Promise.reject(new Error('discovery unavailable'));
+        return Promise.resolve(`subscription-${calls}`);
       },
       unsubscribeServiceEvents: (_tabId: string, subscriptionId: string) => {
         cancelled.push(subscriptionId);
       },
     };
-    const source = createNativeServiceEventSource(nativeModule, 'tab-1', ['a'], () => ({
-      addListener: () => ({ remove: () => {} }),
-    }));
-    const oldUnsubscribe = source.subscribe(() => {});
-    rejectFirst(new Error('native unavailable'));
-    await Promise.resolve();
-    await Promise.resolve();
+    let emitNative!: (event: unknown) => void;
+    const source = createNativeServiceEventSource(
+      nativeModule,
+      'tab-1',
+      ['a'],
+      () => ({
+        addListener: (_event, listener) => {
+          emitNative = listener;
+          return { remove: () => {} };
+        },
+      }),
+      { initialRetryDelayMs: 0, maxRetryDelayMs: 0 }
+    );
+    const received: string[] = [];
+    const unsubscribe = source.subscribe((event) => received.push(event.payloadBase64));
 
-    const replacementUnsubscribe = source.subscribe(() => {});
-    await Promise.resolve();
-    await Promise.resolve();
-    oldUnsubscribe();
-    expect(cancelled).toEqual([]);
+    await waitFor(() => calls === 2);
+    emitNative({
+      tabId: 'tab-1', subscriptionId: 'subscription-2', event: 'a', payloadBase64: 'AAEC',
+    });
+    await waitFor(() => received.length === 1);
+    expect(received).toEqual(['AAEC']);
 
-    replacementUnsubscribe();
-    expect(cancelled).toEqual(['replacement-subscription']);
+    // The cleanup returned before the failed generation still owns the
+    // recovered subscription and tears it down normally.
+    unsubscribe();
+    expect(cancelled).toEqual(['subscription-2']);
   });
 
   test('cancels a native subscription that resolves after unsubscribe', async () => {
@@ -669,6 +677,39 @@ describe('createHttpServiceEventSource', () => {
       expect(received).toEqual(['AAEC']);
       unsubscribe();
     } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('ID-only SSE frames set and clear Last-Event-ID without event data', async () => {
+    const originalFetch = globalThis.fetch;
+    const resumeIds: (string | null)[] = [];
+    let calls = 0;
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      calls += 1;
+      resumeIds.push(new Headers(init?.headers).get('Last-Event-ID'));
+      if (calls >= 3) return new Response(null, { status: 204 });
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(calls === 1 ? 'id: event-41\n\n' : 'id:\n\n'));
+          controller.close();
+        },
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      const source = createHttpServiceEventSource(
+        'https://example.com/events',
+        ['a'],
+        { initialRetryDelayMs: 0, maxRetryDelayMs: 0 }
+      );
+      const unsubscribe = source.subscribe(() => {});
+      await waitFor(() => calls === 3);
+      expect(resumeIds).toEqual([null, 'event-41', null]);
+      unsubscribe();
+    } finally {
+      console.error = originalError;
       globalThis.fetch = originalFetch;
     }
   });

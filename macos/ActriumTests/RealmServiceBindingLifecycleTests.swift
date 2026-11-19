@@ -258,6 +258,36 @@ struct RealmServiceBindingLifecycleTests {
         bindings.remove(tabId)
     }
 
+    @Test func queuedEventDoesNotCrossUnsubscribeAndResubscribe() async throws {
+        let bindings = RealmServiceBindings()
+        let binding = ControlledRealmServiceBinding()
+        let tabId = UUID()
+        let oldId = UUID()
+        let replacementId = UUID()
+        var delivered: [UUID] = []
+        bindings.attach(binding, to: tabId)
+        bindings.eventHandler = { _, event in delivered.append(event.subscriptionId) }
+        await binding.setCompletesSubscribeImmediately()
+        try await bindings.subscribe(
+            RealmServiceEventSubscription(id: oldId, events: ["notes.changed"]), tabId: tabId
+        )
+
+        // Intake captures the old ID. Before the queued MainActor delivery runs,
+        // unsubscribe it and register a replacement on the same binding.
+        bindings.publish(bindingId: binding.id, event: "notes.changed", payload: Data([1]))
+        bindings.unsubscribe(oldId, tabId: tabId)
+        try await bindings.subscribe(
+            RealmServiceEventSubscription(id: replacementId, events: ["notes.changed"]),
+            tabId: tabId
+        )
+        for _ in 0..<5 { await Task.yield() }
+        #expect(delivered.isEmpty)
+
+        bindings.publish(bindingId: binding.id, event: "notes.changed", payload: Data([2]))
+        for _ in 0..<20 where delivered.isEmpty { await Task.yield() }
+        #expect(delivered == [replacementId])
+    }
+
     @Test func rendererReplacementRetiresAnEstablishedSubscription() async throws {
         let bindings = RealmServiceBindings()
         let binding = ControlledRealmServiceBinding()

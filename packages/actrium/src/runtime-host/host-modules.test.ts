@@ -254,10 +254,33 @@ describe('host:service implementation', () => {
       received.push(event);
     });
 
+    // Denial must not briefly open and then close an unauthorized transport.
+    expect(subscriberCount()).toBe(0);
     await Promise.resolve();
     expect(subscriberCount()).toBe(0);
     emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
     expect(received).toEqual([]);
+  });
+
+  test('cancelling pending service.on authorization never opens the transport', async () => {
+    const { source, subscriberCount } = createTestServiceEventSource([
+      'notes.v1.changed',
+    ]);
+    let approve!: () => void;
+    const hostModules = createTestHostModules({
+      serviceEventSource: source,
+      authorizeCapability: () => new Promise<void>((resolve) => {
+        approve = resolve;
+      }),
+    });
+
+    const unsubscribe = hostModules['host:service'].on(() => {});
+    expect(subscriberCount()).toBe(0);
+    unsubscribe?.();
+    approve();
+    await Promise.resolve();
+
+    expect(subscriberCount()).toBe(0);
   });
 });
 

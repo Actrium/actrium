@@ -55,6 +55,11 @@ function deliver(handlers: Iterable<ServiceEventHandler>, event: ServiceEvent): 
   }
 }
 
+export interface NativeServiceEventSourceOptions {
+  initialRetryDelayMs?: number;
+  maxRetryDelayMs?: number;
+}
+
 /** Create an event source backed by the RealmService RCTEventEmitter. */
 export function createNativeServiceEventSource(
   nativeModule: NativeServiceEventModule | undefined,
@@ -62,14 +67,28 @@ export function createNativeServiceEventSource(
   events: string[],
   createEmitter: (
     nativeModule: NativeServiceEventModule
-  ) => NativeServiceEventEmitter = defaultNativeEventEmitter
+  ) => NativeServiceEventEmitter = defaultNativeEventEmitter,
+  options: NativeServiceEventSourceOptions = {}
 ): ServiceEventSource {
+  const initialRetryDelayMs = options.initialRetryDelayMs ?? 1_000;
+  const maxRetryDelayMs = options.maxRetryDelayMs ?? 30_000;
+  if (
+    !Number.isFinite(initialRetryDelayMs) ||
+    !Number.isFinite(maxRetryDelayMs) ||
+    initialRetryDelayMs < 0 ||
+    maxRetryDelayMs < 0
+  ) {
+    throw new Error('Invalid native Service event retry limits.');
+  }
+
   const handlers = new Map<ServiceEventHandler, number>();
   let handlerCount = 0;
   const allowedEvents = new Set(events);
   let emitterSubscription: { remove(): void } | undefined;
   let nativeSubscriptionId: string | undefined;
   let generation = 0;
+  let retryCount = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
   // Native registers the subscription before its async subscribe reply returns.
   // Keep those early events by generation until the reply identifies which
   // native subscription they belong to. A finite buffer prevents a stale or
@@ -81,7 +100,7 @@ export function createNativeServiceEventSource(
   }[] = [];
   const maxEarlyEvents = 256;
 
-  const stop = () => {
+  const stopTransport = () => {
     generation += 1;
     earlyEvents.length = 0;
     emitterSubscription?.remove();
@@ -90,6 +109,13 @@ export function createNativeServiceEventSource(
       nativeModule?.unsubscribeServiceEvents(tabId, nativeSubscriptionId);
       nativeSubscriptionId = undefined;
     }
+  };
+
+  const stop = () => {
+    if (retryTimer !== undefined) clearTimeout(retryTimer);
+    retryTimer = undefined;
+    retryCount = 0;
+    stopTransport();
   };
 
   const start = () => {
@@ -131,9 +157,7 @@ export function createNativeServiceEventSource(
       }
       if (earlyEvents.length >= maxEarlyEvents) {
         console.warn('[Actrium] Service event subscription exceeded its early-event buffer.');
-        handlers.clear();
-        handlerCount = 0;
-        stop();
+        scheduleRetry();
         return;
       }
       earlyEvents.push({
@@ -142,7 +166,15 @@ export function createNativeServiceEventSource(
         handlers: [...handlers.keys()],
       });
     });
-    void nativeModule.subscribeServiceEvents(tabId, events).then(
+    let request: Promise<string>;
+    try {
+      request = nativeModule.subscribeServiceEvents(tabId, events);
+    } catch (error) {
+      console.warn('[Actrium] Service event subscription failed:', error);
+      scheduleRetry();
+      return;
+    }
+    void request.then(
       (subscriptionId) => {
         if (current !== generation) {
           nativeModule.unsubscribeServiceEvents(tabId, subscriptionId);
@@ -150,11 +182,10 @@ export function createNativeServiceEventSource(
         }
         if (typeof subscriptionId !== 'string' || subscriptionId.length === 0) {
           console.warn('[Actrium] Service event subscription returned an invalid ID.');
-          handlers.clear();
-          handlerCount = 0;
-          stop();
+          scheduleRetry();
           return;
         }
+        retryCount = 0;
         nativeSubscriptionId = subscriptionId;
         const pending = earlyEvents.splice(0);
         for (const item of pending) {
@@ -169,11 +200,22 @@ export function createNativeServiceEventSource(
       (error) => {
         if (current !== generation) return;
         console.warn('[Actrium] Service event subscription failed:', error);
-        handlers.clear();
-        handlerCount = 0;
-        stop();
+        scheduleRetry();
       }
     );
+  };
+
+  const scheduleRetry = () => {
+    stopTransport();
+    if (handlerCount === 0 || retryTimer !== undefined) return;
+    const delayMs = Math.min(initialRetryDelayMs * 2 ** retryCount, maxRetryDelayMs);
+    retryCount = Math.min(retryCount + 1, 30);
+    // Keep Guest handlers registered while native discovery/startup recovers.
+    // Their original cleanup handles remain valid across these generations.
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      if (handlerCount > 0) start();
+    }, delayMs);
   };
 
   return {
@@ -194,11 +236,9 @@ export function createNativeServiceEventSource(
         }
       }
       let active = true;
-      const subscriptionGeneration = generation;
       return () => {
         if (!active) return;
         active = false;
-        if (subscriptionGeneration !== generation) return;
         const remaining = (handlers.get(handler) ?? 0) - 1;
         if (remaining > 0) handlers.set(handler, remaining);
         else handlers.delete(handler);
@@ -405,7 +445,9 @@ export function createHttpServiceEventSource(
             // replacement handlers or advance their resume state.
             if (settled || !active) break;
             const frame = parseSseChunk(chunk);
-            if (frame.hasData && frame.id !== undefined) lastEventId = frame.id;
+            // SSE id-only frames update the resume cursor even without data;
+            // an empty id clears it so the next request omits Last-Event-ID.
+            if (frame.id !== undefined) lastEventId = frame.id;
             if (!frame.eventName || !events.includes(frame.eventName)) continue;
             if (!frame.event) {
               console.warn(`[Actrium] Ignoring malformed Service event "${frame.eventName}".`);
