@@ -40,7 +40,7 @@ private actor ControlledRealmServiceBinding: RealmServiceBindingHandle {
     }
 
     func suspendEvents(ifGeneration generation: UInt64) {
-        guard generation == subscribeGeneration else { return }
+        guard generation >= subscribeGeneration else { return }
         suspendCount += 1
     }
 
@@ -83,7 +83,8 @@ private final class ControlledEventReference: RealmServiceEventReference, @unche
     private struct State {
         var target: ActrBindings.ActrId
         var peer: ActrBindings.ActrId?
-        var discovery: CheckedContinuation<[ActrBindings.ActrId], Error>?
+        var discoveryError: Error?
+        var discovery: CheckedContinuation<ActrBindings.ActrId, Error>?
         var discoveryCount = 0
     }
 
@@ -106,10 +107,7 @@ private final class ControlledEventReference: RealmServiceEventReference, @unche
         return state.discoveryCount
     }
 
-    func discover(
-        targetType: ActrBindings.ActrType,
-        count: UInt32
-    ) async throws -> [ActrBindings.ActrId] {
+    func discoverService(serviceType: ActrBindings.ActrType) async throws -> ActrBindings.ActrId {
         try await withCheckedThrowingContinuation { continuation in
             lock.lock()
             state.discovery = continuation
@@ -118,17 +116,35 @@ private final class ControlledEventReference: RealmServiceEventReference, @unche
         }
     }
 
-    func waitForDiscovery() async {
-        while discoveryCount == 0 { await Task.yield() }
+    func waitForDiscovery(expected count: Int = 1) async {
+        while discoveryCount < count { await Task.yield() }
     }
 
     func completeDiscovery() {
         lock.lock()
         let discovery = state.discovery
         let target = state.target
+        let error = state.discoveryError
         state.discovery = nil
         lock.unlock()
-        discovery?.resume(returning: [target])
+        if let error {
+            discovery?.resume(throwing: error)
+        } else {
+            discovery?.resume(returning: target)
+        }
+    }
+
+    func setTarget(_ target: ActrBindings.ActrId) {
+        lock.lock()
+        state.target = target
+        state.discoveryError = nil
+        lock.unlock()
+    }
+
+    func failDiscovery(with error: Error) {
+        lock.lock()
+        state.discoveryError = error
+        lock.unlock()
     }
 
     func setServiceEventPeer(peer: ActrBindings.ActrId?) {
@@ -305,6 +321,49 @@ struct RealmServiceBindingLifecycleTests {
         #expect(delivered == [recoveredId])
     }
 
+    @Test func finalPendingRollbackSuspendsTheLatestSelectedPeer() async throws {
+        let bindings = RealmServiceBindings()
+        let binding = ControlledRealmServiceBinding()
+        let tabId = UUID()
+        let firstId = UUID()
+        let secondId = UUID()
+        bindings.attach(binding, to: tabId)
+
+        // A is pending at generation 1 while B selects generation 2.
+        let first = Task {
+            try await bindings.subscribe(
+                RealmServiceEventSubscription(id: firstId, events: ["notes.changed"]), tabId: tabId
+            )
+        }
+        await binding.waitUntilSubscribeStarts()
+        await binding.setCompletesSubscribeImmediately()
+        try await bindings.subscribe(
+            RealmServiceEventSubscription(id: secondId, events: ["notes.changed"]), tabId: tabId
+        )
+
+        // B's unsubscribe does not suspend because A still occupies the table.
+        bindings.unsubscribe(secondId, tabId: tabId)
+        for _ in 0..<5 { await Task.yield() }
+        var suspendCount = await binding.suspendCount
+        #expect(suspendCount == 0)
+
+        // A is rejected as superseded and removes the final table entry. Its
+        // rollback must use B's latest generation, not A's stale generation.
+        await binding.completeSubscribe(with: .failure(CancellationError()))
+        do {
+            try await first.value
+            Issue.record("The superseded pending subscribe must fail.")
+        } catch {
+            // Expected.
+        }
+        for _ in 0..<20 {
+            if await binding.suspendCount == 1 { break }
+            await Task.yield()
+        }
+        suspendCount = await binding.suspendCount
+        #expect(suspendCount == 1)
+    }
+
     @Test func failedSubscribeDoesNotLeaveARoutableSubscription() async throws {
         let bindings = RealmServiceBindings()
         let binding = ControlledRealmServiceBinding()
@@ -385,13 +444,20 @@ struct RealmServiceBindingLifecycleTests {
         try await selection.value
         #expect(reference.peer == originalTarget)
 
-        // This is the call(_:) path after discovery returns a restarted Service
-        // with a new ActorId while the Front and its subscription stay alive.
+        // This is the call(_:) path: strict rediscovery returns a restarted
+        // Service with a new ActorId while the Front subscription stays alive.
         let activeGeneration = await controller.activeGeneration()
         let generation = try #require(activeGeneration)
-        await controller.refresh(
-            ifGeneration: generation, reference: reference, target: restartedTarget
-        )
+        reference.setTarget(restartedTarget)
+        let rediscovery = Task {
+            try await controller.resolve(
+                ifGeneration: generation, reference: reference, serviceType: serviceType
+            )
+        }
+        await reference.waitForDiscovery(expected: 2)
+        reference.completeDiscovery()
+        let resolvedTarget = try await rediscovery.value
+        #expect(resolvedTarget == restartedTarget)
         #expect(reference.peer == restartedTarget)
         let selectedPeer = await controller.peer
         #expect(selectedPeer == restartedTarget)
@@ -402,5 +468,60 @@ struct RealmServiceBindingLifecycleTests {
             ifGeneration: 1, reference: reference, target: restartedTarget
         )
         #expect(reference.peer == nil)
+    }
+
+    @Test func ambiguousServiceDiscoveryDoesNotSelectOrReplaceAnEventPeer() async throws {
+        let controller = RealmServiceEventPeerController()
+        let originalTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 1)
+        let reference = ControlledEventReference(target: originalTarget)
+        let serviceType = ActrBindings.ActrType(publisher: "pub", name: "svc", version: "1.0.0")
+        let ambiguous = RealmServiceError(message: "Multiple Realm Services match the signed type.")
+
+        let selection = Task {
+            try await controller.select(generation: 1, reference: reference, serviceType: serviceType)
+        }
+        await reference.waitForDiscovery()
+        reference.failDiscovery(with: ambiguous)
+        reference.completeDiscovery()
+        do {
+            try await selection.value
+            Issue.record("Ambiguous Service discovery must fail.")
+        } catch {
+            // Expected.
+        }
+        #expect(reference.peer == nil)
+        var selectedPeer = await controller.peer
+        #expect(selectedPeer == nil)
+
+        // Establish a valid subscription, then make the next call's discovery
+        // ambiguous. The previously trusted peer must remain unchanged.
+        reference.setTarget(originalTarget)
+        let validSelection = Task {
+            try await controller.select(generation: 2, reference: reference, serviceType: serviceType)
+        }
+        await reference.waitForDiscovery(expected: 2)
+        reference.completeDiscovery()
+        try await validSelection.value
+        #expect(reference.peer == originalTarget)
+
+        let activeGeneration = await controller.activeGeneration()
+        let generation = try #require(activeGeneration)
+        let rediscovery = Task {
+            try await controller.resolve(
+                ifGeneration: generation, reference: reference, serviceType: serviceType
+            )
+        }
+        await reference.waitForDiscovery(expected: 3)
+        reference.failDiscovery(with: ambiguous)
+        reference.completeDiscovery()
+        do {
+            _ = try await rediscovery.value
+            Issue.record("Ambiguous Service rediscovery must fail.")
+        } catch {
+            // Expected.
+        }
+        #expect(reference.peer == originalTarget)
+        selectedPeer = await controller.peer
+        #expect(selectedPeer == originalTarget)
     }
 }

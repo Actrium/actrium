@@ -623,6 +623,17 @@ impl ActrRefWrapper {
         }
     }
 
+    /// Discover the unique Service of the specified type in this Realm.
+    /// Unlike `discover`, this rejects both zero and ambiguous candidates.
+    pub async fn discover_service(&self, service_type: ActrType) -> ActrResult<ActrId> {
+        let proto_type: actr_protocol::ActrType = service_type.into();
+        self.inner
+            .discover_service(&proto_type)
+            .await
+            .map(Into::into)
+            .map_err(ActrError::from)
+    }
+
     /// Trigger shutdown.
     pub fn shutdown(&self) {
         self.inner.shutdown();

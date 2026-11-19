@@ -127,7 +127,11 @@ final class RealmServiceBindings {
         func rollback() async {
             subscriptions.removeValue(forKey: request.id)
             if !subscriptions.values.contains(where: { $0.bindingId == binding.id }) {
-                await binding.suspendEvents(ifGeneration: generation)
+                // This request may be an older, superseded generation. If it
+                // removes the last routing entry, tear down the latest peer
+                // selected for the binding rather than leaving it enabled.
+                let teardownGeneration = bindingEventGenerations[binding.id] ?? generation
+                await binding.suspendEvents(ifGeneration: teardownGeneration)
             }
         }
         do {
@@ -287,10 +291,7 @@ private final class RealmServiceEventRelay: ActrBindings.ServiceEventListener, @
 /// The discovery and peer-selection surface used by Service event routing.
 /// Internal so tests can drive out-of-order discoveries without a live Realm.
 protocol RealmServiceEventReference: AnyObject, Sendable {
-    func discover(
-        targetType: ActrBindings.ActrType,
-        count: UInt32
-    ) async throws -> [ActrBindings.ActrId]
+    func discoverService(serviceType: ActrBindings.ActrType) async throws -> ActrBindings.ActrId
     func setServiceEventPeer(peer: ActrBindings.ActrId?) throws
 }
 
@@ -311,9 +312,9 @@ actor RealmServiceEventPeerController {
     ) async throws {
         self.generation = max(self.generation, generation)
         guard self.generation == generation else { throw CancellationError() }
-        guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
-            throw RealmServiceError(message: "The Realm's selected Service is not online.")
-        }
+        // The v1 domain model requires exactly one Service of the signed type;
+        // taking the first of multiple route candidates is not authentication.
+        let target = try await reference.discoverService(serviceType: serviceType)
         guard self.generation == generation else { throw CancellationError() }
         try reference.setServiceEventPeer(peer: target)
         self.reference = reference
@@ -324,6 +325,20 @@ actor RealmServiceEventPeerController {
     /// A call that started before the first subscription must not select a peer.
     func activeGeneration() -> UInt64? {
         reference == nil ? nil : generation
+    }
+
+    /// Strictly rediscover the Service for an RPC and, when this generation's
+    /// subscription is still active, move its event peer to the same ActorId.
+    func resolve(
+        ifGeneration generation: UInt64?,
+        reference: any RealmServiceEventReference,
+        serviceType: ActrBindings.ActrType
+    ) async throws -> ActrBindings.ActrId {
+        let target = try await reference.discoverService(serviceType: serviceType)
+        if let generation {
+            refresh(ifGeneration: generation, reference: reference, target: target)
+        }
+        return target
     }
 
     /// Follow Service rediscovery without reviving a cleared subscription or
@@ -344,7 +359,10 @@ actor RealmServiceEventPeerController {
     }
 
     func suspend(ifGeneration generation: UInt64) {
-        guard self.generation == generation else { return }
+        // The manager may already have issued a newer generation whose
+        // discovery never reached this actor. That newer empty-set teardown
+        // must still clear the current peer; only an older teardown is stale.
+        guard generation >= self.generation else { return }
         clear()
     }
 
@@ -480,17 +498,14 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         let eventGeneration = await eventPeers.activeGeneration()
         let reference = try await connect()
         guard !stopped else { throw CancellationError() }
-        // A Realm tab targets the selected Service type. A restarted Service
-        // may register with a different ActorId while the Front stays running.
-        guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
-            throw RealmServiceError(message: "The Realm's selected Service is not online.")
-        }
+        // A Realm tab targets the unique Service of the selected type. A
+        // restarted Service may register with a different ActorId while the
+        // Front stays running; ambiguous discovery fails instead of selecting
+        // an arbitrary event peer.
+        let target = try await eventPeers.resolve(
+            ifGeneration: eventGeneration, reference: reference, serviceType: serviceType
+        )
         guard !stopped else { throw CancellationError() }
-        if let eventGeneration {
-            await eventPeers.refresh(
-                ifGeneration: eventGeneration, reference: reference, target: target
-            )
-        }
         return try await reference.callPeer(
             target: target,
             routeKey: request.route,
