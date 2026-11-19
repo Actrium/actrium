@@ -202,6 +202,15 @@ data_classes = ["private"]
 capabilities = ["actor.call:infer.v1"]
 ```
 
+受限 WASM 出站使用以下两种规则：
+
+| 规则 | 字段与执行要求 |
+| --- | --- |
+| Actor RPC | 在 `edge` 中添加 `dependency_alias` 和 `rpc_routes`，并声明 `actor.call` 和非空的 `data_classes`。源和目标角色都须提供精确的 `actr_type`。别名须指向源包声明的依赖。路由须互不重复，并对应签名依赖 Proto 中的 unary 方法。签名依赖锁须固定目标 Actor 类型和整包 SHA-256。 |
+| 固定 HTTPS | 添加 `[[privacy_contract.terminal]]`，字段为 `alias`、`source`、`url`、`method`、`data_classes` 和 `required`。`source` 指向具有精确 `actr_type` 的角色。别名绑定固定的 HTTPS URL 和 HTTP 方法，使用 DNS 主机和 443 端口。数据类别列表须非空，Host 禁止重定向。Host 策略可按 `required` 判断该出口不可用时实例能否运行。 |
+
+源包须将 Privacy Contract 列为签名的 `contract` 文件。只有源角色的类型与包的 `release_id` 匹配的规则，才能约束该包的本地出站。有本地出站规则的包须为自己的 release 声明唯一角色。例如 Notebook 的契约限定它调用 Index 和 Weather 的 RPC，Weather 的签名契约限定它自己的 HTTPS 请求。Notebook 图中的远端角色声明本身不会给 Weather 发放能力。嵌入式 Host 在每次调用时评估所选图与当前授权。
+
 声明不是说明文字，而是 Actr Host 能发放能力的上界：
 
 ```text

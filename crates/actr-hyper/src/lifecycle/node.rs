@@ -14,7 +14,7 @@ use crate::issuer_client::IssuerClient;
 use crate::lifecycle::credential_manager::{
     CredentialManager, HardRebindHandles, RegistrationContext,
 };
-use crate::lifecycle::dedup::{DEDUP_TTL, DedupOutcome, DedupState, DedupWaiter};
+use crate::lifecycle::dedup::{DEDUP_TTL, DedupKey, DedupOutcome, DedupState, DedupWaiter};
 use crate::lifecycle::recovery_policy::translate::LifecycleProfile;
 use crate::lifecycle::session_state::{SessionSnapshot, SessionState};
 use crate::outbound::Gate;
@@ -1185,6 +1185,9 @@ async fn host_operation_handler(
     use actr_protocol::{DataChunk, PayloadType};
 
     match pending {
+        HostOperation::ScopedActorCall { request, deadline } => {
+            scoped_actor_call(&ctx, request, deadline).await
+        }
         HostOperation::CallRaw(req) => {
             match ctx
                 .call_raw(
@@ -1414,6 +1417,29 @@ pub(crate) fn lifecycle_host_abi(
     })
 }
 
+async fn scoped_actor_call(
+    ctx: &crate::context::RuntimeContext,
+    request: actr_framework::guest::dynclib_abi::HostCallRawV1,
+    deadline: tokio::time::Instant,
+) -> crate::workload::HostOperationResult {
+    use crate::workload::HostOperationResult;
+
+    match ctx
+        .call_raw_with_deadline(
+            &actr_framework::Dest::Peer(request.target),
+            request.route_key,
+            guest_rpc_payload_type(request.payload_type),
+            Bytes::from(request.payload),
+            crate::transport::RpcDeadline::at(deadline),
+            true,
+        )
+        .await
+    {
+        Ok(response) => HostOperationResult::Bytes(response.to_vec()),
+        Err(error) => HostOperationResult::Error(error),
+    }
+}
+
 async fn stream_callback_host_operation_handler(
     ctx: crate::context::RuntimeContext,
     pending: crate::workload::HostOperation,
@@ -1424,6 +1450,9 @@ async fn stream_callback_host_operation_handler(
     use actr_protocol::PayloadType;
 
     match pending {
+        HostOperation::ScopedActorCall { request, deadline } => {
+            scoped_actor_call(&ctx, request, deadline).await
+        }
         HostOperation::CallRaw(req) => {
             match ctx
                 .call_raw(
@@ -2133,7 +2162,46 @@ impl Inner {
             return ready_continuation(Err(denied));
         }
 
-        // 0.2. Deduplication: return cached response for retried request_ids.
+        let egress_deadline = match crate::request_scope::take_egress_deadline(&mut envelope) {
+            Ok(deadline) => deadline,
+            Err(error) => return ready_continuation(Err(error)),
+        };
+        let scope = match (scope, egress_deadline) {
+            (Some(parent), Some(deadline)) => Some(parent.child_at(deadline)),
+            (None, Some(deadline)) => Some(crate::request_scope::RequestScope::root_at(deadline)),
+            (scope, None) => scope,
+        };
+        if let Some(scope) = scope.as_ref().filter(|scope| !scope.is_active()) {
+            tracing::debug!(
+                request_id = %envelope.request_id,
+                root_request_id = %scope.root_request_id(),
+                "request scope already cancelled before admission; rejecting"
+            );
+            return ready_continuation(Err(ActrError::TimedOut));
+        }
+
+        let dispatch_ctx = crate::workload::InvocationContext {
+            self_id: actor_id.clone(),
+            caller_id: caller_id.cloned(),
+            request_id: envelope.request_id.clone(),
+        };
+        #[cfg(feature = "wasm-engine")]
+        let authorize_inbound = {
+            let broker = self.workload_dispatch.egress_broker().cloned();
+            let invocation = dispatch_ctx.clone();
+            let route = envelope.route_key.clone();
+            move || match &broker {
+                Some(broker) => broker.authorize_inbound(&invocation, &route),
+                None => Ok(()),
+            }
+        };
+        #[cfg(feature = "wasm-engine")]
+        if let Err(error) = authorize_inbound() {
+            return ready_continuation(Err(error));
+        }
+
+        // 0.2. Deduplication: share results only among retries of the same
+        // operation from the same authenticated caller.
         //
         // TELL envelopes keep their dedup entry (retry protection for
         // RpcReliable's up-to-5 same-request_id attempts), but their
@@ -2142,12 +2210,13 @@ impl Inner {
         // dropped immediately instead of blocking the receive loop for
         // `duplicate_wait_timeout` (which maps 0 to the 30 s DEDUP_TTL).
         let is_tell = Self::envelope_is_tell(&envelope);
-        let outcome = {
-            self.dedup_state
-                .lock()
-                .await
-                .check_or_mark(&envelope.request_id)
+        let dedup_key = DedupKey {
+            caller: caller_id.cloned(),
+            route_key: envelope.route_key.clone(),
+            request_id: envelope.request_id.clone(),
+            is_tell,
         };
+        let outcome = self.dedup_state.lock().await.check_or_mark(&dedup_key);
         match outcome {
             DedupOutcome::Fresh => {} // proceed normally
             DedupOutcome::InFlight(waiter) => {
@@ -2166,34 +2235,31 @@ impl Inner {
                 );
                 let timeout = Self::duplicate_wait_timeout(envelope.timeout_ms);
                 return Box::pin(async move {
-                    IncomingOutcome::Replied(
-                        Self::wait_for_inflight_duplicate(waiter, timeout).await,
-                    )
+                    let result = Self::wait_for_inflight_duplicate(waiter, timeout).await;
+                    if scope.as_ref().is_some_and(|scope| !scope.is_active()) {
+                        return IncomingOutcome::Replied(Err(ActrError::TimedOut));
+                    }
+                    #[cfg(feature = "wasm-engine")]
+                    if let Err(error) = authorize_inbound() {
+                        return IncomingOutcome::Replied(Err(error));
+                    }
+                    IncomingOutcome::Replied(result)
                 });
             }
             DedupOutcome::Duplicate(cached) => {
+                if scope.as_ref().is_some_and(|scope| !scope.is_active()) {
+                    return ready_continuation(Err(ActrError::TimedOut));
+                }
+                #[cfg(feature = "wasm-engine")]
+                if let Err(error) = authorize_inbound() {
+                    return ready_continuation(Err(error));
+                }
                 tracing::debug!(
                     request_id = %envelope.request_id,
                     route_key = %envelope.route_key,
                     "♻️ returning cached response for duplicate request_id"
                 );
                 return ready_continuation(cached);
-            }
-        }
-
-        // Scoped-cancellation check: if the inherited request scope is already
-        // terminal (caller dropped or root deadline expired), reject before any
-        // handler work. The dedup mark above is left to expire via DEDUP_TTL —
-        // same as the credential-missing path — since the caller is gone and
-        // no response can be delivered anyway.
-        if let Some(scope) = scope.as_ref() {
-            if !scope.is_active() {
-                tracing::debug!(
-                    request_id = %envelope.request_id,
-                    root_request_id = %scope.root_request_id(),
-                    "request scope already cancelled before admission; rejecting"
-                );
-                return ready_continuation(Err(ActrError::TimedOut));
             }
         }
 
@@ -2257,78 +2323,73 @@ impl Inner {
             _ => None,
         };
         let mut explicit_attempt_id = None;
-        let explicit_deliver: Option<crate::lifecycle::reply_deliver::ReplyDeliver> =
-            if reply_mode == actr_protocol::ReplyMode::Explicit {
-                match reply_sink {
-                    Some(sink) => {
-                        // RFC-0323: plumb the caller deadline (arrival +
-                        // `envelope.timeout_ms`) onto the context so the
-                        // generated EXPLICIT arm builds `Reply<T>` with a
-                        // real deadline instead of `None`. `timeout_ms == 0`
-                        // means "no timeout" → `None` (a TELL or an
-                        // unbounded call). The wall-clock read lives in the
-                        // exempt dedup module — this deadline is a
-                        // caller-side bound, not a tokio-await deadline.
-                        let reply_deadline =
-                            crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms);
-                        let rtc_route: RtcResponseRoute = self.rtc_manager.clone();
-                        let attempt_id = self.outstanding_replies.allocate_attempt_id();
-                        explicit_attempt_id = Some(attempt_id);
-                        let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
-                            self.websocket_gate.clone(),
-                            rtc_route,
-                            self.dedup_state.clone(),
-                            self.outstanding_replies.clone(),
+        let explicit_deliver: Option<crate::lifecycle::reply_deliver::ReplyDeliver> = if reply_mode
+            == actr_protocol::ReplyMode::Explicit
+        {
+            match reply_sink {
+                Some(sink) => {
+                    // RFC-0323 exposes an EXPLICIT reply deadline on the
+                    // synchronous reply clock. Scoped Actor calls use the
+                    // remaining request budget. Otherwise, zero timeout means
+                    // the envelope has no reply deadline.
+                    let reply_deadline = match egress_deadline {
+                        Some(_) => scope.as_ref().map(|scope| {
+                            crate::lifecycle::dedup::scoped_reply_deadline(scope.deadline())
+                        }),
+                        None => crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms),
+                    };
+                    let rtc_route: RtcResponseRoute = self.rtc_manager.clone();
+                    let attempt_id = self.outstanding_replies.allocate_attempt_id();
+                    explicit_attempt_id = Some(attempt_id);
+                    let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
+                        self.websocket_gate.clone(),
+                        rtc_route,
+                        self.dedup_state.clone(),
+                        self.outstanding_replies.clone(),
+                        attempt_id,
+                        dedup_key.clone(),
+                        envelope.traceparent.clone(),
+                        envelope.tracestate.clone(),
+                        sink,
+                        expects_response,
+                    );
+                    // Start every admission unclaimed. Component dispatchers
+                    // return a reserved deferred marker only after selecting
+                    // an EXPLICIT route; ordinary zero-byte return payloads
+                    // must still use the normal return-byte fallback.
+                    let reply_claimed =
+                        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    // Register the exact deliver for this admission. The
+                    // TTL sweep uses its first-write-wins gate, and all
+                    // asynchronous completion uses the attempt ID so an
+                    // old same-ID reply cannot release or complete a retry.
+                    self.outstanding_replies
+                        .register_with_deliver(
+                            dedup_key.clone(),
                             attempt_id,
-                            envelope.request_id.clone(),
-                            envelope.route_key.clone(),
-                            envelope.traceparent.clone(),
-                            envelope.tracestate.clone(),
-                            sink,
-                            expects_response,
-                        );
-                        // Start every admission unclaimed. Component dispatchers
-                        // return a reserved deferred marker only after selecting
-                        // an EXPLICIT route; ordinary zero-byte return payloads
-                        // must still use the normal return-byte fallback.
-                        let reply_claimed =
-                            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-                        // Register the exact deliver for this admission. The
-                        // TTL sweep uses its first-write-wins gate, and all
-                        // asynchronous completion uses the attempt ID so an
-                        // old same-ID reply cannot release or complete a retry.
-                        self.outstanding_replies
-                            .register_with_deliver(
-                                &envelope.request_id,
-                                attempt_id,
-                                deliver.clone(),
-                                reply_deadline,
-                            )
-                            .await;
-                        // Pump-side clone: lets `wrap_outcome` route a
-                        // handler-Err through the same first-write-wins
-                        // `deliver` as a spawned `Reply::send` / `Drop`.
-                        let pump_deliver = deliver.clone();
-                        ctx.set_explicit_reply(
-                            std::sync::Arc::new(deliver),
-                            expects_response,
+                            deliver.clone(),
                             reply_deadline,
-                            reply_claimed,
-                        );
-                        Some(pump_deliver)
-                    }
-                    None => None,
+                        )
+                        .await;
+                    // Pump-side clone: lets `wrap_outcome` route a
+                    // handler-Err through the same first-write-wins
+                    // `deliver` as a spawned `Reply::send` / `Drop`.
+                    let pump_deliver = deliver.clone();
+                    ctx.set_explicit_reply(
+                        std::sync::Arc::new(deliver),
+                        expects_response,
+                        reply_deadline,
+                        reply_claimed,
+                    );
+                    Some(pump_deliver)
                 }
-            } else {
-                None
-            };
+                None => None,
+            }
+        } else {
+            None
+        };
 
         // 2. Dispatch
-        let dispatch_ctx = crate::workload::InvocationContext {
-            self_id: actor_id.clone(),
-            caller_id: caller_id.cloned(),
-            request_id: envelope.request_id.clone(),
-        };
         let ctx_for_executor = ctx.clone();
         let call_executor = lifecycle_host_abi(ctx_for_executor, self.workload_dispatch.clone());
 
@@ -2370,7 +2431,7 @@ impl Inner {
                 (Ok(_), true) => Ok(Bytes::new()),
                 _ => result.clone(),
             };
-            dedup_state.lock().await.complete(&request_id, cached);
+            dedup_state.lock().await.complete(&dedup_key, cached);
             result
         };
 

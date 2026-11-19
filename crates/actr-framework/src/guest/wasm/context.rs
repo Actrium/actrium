@@ -348,6 +348,30 @@ impl Context for WasmContext {
             .map_err(wit_actr_error_to_proto)
     }
 
+    async fn call_dependency(
+        &self,
+        alias: &str,
+        route: &str,
+        payload: Bytes,
+    ) -> ActorResult<Bytes> {
+        wit_host::call_dependency(
+            self.ctx_token,
+            alias.to_owned(),
+            route.to_owned(),
+            payload.to_vec(),
+        )
+        .await
+        .map(Bytes::from)
+        .map_err(wit_actr_error_to_proto)
+    }
+
+    async fn https_request(&self, alias: &str, body: Bytes) -> ActorResult<Bytes> {
+        wit_host::https_request(self.ctx_token, alias.to_owned(), body.to_vec())
+            .await
+            .map(Bytes::from)
+            .map_err(wit_actr_error_to_proto)
+    }
+
     async fn call_raw(
         &self,
         target: &ActrId,

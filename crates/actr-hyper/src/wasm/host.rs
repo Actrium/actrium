@@ -79,6 +79,8 @@ fn build_engine(limits: &WasmRuntimeLimits) -> WasmResult<Engine> {
     // We pair it with explicit component-model flags to be self-documenting.
     config.wasm_component_model(true);
     config.wasm_component_model_async(true);
+    config.wasm_component_model_threading(false);
+    config.wasm_shared_everything_threads(false);
     // Explicitly gate the concurrency surface (`run_concurrent`) on. Defaults
     // to true on wasmtime 46; pinned here so a future default flip can never
     // silently turn the V2 concurrent runner into a runtime panic.
@@ -122,6 +124,8 @@ fn build_engine(limits: &WasmRuntimeLimits) -> WasmResult<Engine> {
 /// - issue #346 per-store resource limits (memory/table/instance caps).
 pub(crate) struct HostState {
     wasi: WasiCtx,
+    pub(super) egress: Option<Arc<crate::egress::EgressBroker>>,
+    egress_token: Option<u64>,
     isolate_wasi_runtime: bool,
     table: ResourceTable,
     /// Per-invocation table keyed by `ctx-token`, used by the V2 (0.6.0
@@ -354,6 +358,8 @@ impl HostState {
     pub(crate) fn new(limits: &WasmRuntimeLimits) -> Self {
         Self {
             wasi: WasiCtxBuilder::new().inherit_stdio().build(),
+            egress: None,
+            egress_token: None,
             isolate_wasi_runtime: false,
             table: ResourceTable::new(),
             invocations: HashMap::new(),
@@ -362,6 +368,40 @@ impl HostState {
             next_token: 1,
             limits: StoreResourceLimiter::new(limits),
         }
+    }
+
+    pub(super) fn install_egress(&mut self, egress: Option<Arc<crate::egress::EgressBroker>>) {
+        if egress.is_some() {
+            self.wasi = WasiCtxBuilder::new()
+                .allow_tcp(false)
+                .allow_udp(false)
+                .allow_ip_name_lookup(false)
+                .build();
+        }
+        self.egress = egress;
+    }
+
+    pub(super) fn set_egress_token(&mut self, token: Option<u64>) {
+        self.egress_token = token;
+    }
+
+    pub(super) fn egress_invocation(
+        &self,
+        token: u64,
+    ) -> Option<(
+        Arc<crate::egress::EgressBroker>,
+        InvocationContext,
+        HostAbiFn,
+    )> {
+        if self.egress_token != Some(token) {
+            return None;
+        }
+        let entry = self.invocations.get(&token)?;
+        Some((
+            self.egress.clone()?,
+            entry.ctx.clone(),
+            entry.host_abi.clone(),
+        ))
     }
 
     pub(super) fn set_wasi_runtime_isolation(&mut self, enabled: bool) {
@@ -549,11 +589,18 @@ impl HostState {
         } else {
             host_abi
         };
-        let token = self.next_token;
-        self.next_token = self.next_token.wrapping_add(1);
-        if self.next_token == 0 {
-            self.next_token = 1;
-        }
+        let token = if self.egress.is_some() {
+            loop {
+                let candidate = uuid::Uuid::new_v4().as_u64_pair().1;
+                if !self.invocations.contains_key(&candidate) {
+                    break candidate;
+                }
+            }
+        } else {
+            let token = self.next_token;
+            self.next_token = self.next_token.wrapping_add(1).max(1);
+            token
+        };
         let reply_claimed = reply_claimed.or_else(|| {
             reply_deliver
                 .as_ref()
@@ -587,9 +634,31 @@ impl HostState {
             .get(&token)
             .copied()
             .unwrap_or(token);
-        self.invocations
-            .get(&token)
-            .map(|e| Arc::clone(&e.host_abi))
+        let bridge = self.invocations.get(&token)?.host_abi.clone();
+        if self.egress.is_none() {
+            return Some(bridge);
+        }
+        Some(Arc::new(move |operation| {
+            use crate::workload::{HostOperation, HostOperationResult};
+            if matches!(
+                operation,
+                HostOperation::Call(_)
+                    | HostOperation::CallRaw(_)
+                    | HostOperation::ScopedActorCall { .. }
+                    | HostOperation::Tell(_)
+                    | HostOperation::Discover(_)
+                    | HostOperation::RegisterStream(_)
+                    | HostOperation::SendDataChunk(_)
+            ) {
+                Box::pin(async {
+                    HostOperationResult::Error(actr_protocol::ActrError::PermissionDenied(
+                        "this Service must use scoped egress".into(),
+                    ))
+                })
+            } else {
+                bridge(operation)
+            }
+        }))
     }
 
     pub(crate) fn invocation_exists(&self, token: u64) -> bool {
@@ -685,6 +754,9 @@ impl HostState {
     /// Retire the invocation registered for `token` once its guest call has
     /// completed (success or business error). No-op if already gone.
     pub(crate) fn remove_invocation(&mut self, token: u64) {
+        if self.egress_token == Some(token) {
+            self.egress_token = None;
+        }
         self.invocations.remove(&token);
     }
 
@@ -699,6 +771,9 @@ impl HostState {
     /// a successful EXPLICIT dispatch whose claimed reply is still pending.
     pub(crate) fn finish_invocation(&mut self, token: u64, retain_for_reply: bool) {
         let token = self.effective_invocation_token(token);
+        if self.egress_token == Some(token) {
+            self.egress_token = None;
+        }
         let should_remove = match self.invocations.get_mut(&token) {
             Some(entry) => {
                 entry.dispatch_finished = true;
@@ -809,6 +884,7 @@ impl HostState {
     /// trap poisons the store: the whole in-flight set is dead, so the
     /// rebuilt instance starts clean.
     pub(crate) fn clear_invocations(&mut self) {
+        self.egress_token = None;
         self.invocations.clear();
         self.stream_context_tokens.clear();
         self.stream_token_aliases.clear();
@@ -936,9 +1012,18 @@ impl WasmHost {
     /// Builds a fresh [`Linker`] per instance (cheap) inside the V2
     /// instantiation helper, registers WASI p2 as well as the generated
     /// `actr:workload/host@0.6.0` linker, and runs `Component::instantiate_async`.
+    #[cfg(any(test, feature = "test-utils"))]
     pub(crate) async fn instantiate(
         &self,
         wasi_data: Option<WasiDataGrant<'_>>,
+    ) -> WasmResult<WasmWorkloadV2> {
+        self.instantiate_scoped(wasi_data, None).await
+    }
+
+    pub(crate) async fn instantiate_scoped(
+        &self,
+        wasi_data: Option<WasiDataGrant<'_>>,
+        egress: Option<Arc<crate::egress::EgressBroker>>,
     ) -> WasmResult<WasmWorkloadV2> {
         probe_world(&self.component, &self.engine)?;
         WasmWorkloadV2::instantiate(
@@ -948,6 +1033,7 @@ impl WasmHost {
             Arc::clone(&self.epoch_ticker),
             self.uses_explicit_reply_boundary,
             wasi_data,
+            egress,
         )
         .await
     }

@@ -22,7 +22,7 @@ use actr_protocol::{ActrError, ActrId};
 use bytes::Bytes;
 use tokio::sync::Mutex;
 
-use crate::lifecycle::dedup::DedupState;
+use crate::lifecycle::dedup::{DedupKey, DedupState};
 use crate::lifecycle::outstanding_replies::{OutstandingReplies, ReplyAttemptId};
 use crate::transport::HostTransport;
 
@@ -56,8 +56,7 @@ struct ReplyShared {
     dedup_state: Arc<Mutex<DedupState>>,
     outstanding_replies: Weak<OutstandingReplies>,
     attempt_id: ReplyAttemptId,
-    request_id: String,
-    route_key: String,
+    dedup_key: DedupKey,
     traceparent: Option<String>,
     tracestate: Option<String>,
     emit_response: bool,
@@ -102,8 +101,7 @@ impl ReplyDeliver {
         dedup_state: Arc<Mutex<DedupState>>,
         outstanding_replies: Arc<OutstandingReplies>,
         attempt_id: ReplyAttemptId,
-        request_id: String,
-        route_key: String,
+        dedup_key: DedupKey,
         traceparent: Option<String>,
         tracestate: Option<String>,
         sink: ReplySink,
@@ -138,8 +136,7 @@ impl ReplyDeliver {
                     dedup_state,
                     outstanding_replies: Arc::downgrade(&outstanding_replies),
                     attempt_id,
-                    request_id,
-                    route_key,
+                    dedup_key,
                     traceparent,
                     tracestate,
                     emit_response,
@@ -163,7 +160,7 @@ impl ReplyDeliver {
     pub(crate) fn try_deliver_timeout(&self) -> bool {
         if self.try_deliver(
             ReplyOutcome {
-                request_id: self.shared.request_id.clone(),
+                request_id: self.shared.dedup_key.request_id.clone(),
                 result: Err(ActrError::TimedOut),
                 emit_response: self.shared.emit_response,
             },
@@ -203,7 +200,7 @@ impl ReplyDeliver {
             .is_err()
         {
             tracing::debug!(
-                request_id = %self.shared.request_id,
+                request_id = %self.shared.dedup_key.request_id,
                 "explicit reply: late deliver degraded to no-op (RFC §5 first-write-wins)"
             );
             return false;
@@ -236,7 +233,7 @@ impl ReplyDeliver {
                     .ok();
                 self.delivered.store(false, Ordering::Release);
                 tracing::warn!(
-                    request_id = %self.shared.request_id,
+                    request_id = %self.shared.dedup_key.request_id,
                     "Deliver::deliver has no Tokio runtime; reply remains pending \
                      for the next TTL sweep"
                 );
@@ -266,7 +263,7 @@ impl ReplyDeliver {
                 .dedup_state
                 .lock()
                 .await
-                .complete(&self.shared.request_id, cached);
+                .complete(&self.shared.dedup_key, cached);
         }
 
         // Release the outstanding-reply registry slot (RFC-0323 §5/§7 gauge).
@@ -293,8 +290,8 @@ impl ReplyDeliver {
                 self.shared.ws_gate.clone(),
                 self.shared.rtc_route.clone(),
                 caller,
-                self.shared.request_id.clone(),
-                self.shared.route_key.clone(),
+                self.shared.dedup_key.request_id.clone(),
+                self.shared.dedup_key.route_key.clone(),
                 self.shared.traceparent.clone(),
                 self.shared.tracestate.clone(),
                 emit_response,
@@ -306,8 +303,8 @@ impl ReplyDeliver {
             // In-proc path
             crate::lifecycle::node::inproc_send_reply(
                 response_tx.clone(),
-                self.shared.route_key.clone(),
-                self.shared.request_id.clone(),
+                self.shared.dedup_key.route_key.clone(),
+                self.shared.dedup_key.request_id.clone(),
                 self.shared.traceparent.clone(),
                 self.shared.tracestate.clone(),
                 emit_response,

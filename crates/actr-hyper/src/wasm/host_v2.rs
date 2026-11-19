@@ -149,6 +149,49 @@ async fn run_host_operation(
 }
 
 impl HostWithStore<HostState> for HostState {
+    async fn call_dependency(
+        accessor: &Accessor<HostState, Self>,
+        ctx_token: u64,
+        alias: String,
+        route: String,
+        payload: Vec<u8>,
+    ) -> wasmtime::Result<Result<Vec<u8>, WitActrError>> {
+        let Some((broker, invocation, bridge)) =
+            accessor.with(|mut a| a.get().egress_invocation(ctx_token))
+        else {
+            return Ok(Err(actr_error_to_wit(
+                actr_protocol::ActrError::PermissionDenied(
+                    "no scoped egress for this invocation".into(),
+                ),
+            )));
+        };
+        let result = broker
+            .actor_call(&invocation, bridge, &alias, route, payload)
+            .await;
+        tracing::info!(succeeded = result.is_ok(), "scoped Actor egress result");
+        Ok(result.map_err(actr_error_to_wit))
+    }
+
+    async fn https_request(
+        accessor: &Accessor<HostState, Self>,
+        ctx_token: u64,
+        alias: String,
+        body: Vec<u8>,
+    ) -> wasmtime::Result<Result<Vec<u8>, WitActrError>> {
+        let Some((broker, invocation, _)) =
+            accessor.with(|mut a| a.get().egress_invocation(ctx_token))
+        else {
+            return Ok(Err(actr_error_to_wit(
+                actr_protocol::ActrError::PermissionDenied(
+                    "no scoped egress for this invocation".into(),
+                ),
+            )));
+        };
+        let result = broker.https_request(&invocation, &alias, body).await;
+        tracing::info!(succeeded = result.is_ok(), "scoped HTTPS egress result");
+        Ok(result.map_err(actr_error_to_wit))
+    }
+
     async fn call(
         accessor: &Accessor<HostState, Self>,
         ctx_token: u64,
@@ -368,11 +411,14 @@ impl HostWithStore<HostState> for HostState {
     }
 
     async fn log_message(
-        _accessor: &Accessor<HostState, Self>,
+        accessor: &Accessor<HostState, Self>,
         _ctx_token: u64,
         level: String,
         message: String,
     ) -> wasmtime::Result<()> {
+        if accessor.with(|mut a| a.get().egress.is_some()) {
+            return Ok(());
+        }
         match level.as_str() {
             // `message` is guest-authored (the WASM guest calls the host `log`
             // import with a string it chose); relaying it is a separate
@@ -814,8 +860,8 @@ async fn instantiate_parts_v2(
     limits: &WasmRuntimeLimits,
     filesystem: &WasiFilesystemCtx,
     deadline: tokio::time::Instant,
-    _instantiate_permit: QuotaPermit,
     wasi_runtime: Option<Handle>,
+    egress: Option<Arc<crate::egress::EgressBroker>>,
 ) -> WasmResult<(Store<HostState>, ActrWorkloadGuestV2)> {
     let mut linker: Linker<HostState> = Linker::new(engine);
     wasmtime_wasi::p2::add_to_linker_async(&mut linker).map_err(|e| {
@@ -834,6 +880,7 @@ async fn instantiate_parts_v2(
 
     let mut state = HostState::new(limits);
     state.set_wasi_runtime_isolation(wasi_runtime.is_some());
+    state.install_egress(egress);
     state.set_wasi_filesystem(filesystem.clone());
     let mut store = Store::new(engine, state);
     // issue #346: install the per-store limiter and initial fuel/epoch budget.
@@ -890,6 +937,7 @@ pub(crate) struct WasmWorkloadV2 {
     limits: WasmRuntimeLimits,
     store: Option<Store<HostState>>,
     wasi_filesystem: WasiFilesystemCtx,
+    egress: Option<Arc<crate::egress::EgressBroker>>,
     wasi_runtime: Option<Handle>,
     bindings: ActrWorkloadGuestV2,
     _epoch_ticker: Arc<EpochTicker>,
@@ -920,6 +968,7 @@ impl WasmWorkloadV2 {
         epoch_ticker: Arc<EpochTicker>,
         uses_explicit_reply_boundary: bool,
         wasi_data: Option<WasiDataGrant<'_>>,
+        egress: Option<Arc<crate::egress::EgressBroker>>,
     ) -> WasmResult<Self> {
         let timeout = limits.invocation_timeout;
         let deadline = tokio::time::Instant::now() + timeout;
@@ -952,15 +1001,15 @@ impl WasmWorkloadV2 {
         }
         let wasi_runtime = wasi_data.map(|_| wasi_guest_runtime()).transpose()?;
         let store_permit = acquire_store(limits)?;
-        let permit = acquire_instantiate(limits)?;
+        let _instantiate_permit = acquire_instantiate(limits)?;
         let (store, bindings) = instantiate_parts_v2(
             engine,
             component,
             limits,
             &wasi_filesystem,
             deadline,
-            permit,
             wasi_runtime.clone(),
+            egress.clone(),
         )
         .await?;
         tracing::info!("wasm Component instantiated (v2 async world)");
@@ -970,6 +1019,7 @@ impl WasmWorkloadV2 {
             limits: *limits,
             store: Some(store),
             wasi_filesystem,
+            egress,
             wasi_runtime,
             bindings,
             _epoch_ticker: epoch_ticker,
@@ -1031,7 +1081,7 @@ impl WasmWorkloadV2 {
              guest in-memory state is discarded (lifecycle/queue not replayed)"
         );
         // Keep the poisoned Store intact when quota denial must be retried.
-        let permit = acquire_instantiate(&self.limits)?;
+        let _instantiate_permit = acquire_instantiate(&self.limits)?;
         let deadline = tokio::time::Instant::now() + self.limits.invocation_timeout;
         drop(self.store.take());
         match instantiate_parts_v2(
@@ -1040,8 +1090,8 @@ impl WasmWorkloadV2 {
             &self.limits,
             &self.wasi_filesystem,
             deadline,
-            permit,
             self.wasi_runtime.clone(),
+            self.egress.clone(),
         )
         .await
         {
@@ -1102,8 +1152,12 @@ impl WasmWorkloadV2 {
         ctx: InvocationContext,
         host_abi: &HostAbiFn,
     ) -> WasmResult<Vec<u8>> {
-        self.handle_with_reply(request_bytes, ctx, host_abi, None, true, None, None)
+        self.handle_with_reply(request_bytes, ctx, host_abi, None, true, None, None, None)
             .await
+    }
+
+    pub(crate) fn egress_broker(&self) -> Option<&Arc<crate::egress::EgressBroker>> {
+        self.egress.as_ref()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1116,6 +1170,7 @@ impl WasmWorkloadV2 {
         expects_response: bool,
         reply_claimed: Option<Arc<std::sync::atomic::AtomicBool>>,
         reply_deadline: Option<tokio::time::Instant>,
+        scope: Option<Arc<crate::request_scope::RequestScope>>,
     ) -> WasmResult<Vec<u8>> {
         self.ensure_instance().await?;
 
@@ -1124,6 +1179,11 @@ impl WasmWorkloadV2 {
                 "host failed to decode RpcEnvelope before dispatch: {e}"
             ))
         })?;
+        if let Some(broker) = &self.egress {
+            broker
+                .authorize_inbound(&ctx, &envelope.route_key)
+                .map_err(|error| WasmError::ExecutionFailed(error.to_string()))?;
+        }
         // #251 request-path diagnostics: record that the envelope crossed
         // from the host into the guest. Info-level so the default
         // RUST_LOG=info of the polyglot e2e captures it in server.log.
@@ -1164,10 +1224,16 @@ impl WasmWorkloadV2 {
             .as_mut()
             .expect("serviceable wasm instance must have a Store")
             .run_concurrent(async move |accessor| {
-                bindings
-                    .actr_workload_workload()
-                    .call_dispatch(accessor, wit_envelope, inv)
-                    .await
+                run_serial_export(accessor, token, async {
+                    if scope.as_ref().is_some_and(|scope| !scope.is_active()) {
+                        return Ok(Err(WitActrError::TimedOut));
+                    }
+                    bindings
+                        .actr_workload_workload()
+                        .call_dispatch(accessor, wit_envelope, inv)
+                        .await
+                })
+                .await
             });
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
@@ -1304,10 +1370,14 @@ impl WasmWorkloadV2 {
             .as_mut()
             .expect("serviceable wasm instance must have a Store")
             .run_concurrent(async move |accessor| {
-                bindings
-                    .actr_workload_workload()
-                    .call_on_start(accessor, inv)
-                    .await
+                run_serial_export(
+                    accessor,
+                    token,
+                    bindings
+                        .actr_workload_workload()
+                        .call_on_start(accessor, inv),
+                )
+                .await
             });
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
@@ -1344,10 +1414,14 @@ impl WasmWorkloadV2 {
             .as_mut()
             .expect("serviceable wasm instance must have a Store")
             .run_concurrent(async move |accessor| {
-                bindings
-                    .actr_workload_workload()
-                    .call_on_ready(accessor, inv)
-                    .await
+                run_serial_export(
+                    accessor,
+                    token,
+                    bindings
+                        .actr_workload_workload()
+                        .call_on_ready(accessor, inv),
+                )
+                .await
             });
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
@@ -1384,10 +1458,14 @@ impl WasmWorkloadV2 {
             .as_mut()
             .expect("serviceable wasm instance must have a Store")
             .run_concurrent(async move |accessor| {
-                bindings
-                    .actr_workload_workload()
-                    .call_on_stop(accessor, inv)
-                    .await
+                run_serial_export(
+                    accessor,
+                    token,
+                    bindings
+                        .actr_workload_workload()
+                        .call_on_stop(accessor, inv),
+                )
+                .await
             });
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
@@ -1465,10 +1543,14 @@ impl WasmWorkloadV2 {
             .as_mut()
             .expect("serviceable wasm instance must have a Store")
             .run_concurrent(async move |accessor| {
-                bindings
-                    .actr_workload_workload()
-                    .call_on_data_chunk(accessor, wit_chunk, wit_sender, inv)
-                    .await
+                run_serial_export(
+                    accessor,
+                    token,
+                    bindings
+                        .actr_workload_workload()
+                        .call_on_data_chunk(accessor, wit_chunk, wit_sender, inv),
+                )
+                .await
             });
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
@@ -1533,7 +1615,12 @@ impl WasmWorkloadV2 {
             .as_mut()
             .expect("serviceable wasm instance must have a Store")
             .run_concurrent(async move |accessor| {
-                run_hook_region(accessor, bindings, event, inv).await
+                run_serial_export(
+                    accessor,
+                    token,
+                    run_hook_region(accessor, bindings, event, inv),
+                )
+                .await
             });
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
@@ -2186,8 +2273,7 @@ async fn resident_region(
                         let expects_response = ctx.expects_response();
                         let reply_enabled = reply_deliver.is_some();
                         let reply_claimed = ctx.reply_claimed_marker();
-                        let reply_deadline =
-                            ctx.reply_deadline().map(tokio::time::Instant::from_std);
+                        let reply_deadline = ctx.wasm_reply_deadline();
                         let permit = match acquire_invocation(&limits) {
                             Ok(permit) => permit,
                             Err(error) => {
@@ -2202,6 +2288,13 @@ async fn resident_region(
                                 continue;
                             }
                         };
+                        let admission = accessor.with(|mut a| {
+                            a.get().egress.as_ref().map(|broker| broker.authorize_inbound(&invocation, &envelope.route_key))
+                        });
+                        if let Some(Err(error)) = admission {
+                            let _ = reply.send(Err(error));
+                            continue;
+                        }
                         let wit_env = rpc_envelope_to_wit(&envelope);
                         // Token allocation moves inside the region: the store is
                         // owned by the region, so we go through the accessor (the
@@ -2722,6 +2815,27 @@ fn clamp_region_budget(
 
 fn fuel_cap(fuel_per_invocation: u64, live: usize) -> u64 {
     fuel_per_invocation.saturating_mul(u64::try_from(live).unwrap_or(u64::MAX))
+}
+
+/// Grant egress only while one export is running. Deferred guest tasks can
+/// finish replies with their own tokens before the next export gains egress.
+async fn run_serial_export<T>(
+    accessor: &Accessor<HostState>,
+    token: u64,
+    call: impl std::future::Future<Output = wasmtime::Result<T>>,
+) -> wasmtime::Result<T> {
+    if !accessor.with(|mut access| access.get().egress.is_some()) {
+        return call.await;
+    }
+
+    // Wasmtime counts guest tasks even after they return their result. Guest
+    // threading is disabled on this engine so spawned threads cannot outlive
+    // a tracked task and overlap the next authorized export.
+    std::future::poll_fn(|cx| accessor.poll_no_interesting_tasks(cx)).await;
+    accessor.with(|mut access| access.get().set_egress_token(Some(token)));
+    let result = call.await;
+    accessor.with(|mut access| access.get().set_egress_token(None));
+    result
 }
 
 /// Region-internal lifecycle-hook call (shared by the per-region serial methods

@@ -365,6 +365,12 @@ timer_inventory! {
         success: "guest entry returns", interrupt: "host cancellation",
         expiry: "interrupt and poison store", reset: "each guest entry", external: false
     },
+    WASM_EGRESS_DEADLINE => {
+        id: "wasm.egress_deadline", owner: "egress_broker", category: FailureDeadline,
+        duration: "earlier of permit expiry and the 5s operation cap", arm: "authorized egress starts",
+        success: "egress completes with an active grant", interrupt: "permit revocation",
+        expiry: "cancel the operation and deny its result", reset: "each authorized operation", external: false
+    },
     WASM_RESIDENT_DISPATCH => {
         id: "wasm.resident_dispatch", owner: "wasm_host_v2", category: FailureDeadline,
         duration: "DispatchConcurrency.dispatch_timeout", arm: "resident-region dispatch starts",

@@ -39,6 +39,10 @@ pub enum HostOperation {
     Discover(HostDiscoverV1),
     ResolveDependency(HostResolveDependencyV1),
     CallRaw(HostCallRawV1),
+    ScopedActorCall {
+        request: HostCallRawV1,
+        deadline: tokio::time::Instant,
+    },
     Reply(Vec<u8>),
     ReplyError(ActrError),
     RegisterStream(HostRegisterStreamV1),
@@ -729,7 +733,7 @@ impl Workload {
                     let reply_deliver = ctx.reply_deliver();
                     let expects_response = ctx.expects_response();
                     let reply_claimed = ctx.reply_claimed_marker();
-                    let reply_deadline = ctx.reply_deadline().map(tokio::time::Instant::from_std);
+                    let reply_deadline = ctx.wasm_reply_deadline();
                     workload
                         .handle_with_reply(
                             &request_bytes,
@@ -739,6 +743,7 @@ impl Workload {
                             expects_response,
                             reply_claimed,
                             reply_deadline,
+                            ctx.scope,
                         )
                         .await
                         .map(Bytes::from)

@@ -12,8 +12,8 @@ use crate::{
 /// A v2 Actor Package or an unversioned package used by the original loader.
 #[derive(Debug, Clone)]
 pub enum RuntimePackageManifest {
-    V2(ActorPackageManifest),
-    Legacy(PackageManifest),
+    V2(Box<ActorPackageManifest>),
+    Legacy(Box<PackageManifest>),
 }
 
 impl RuntimePackageManifest {
@@ -53,7 +53,7 @@ pub type VerifiedRuntimePackage = VerifiedPackage<RuntimePackageManifest>;
 impl From<VerifiedPackage> for VerifiedRuntimePackage {
     fn from(verified: VerifiedPackage) -> Self {
         Self {
-            manifest: RuntimePackageManifest::Legacy(verified.manifest),
+            manifest: RuntimePackageManifest::Legacy(Box::new(verified.manifest)),
             manifest_raw: verified.manifest_raw,
             sig_raw: verified.sig_raw,
             signing_public_key: verified.signing_public_key,
@@ -95,9 +95,11 @@ fn is_v2_manifest(source: &str) -> Result<bool, PackError> {
 pub fn read_runtime_manifest(bytes: &[u8]) -> Result<RuntimePackageManifest, PackError> {
     let source = read_manifest_raw(bytes)?;
     if is_v2_manifest(&source)? {
-        ActorPackageManifest::from_toml(&source).map(RuntimePackageManifest::V2)
+        ActorPackageManifest::from_toml(&source)
+            .map(|manifest| RuntimePackageManifest::V2(Box::new(manifest)))
     } else {
-        PackageManifest::from_toml(&source).map(RuntimePackageManifest::Legacy)
+        PackageManifest::from_toml(&source)
+            .map(|manifest| RuntimePackageManifest::Legacy(Box::new(manifest)))
     }
 }
 
@@ -110,7 +112,7 @@ pub fn verify_runtime_package_bounded(
 ) -> Result<VerifiedRuntimePackage, PackError> {
     if is_v2_manifest(&read_manifest_raw(bytes)?)? {
         let verified = verify_actor_package_bounded(bytes, key, max_payload_bytes)?;
-        let manifest = RuntimePackageManifest::V2(verified.manifest);
+        let manifest = RuntimePackageManifest::V2(Box::new(verified.manifest));
         ValidatedActorIdentity::from_actor_type(manifest.actor_type())
             .map_err(|error| PackError::InvalidPackage(error.to_string()))?;
         Ok(VerifiedRuntimePackage {

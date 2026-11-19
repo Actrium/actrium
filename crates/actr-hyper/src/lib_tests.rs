@@ -1230,7 +1230,8 @@ async fn bootstrap_package_uses_manifest_auth() {
 
     // Verify no legacy PSK keys are written to ActorStore.
     let namespace =
-        storage_namespace_for(&RuntimePackageManifest::Legacy(manifest.manifest)).unwrap();
+        storage_namespace_for(&RuntimePackageManifest::Legacy(Box::new(manifest.manifest)))
+            .unwrap();
     let root = SecureStorageRoot::new(hyper.config().storage_root())
         .await
         .unwrap();
@@ -1329,7 +1330,8 @@ async fn bootstrap_issuer_rejection_creates_no_database() {
 
     // The would-be database path must not exist after a rejected registration.
     let namespace =
-        storage_namespace_for(&RuntimePackageManifest::Legacy(manifest.manifest)).unwrap();
+        storage_namespace_for(&RuntimePackageManifest::Legacy(Box::new(manifest.manifest)))
+            .unwrap();
     let root = SecureStorageRoot::new(hyper.config().storage_root())
         .await
         .unwrap();

@@ -317,6 +317,15 @@ interface types {
 interface host {
     use types.{actr-id, actr-type, actr-error, data-chunk, dest, payload-type};
 
+    // Scoped calls are resolved and authorized by the Service Host.
+    call-dependency: async func(
+        ctx-token: u64, alias: string, route-key: string, payload: list<u8>,
+    ) -> result<list<u8>, actr-error>;
+    https-request: async func(
+        ctx-token: u64, alias: string, body: list<u8>,
+    ) -> result<list<u8>, actr-error>;
+
+
     // Typed-routed call: host forwards to the destination on the requested
     // payload-type lane, returning the encoded response payload.
     call: async func(

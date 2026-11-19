@@ -240,6 +240,16 @@ impl RuntimeContext {
         self.reply_claimed.clone()
     }
 
+    #[cfg(feature = "wasm-engine")]
+    pub(crate) fn wasm_reply_deadline(&self) -> Option<tokio::time::Instant> {
+        let deadline = self.reply_deadline?;
+        if let Some(scope) = &self.scope {
+            return Some(scope.deadline());
+        }
+        let now = tokio::time::Instant::now();
+        Some(now + crate::lifecycle::dedup::remaining_reply_budget(deadline))
+    }
+
     #[cfg(test)]
     pub(crate) fn data_chunk_registry_for_test(&self) -> Arc<DataChunkRegistry> {
         self.data_chunk_registry.clone()
@@ -402,6 +412,19 @@ impl RuntimeContext {
         // Sender-side argument validation and the single absolute deadline
         // for this operation. Receivers stay permissive.
         let deadline = crate::transport::RpcDeadline::from_timeout_ms(timeout_ms)?;
+        self.call_raw_with_deadline(target, route_key, payload_type, payload, deadline, false)
+            .await
+    }
+
+    pub(crate) async fn call_raw_with_deadline(
+        &self,
+        target: &Dest,
+        route_key: String,
+        payload_type: PayloadType,
+        payload: Bytes,
+        deadline: crate::transport::RpcDeadline,
+        propagate_deadline: bool,
+    ) -> ActorResult<Bytes> {
         crate::outbound::ensure_rpc_payload_type(payload_type)?;
 
         // Per-hop cancellation scope (#390). A context without a scope is a
@@ -425,7 +448,6 @@ impl RuntimeContext {
         #[cfg(feature = "opentelemetry")]
         use crate::wire::webrtc::trace::inject_span_context_to_rpc;
 
-        #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
         let mut envelope = RpcEnvelope {
             route_key,
             payload: Some(payload),
@@ -441,6 +463,9 @@ impl RuntimeContext {
         };
         #[cfg(feature = "opentelemetry")]
         inject_span_context_to_rpc(&tracing::Span::current(), &mut envelope);
+        if propagate_deadline {
+            crate::request_scope::attach_egress_deadline(&mut envelope, scope.deadline())?;
+        }
 
         // In-process hops carry the handoff marker so workload intake can
         // claim the scope (or observe an abandoned root and drop before
