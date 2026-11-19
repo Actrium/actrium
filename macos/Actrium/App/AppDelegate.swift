@@ -112,8 +112,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // Listen for new window requests
         NotificationCenter.default.publisher(for: .openNewWindowWithGroup)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.createNewWindow()
+            .sink { [weak self] notification in
+                guard let transfer = notification.object as? TabGroupWindowTransfer else { return }
+                self?.createWindow(groupTransfer: transfer)
             }
             .store(in: &cancellables)
 
@@ -217,6 +218,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     @objc func createNewWindow() {
+        createWindow()
+    }
+
+    private func createWindow(groupTransfer: TabGroupWindowTransfer? = nil) {
         let viewModel = BrowserViewModel()
         viewModel.historyVM = historyVM
 
@@ -226,13 +231,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             bookmarkVM: bookmarkVM
         )
 
+        if let groupTransfer, !groupTransfer.move(to: viewModel) { return }
+
         windowControllers.append(windowController)
         windowController.showWindow()
         refreshFocusedViewModel()
 
         // Restart restore (15-B B7): rebuild the persisted session into the
         // first window; actr:// instance addresses rebind with the same ActorId.
-        viewModel.restoreSessionIfNeeded()
+        if groupTransfer == nil { viewModel.restoreSessionIfNeeded() }
 
         // Register with DevTools
         DevToolsManager.shared.activeBrowserViewModel = viewModel

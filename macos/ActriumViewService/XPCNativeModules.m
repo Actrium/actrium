@@ -72,6 +72,17 @@ RCT_EXTERN_METHOD(requestGrant:(NSString *)tabId capability:(NSString *)capabili
 
 @end
 
+@interface RCT_EXTERN_MODULE(GuestLocalStorage, NSObject)
+
+RCT_EXTERN_METHOD(perform:(NSString *)tabId
+                  documentId:(NSString *)documentId
+                  operation:(NSString *)operation
+                  inputJSON:(NSString *)inputJSON
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+@end
+
 @interface RCT_EXTERN_MODULE(GuestFileImport, NSObject)
 
 RCT_EXTERN_METHOD(pick:(NSString *)tabId

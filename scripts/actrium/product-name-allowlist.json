@@ -334,7 +334,6 @@
       "actroSourcePath": 2
     },
     "macos/Actrium/Views/Sidebar/TabOutlineView.swift": {
-      "com.actro.tabCrossWindowData": 1,
       "com.actro.tabOutlineItem": 1
     },
     "macos/Actrium/Views/Window/ContentViewController.swift": {

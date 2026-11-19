@@ -1424,6 +1424,9 @@ final class ServiceReactNativeHost {
         if let snapshot = config["capabilitySnapshotJSON"] as? String {
             tabDict["capabilitySnapshotJSON"] = snapshot
         }
+        if let documentId = config["localStorageDocumentId"] as? String {
+            tabDict["localStorageDocumentId"] = documentId
+        }
         if let s = config["leftPanelScript"] as? String { tabDict["leftPanelScript"] = s }
         if let s = config["rightPanelScript"] as? String { tabDict["rightPanelScript"] = s }
         if let s = config["guestScript"] as? String { tabDict["guestScript"] = s }
@@ -1976,6 +1979,9 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     }
     if let capabilitySnapshotJSON = config["capabilitySnapshotJSON"] as? String {
         tabDict["capabilitySnapshotJSON"] = capabilitySnapshotJSON
+    }
+    if let documentId = config["localStorageDocumentId"] as? String {
+        tabDict["localStorageDocumentId"] = documentId
     }
     if let permissions = config["permissions"] as? [String] {
         tabDict["permissions"] = permissions

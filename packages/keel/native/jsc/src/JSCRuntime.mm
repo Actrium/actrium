@@ -18,6 +18,7 @@
  */
 
 #include "JSCRuntime.h"
+#import <Foundation/Foundation.h>
 
 #include <jsi/jsilib.h>
 #include <JavaScriptCore/JavaScript.h>
@@ -31,6 +32,15 @@
 #include <thread>
 
 namespace facebook::jsc {
+
+// Honor JSI's counted UTF-8 contract in the standalone test host, including NULs.
+static JSStringRef countedJSString(const uint8_t *utf8, size_t length) {
+  NSString *string = [[NSString alloc] initWithBytes:utf8 length:length encoding:NSUTF8StringEncoding];
+  if (!string) throw jsi::JSINativeException("Invalid UTF-8 in the JSC test host.");
+  std::vector<unichar> characters(string.length);
+  [string getCharacters:characters.data() range:NSMakeRange(0, string.length)];
+  return JSStringCreateWithCharacters(characters.data(), characters.size());
+}
 
 namespace detail {
 class ArgsConverter;
@@ -632,18 +642,12 @@ JSCRuntime::clonePropNameID(const jsi::Runtime::PointerValue *pv) {
 
 jsi::PropNameID JSCRuntime::createPropNameIDFromAscii(const char *str,
                                                       size_t length) {
-  // For system JSC this must is identical to a string
-  std::string tmp(str, length);
-  JSStringRef strRef = JSStringCreateWithUTF8CString(tmp.c_str());
-  auto res = createPropNameID(strRef);
-  JSStringRelease(strRef);
-  return res;
+  return createPropNameIDFromUtf8(reinterpret_cast<const uint8_t *>(str), length);
 }
 
 jsi::PropNameID JSCRuntime::createPropNameIDFromUtf8(const uint8_t *utf8,
                                                      size_t length) {
-  std::string tmp(reinterpret_cast<const char *>(utf8), length);
-  JSStringRef strRef = JSStringCreateWithUTF8CString(tmp.c_str());
+  JSStringRef strRef = countedJSString(utf8, length);
   auto res = createPropNameID(strRef);
   JSStringRelease(strRef);
   return res;
@@ -707,8 +711,7 @@ jsi::String JSCRuntime::createStringFromAscii(const char *str, size_t length) {
 
 jsi::String JSCRuntime::createStringFromUtf8(const uint8_t *str,
                                              size_t length) {
-  std::string tmp(reinterpret_cast<const char *>(str), length);
-  JSStringRef stringRef = JSStringCreateWithUTF8CString(tmp.c_str());
+  JSStringRef stringRef = countedJSString(str, length);
   auto result = createString(stringRef);
   JSStringRelease(stringRef);
   return result;
