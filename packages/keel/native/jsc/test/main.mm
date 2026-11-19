@@ -93,11 +93,14 @@ int main(int argc, const char *argv[]) {
           "../test/sandbox_test.js", "sandbox_test.js"};
 
       std::string testCode;
+      std::string testDirectory;
       bool found = false;
 
       for (const auto &path : searchPaths) {
         try {
           testCode = readFile(path);
+          const auto slash = path.find_last_of('/');
+          testDirectory = slash == std::string::npos ? "" : path.substr(0, slash + 1);
           found = true;
           std::cout << "Loaded test file: " << path << std::endl;
           break;
@@ -125,9 +128,15 @@ int main(int argc, const char *argv[]) {
       jsi::Value phase2Result =
           runtime->evaluateJavaScript(phase2Buffer, "sandbox_test_phase2.js");
 
+      auto storageStringBuffer = std::make_shared<jsi::StringBuffer>(
+          readFile(testDirectory + "storage_string_test.js"));
+      jsi::Value storageStringResult = runtime->evaluateJavaScript(
+          storageStringBuffer, "storage_string_test.js");
+
       // 7. Check results (the JS test returns true/false)
       bool passed = result.isBool() && result.getBool() &&
-                    phase2Result.isBool() && phase2Result.getBool();
+                    phase2Result.isBool() && phase2Result.getBool() &&
+                    storageStringResult.isBool() && storageStringResult.getBool();
       return passed ? 0 : 1;
 
     } catch (const jsi::JSError &e) {

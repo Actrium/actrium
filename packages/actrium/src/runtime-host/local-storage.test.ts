@@ -119,6 +119,20 @@ test.each([
   expect(() => methods.setItem({ key, value: value + 'a' })).toThrow('value');
 });
 
+test.each(['\ud800', '\udc00'])('storage rejects unpaired UTF-16 surrogates', (surrogate) => {
+  const methods = createHostModuleDispatch(contract, createHostModules({
+    hasServiceCapability: false,
+    callActor: async () => ({ success: false }),
+    writeClipboardText: async () => {},
+    authorizeCapability: async () => {},
+    localStorage: async () => { throw new Error('Invalid input reached storage.'); },
+  }))[moduleId];
+  expect(() => methods.getItem({ key: surrogate })).toThrow('valid Unicode');
+  expect(() => methods.removeItem({ key: surrogate })).toThrow('valid Unicode');
+  expect(() => methods.setItem({ key: surrogate, value: 'value' })).toThrow('valid Unicode');
+  expect(() => methods.setItem({ key: 'key', value: 'prefix' + surrogate })).toThrow('valid Unicode');
+});
+
 test('the v1 CLI and Guest Engine round-trip all three named storage methods', async () => {
   const root = mkdtempSync(join(tmpdir(), 'actrium-local-storage-'));
   let engine: Engine | undefined;

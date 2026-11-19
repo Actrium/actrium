@@ -129,7 +129,9 @@ function utf8ByteLength(value: string): number {
   for (const character of value) {
     const code = character.charCodeAt(0);
     if (character.length === 2) bytes += 4;
-    else if (code < 0x80) bytes += 1;
+    else if (code >= 0xd800 && code <= 0xdfff) {
+      throw new Error('local storage strings must contain valid Unicode');
+    } else if (code < 0x80) bytes += 1;
     else if (code < 0x800) bytes += 2;
     else bytes += 3;
   }

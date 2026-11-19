@@ -1084,6 +1084,10 @@ void *JSCSandboxContext::wrapFunctionForSandbox(jsi::Runtime &rt,
             void *jsResult = self->jsiToJSValue(*hostRt, result);
             NSLog(@"[JSCSandbox] fn_%d: jsiToJSValue completed, returning to Guest", funcId);
             return (__bridge id)jsResult;
+          } catch (const jsi::JSError &e) {
+            JSContext *context = (__bridge JSContext *)self->jsContext_;
+            context.exception = (__bridge JSValue *)self->sandboxRejectionReason(*hostRt, e);
+            return nil;
           } catch (const std::exception &e) {
             os_log_error(OS_LOG_DEFAULT, "[JSCSandbox] fn_%d exception: %{public}s", funcId, e.what());
             return nil;
@@ -1308,6 +1312,9 @@ void *JSCSandboxContext::jsiToJSValueImpl(jsi::Runtime &rt,
     NSString *nsStr = [[NSString alloc] initWithBytes:str.data()
                                             length:str.size()
                                           encoding:NSUTF8StringEncoding];
+    if (!nsStr) {
+      throw jsi::JSError(rt, "Host string cannot be converted losslessly from UTF-8.");
+    }
     return (__bridge void *)[JSValue valueWithObject:nsStr inContext:ctx];
   }
   // Handle Symbols
@@ -1738,8 +1745,12 @@ jsi::Value JSCSandboxContext::jsValueToJSI(jsi::Runtime &rt, void *jsValue,
   }
   if ([value isString]) {
     NSString *str = [value toString];
+    const char *utf8 = [str UTF8String];
+    if (!utf8) {
+      throw jsi::JSError(rt, "Guest string cannot be converted losslessly to UTF-8.");
+    }
     return jsi::String::createFromUtf8(
-        rt, std::string([str UTF8String],
+        rt, std::string(utf8,
                         [str lengthOfBytesUsingEncoding:NSUTF8StringEncoding]));
   }
 
