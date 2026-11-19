@@ -306,11 +306,10 @@ async fn update_realm(
             return fail(Code::Unavailable, "package release receipt missing");
         };
         platform::recording::info!(
-            "Realm {realm}: {:?} operation {} accepted at sequence {} for Service {:?}",
+            "Realm {realm}: {:?} operation {} accepted at sequence {}",
             request.op,
             update.operation_id,
-            receipt.sequence,
-            selection.service_actor_id
+            receipt.sequence
         );
         return Ok(receipt.reply(realm, update)?);
     }

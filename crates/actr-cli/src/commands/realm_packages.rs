@@ -25,10 +25,7 @@ use tempfile::NamedTempFile;
 use super::realm_members::resolve_profile;
 
 mod front;
-pub(super) use front::{
-    FrontRollbackArgs, FrontUpdateArgs, ServiceRollbackArgs, ServiceSwitchArgs, rollback_front,
-    rollback_service, switch_service, update_front,
-};
+pub(super) use front::{ServiceProbeArgs, release};
 
 const DOCUMENT_LIMIT: usize = actr_protocol::realm_profile::MAX_REALM_PROFILE_BYTES;
 const ARCHIVE_LIMIT: usize = 64 * 1024 * 1024;
@@ -55,6 +52,11 @@ pub struct CheckArgs {
     /// Directory for verified archives and Publisher trust pins
     #[arg(long, value_name = "DIR")]
     pub output: PathBuf,
+    /// Verify the current Realm Profile and probe the selected Service type.
+    #[arg(long, value_name = "REALM", requires = "probe_config")]
+    pub probe_realm: Option<String>,
+    #[command(flatten)]
+    pub probe: ServiceProbeArgs,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -311,6 +313,11 @@ where
     Fut: Future<Output = Result<Vec<u8>>>,
 {
     let selection = super::realm::read_selection(&args.selection)?;
+    let probe = args.probe.probe();
+    ensure!(
+        args.probe_realm.is_some() == probe.is_some(),
+        "probe options require --probe-realm"
+    );
     std::fs::create_dir_all(&args.output)?;
     let lock = File::options()
         .write(true)
@@ -331,6 +338,15 @@ where
     let roots = selection.packages.keys().cloned().collect();
     let mut result =
         prepare_selection(&selection, &args.output, &mut cache, &path, roots, &get).await?;
+    if let Some((realm, probe)) = args.probe_realm.as_ref().zip(probe) {
+        let (profile, _, _) =
+            resolve_profile(realm, None, |url| get(url, DOCUMENT_LIMIT), None).await?;
+        ensure!(
+            profile.realm.status == RealmStatus::Active,
+            "Realm is retired"
+        );
+        probe.check_ready(&profile, &selection, &result).await?;
+    }
     result["selection"] = serde_json::to_value(&selection)?;
     Ok(result)
 }

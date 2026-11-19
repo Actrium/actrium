@@ -5,7 +5,7 @@ import Foundation
 @MainActor
 enum RealmFrontTrustStore {
     enum Kind: String {
-        case authority, profile, publisher
+        case authority, profile, publisher, installedProfile
     }
 
     static func read(_ kind: Kind, name: String) throws -> String? {

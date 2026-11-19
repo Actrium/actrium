@@ -137,7 +137,7 @@ impl Member {
         Ok(Self { file, key })
     }
 
-    pub(super) fn request(&self, op: MembershipOp) -> MembershipRequest {
+    fn request(&self, op: MembershipOp) -> MembershipRequest {
         MembershipRequest::new(op, &self.file.realm, &self.file.provider_id, &new_nonce())
     }
 
@@ -565,17 +565,45 @@ pub async fn invite(args: &InviteArgs) -> Result<Value> {
 }
 
 #[derive(Args, Debug)]
+#[command(group(clap::ArgGroup::new("release_mode").args(["front_only", "service"])))]
 pub struct UpdateArgs {
     #[command(flatten)]
     pub key: KeyArgs,
     /// JSON containing both references and the complete packages map
-    #[arg(long, value_name = "FILE")]
-    pub selection: PathBuf,
+    #[arg(long, value_name = "FILE", required_unless_present = "rollback")]
+    pub selection: Option<PathBuf>,
+    /// Verify a Front release while preserving the primary Service and its dependencies.
+    #[arg(long, requires = "output")]
+    pub front_only: bool,
+    /// Probe the target Service version before releasing a compatible package selection.
+    #[arg(long, requires_all = ["output", "probe_config"])]
+    pub service: bool,
+    /// Restore the previous selection from this output directory at a higher Profile sequence.
+    #[arg(long, requires = "release_mode", conflicts_with = "selection")]
+    pub rollback: bool,
+    /// Directory for verified packages and release history.
+    #[arg(long, value_name = "DIR", requires = "release_mode")]
+    pub output: Option<PathBuf>,
+    #[command(flatten)]
+    pub probe: super::realm_packages::ServiceProbeArgs,
 }
 
 pub async fn update(args: &UpdateArgs) -> Result<Value> {
     let member = Member::load(&args.key)?;
-    let selection = super::realm::read_selection(&args.selection)?;
+    let selection = args
+        .selection
+        .as_deref()
+        .map(super::realm::read_selection)
+        .transpose()?;
+    let probe = args.probe.probe();
+    anyhow::ensure!(
+        args.service || probe.is_none(),
+        "probe options require --service"
+    );
+    if let Some(output) = &args.output {
+        return super::realm_packages::release(&member, output, selection, probe.as_ref()).await;
+    }
+    let selection = selection.context("missing package selection")?;
     let mut request = member.request(MembershipOp::UpdateRealm);
     request.selection = Some(selection.clone());
     let reply = member.send(request).await?;

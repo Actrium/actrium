@@ -2,7 +2,7 @@ use super::RealmPackage;
 use serde::{Deserialize, Deserializer, Serialize, de};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// An authorized replacement of the Front based on a specific accepted Profile.
+/// A conditional package release based on a specific accepted Profile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FrontUpdate {
@@ -18,10 +18,10 @@ impl FrontUpdate {
                 .bytes()
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
         {
-            return Err("front_update.operation_id must be 32 lowercase hex digits".into());
+            return Err("operation_id must be 32 lowercase hex digits".into());
         }
         if self.expected_sequence >= super::MAX_EXACT_INTEGER {
-            return Err("front_update.expected_sequence is out of range".into());
+            return Err("expected_sequence is out of range".into());
         }
         Ok(())
     }
@@ -33,9 +33,6 @@ pub struct RealmPackageSelection {
     pub primary_package: String,
     pub front_package: String,
     pub packages: BTreeMap<String, RealmPackage>,
-    /// Exact Actor serving the primary package after a managed cutover.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub service_actor_id: Option<String>,
 }
 
 impl RealmPackageSelection {
@@ -62,23 +59,19 @@ impl RealmPackageSelection {
             front_package: Option<String>,
             #[serde(default, deserialize_with = "package_map")]
             packages: Option<BTreeMap<String, RealmPackage>>,
-            #[serde(default, deserialize_with = "present")]
-            service_actor_id: Option<String>,
         }
         let fields = Fields::deserialize(d)?;
         match (
             fields.primary_package,
             fields.front_package,
             fields.packages,
-            fields.service_actor_id,
         ) {
-            (None, None, None, None) => Ok(None),
-            (Some(primary_package), Some(front_package), Some(packages), service_actor_id) => {
+            (None, None, None) => Ok(None),
+            (Some(primary_package), Some(front_package), Some(packages)) => {
                 let selection = Self {
                     primary_package,
                     front_package,
                     packages,
-                    service_actor_id,
                 };
                 selection.check().map_err(de::Error::custom)?;
                 Ok(Some(selection))
@@ -87,22 +80,6 @@ impl RealmPackageSelection {
                 "primary_package, front_package and packages must be supplied together",
             )),
         }
-    }
-
-    pub fn service_actor(&self, realm: &str) -> Result<Option<crate::ActrId>, String> {
-        self.service_actor_id
-            .as_deref()
-            .map(|value| {
-                let actor = crate::ActrId::from_string_repr(value).map_err(|e| e.to_string())?;
-                if actor.realm != realm
-                    || actor.serial_number == 0
-                    || actor.to_string_repr() != value
-                {
-                    return Err("service_actor_id must name a canonical Actor in this Realm".into());
-                }
-                Ok(actor)
-            })
-            .transpose()
     }
 
     /// Resolve the Service and Front in that order.
@@ -184,9 +161,6 @@ impl RealmPackageSelection {
     /// A Front release must preserve the primary Service and all packages
     /// reachable through its signed dependency selection.
     pub fn check_unchanged_service(&self, next: &Self) -> Result<(), String> {
-        if self.service_actor_id != next.service_actor_id {
-            return Err("a Front update cannot change service_actor_id".into());
-        }
         if self.primary_package != next.primary_package {
             return Err("a Front update cannot change primary_package".into());
         }
@@ -206,6 +180,17 @@ impl RealmPackageSelection {
                 ));
             }
             pending.extend(old.dependencies.values().map(String::as_str));
+        }
+        Ok(())
+    }
+
+    /// A managed cutover is between distinct versions of the same Service.
+    pub fn check_service_switch(&self, next: &Self) -> Result<(), String> {
+        let (old, _) = self.selected()?;
+        let (target, _) = next.selected()?;
+        old.check_primary_successor(target)?;
+        if old.r#type == target.r#type {
+            return Err("a Service cutover requires a different Service version".into());
         }
         Ok(())
     }

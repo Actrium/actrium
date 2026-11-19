@@ -359,7 +359,6 @@ struct RealmServiceAttachmentUploadTests {
             serviceHref: "https://example.test/svc.actr",
             serviceSha256: String(repeating: "1", count: 64),
             serviceType: "pub/svc@1.0.0",
-            serviceActorSerial: nil,
             issuerUrl: "https://issuer.example.test",
             providerId: "provider-1"
         )

@@ -486,9 +486,6 @@ impl RealmProfile {
                 self.realm.name
             ));
         }
-        if let Some(selection) = &self.selection {
-            selection.service_actor(&self.realm.name)?;
-        }
         if self.selection.is_none()
             && self.stored_primary.is_none()
             && self.realm.status == RealmStatus::Active

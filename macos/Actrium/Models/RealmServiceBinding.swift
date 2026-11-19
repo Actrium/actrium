@@ -174,7 +174,6 @@ actor RealmServiceBinding {
     private let front: Data
     private let configuration: String
     private let serviceType: ActrBindings.ActrType
-    private let serviceActor: ActrBindings.ActrId?
     /// Business routes; internal for the attachment transport wiring tests.
     let routes: Set<String>
     /// `true` only when the manifest grants `service.attachmentUpload` AND the
@@ -214,9 +213,6 @@ actor RealmServiceBinding {
         // reachable through the generic RealmService.call business routes.
         self.routes = RealmServiceAttachmentUploadPolicy.businessRoutes(declaredRoutes)
         self.serviceType = serviceType
-        self.serviceActor = profile.serviceActorSerial.map {
-            ActrBindings.ActrId(realm: profile.realmName, serialNumber: $0)
-        }
         self.profile = profile
         self.front = front
 
@@ -251,22 +247,15 @@ actor RealmServiceBinding {
         """
     }
 
-    /// Start a replacement Front and check discovery without sending a business RPC.
-    func prepareForSwitch() async throws -> ActrBindings.ActrId {
+    /// Prepare a replacement binding without sending a business RPC.
+    func prepareForSwitch() async throws {
         try Task.checkCancellation()
         let reference = try await connect()
-        guard let target = try await selectedService(using: reference) else {
+        guard try await reference.discover(targetType: serviceType, count: 1).first != nil else {
             throw RealmServiceError(message: "The Realm's selected Service is not online.")
-        }
-        if let serviceActor {
-            let candidates = try await reference.discover(targetType: serviceType, count: 4)
-            guard candidates.contains(where: { $0.realm == serviceActor.realm && $0.serialNumber == serviceActor.serialNumber }) else {
-                throw RealmServiceError(message: "The Service Actor in the Realm Profile is not online.")
-            }
         }
         guard !stopped else { throw CancellationError() }
         try Task.checkCancellation()
-        return target
     }
 
     func call(_ request: RealmServiceCall) async throws -> Data {
@@ -275,7 +264,10 @@ actor RealmServiceBinding {
             throw RealmServiceError(message: "The Service call is outside this tab's declared capabilities.")
         }
         let reference = try await connect()
-        guard let target = try await selectedService(using: reference) else {
+        guard !stopped else { throw CancellationError() }
+        // A Realm tab targets the selected Service type. A restarted Service
+        // may register with a different ActorId while the Front stays running.
+        guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
             throw RealmServiceError(message: "The Realm's selected Service is not online.")
         }
         guard !stopped else { throw CancellationError() }
@@ -287,12 +279,6 @@ actor RealmServiceBinding {
         )
     }
 
-    private func selectedService(using reference: ActrRefWrapper) async throws -> ActrBindings.ActrId? {
-        guard !stopped else { throw CancellationError() }
-        if let serviceActor { return serviceActor }
-        return try await reference.discover(targetType: serviceType, count: 1).first
-    }
-
     /// Availability as seen by this binding: the manifest must opt in and the
     /// binding must still be running. Actor-isolated so a race with `stop()`
     /// cannot report a binding that is already tearing down.
@@ -301,7 +287,7 @@ actor RealmServiceBinding {
     }
 
     /// Prepares one attachment upload: validates capability and fields,
-    /// resolves the Service target once and fixes it for the whole session,
+    /// discovers the Service target once and fixes it for the whole session,
     /// registers the result stream, then issues the fixed
     /// `ask.AskService.PrepareAttachmentUpload` reliable RPC with a 20 second
     /// budget. Any failure unregisters the result stream again so no state
@@ -324,7 +310,7 @@ actor RealmServiceBinding {
                       await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
                     throw RealmServiceAttachmentUploadError.cancelled
                 }
-                guard let target = try await selectedService(using: reference) else {
+                guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
                     throw RealmServiceAttachmentUploadError.unavailable(
                         "The Realm's selected Service is not online.")
                 }

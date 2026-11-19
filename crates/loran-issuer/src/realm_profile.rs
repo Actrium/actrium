@@ -366,9 +366,6 @@ impl RealmProfiles {
             document["primary_package"] = json!(selection.primary_package);
             document["front_package"] = json!(selection.front_package);
             document["packages"] = json!(selection.packages);
-            if let Some(actor_id) = selection.service_actor_id {
-                document["service_actor_id"] = json!(actor_id);
-            }
         }
         Ok(document)
     }

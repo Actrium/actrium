@@ -73,16 +73,8 @@ pub enum RealmCommand {
     /// Create an invite: a new member (owner, `--role`) or a new client of a
     /// member (`--member`).
     Invite(InviteArgs),
-    /// Replace the selection of a Realm under its Provider domain as its owner
+    /// Update or roll back the package selection under the Realm's Provider domain
     Update(realm_members::UpdateArgs),
-    /// Verify and publish a Front-only update for an AFP-domain Realm.
-    FrontUpdate(super::realm_packages::FrontUpdateArgs),
-    /// Republish the last Front selection at a higher Profile sequence.
-    FrontRollback(super::realm_packages::FrontRollbackArgs),
-    /// Probe a running Service and publish its ActorId with the new selection.
-    ServiceSwitch(super::realm_packages::ServiceSwitchArgs),
-    /// Probe the previous Service and restore its selection at a higher sequence.
-    ServiceRollback(super::realm_packages::ServiceRollbackArgs),
     /// Download and verify the selected Service and Front into a new directory
     FetchPackages(super::realm_packages::FetchArgs),
     /// Download and validate a complete manual selection before signing a Realm Profile
@@ -285,16 +277,6 @@ impl Command for RealmArgs {
             RealmCommand::RegisterPublisher(args) => register_publisher(args).await?,
             RealmCommand::Join(args) => realm_members::join(args).await?,
             RealmCommand::Update(args) => realm_members::update(args).await?,
-            RealmCommand::FrontUpdate(args) => super::realm_packages::update_front(args).await?,
-            RealmCommand::FrontRollback(args) => {
-                super::realm_packages::rollback_front(args).await?
-            }
-            RealmCommand::ServiceSwitch(args) => {
-                super::realm_packages::switch_service(args).await?
-            }
-            RealmCommand::ServiceRollback(args) => {
-                super::realm_packages::rollback_service(args).await?
-            }
             RealmCommand::FetchPackages(args) => super::realm_packages::fetch(args).await?,
             RealmCommand::CheckSelection(args) => {
                 super::realm_packages::check_selection(args).await?
@@ -513,14 +495,10 @@ fn sign_profile(
         selection.check().map_err(anyhow::Error::msg)?;
         if let Some(fields) = profile.as_object_mut() {
             fields.remove("package");
-            fields.remove("service_actor_id");
         }
         profile["primary_package"] = selection.primary_package.into();
         profile["front_package"] = selection.front_package.into();
         profile["packages"] = serde_json::to_value(selection.packages)?;
-        if let Some(actor_id) = selection.service_actor_id {
-            profile["service_actor_id"] = actor_id.into();
-        }
     }
     profile["issued_at"] = chrono::Utc::now()
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
@@ -597,13 +575,7 @@ fn retire(key_path: &Path, mut profile: Value) -> Result<Value> {
     }
     profile["realm"]["status"] = "retired".into();
     if let Value::Object(members) = &mut profile {
-        for field in [
-            "primary_package",
-            "front_package",
-            "packages",
-            "package",
-            "service_actor_id",
-        ] {
+        for field in ["primary_package", "front_package", "packages", "package"] {
             members.remove(field);
         }
     }

@@ -182,7 +182,7 @@ run_package_release_roundtrips() {
     local target_service_version="$SERVICE_VERSION" actors=null
     local next_service="" service_sha="" service_href=""
     if [ "${REALM_SERVICE_SWITCH:-0}" = 1 ]; then
-        section "Service upgrade and rollback with signed ActorId selection"
+        section "Service upgrade and rollback by exact Service type"
         target_service_version="1.1.0"
         next_service="$DIST_DIR/echo-v2-next.actr"
         local payload="$RUN_DIR/v2-echo-next-payload"

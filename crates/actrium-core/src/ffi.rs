@@ -881,8 +881,6 @@ pub struct RealmProfileInfo {
     pub service_href: String,
     pub service_sha256: String,
     pub service_type: String,
-    /// Serial number of the signed Service Actor in realm_name.
-    pub service_actor_serial: Option<u64>,
     /// Issuer endpoint that serves Actor credentials.
     pub issuer_url: String,
     /// Actr Facility Provider ID; a membership client binds to it.
@@ -1130,10 +1128,6 @@ fn realm_profile_info(profile: &RealmProfile) -> Result<RealmProfileInfo, CoreEr
         service_href: service.href.clone(),
         service_sha256: service.sha256.clone(),
         service_type: service.r#type.clone(),
-        service_actor_serial: selection
-            .service_actor(&profile.realm.name)
-            .map_err(CoreError::RealmProfileInvalid)?
-            .map(|actor| actor.serial_number),
         issuer_url: profile.issuer.url.clone(),
         provider_id: profile.provider.id.clone(),
     })
@@ -1190,12 +1184,8 @@ pub fn accept_realm_profile_update(
             }
             (
                 Some(realm_profile_info(&candidate)?),
-                selected_package_key(
-                    selection,
-                    &selection.primary_package,
-                    selection.service_actor_id.as_deref(),
-                )?,
-                selected_package_key(selection, &selection.front_package, None)?,
+                selected_package_key(selection, &selection.primary_package)?,
+                selected_package_key(selection, &selection.front_package)?,
             )
         } else {
             (None, String::new(), String::new())
@@ -1217,7 +1207,6 @@ pub fn accept_realm_profile_update(
 fn selected_package_key(
     selection: &actr_protocol::realm_profile::RealmPackageSelection,
     root: &str,
-    actor_id: Option<&str>,
 ) -> Result<String, CoreError> {
     let mut pending = vec![root];
     let mut packages = std::collections::BTreeMap::new();
@@ -1234,7 +1223,7 @@ fn selected_package_key(
         );
         pending.extend(package.dependencies.values().map(String::as_str));
     }
-    let bytes = serde_json::to_vec(&(root, packages, actor_id))
+    let bytes = serde_json::to_vec(&(root, packages))
         .map_err(|e| CoreError::RealmProfileInvalid(e.to_string()))?;
     Ok(hex_digest(&bytes))
 }
@@ -1355,7 +1344,6 @@ pub fn verify_realm_front_package(
     let public_key = VerifyingKey::from_bytes(public_key_bytes)
         .map_err(|error| ActrPackageVerificationError::InvalidPublicKey(error.to_string()))?;
     let selection = RealmPackageSelection {
-        service_actor_id: None,
         primary_package: profile.primary_package,
         front_package: profile.front_package,
         packages: profile

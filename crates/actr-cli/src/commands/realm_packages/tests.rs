@@ -473,6 +473,8 @@ async fn previews_manual_selections_and_fetches_cyclic_dependency_closure() {
     let args = CheckArgs {
         selection: selection_path.clone(),
         output: dir.path().join("check"),
+        probe_realm: None,
+        probe: ServiceProbeArgs::default(),
     };
     let check = |url: String, _limit| {
         std::future::ready(

@@ -106,7 +106,7 @@ async fn realm_front_release_fixture() -> Result<()> {
             let selection = (step == 1)
                 .then(|| crate::commands::realm::read_selection(&request.selection))
                 .transpose()?;
-            if let Some(actors) = &request.service_actors {
+            if request.service_actors.is_some() {
                 let (baseline, _, _) =
                     resolve_profile(realm, None, |url| get(url, DOCUMENT_LIMIT), None).await?;
                 let target_selection = selection
@@ -130,9 +130,7 @@ async fn realm_front_release_fixture() -> Result<()> {
                     }
                     .encode_to_vec(),
                 )?;
-                let actor_id = actors[usize::from(step == 1)].clone();
                 let mut probe = front::ServiceProbe {
-                    actor_id,
                     probe_config,
                     probe_request: Some(payload),
                     probe_route: EchoRequest::route_key().to_owned(),
@@ -164,7 +162,7 @@ async fn realm_front_release_fixture() -> Result<()> {
                     );
                     println!(
                         "SERVICE_READINESS_GATE sequence={} rejected_unready={}",
-                        baseline.sequence, probe.actor_id
+                        baseline.sequence, target.r#type
                     );
                     probe.probe_route = EchoRequest::route_key().to_owned();
                 }
@@ -210,12 +208,11 @@ async fn realm_front_release_fixture() -> Result<()> {
                 service_actor.to_string_repr() == *expected,
                 "RPC reached the wrong Service Actor"
             );
-            if step > 0 {
-                ensure!(
-                    selection.service_actor_id.as_ref() == Some(expected),
-                    "signed Profile did not pin the Service Actor"
-                );
-            }
+            let document: Value = serde_json::from_slice(profile.document())?;
+            ensure!(
+                document.get("service_actor_id").is_none(),
+                "signed Profile pinned an ActorId"
+            );
         }
         println!(
             "{} sequence={} front={} front_sha256={} service={} service_sha256={} service_actor={}",
@@ -301,16 +298,7 @@ async fn call_echo(
         .await?
         .start()
         .await?;
-    let actor = match profile
-        .selection
-        .as_ref()
-        .context("active selection")?
-        .service_actor(&profile.realm.name)
-        .map_err(anyhow::Error::msg)?
-    {
-        Some(actor) => actor,
-        None => candidate.discover_service(&target).await?,
-    };
+    let actor = candidate.discover_service(&target).await?;
     let message = format!("package-release-{}", profile.sequence);
     let response = candidate
         .call_remote(

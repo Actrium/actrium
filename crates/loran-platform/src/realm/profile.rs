@@ -271,29 +271,26 @@ impl RealmProfileRecord {
                     .check_unchanged_service(new)
                     .map_err(RealmError::Conflict)?,
                 PackageRelease::Service(_) => {
+                    old.check_service_switch(new)
+                        .map_err(RealmError::Conflict)?;
                     let owner = owner.ok_or_else(|| {
                         RealmError::Conflict("Service cutover needs the Realm owner".into())
                     })?;
-                    let target = new
-                        .service_actor(name)
-                        .map_err(RealmError::Conflict)?
-                        .ok_or_else(|| {
-                            RealmError::Conflict("Service cutover needs service_actor_id".into())
-                        })?;
                     let service_type = &new.selected().map_err(RealmError::Conflict)?.0.r#type;
                     let registered: bool = sqlx::query_scalar(
                         "SELECT EXISTS(SELECT 1 FROM issued_actor_identity
-                         WHERE realm = ? AND serial_number = ? AND actor_type = ?
+                         WHERE realm = ? AND actor_type = ?
                            AND member_id = ? AND auth_mode = 1 AND development = 0)",
                     )
                     .bind(name)
-                    .bind(target.serial_number as i64)
                     .bind(service_type)
                     .bind(&owner.member_id)
                     .fetch_one(&mut *tx)
                     .await?;
                     if !registered {
-                        return Err(RealmError::Conflict("selected Actor was not registered by the owner for this Service package type".into()));
+                        return Err(RealmError::Conflict(
+                            "the owner has not registered this Service type".into(),
+                        ));
                     }
                 }
             }
@@ -313,27 +310,6 @@ impl RealmProfileRecord {
             if inserted != 1 {
                 return Err(RealmError::Conflict(
                     "Package release operation ID already used".into(),
-                ));
-            }
-        } else if let Some(selection) = &profile.selection
-            && profile.realm.status == RealmStatus::Active
-        {
-            // Once a Service is pinned, an ordinary Profile edit or key
-            // rotation cannot change its deployment or remove the binding.
-            let previous: Option<String> = sqlx::query_scalar(
-                "SELECT document FROM realm_profile WHERE realm = ?
-                 AND json_type(document, '$.service_actor_id') = 'text'",
-            )
-            .bind(name)
-            .fetch_optional(&mut *tx)
-            .await?;
-            if let Some(previous) = previous {
-                read_selection(&previous)?
-                    .check_unchanged_service(selection)
-                    .map_err(RealmError::Conflict)?;
-            } else if selection.service_actor_id.is_some() {
-                return Err(RealmError::Conflict(
-                    "use switch_service to bind a Service Actor".into(),
                 ));
             }
         }

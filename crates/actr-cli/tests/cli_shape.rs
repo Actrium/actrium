@@ -118,8 +118,6 @@ fn realm_group_exposes_the_signing_and_membership_tools() {
             "create-request",
             "draft-request",
             "fetch-packages",
-            "front-rollback",
-            "front-update",
             "invite",
             "join",
             "keygen",
@@ -131,14 +129,88 @@ fn realm_group_exposes_the_signing_and_membership_tools() {
             "retire",
             "revoke-client",
             "revoke-invite",
-            "service-rollback",
-            "service-switch",
             "set-role",
             "sign-profile",
             "transfer-owner",
             "update",
         ]
     );
+}
+
+#[test]
+fn realm_update_checks_release_arguments() {
+    let normal = ["actr", "realm", "update", "--key", "owner.json"];
+    for args in [
+        vec!["--selection", "selection.json"],
+        vec![
+            "--front-only",
+            "--output",
+            "cache",
+            "--selection",
+            "selection.json",
+        ],
+        vec!["--front-only", "--output", "cache", "--rollback"],
+        vec![
+            "--service",
+            "--output",
+            "cache",
+            "--probe-config",
+            "probe.toml",
+            "--probe-route",
+            "echo.EchoService.Echo",
+            "--selection",
+            "selection.json",
+        ],
+        vec![
+            "--service",
+            "--output",
+            "cache",
+            "--probe-config",
+            "probe.toml",
+            "--probe-route",
+            "echo.EchoService.Echo",
+            "--rollback",
+        ],
+    ] {
+        cli()
+            .try_get_matches_from(normal.into_iter().chain(args))
+            .unwrap();
+    }
+    for args in [
+        vec!["--rollback"],
+        vec![
+            "--front-only",
+            "--rollback",
+            "--output",
+            "cache",
+            "--selection",
+            "selection.json",
+        ],
+        vec![
+            "--service",
+            "--output",
+            "cache",
+            "--selection",
+            "selection.json",
+        ],
+        vec![
+            "--front-only",
+            "--service",
+            "--output",
+            "cache",
+            "--probe-config",
+            "probe.toml",
+            "--probe-route",
+            "ready",
+            "--rollback",
+        ],
+    ] {
+        assert!(
+            cli()
+                .try_get_matches_from(normal.into_iter().chain(args))
+                .is_err()
+        );
+    }
 }
 
 #[test]

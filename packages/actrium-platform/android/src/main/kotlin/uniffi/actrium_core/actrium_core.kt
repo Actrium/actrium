@@ -5959,9 +5959,6 @@ data class RealmProfileInfo (
     var `serviceType`: kotlin.String,
     /**
      * Serial number of the signed Service Actor in realm_name.
-     */
-    var `serviceActorSerial`: kotlin.ULong?,
-    /**
      * Issuer endpoint that serves Actor credentials.
      */
     var `issuerUrl`: kotlin.String,
@@ -5993,7 +5990,6 @@ public object FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer<RealmProf
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
-            FfiConverterOptionalULong.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
         )
@@ -6013,7 +6009,6 @@ public object FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer<RealmProf
             FfiConverterString.allocationSize(value.`serviceHref`) +
             FfiConverterString.allocationSize(value.`serviceSha256`) +
             FfiConverterString.allocationSize(value.`serviceType`) +
-            FfiConverterOptionalULong.allocationSize(value.`serviceActorSerial`) +
             FfiConverterString.allocationSize(value.`issuerUrl`) +
             FfiConverterString.allocationSize(value.`providerId`)
     )
@@ -6032,7 +6027,6 @@ public object FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer<RealmProf
             FfiConverterString.write(value.`serviceHref`, buf)
             FfiConverterString.write(value.`serviceSha256`, buf)
             FfiConverterString.write(value.`serviceType`, buf)
-            FfiConverterOptionalULong.write(value.`serviceActorSerial`, buf)
             FfiConverterString.write(value.`issuerUrl`, buf)
             FfiConverterString.write(value.`providerId`, buf)
     }
@@ -7018,38 +7012,6 @@ public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
         } else {
             buf.put(1)
             FfiConverterUInt.write(value, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
-public object FfiConverterOptionalULong: FfiConverterRustBuffer<kotlin.ULong?> {
-    override fun read(buf: ByteBuffer): kotlin.ULong? {
-        if (buf.get().toInt() == 0) {
-            return null
-        }
-        return FfiConverterULong.read(buf)
-    }
-
-    override fun allocationSize(value: kotlin.ULong?): ULong {
-        if (value == null) {
-            return 1UL
-        } else {
-            return 1UL + FfiConverterULong.allocationSize(value)
-        }
-    }
-
-    override fun write(value: kotlin.ULong?, buf: ByteBuffer) {
-        if (value == null) {
-            buf.put(0)
-        } else {
-            buf.put(1)
-            FfiConverterULong.write(value, buf)
         }
     }
 }

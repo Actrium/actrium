@@ -153,7 +153,6 @@ mod tests {
             },
         );
         let mut selection = RealmPackageSelection {
-            service_actor_id: None,
             primary_package: "source".into(),
             front_package: "front".into(),
             packages: manifests

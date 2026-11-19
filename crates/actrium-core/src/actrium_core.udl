@@ -1113,7 +1113,6 @@ dictionary RealmProfileInfo {
     string service_sha256;
     string service_type;
     /// Serial number of the signed Service Actor in realm_name.
-    u64? service_actor_serial;
     /// Issuer endpoint that serves Actor credentials.
     string issuer_url;
     /// Actr Facility Provider ID; a membership client binds to it.

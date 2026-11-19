@@ -5518,9 +5518,6 @@ public struct RealmProfileInfo {
     public var serviceType: String
     /**
      * Serial number of the signed Service Actor in realm_name.
-     */
-    public var serviceActorSerial: UInt64?
-    /**
      * Issuer endpoint that serves Actor credentials.
      */
     public var issuerUrl: String
@@ -5552,8 +5549,6 @@ public struct RealmProfileInfo {
          */serviceHref: String, serviceSha256: String, serviceType: String,
         /**
          * Serial number of the signed Service Actor in realm_name.
-         */serviceActorSerial: UInt64?,
-        /**
          * Issuer endpoint that serves Actor credentials.
          */issuerUrl: String,
         /**
@@ -5572,7 +5567,6 @@ public struct RealmProfileInfo {
         self.serviceHref = serviceHref
         self.serviceSha256 = serviceSha256
         self.serviceType = serviceType
-        self.serviceActorSerial = serviceActorSerial
         self.issuerUrl = issuerUrl
         self.providerId = providerId
     }
@@ -5624,9 +5618,6 @@ extension RealmProfileInfo: Equatable, Hashable {
         if lhs.serviceType != rhs.serviceType {
             return false
         }
-        if lhs.serviceActorSerial != rhs.serviceActorSerial {
-            return false
-        }
         if lhs.issuerUrl != rhs.issuerUrl {
             return false
         }
@@ -5650,7 +5641,6 @@ extension RealmProfileInfo: Equatable, Hashable {
         hasher.combine(serviceHref)
         hasher.combine(serviceSha256)
         hasher.combine(serviceType)
-        hasher.combine(serviceActorSerial)
         hasher.combine(issuerUrl)
         hasher.combine(providerId)
     }
@@ -5678,7 +5668,6 @@ public struct FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer {
                 serviceHref: FfiConverterString.read(from: &buf),
                 serviceSha256: FfiConverterString.read(from: &buf),
                 serviceType: FfiConverterString.read(from: &buf),
-                serviceActorSerial: FfiConverterOptionUInt64.read(from: &buf),
                 issuerUrl: FfiConverterString.read(from: &buf),
                 providerId: FfiConverterString.read(from: &buf)
         )
@@ -5698,7 +5687,6 @@ public struct FfiConverterTypeRealmProfileInfo: FfiConverterRustBuffer {
         FfiConverterString.write(value.serviceHref, into: &buf)
         FfiConverterString.write(value.serviceSha256, into: &buf)
         FfiConverterString.write(value.serviceType, into: &buf)
-        FfiConverterOptionUInt64.write(value.serviceActorSerial, into: &buf)
         FfiConverterString.write(value.issuerUrl, into: &buf)
         FfiConverterString.write(value.providerId, into: &buf)
     }
@@ -7644,30 +7632,6 @@ fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterUInt32.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
-    typealias SwiftType = UInt64?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterUInt64.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterUInt64.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }

@@ -2,58 +2,35 @@ use actr_protocol::realm_membership::{MembershipOp, MembershipRequest};
 use actr_protocol::realm_profile::FrontUpdate;
 
 use super::*;
-use crate::commands::realm::read_selection;
-use crate::commands::realm_members::{KeyArgs, Member};
+use crate::commands::realm_members::Member;
 
-#[derive(Args, Debug)]
-pub struct FrontRollbackArgs {
-    #[command(flatten)]
-    pub key: KeyArgs,
-    /// Persistent directory for this Realm's Front release history and verified packages.
-    #[arg(long, value_name = "DIR")]
-    pub output: PathBuf,
-}
-
-#[derive(Args, Debug)]
-pub struct FrontUpdateArgs {
-    #[command(flatten)]
-    pub release: FrontRollbackArgs,
-    /// Complete replacement package selection. Service and its dependencies must match.
-    #[arg(long, value_name = "FILE")]
-    pub selection: PathBuf,
-}
-
-#[derive(Args, Debug)]
-pub struct ServiceProbe {
-    /// Canonical ActorId of the running target Service.
-    #[arg(long)]
-    pub actor_id: String,
+#[derive(Args, Debug, Default)]
+pub struct ServiceProbeArgs {
     /// Runtime config for the probe Front, using a Realm member key.
-    #[arg(long, value_name = "FILE")]
-    pub probe_config: PathBuf,
+    #[arg(long, value_name = "FILE", requires = "probe_route")]
+    pub probe_config: Option<PathBuf>,
     /// A read-only RPC that succeeds only when the target is ready.
-    #[arg(long)]
-    pub probe_route: String,
+    #[arg(long, requires = "probe_config")]
+    pub probe_route: Option<String>,
     /// Optional encoded request body. The default is empty.
-    #[arg(long, value_name = "FILE")]
+    #[arg(long, value_name = "FILE", requires = "probe_config")]
     pub probe_request: Option<PathBuf>,
 }
 
-#[derive(Args, Debug)]
-pub struct ServiceRollbackArgs {
-    #[command(flatten)]
-    pub release: FrontRollbackArgs,
-    #[command(flatten)]
-    pub probe: ServiceProbe,
+impl ServiceProbeArgs {
+    pub fn probe(&self) -> Option<ServiceProbe> {
+        Some(ServiceProbe {
+            probe_config: self.probe_config.clone()?,
+            probe_route: self.probe_route.clone()?,
+            probe_request: self.probe_request.clone(),
+        })
+    }
 }
 
-#[derive(Args, Debug)]
-pub struct ServiceSwitchArgs {
-    #[command(flatten)]
-    pub rollback: ServiceRollbackArgs,
-    /// Complete selection for the target Service and a compatible Front.
-    #[arg(long, value_name = "FILE")]
-    pub selection: PathBuf,
+pub struct ServiceProbe {
+    pub probe_config: PathBuf,
+    pub probe_route: String,
+    pub probe_request: Option<PathBuf>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,33 +54,12 @@ struct Journal {
     current: Option<RealmPackageSelection>,
 }
 
-pub async fn update_front(args: &FrontUpdateArgs) -> Result<Value> {
-    release(&args.release, Some(read_selection(&args.selection)?), None).await
-}
-
-pub async fn rollback_front(args: &FrontRollbackArgs) -> Result<Value> {
-    release(args, None, None).await
-}
-
-pub async fn switch_service(args: &ServiceSwitchArgs) -> Result<Value> {
-    release(
-        &args.rollback.release,
-        Some(read_selection(&args.selection)?),
-        Some(&args.rollback.probe),
-    )
-    .await
-}
-
-pub async fn rollback_service(args: &ServiceRollbackArgs) -> Result<Value> {
-    release(&args.release, None, Some(&args.probe)).await
-}
-
-async fn release(
-    args: &FrontRollbackArgs,
+pub async fn release(
+    member: &Member,
+    output: &Path,
     requested: Option<RealmPackageSelection>,
     service: Option<&ServiceProbe>,
 ) -> Result<Value> {
-    let member = Member::load(&args.key)?;
     ensure!(
         member.file.realm.rsplit_once('@').map(|(_, domain)| domain)
             == Some(member.file.provider_id.as_str()),
@@ -112,7 +68,7 @@ async fn release(
     release_selection_with(
         &member.file.realm,
         &member.file.provider_id,
-        &args.output,
+        output,
         requested,
         service,
         &|url, limit| async move { download(&url, limit).await },
@@ -220,21 +176,11 @@ where
             "the pending {kind} operation was superseded; review the current selection and retry"
         );
     }
-    let requested = requested.map(|mut target| {
-        if let Some(probe) = service {
-            target.service_actor_id = Some(probe.actor_id.clone());
-        } else if target.service_actor_id.is_none() {
-            target.service_actor_id = current.service_actor_id.clone();
-        }
-        target
-    });
     let rollback = requested.is_none();
-    let mut selection = if let Some(pending) = &journal.pending {
+    let selection = if let Some(pending) = &journal.pending {
         ensure!(
             pending.rollback == rollback
-                && requested.as_ref().is_none_or(|s| *s == pending.selection)
-                && service.is_none_or(|probe| pending.selection.service_actor_id.as_deref()
-                    == Some(probe.actor_id.as_str())),
+                && requested.as_ref().is_none_or(|s| *s == pending.selection),
             "{kind} operation {} is pending; retry the same command and selection",
             pending.update.operation_id
         );
@@ -251,12 +197,13 @@ where
             .clone()
             .with_context(|| format!("no previous {kind} selection in this directory"))?
     };
-    if let Some(probe) = service {
-        selection.service_actor_id = Some(probe.actor_id.clone());
-        selection.service_actor(realm).map_err(anyhow::Error::msg)?;
-    } else {
+    if service.is_none() {
         current
             .check_unchanged_service(&selection)
+            .map_err(anyhow::Error::msg)?;
+    } else if current != &selection {
+        current
+            .check_service_switch(&selection)
             .map_err(anyhow::Error::msg)?;
     }
     current
@@ -388,17 +335,13 @@ where
 }
 
 impl ServiceProbe {
-    async fn check_ready(
+    pub(super) async fn check_ready(
         &self,
         profile: &RealmProfile,
         selection: &RealmPackageSelection,
         verified: &Value,
     ) -> Result<()> {
         use actr_hyper::{Dest, Node, WorkloadPackage};
-        let target = selection
-            .service_actor(&profile.realm.name)
-            .map_err(anyhow::Error::msg)?
-            .context("missing Service ActorId")?;
         let service_type = selection
             .selected()
             .map_err(anyhow::Error::msg)?
@@ -444,21 +387,34 @@ impl ServiceProbe {
         })
         .await
         .context("starting the readiness probe")??;
-        let response = probe
-            .app_context()
-            .await
-            .call_raw(
-                &Dest::Peer(target.clone()),
-                self.probe_route.clone(),
-                actr_protocol::PayloadType::RpcReliable,
-                payload.into(),
-                10_000,
+        let response = async {
+            let target = tokio::time::timeout(
+                Duration::from_secs(10),
+                probe.discover_service(&service_type),
             )
-            .await;
+            .await
+            .context("discovering the target Service")?
+            .with_context(|| format!("could not find one Service of type {service_type}"))?;
+            probe
+                .app_context()
+                .await
+                .call_raw(
+                    &Dest::Peer(target.clone()),
+                    self.probe_route.clone(),
+                    actr_protocol::PayloadType::RpcReliable,
+                    payload.into(),
+                    10_000,
+                )
+                .await
+                .with_context(|| {
+                    format!("Service {service_type} did not pass the readiness RPC")
+                })?;
+            tracing::info!(actor_id = %target, %service_type, "Service readiness RPC passed");
+            Ok(())
+        }
+        .await;
         probe.shutdown();
         probe.wait_for_shutdown().await;
-        response.with_context(|| format!("Service {target} did not pass the readiness RPC"))?;
-        tracing::info!(actor_id = %target, %service_type, "Service readiness RPC passed");
-        Ok(())
+        response
     }
 }
