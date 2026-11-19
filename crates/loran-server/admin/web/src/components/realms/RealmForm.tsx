@@ -297,7 +297,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh, limit }: RealmFormProp
                         <input type="checkbox" checked={allowRebuild} onChange={(event) => setAllowRebuild(event.target.checked)} />
                         Allow rebuilds signed by this key
                       </label>
-                      <p className="text-xs text-gray-500">The signed Realm Profile includes the full path. Actrium asks before reading it.</p>
+                      <p className="text-xs text-gray-500">The signed Realm Profile includes the full path. Actrium requests permission before reading the file.</p>
                     </>
                   )}
                 </fieldset>
