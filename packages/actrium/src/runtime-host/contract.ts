@@ -1,5 +1,10 @@
 import { defineKeelContract, rpc, subscription } from 'keel/contract';
 
+import {
+  type AttachmentUploadType,
+  parseAttachmentUploadInput,
+} from './attachment-upload';
+
 /**
  * Host capabilities declared to Guests (v1 runtime spec, section 5.2/5.3).
  *
@@ -31,6 +36,24 @@ export type ServiceEvent = {
   payloadBase64: string;
 };
 
+/**
+ * Fixed transport upload exposed on `host:service`. Unlike `call`/`tell`/
+ * `on`, the Guest cannot name a route here: the Host owns the whole
+ * prepare/chunk/result protocol natively.
+ */
+export type ServiceUploadAttachmentInput = {
+  filename: string;
+  base64: string;
+  /** Defaults to `document`. */
+  type?: AttachmentUploadType;
+  /** Optional caller-chosen attachment id. */
+  id?: string;
+};
+
+export type ServiceUploadAttachmentOutput = {
+  attachmentId: string;
+};
+
 export type AssetsReadInput = { path: string };
 export type AssetsReadOutput = { base64: string };
 
@@ -44,6 +67,14 @@ export type CameraCapturePhotoOutput = { base64: string };
 
 export type MicrophoneRecordInput = { durationMs: number };
 export type MicrophoneRecordOutput = { base64: string };
+
+/** Omit continuous to finish after a single utterance. */
+export type SpeechRecognizeInput = { locale?: string; continuous?: boolean };
+/** Final transcript returned after the native session ends. */
+export type SpeechRecognizeOutput = { text: string };
+export type SpeechInterimHandler = (result: SpeechRecognizeOutput) => void;
+export type SpeechRecordingState = { state: 'recording' | 'finalizing' };
+export type SpeechStateHandler = (event: SpeechRecordingState) => void;
 
 export type LocationPositionOutput = {
   latitude: number;
@@ -346,6 +377,30 @@ export const contract = defineKeelContract({
           },
         },
       }),
+      uploadAttachment: rpc<ServiceUploadAttachmentInput, ServiceUploadAttachmentOutput>({
+        schema: {
+          parseInput: (value) => {
+            // Shared boundary validation: strict base64, 7 MiB cap, type
+            // defaulting to `document`.
+            const input = parseAttachmentUploadInput(value);
+            return {
+              filename: input.filename,
+              base64: input.base64,
+              type: input.type,
+              id: input.id,
+            };
+          },
+          parseOutput: (value) => {
+            const output = asObject(value, 'service.uploadAttachment output');
+            return {
+              attachmentId: requireString(
+                output.attachmentId,
+                'service.uploadAttachment output.attachmentId'
+              ),
+            };
+          },
+        },
+      }),
     },
     'host:assets': {
       read: rpc<AssetsReadInput, AssetsReadOutput>({
@@ -465,6 +520,48 @@ export const contract = defineKeelContract({
               ),
             };
           },
+        },
+      }),
+    },
+    'host:speech': {
+      recognize: rpc<SpeechRecognizeInput, SpeechRecognizeOutput>({
+        schema: {
+          parseInput: (value) => {
+            if (Array.isArray(value)) throw new Error('speech.recognize input must be an object');
+            const input = asObject(value, 'speech.recognize input');
+            const locale = optionalString(input.locale, 'speech.recognize input.locale');
+            if (locale !== undefined && (locale.length > 64 || !/^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/i.test(locale))) {
+              throw new Error('speech.recognize input.locale must be a language tag');
+            }
+            const continuous = optionalBoolean(input.continuous, 'speech.recognize input.continuous');
+            return {
+              ...(locale === undefined ? {} : { locale }),
+              ...(continuous === undefined ? {} : { continuous }),
+            };
+          },
+          parseOutput: (value) => {
+            const output = asObject(value, 'speech.recognize output');
+            return { text: requireString(output.text, 'speech.recognize output.text') };
+          },
+        },
+      }),
+      onInterimResult: subscription<SpeechRecognizeOutput>({
+        schema: {
+          parseEvent: (value) => {
+            const result = asObject(value, 'speech.onInterimResult event');
+            return { text: requireString(result.text, 'speech.onInterimResult event.text', true) };
+          },
+        },
+      }),
+      stop: rpc<void, void>({
+        schema: { parseInput: (value) => requireNoInput(value, 'speech.stop input') },
+      }),
+      onStateChange: subscription<SpeechRecordingState>({
+        schema: {
+          parseEvent: (value) => ({
+            state: requireEnum(asObject(value, 'speech.onStateChange event').state,
+              'speech.onStateChange event.state', ['recording', 'finalizing']),
+          }),
         },
       }),
     },

@@ -121,8 +121,9 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `primary_package` | A key in `packages` selecting the instance's default Service package. |
 | `front_package` | A key in `packages` selecting the Front for this instance. |
 | `packages` | Map of archive references selected for this application instance. |
-| `packages[ref].href` | HTTPS download address of that archive; it may be anywhere. |
-| `packages[ref].sha256` | SHA-256 of all archive bytes, as 64 lowercase hexadecimal digits. |
+| `packages[ref].href` | HTTPS download address, or an absolute local path when `local_path` is present. Existing filename hints are supported. |
+| `packages[ref].sha256` | SHA-256 of all archive bytes, as 64 lowercase hexadecimal digits. Omit only for a local Front with `allow_rebuild: true`. |
+| `packages[ref].local_path` | Optional signed declaration for the selected Front: `signing_key_id` and `allow_rebuild`. |
 | `packages[ref].type` | Exact Actor type `publisher/program@version` declared by that archive's manifest. |
 | `packages[ref].dependencies` | Optional map from a dependency alias in that package's manifest to a selected key in `packages`. See Section 4.3. |
 | `issuer.url` | Registration and verification endpoint of the Issuer. |
@@ -130,7 +131,7 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `provider.id` | Actr Facility Provider ID: the Actr Facility Provider's canonical DNS authority. It never changes during the Realm's life. |
 | `provider.signaling` | Signaling endpoints. Entries sharing a `control_plane_id` are replicas or failover entries of one Actr Facility Provider control plane, not a federation. |
 | `provider.ice` | STUN and TURN endpoints. TURN entries name the `credential_audience` for short-lived TURN credentials. |
-| `policy` | Join policy of the Realm. |
+| `policy` | `membership` is `invite-only` (default) or `open`. Optional positive integers `open_joins_per_minute` and `max_members` limit admissions. See [Realm Membership](realm-membership.md#41-redemption). |
 | `issued_at` | RFC 3339 time the Realm Profile was signed. It is informational; Realm Profiles do not expire. |
 | `signature` | Detached signature by a Realm signing key. |
 
@@ -157,7 +158,7 @@ The Realm selects its Service and Front by naming two entries in `packages`. Oth
 1. An `active` Profile **MUST** supply `primary_package`, `front_package` and `packages`. A `retired` Profile may omit the entire selection. Reject partial selections.
 2. `packages` is a JSON object with 2–32 entries. Keys consist of 1–63 lowercase ASCII letters, digits or hyphens and start and end with a letter or digit.
 3. When a selection is present, `primary_package` and `front_package` **MUST** exactly match two distinct map keys whose entries have different Actor types.
-4. Each entry **MUST** include an HTTPS `href`, a `sha256` digest of the whole archive (64 lowercase hex digits), and an exact `type` (`publisher/program@version`). One exact type maps to one digest. Receivers **MUST** reject version ranges and `latest`.
+4. Each entry **MUST** include an exact `type` (`publisher/program@version`). Download entries require HTTPS `href` and a fixed `sha256`. The selected Front alone may declare `local_path`, with an absolute local `.actr` path or a legacy filename hint as `href`, and a `service` dependency bound to `primary_package`. Fixed entries retain an immutable digest for each exact type. Receivers **MUST** reject version ranges and `latest`.
 5. The complete signed Profile is at most 64 KiB. Receivers **MUST** reject oversized documents and duplicate JSON members.
 6. If supplied, `packages[ref].dependencies` **MUST** be a JSON object. Keys are nonempty dependency aliases without leading or trailing whitespace; each value **MUST** exactly match a key in `packages`. Reject references to missing packages.
 
@@ -218,16 +219,30 @@ it, an Actr Host **MUST** stop using the Realm.
 ## 6. Using a Realm
 
 Resolve the Service reference from `packages[primary_package]` and the Front reference from
-`packages[front_package]`. The client opening an existing Realm fetches only the Front archive. It
+`packages[front_package]`. For a downloadable Front, the client opening an existing Realm fetches the Front archive. It
 checks the Front's required Service dependency against the Service reference's exact Actor type
 and confirms the RPC contract with the authenticated Service during Attach, before running the Guest.
 The Service Host verifies the Service archive and checks the selected Front's dependency and RPC
 contract against it before admitting the Front.
 
-Downloads **MUST** use the selected `href` and a credential-free HTTPS GET. Before loading any archive,
-check its whole-archive `sha256` and verify its `manifest.sig` over the raw `manifest.toml` with the
+Downloads **MUST** use the selected `href` and a credential-free HTTPS GET. Check fixed archives
+against their whole-archive `sha256`. Before loading any archive, verify its `manifest.sig` over
+the raw `manifest.toml` with the
 trusted key of the Publisher named in `type`. Check the manifest's exact Actor type, signed payloads,
 Workload, Host requirements, platform policy and dependency locks. See [Actor Package](actor-package.zh.md).
+
+A `local_path` Front with an absolute `href` requires explicit user approval for that path
+before any file access. Absolute paths must be outside protected system directories. On macOS,
+use the canonical `/Users/…` path for files under a home directory.
+A legacy filename hint requires explicit local file selection. The Host checks one read snapshot against the pinned
+Publisher signing key, exact Actor type, Service dependency and RPC contract. In either flow,
+the archive must be a regular file on a local volume. The Host rejects symbolic links to the file
+and traverses approved absolute paths without following symbolic links. The Host checks a fixed
+digest and may use a retired package key to verify that archive. With `allow_rebuild` enabled,
+the key must be active. The Host computes a digest for each loaded build and may read a
+replacement of the approved filename on refresh. Realm and Publisher verification still apply
+on refresh. Management tools validate the declaration and downloadable archives, while the
+Host verifies the selected local archive against the verified Service contract.
 
 The primary Actor type identifies the instance's Service. Finding zero or multiple Actors of that
 type in the Realm is an error. Authorized deployment configuration determines which other packages to
@@ -399,9 +414,10 @@ Discovery, Section 4.3):
 
 | `op` | Purpose |
 | --- | --- |
-| `create_realm` | The request includes both selectors and the complete `packages` map. The AFP creates a pending Realm and returns that selection in its unsigned draft. |
+| `create_realm` | The request includes both selectors and the complete `packages` map. The optional `policy` defaults to invite-only. The AFP pins the selection and policy in the pending Realm and its first draft. |
 | `publish_profile` | Submit a signed Realm Profile in `profile`. The first submission activates the pending Realm and the response carries an owner invite (`owner_invite`) once; later submissions with a higher sequence are updates (including retirement). |
 | `reissue_owner_invite` | Issue a new owner invite (response `owner_invite`) and invalidate the Realm's earlier unused owner invites; used to recover when the owner has lost all its clients (Actr Realm Membership, Section 5). |
+| `get_admission` | A domain-signed request for one Realm returns its policy, active-member count, effective member cap and invite-free joins per minute. |
 | `draft_profile` | For Realms outside the AFP domain, return a draft at the accepted sequence plus one. The unsigned draft retains the accepted selection, `display_name` and `policy`, and uses the AFP's current `issuer` and `provider` (Section 6.1). Publication is a separate operation. |
 
 Realm management requests are used only for Realms outside the Actr Facility

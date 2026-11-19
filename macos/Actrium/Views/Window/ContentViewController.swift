@@ -264,6 +264,8 @@ private struct ContentAreaView: View {
                 leftPanelScript: tabData["leftPanelScript"] as? String,
                 rightPanelScript: tabData["rightPanelScript"] as? String,
                 unifiedScript: tabData["unifiedScript"] as? String,
+                guestExtractedPath: tabData["guestExtractedPath"] as? String,
+                guestEntry: tabData["guestEntry"] as? String,
                 capabilityManifestJSON: tabData["capabilityManifestJSON"] as? String,
                 contractName: tabData["contractName"] as? String,
                 contractVersion: tabData["contractVersion"] as? Int,
@@ -272,8 +274,7 @@ private struct ContentAreaView: View {
                 backgroundColor: tabData["backgroundColor"] as? String
             )
 
-            viewModel.tabs.append(tab)
-            viewModel.tabSlotPositions[tab.id] = viewModel.tabs.count - 1
+            viewModel.insertTabFromCrossWindow(tab, at: viewModel.tabs.count, groupId: nil, select: false)
             newTabIds.append(tab.id)
         }
 

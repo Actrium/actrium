@@ -8,6 +8,8 @@ import { Engine } from 'keel/host';
 import { type V1Linkage, createV1CapabilityManifest, v1ServiceDispatchId, writeV1Bundle } from 'keel/v1';
 import { contract } from './contract';
 import { createHostModules } from './host-modules';
+import { createTestServiceEventSource } from './service-events.test-utils';
+import type { AttachmentUploadManager } from './attachment-upload';
 import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
 
 /** The actual CLI entrypoint, exercised in a separate process. */
@@ -39,6 +41,69 @@ test('requires the package declaration for a linked file import picker', () => {
   expect(verifyV1RuntimeGuest(bundle, profile, []).ok).toBe(false);
 });
 
+test('requires the package declaration for linked speech recognition', () => {
+  const linked: V1Linkage = { ...linkage, links: [['host:speech', 'recognize']] };
+  const profile = JSON.stringify(createV1CapabilityManifest(linked, contract));
+  const bundle = writeV1Bundle(linked, 'module.exports = {};');
+  expect(verifyV1RuntimeGuest(bundle, profile, ['host:speech.recognize']).ok).toBe(true);
+  expect(verifyV1RuntimeGuest(bundle, profile, ['host:microphone.record']).ok).toBe(false);
+});
+
+test('verifies and binds the fixed uploadAttachment transport', async () => {
+  const linked: V1Linkage = {
+    ...linkage,
+    links: [...linkage.links, ['host:service', 'uploadAttachment']],
+  };
+  const profile = JSON.stringify(createV1CapabilityManifest(linked, contract));
+  const bundle = writeV1Bundle(linked, 'module.exports = {};');
+  // The manifest records the fixed transport next to the business route.
+  expect(verifyV1RuntimeGuest(bundle, profile, [
+    'service.call',
+    'service.attachmentUpload',
+    'host:clipboard.write',
+  ]).ok).toBe(true);
+  // The transport needs its own declaration, not just service.call.
+  expect(
+    verifyV1RuntimeGuest(bundle, profile, ['service.call', 'host:clipboard.write']).ok
+  ).toBe(false);
+
+  const uploads: unknown[] = [];
+  const grants: string[] = [];
+  const authorize = async (capability: string) => {
+    grants.push(capability);
+  };
+  const uploader = {
+    available: true,
+    upload: async (input: unknown) => {
+      uploads.push(input);
+      return { attachmentId: 'a-1' };
+    },
+    dispose: () => {},
+  };
+  const implementations = createHostModules({
+    hasServiceCapability: true,
+    hasServiceOnCapability: true,
+    callActor: async () => ({ success: true, payloadBase64: '' }),
+    authorizeCapability: authorize,
+    writeClipboardText: async () => {},
+    attachmentUploader: uploader as unknown as AttachmentUploadManager,
+  });
+  const bound = bindV1HostModules(linked, implementations, authorize);
+  const dispatch = createHostModuleDispatch(bound.contract, bound.hostModules);
+  expect(Object.keys(dispatch).sort()).toEqual([
+    'host:clipboard',
+    'host:service',
+    v1ServiceDispatchId(sourceModule, 'call'),
+  ]);
+  await dispatch['host:service'].uploadAttachment({
+    filename: 'a.txt',
+    base64: 'AAEC',
+    type: 'image',
+  });
+  expect(grants).toContain('service.attachmentUpload');
+  expect(uploads).toEqual([{ filename: 'a.txt', base64: 'AAEC', type: 'image' }]);
+});
+
 test('exposes only linked Host methods and pins the route on the Host', async () => {
   const calls: string[] = [];
   const grants: string[] = [];
@@ -46,6 +111,7 @@ test('exposes only linked Host methods and pins the route on the Host', async ()
   const authorize = async (capability: string) => { grants.push(capability); };
   const hostModules = createHostModules({
     hasServiceCapability: true,
+    hasServiceOnCapability: true,
     callActor: async ({ route: sentRoute }) => {
       calls.push(sentRoute);
       return { success: true, payloadBase64: '' };
@@ -68,6 +134,91 @@ test('exposes only linked Host methods and pins the route on the Host', async ()
   expect(clipboard).toEqual(['Echo']);
 });
 
+test('verifies and binds a fixed event subscription', async () => {
+  const eventLinkage: V1Linkage = {
+    guestEntry: 'workload/guest.js',
+    links: [[sourceModule, 'on']],
+  };
+  const eventManifest = createV1CapabilityManifest(eventLinkage, contract);
+  const bundle = writeV1Bundle(eventLinkage, 'module.exports = {};');
+  const verified = verifyV1RuntimeGuest(
+    bundle,
+    JSON.stringify(eventManifest),
+    ['service.on']
+  );
+  expect(verified).toMatchObject({ ok: true });
+  if (!verified.ok) throw new Error(verified.details.join(' '));
+
+  const { source, emit, subscriberCount } = createTestServiceEventSource([
+    route,
+    'echo.v1.EchoService.Other',
+  ]);
+  const authorize = async () => {};
+  const implementations = createHostModules({
+    hasServiceCapability: true,
+    hasServiceOnCapability: true,
+    callActor: async () => ({ success: true, payloadBase64: '' }),
+    serviceEventSource: source,
+    authorizeCapability: authorize,
+    writeClipboardText: async () => {},
+  });
+  const bound = bindV1HostModules(verified.linkage, implementations, authorize);
+  const dispatch = createHostModuleDispatch(bound.contract, bound.hostModules);
+  const id = v1ServiceDispatchId(sourceModule, 'on');
+  const received: { event: string; payloadBase64: string }[] = [];
+  const on = dispatch[id].on as (
+    handler: (event: { event: string; payloadBase64: string }) => void
+  ) => () => void;
+  const unsubscribe = on((event) => received.push(event));
+  await Promise.resolve();
+
+  expect(subscriberCount()).toBe(1);
+  emit({ event: 'echo.v1.EchoService.Other', payloadBase64: 'BAUG' });
+  emit({ event: route, payloadBase64: 'AAEC' });
+  expect(received).toEqual([{ event: route, payloadBase64: 'AAEC' }]);
+
+  unsubscribe?.();
+  expect(subscriberCount()).toBe(0);
+});
+
+test('verifies and binds a call and on link with the same business name', () => {
+  const sharedLinkage: V1Linkage = {
+    guestEntry: 'workload/guest.js',
+    links: [
+      [sourceModule, 'call'],
+      [sourceModule, 'on'],
+    ],
+  };
+  const sharedManifest = createV1CapabilityManifest(sharedLinkage, contract);
+  const bundle = writeV1Bundle(sharedLinkage, 'module.exports = {};');
+  const verified = verifyV1RuntimeGuest(
+    bundle,
+    JSON.stringify(sharedManifest),
+    ['service.call', 'service.on']
+  );
+  expect(verified).toMatchObject({ ok: true });
+  if (!verified.ok) throw new Error(verified.details.join(' '));
+
+  const authorize = async () => {};
+  const bound = bindV1HostModules(
+    verified.linkage,
+    createHostModules({
+      hasServiceCapability: true,
+      hasServiceOnCapability: true,
+      callActor: async () => ({ success: true, payloadBase64: '' }),
+      serviceEventSource: createTestServiceEventSource([route]).source,
+      authorizeCapability: authorize,
+      writeClipboardText: async () => {},
+    }),
+    authorize
+  );
+  const id = v1ServiceDispatchId(sourceModule, 'call');
+  expect(bound.contract.hostModules[id]?.call).toBeDefined();
+  expect(bound.contract.hostModules[id]?.on).toBeDefined();
+  expect(bound.hostModules[id].call).toBeDefined();
+  expect(bound.hostModules[id].on).toBeDefined();
+});
+
 test('rejects a fixed tell link while tell is unimplemented even on a linked call route', () => {
   const withTell: V1Linkage = { ...linkage, links: [...linkage.links, [sourceModule, 'tell']] };
   expect(verifyV1RuntimeGuest(writeV1Bundle(withTell, ''), JSON.stringify(manifest), declarations)).toMatchObject({
@@ -81,11 +232,11 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
   let engine: Engine | undefined;
   try {
     await Bun.write(path.join(root, 'guest.tsx'), `
-      import { View } from 'keel/guest';
+      import { Supramark, View } from 'keel/guest';
       import { writeText } from 'host:clipboard';
       import { call as echo } from 'host:service/${route}';
       void echo({ payloadBase64: '' }).then(() => writeText({ text: 'Echo received' }));
-      export default function App() { return <><View>Hello</View>{'Standalone text'}</>; }
+      export default function App() { return <><View>Hello</View>{'Standalone text'}<Supramark markdown="# Hello" /></>; }
     `);
     const command = [
       Bun.argv[0], keelCli, 'build', 'guest.tsx',
@@ -94,20 +245,25 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
       '--contract', fileURLToPath(new URL('./contract.ts', import.meta.url)),
       ...(minify ? [] : ['--no-minify']),
     ];
-    const result = Bun.spawnSync(command, { cwd: root, stderr: 'pipe' });
+    const result = Bun.spawnSync(command, { cwd: root, stdout: 'pipe', stderr: 'pipe' });
     // Surface the CLI diagnostics if building the integration fixture failed.
-    if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+    if (result.exitCode !== 0) throw new Error(result.stderr.toString() || result.stdout.toString());
     const bundle = await Bun.file(path.join(root, 'workload/guest.js')).text();
     const signedProfile = await Bun.file(path.join(root, 'workload/capabilities.json')).text();
     const verified = verifyV1RuntimeGuest(bundle, signedProfile, declarations);
     if (!verified.ok) throw new Error(verified.details.join(' '));
-    expect(verified.manifest.components).toEqual(['View']);
+    expect(verified.manifest.components).toEqual(['Supramark', 'View']);
+    const profileWithoutSupramark = JSON.stringify({ ...verified.manifest, components: ['View'] });
+    expect(verifyV1RuntimeGuest(bundle, profileWithoutSupramark, declarations)).toMatchObject({
+      ok: false, code: 'capability_mismatch',
+    });
 
     const calls: string[] = [];
     const clipboard = Promise.withResolvers<string>();
     const authorize = async () => {};
     const implementations = createHostModules({
       hasServiceCapability: true,
+      hasServiceOnCapability: true,
       callActor: async ({ route: sentRoute }) => {
         calls.push(sentRoute);
         return { success: true, payloadBase64: '' };
@@ -117,6 +273,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
     });
     // Stand in for the Host's native renderer without registering a Text component.
     const ProtocolText = () => null;
+    const HostSupramark = () => null;
     engine = new Engine({
       sandbox: 'node-vm',
       ...bindV1HostModules(verified.linkage, implementations, authorize),
@@ -124,7 +281,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
       textNodeRenderer: ProtocolText,
       requireWhitelist: verified.manifest.imports.filter((id) => !id.startsWith('host:')),
     });
-    engine.register({ View: () => null });
+    engine.register({ Supramark: HostSupramark, View: () => null });
     const receiver = engine.createReceiver();
     await engine.loadBundle(bundle);
     expect(await clipboard.promise).toBe('Echo received');
@@ -135,6 +292,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
         children: [
           { props: { children: { type: ProtocolText, props: { children: 'Hello' } } } },
           { type: ProtocolText, props: { children: 'Standalone text' } },
+          { type: HostSupramark, props: { markdown: '# Hello' } },
         ],
       },
     });
@@ -146,7 +304,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
         { op: 'CREATE', id: 999, type: 'Text', props: {} },
       ],
     }).failed).toBe(2);
-    expect(receiver.getStats().nodeCount).toBe(3);
+    expect(receiver.getStats().nodeCount).toBe(4);
   } finally {
     engine?.destroy();
     fs.rmSync(root, { recursive: true, force: true });

@@ -34,6 +34,9 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
+#[cfg(test)]
+mod admission_policy_tests;
+
 /// A created Realm: the response and its owner invite, returned once.
 pub type CreatedRealm = (CreateRealmResponse, Option<IssuedInvite>);
 type MetricsFuture = Pin<Box<dyn Future<Output = AdminResult<SystemMetrics>> + Send>>;
@@ -446,6 +449,7 @@ impl AdminApiService {
             }),
             "issuer" => cfg.services.issuer.as_ref().map(|a| {
                 serde_json::json!({
+                    "max_members_per_realm": cfg.realm.max_members_per_realm(),
                     "token_ttl_secs": a.server.token_ttl_secs,
                     "signaling_heartbeat_interval_secs": a.server.signaling_heartbeat_interval_secs,
                     "dependencies": {
@@ -507,9 +511,8 @@ impl AdminApiService {
     /// Write config file to disk (with TOML validation).
     ///
     /// `superv_managed` reflects whether the realm is supervisor-managed (Admin
-    /// UI read-only for the control plane). When true, any change to the
-    /// `control.*` section is rejected so a config write + reload cannot
-    /// re-enable the gRPC API and bypass the realm-write lock.
+    /// UI read-only for the control plane). When true, control settings and
+    /// Realm admission policy are protected by the supervisor's Realm-write lock.
     pub async fn save_config_file_direct(
         &self,
         content: &str,
@@ -552,6 +555,18 @@ impl AdminApiService {
             return Err(Status::permission_denied(
                 "control.* section is read-only while the realm is supervisor-managed",
             ));
+        }
+        if superv_managed {
+            let old_config = LoranConfig::from_toml(&original).map_err(|_| {
+                Status::failed_precondition("Cannot verify the existing admission policy")
+            })?;
+            if new_config.realm.dev_join != old_config.realm.dev_join
+                || new_config.realm.max_members_per_realm != old_config.realm.max_members_per_realm
+            {
+                return Err(Status::permission_denied(
+                    "Realm admission settings are read-only while the node is supervisor-managed",
+                ));
+            }
         }
 
         // Validate config semantics
@@ -676,7 +691,15 @@ impl AdminApiService {
             .await
             .map_err(|e| Status::internal(format!("Failed to load realm list: {e}")))?;
 
-        let realms_info: Vec<RealmInfo> = realms.iter().map(realm_to_proto).collect();
+        let counts: HashMap<String, u32> = membership::active_member_counts(None)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .into_iter()
+            .collect();
+        let realms_info: Vec<_> = realms
+            .iter()
+            .map(|realm| self.realm_info(realm, counts.get(&realm.name).copied().unwrap_or(0)))
+            .collect();
         let total_count = realms_info.len() as u32;
 
         Ok(ListRealmsResponse {
@@ -693,6 +716,85 @@ impl AdminApiService {
             .as_ref()
             .map(|config| config.realm.clone())
             .unwrap_or_default()
+    }
+
+    pub fn platform_member_limit(&self) -> u32 {
+        self.realm_config().max_members_per_realm()
+    }
+
+    fn manages_admission(&self, realm: &str) -> bool {
+        !self
+            .running_config
+            .as_ref()
+            .is_some_and(|cfg| cfg.superv_managed())
+            && self
+                .realm_profiles
+                .as_ref()
+                .is_none_or(|profiles| profiles.holds_key_for(realm))
+    }
+
+    fn realm_info(&self, realm: &Realm, active_members: u32) -> RealmInfo {
+        let mut info = realm_to_proto(realm);
+        info.active_members = Some(active_members);
+        info.admission_writable =
+            Some(realm.status == RealmStatus::Active && self.manages_admission(&realm.name));
+        info.effective_max_members = Some(realm.policy.member_limit(self.platform_member_limit()));
+        info
+    }
+
+    async fn current_realm_info(&self, realm: &Realm) -> GrpcResult<RealmInfo> {
+        let counts = membership::active_member_counts(Some(&realm.name))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(self.realm_info(realm, counts.first().map_or(0, |row| row.1)))
+    }
+
+    fn check_policy_limit(&self, policy: platform::realm::RealmPolicy) -> GrpcResult<()> {
+        if policy
+            .max_members
+            .is_some_and(|n| n.get() > self.platform_member_limit())
+        {
+            return Err(Status::invalid_argument(
+                "max_members exceeds the AFP member limit",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Change the public policy and the admission decision together.
+    pub async fn set_realm_policy_direct(
+        &self,
+        name: &str,
+        policy: platform::realm::RealmPolicy,
+    ) -> GrpcResult<RealmInfo> {
+        if !self.manages_admission(name) {
+            return Err(Status::permission_denied(
+                "local admission edits require an operator-managed Realm under this node's authority",
+            ));
+        }
+        self.check_policy_limit(policy)?;
+        let current = self.load_realm(name).await?;
+        if current.status != RealmStatus::Active {
+            return Err(Status::failed_precondition(
+                "only active Realms accept admission changes",
+            ));
+        }
+        let updated = match &self.realm_profiles {
+            Some(profiles) => profiles
+                .issue(
+                    name,
+                    ProfileChange {
+                        policy: Some(policy),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| Status::failed_precondition(e.to_string()))?,
+            None => Realm::set_unsigned_policy(name, policy)
+                .await
+                .map_err(|e| Status::failed_precondition(e.to_string()))?,
+        };
+        self.current_realm_info(&updated).await
     }
 
     fn max_realms(&self) -> Option<u32> {
@@ -753,7 +855,10 @@ impl AdminApiService {
             None => {}
         }
 
+        let policy = profile.policy.unwrap_or_default();
+        self.check_policy_limit(policy)?;
         let realm = Realm {
+            policy,
             name: req.realm,
             status: if signer.is_some() {
                 RealmStatus::Pending
@@ -813,7 +918,7 @@ impl AdminApiService {
             CreateRealmResponse {
                 success: true,
                 error_message: None,
-                realm: Some(realm_to_proto(&realm)),
+                realm: Some(self.current_realm_info(&realm).await?),
                 owner_invite: owner_invite.as_ref().map(|invite| invite.invite.clone()),
             },
             owner_invite,
@@ -868,7 +973,7 @@ impl AdminApiService {
                 Ok(CreateRealmResponse {
                     success: true,
                     error_message: None,
-                    realm: Some(realm_to_proto(&realm)),
+                    realm: Some(self.current_realm_info(&realm).await?),
                     owner_invite,
                 })
             }
@@ -910,7 +1015,7 @@ impl AdminApiService {
             Ok(realm) => Ok(GetRealmResponse {
                 success: true,
                 error_message: None,
-                realm: Some(realm_to_proto(&realm)),
+                realm: Some(self.current_realm_info(&realm).await?),
             }),
             Err(status) if status.code() == tonic::Code::NotFound => Ok(GetRealmResponse {
                 success: false,
@@ -955,7 +1060,7 @@ impl AdminApiService {
         Ok(UpdateRealmResponse {
             success: true,
             error_message: None,
-            realm: Some(realm_to_proto(&realm)),
+            realm: Some(self.current_realm_info(&realm).await?),
         })
     }
 
@@ -995,7 +1100,7 @@ impl AdminApiService {
             Ok(realm) => Ok(RetireRealmResponse {
                 success: true,
                 error_message: None,
-                realm: Some(realm_to_proto(&realm)),
+                realm: Some(self.current_realm_info(&realm).await?),
             }),
             Err(RealmError::NotFound) => {
                 Err(Status::not_found(format!("Realm not found: {realm}")))

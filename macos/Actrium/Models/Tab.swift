@@ -86,8 +86,19 @@ struct Tab: Identifiable {
     var title: String
     var url: URL?
     var appId: String?
+    /// The signed Realm Profile authorizing the installed runtime.
+    var realmProfileSigner: (realmName: String, keyId: String)?
     /// Per-tab Service actor endpoint supplied after Attach.
     var serviceCallUrl: String?
+    /// The companion SSE endpoint exposed by an HTTP Service gateway. Native
+    /// actor-backed tabs leave both URLs nil and use RealmService events.
+    var serviceEventsUrl: String? {
+        guard let serviceCallUrl,
+              var components = URLComponents(string: serviceCallUrl),
+              components.path.hasSuffix("/call") else { return nil }
+        components.path = String(components.path.dropLast("/call".count)) + "/events"
+        return components.url?.absoluteString
+    }
     /// Host-designated permission to use the legacy ACTR_CALL bridge.
     var legacyActorBridge: Bool = false
     var htmlContent: String?

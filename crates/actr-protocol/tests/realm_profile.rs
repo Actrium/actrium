@@ -89,6 +89,41 @@ fn schema_and_protocol_give_the_expected_results() {
 }
 
 #[test]
+fn local_front_path_policy_matches_the_schema() {
+    let vectors = vectors();
+    let schema = schema();
+    let mut document = vectors["profiles"]["active"]["document"].clone();
+    let front = &mut document["packages"]["ui"];
+    front["local_path"] =
+        json!({"signing_key_id":"actr-pub-0123456789abcdef","allow_rebuild":true});
+    front["dependencies"] = json!({"service":"notes"});
+    front.as_object_mut().unwrap().remove("sha256");
+    for (path, allowed) in [
+        ("front.actr", true),
+        ("/Users/example/My Project/front.actr", true),
+        ("/private/tmp/front.actr", true),
+        (" front.actr", false),
+        ("/EtC/front.actr", false),
+        ("/Library/front.actr", false),
+        ("/private/VAR/RUN/front.actr", false),
+        ("/System/Volumes/Data/Users/example/front.actr", false),
+        ("/Users/a/../front.actr", false),
+        ("/Users/a/%2e%2e/front.actr", false),
+        ("/Users/a/\u{202e}front.actr", false),
+    ] {
+        document["packages"]["ui"]["href"] = json!(path);
+        assert_eq!(
+            schema.is_valid(&document),
+            allowed,
+            "{path:?}: {:?}",
+            schema.iter_errors(&document).collect::<Vec<_>>()
+        );
+        let selection = serde_json::from_value::<RealmPackageSelection>(document.clone()).unwrap();
+        assert_eq!(selection.check().is_ok(), allowed, "{path:?}");
+    }
+}
+
+#[test]
 fn schema_rejects_malformed_shapes_but_allows_extensions() {
     let vectors = vectors();
     let schema = schema();

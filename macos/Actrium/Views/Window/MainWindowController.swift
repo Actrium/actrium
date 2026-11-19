@@ -204,7 +204,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        for tab in viewModel.tabs { RealmServiceBindings.shared.remove(tab.id) }
+        viewModel.invalidateRealmLoadsForWindowClose()
+        for tab in viewModel.tabs {
+            TabSnapshotCacheManager.shared.invalidate(tabId: tab.id)
+            WebViewHolderManager.shared.remove(tabId: tab.id)
+            ViewBridgeHostViewManager.shared.remove(tabId: tab.id)
+            RealmServiceBindings.shared.remove(tab.id)
+            CapabilityPermissionStore.shared.clearSessionGrants(tabId: tab.id)
+        }
     }
 
     func windowDidBecomeKey(_ notification: Notification) {

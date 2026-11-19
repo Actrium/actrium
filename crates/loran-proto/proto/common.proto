@@ -103,5 +103,11 @@ message RealmInfo {
   // Field 7 removed (was version, replaced by updated_at)
   required uint64 expires_at = 8;           // Expiration timestamp (Unix timestamp)
   required string status = 9;               // pending | active | retired
+  optional string membership = 11;          // invite-only or open
+  optional uint32 max_members = 12;         // Realm override, subject to the AFP cap
+  optional uint32 open_joins_per_minute = 13;
+  optional uint32 active_members = 14;
+  optional uint32 effective_max_members = 15;
+  optional bool admission_writable = 16;    // Policy may be changed by the local operator
   reserved 10; reserved "secret_rotation_state"; // Realm secrets were replaced by invites
 }

@@ -170,16 +170,38 @@ pub struct RawCapabilitiesConfig {
 /// Actor storage uses a fixed hashed layout under `storage_root`
 /// (`{storage_root}/actors/v1/<sha256-hex>/store.sqlite3`); the actor identity
 /// never contributes a path component (CWE-22 / CWE-73).
+/// Keep embedded Host keys in sync with `actr_hyper::config::HyperSection`,
+/// which is parsed separately after this strict schema.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct RawHyperConfig {
+    /// Runtime data directory consumed by the embedded Host.
+    #[serde(default)]
+    pub data_dir: Option<std::path::PathBuf>,
+
+    /// Embedded Host trust configuration.
+    #[serde(default)]
+    pub trust: Option<toml::Table>,
+
+    /// Enable the embedded Host membership controller.
+    #[serde(default)]
+    pub membership_controller_enabled: Option<bool>,
+
     /// Filesystem root for per-actor storage. Relative paths resolve against the
     /// config file's directory; a leading `~` is expanded.
     #[serde(default)]
     pub storage_root: Option<std::path::PathBuf>,
 
-    /// Tombstone: the removed `storage_path_template` key. Kept only to produce
-    /// an explicit migration error instead of letting Serde silently ignore it
-    /// (the surrounding struct has no `deny_unknown_fields`).
+    /// Existing host directory exposed to a WASM workload at `/data`.
+    /// Relative paths resolve against the config file's directory.
+    #[serde(default)]
+    pub wasi_data_dir: Option<std::path::PathBuf>,
+
+    /// Maximum guest access to that directory. Defaults to read-write.
+    #[serde(default)]
+    pub wasi_data_access: crate::config::WasiDataAccess,
+
+    /// Recognize the removed key so the parser can report its replacement.
     #[serde(default, rename = "storage_path_template")]
     pub removed_storage_path_template: Option<String>,
 }

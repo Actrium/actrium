@@ -38,3 +38,14 @@ BOOL ActriumScrollRendererContent(NSView *hitView, NSPoint delta)
     [clip scrollToPoint:[clip constrainBoundsRect:bounds].origin];
     return YES;
 }
+
+BOOL ActriumSendEditingAction(SEL action, NSResponder *target)
+{
+    @try {
+        return [NSApp sendAction:action to:target from:nil];
+    } @catch (NSException *exception) {
+        NSLog(@"Actrium: editing action %@ on %@ threw %@",
+              NSStringFromSelector(action), target, exception);
+        return NO;
+    }
+}

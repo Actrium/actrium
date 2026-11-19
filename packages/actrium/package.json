@@ -21,11 +21,13 @@
   "type": "commonjs",
   "dependencies": {
     "@babel/runtime": "^7.28.4",
+    "@boomsi/rn-speech-recognition": "3.2.0",
     "askit": "file:../actrium-app-sdk",
     "keel": "file:../keel",
     "react": "19.0.0",
     "react-native": "0.79.6",
-    "react-reconciler": "0.31.0"
+    "react-reconciler": "0.31.0",
+    "spark-md5": "^3.0.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
@@ -38,6 +40,7 @@
     "@types/bun": "^1.4.4",
     "@types/node": "^22.19.3",
     "@types/react": "19.0.0",
+    "@types/spark-md5": "^3.0.5",
     "husky": "^9.1.7",
     "patch-package": "^8.0.0",
     "typescript": "^5.9.3"

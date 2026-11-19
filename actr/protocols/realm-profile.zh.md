@@ -96,8 +96,9 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `primary_package` | `packages` 中的一个引用名，指定本实例的默认主 Service 包。 |
 | `front_package` | `packages` 中本实例选用的 Front 包引用名。 |
 | `packages` | 本应用实例选定的包引用映射。 |
-| `packages[ref].href` | 该归档的 HTTPS 下载地址，可以在任何位置。 |
-| `packages[ref].sha256` | 该归档全部字节的 SHA-256（64 位小写十六进制）。 |
+| `packages[ref].href` | 该归档的 HTTPS 下载地址。声明 `local_path` 时填写本地绝对路径，兼容已有的文件名提示。 |
+| `packages[ref].sha256` | 该归档全部字节的 SHA-256（64 位小写十六进制）。仅 `allow_rebuild: true` 的本地 Front 省略。 |
+| `packages[ref].local_path` | 所选 Front 的可选签名字段，包含 `signing_key_id` 和 `allow_rebuild`。 |
 | `packages[ref].type` | 该归档 manifest 声明的精确 Actor 类型 `publisher/program@version`。 |
 | `packages[ref].dependencies` | 可选映射：该包 manifest 中的依赖 alias → `packages` 中选定的目标包引用。见 §4.3。 |
 | `issuer.url` | Issuer 的注册与验证端点。 |
@@ -105,7 +106,7 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `provider.id` | Actr Facility Provider ID：Actr Facility Provider 的规范化 DNS authority，在 Realm 生命周期内不变。 |
 | `provider.signaling` | signaling 端点。共享同一 `control_plane_id` 的条目是同一 Actr Facility Provider control plane 的副本或故障切换入口，不是 federation。 |
 | `provider.ice` | STUN 与 TURN 端点。TURN 条目标明短期 TURN credential 的 `credential_audience`。 |
-| `policy` | 该 Realm 的加入策略。 |
+| `policy` | `membership` 为 `invite-only`（默认）或 `open`。可选正整数 `open_joins_per_minute` 和 `max_members` 分别限制免邀请加入频率和成员总数。 |
 | `issued_at` | Realm Profile 的签署时间（RFC 3339），仅供参考；Realm Profile 不过期。 |
 | `signature` | Realm 签名 key 的 detached 签名。 |
 
@@ -129,7 +130,7 @@ Realm 从 `packages` 中选定本实例的 Service 和 Front。其余条目供�
 1. `active` Profile **MUST** 同时提供 `primary_package`、`front_package` 和 `packages`。`retired` Profile 可整体省略包选择。字段不齐时拒绝。
 2. `packages` 是包含 2–32 项的 JSON 对象。键为 1–63 个 ASCII 小写字母、数字或连字符，首尾须为字母或数字。
 3. 提供包选择时，`primary_package` 与 `front_package` **MUST** 精确匹配两个不同的键，且条目的 Actor 类型不同。
-4. 每项 **MUST** 包含 HTTPS `href`、整包 `sha256`（64 位小写十六进制）和精确 `type`（`publisher/program@version`）。同一精确类型只能绑定一个摘要。接收方 **MUST** 拒绝版本范围和 `latest`。
+4. 每项 **MUST** 包含精确 `type`（`publisher/program@version`）。下载包须提供 HTTPS `href` 和固定摘要。仅所选 Front 可声明 `local_path`，其 `href` 为本地 `.actr` 绝对路径或已有的文件名提示，`service` 依赖必须绑定 `primary_package`。固定包的精确类型和摘要绑定保持不可变。接收方 **MUST** 拒绝版本范围和 `latest`。
 5. 完整签名 Profile 最多 64 KiB。接收方 **MUST** 拒绝超限文档和重复的 JSON member。
 6. 提供 `packages[ref].dependencies` 时，它 **MUST** 是 JSON 对象；键是非空且首尾无空白的依赖 alias，值 **MUST** 精确匹配 `packages` 中的一个键。不存在的目标引用必须拒绝。
 
@@ -184,13 +185,23 @@ Provider 不是信任根。
 ## 6. 使用 Realm
 
 从 `packages[primary_package]` 解析 Service 引用，从 `packages[front_package]` 解析 Front 引用。
-客户端打开已有 Realm 时只获取 Front 归档。客户端按 Service 引用中的精确 Actor 类型检查 Front
+打开使用下载 Front 的 Realm 时，客户端获取 Front 归档。客户端按 Service 引用中的精确 Actor 类型检查 Front
 的必需依赖，并在 Attach 时与通过身份验证的 Service 核对 RPC 契约，通过后才运行 Guest。
 Service Host 验证 Service 归档，并在接受 Front 前核对所选 Front 的依赖和 RPC 契约。
 
-下载时 **MUST** 以不带凭据的 HTTPS GET 获取 `href`。加载任何归档前，须核对整包 `sha256`，并用
+下载时 **MUST** 以不带凭据的 HTTPS GET 获取 `href`。固定归档须核对整包 `sha256`。加载任何归档前，用
 `type` 所属 Publisher 的受信公钥验证包内 `manifest.sig` 对原始 `manifest.toml` 的签名。再核对清单中
 的精确 Actor 类型、签名覆盖的载荷、Workload、Host 要求、平台策略和依赖锁。见 [Actor Package](actor-package.zh.md)。
+
+声明 `local_path` 的 Front 若使用绝对路径，Host 必须先向本机用户展示该路径并获得授权，才能访问文件。
+绝对路径须避开受保护的系统目录。在 macOS 上，主目录下的文件使用 `/Users/…` 路径。
+只有文件名提示的已有 Profile 仍通过本机选包授权。两种方式都只接受本地卷上的普通文件，
+并拒绝文件符号链接。读取已授权的绝对路径时，Host 也拒绝目录符号链接。
+Host 从同一次读取的字节验证固定的 Publisher 签名 key、精确 Actor 类型、Service 依赖和 RPC 契约。
+固定包核对整包摘要，可以用已退役的包签名 key 验证。`allow_rebuild` 开启时须使用 active key。
+每次加载重新计算构建摘要，刷新可重新读取获准位置的同名文件，
+并重新验证 Realm 与 Publisher。后台只验本地包声明，可下载归档照常验包。Host 用已验证的 Service 契约
+比对本地包。
 
 主包的 Actor 类型标识实例的 Service。Realm 中该类型的 Actor 数量必须恰好为一。
 授权部署配置决定还要运行哪些包、由哪个 Host 启动，以及每个 Actor 的身份和状态。
@@ -314,9 +325,10 @@ Authority Discovery 第 4.3 节）接受以下 Realm 管理请求：
 
 | `op` | 用途 |
 | --- | --- |
-| `create_realm` | 请求包含两个引用和完整包表。AFP 创建 pending Realm，在未签名的首份草稿中返回该选择。 |
+| `create_realm` | 请求包含两个引用和完整包表。可选的 `policy` 默认为邀请制。AFP 在 pending Realm 中保存选定的包和策略，写入首份草稿。 |
 | `publish_profile` | 在 `profile` 中提交已签名的 Realm Profile：首次提交激活 pending Realm，响应一次性携带 owner 邀请（`owner_invite`）；之后提交 sequence 更高的版本即更新（含退役）。 |
 | `reissue_owner_invite` | 签发新的 owner 邀请（响应 `owner_invite`），并使该 Realm 此前未用的 owner 邀请失效；用于 owner 丢失全部客户端时的恢复（Actr Realm Membership 第 5 节）。 |
+| `get_admission` | 由 Realm 域签名查询指定 Realm 的加入策略、活跃成员数、实际成员上限和每分钟免邀请加入上限。 |
 | `draft_profile` | 对 AFP 域外的 Realm，返回 `sequence` 加一的草稿。未签名草稿沿用已接受的包选择、`display_name` 和 `policy`，使用 AFP 当前的 `issuer` 和 `provider`（§6.1）。发布须单独执行。 |
 
 Realm 管理请求只用于 Actr Facility Provider 域名以外的 Realm（第 7.3 节）。每个请求都是 Actr 管理信封：

@@ -57,7 +57,7 @@ Realm Profile（`application/json`，带 `Access-Control-Allow-Origin: *` 与
 为该 Realm 当前列出的 issuer key（`id` 为 Signer 数字 key id 的十进制，即 credential `key_id`；
 首把是 Signer 中的 `issuer:<realm>`，轮换见下文「Admin」），`provider.signaling` 的
 `control_plane_id = <provider>/v1`、`ticket_audience = actr.signaling`，TURN 条目的
-`credential_audience = actr.turn`，`policy.membership = invite-only`；每份都先按 Actr Host
+`credential_audience = actr.turn`，`policy.membership` 取该 Realm 的 `invite-only` 或 `open`；每份都先按 Actr Host
 的规则（`RealmProfile::verify` 与 `check_successor`）验证再保存。
 
 其他域名的 Realm 若有已接受的 Realm Profile，Loran 每 `[realm] profile_refresh_secs`（默认
@@ -202,10 +202,11 @@ Realm）或本 Realm 名；写成其他 Realm 名或不合法的 Realm 名时注
 `signature.key_id` 为其 `key_id`（公钥 SHA-256 前 16 hex）。`provider_id` 规则与 Issuer 客户端证明
 相同。操作见 Actr Realm Membership 第 4 节：
 
-- `join`：`invite`（邀请 secret）、`public_key`、可选 `label`（≤ 64 字符），由新 key 签名；兑换
+- `join` 的新设备签名包含 `public_key` 和可选 `label`（≤ 64 字符）。`invite-only` 需要邀请 secret，兑换
   邀请并登记该 key，响应 `{realm, member_id, role, key_id}`。同一把 key 重试已兑换的邀请返回首次
   的结果（key 未撤销、成员 active 时）。owner 邀请在 Realm 已有 owner 时把新 key 加给 owner 并撤销
   owner 原有的全部 key；
+- `open` 允许不带邀请加入为 Viewer。首次 Owner 领取有预留名额，邀请加入和免邀请加入共用活跃成员上限。超过免邀请加入频率会返回 `429 join_rate_limited`，响应头 `Retry-After` 指明等待秒数。
 - `create_invite`：`role`（`editor`/`viewer`，只有 owner）或 `member_id`（为该成员添加客户端：
   owner 可为任何 active 成员，成员只为自己），加 `invite_expires_at`（≤ 30 天）；响应 `{invite_id,
   invite, expires_at}`，`invite` 为 `ri_…` 文本，只返回这一次；

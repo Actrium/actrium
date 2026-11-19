@@ -12,6 +12,7 @@
 //  - All root views share the same RCTHost (managed by ServiceReactNativeHost singleton)
 //
 
+import ActriumIPC
 import Cocoa
 import ObjectiveC
 import React
@@ -1437,6 +1438,9 @@ final class ServiceReactNativeHost {
         if let serviceCallUrl = config["serviceCallUrl"] as? String {
             tabDict["serviceCallUrl"] = serviceCallUrl
         }
+        if let serviceEventsUrl = config["serviceEventsUrl"] as? String {
+            tabDict["serviceEventsUrl"] = serviceEventsUrl
+        }
         if config["legacyActorBridge"] as? Bool == true {
             tabDict["legacyActorBridge"] = true
         }
@@ -1572,6 +1576,23 @@ final class ServiceReactNativeHost {
         }
         let args = [name, body] as NSArray
         RCTHostCallFunction(host, "RCTDeviceEventEmitter" as NSString, "emit" as NSString, args)
+    }
+
+    /// Delivers one terminal attachment upload result to the JS of the tab
+    /// that owns the session. `streamId` is the upload's resultStreamId; JS
+    /// filters the broadcast by it.
+    func emitAttachmentUploadResult(tabId: String, event: RealmServiceAttachmentResultEvent) {
+        var body: [String: Any] = [
+            "tabId": tabId,
+            "streamId": event.streamId,
+            "attachmentId": event.attachmentId,
+            "status": event.status,
+            "statusCode": event.statusCode,
+        ]
+        if let errorMessage = event.errorMessage {
+            body["errorMessage"] = errorMessage
+        }
+        emitDeviceEvent(RealmServiceAttachmentResultEvent.nativeEventName, body: body)
     }
 
     func updateDimensionsForEntry(_ entry: TabViewControllerEntry) {
@@ -1969,6 +1990,9 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     if let appId = config["appId"] as? String { tabDict["appId"] = appId }
     if let serviceCallUrl = config["serviceCallUrl"] as? String {
         tabDict["serviceCallUrl"] = serviceCallUrl
+    }
+    if let serviceEventsUrl = config["serviceEventsUrl"] as? String {
+        tabDict["serviceEventsUrl"] = serviceEventsUrl
     }
     if config["legacyActorBridge"] as? Bool == true {
         tabDict["legacyActorBridge"] = true

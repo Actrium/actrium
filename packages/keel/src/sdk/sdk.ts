@@ -481,6 +481,9 @@ export function declareHostComponent<P>(name: string): GuestComponent<P> {
 export const View = asComponent<ViewProps>(_components.View);
 export const Text = asComponent<TextProps>(_components.Text);
 export const Image = asComponent<ImageProps>(_components.Image);
+export const Supramark = declareHostComponent<{ markdown: string; theme?: 'light' | 'dark' }>(
+  'Supramark'
+);
 export const ImageBackground = asComponent<ImageBackgroundProps>(_components.ImageBackground);
 // Scrolling
 export const ScrollView = asComponent<ScrollViewProps>(_components.ScrollView);

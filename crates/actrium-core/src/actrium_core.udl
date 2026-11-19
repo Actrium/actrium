@@ -14,6 +14,12 @@ namespace actrium_core {
 
     [Throws=ActrPackageVerificationError]
     VerifiedActrPackageInfo verify_realm_front_package(bytes archive, bytes trusted_public_key, RealmProfileInfo profile);
+    [Throws=ActrPackageVerificationError]
+    VerifiedLocalRealmFrontInfo verify_local_realm_front_package(bytes archive, bytes trusted_public_key, RealmProfileInfo profile, bytes service_archive, sequence<bytes> service_public_keys);
+    [Throws=CoreError]
+    PublisherProfileInfo verify_realm_package_publisher(string body, string domain);
+    [Throws=CoreError]
+    PublisherProfileAcceptance accept_realm_package_publisher(string body, string domain, string? previous_pins_json);
 
     /// Generate a fresh installation id: 26 lowercase base32 characters
     /// from 16 OS-CSPRNG bytes. Platforms persist the value once and own
@@ -39,6 +45,8 @@ namespace actrium_core {
     /// across visits is not applied yet.
     [Throws=CoreError]
     AuthorityDiscoveryInfo accept_authority_descriptor(string body, string domain);
+    [Throws=CoreError]
+    RealmAuthorityAcceptance accept_realm_authority(string body, string domain, string? previous_pins_json, string? legacy_signing_keys_json);
 
     /// Validate a Realm Profile response for `realm_name` and extract the
     /// package target.
@@ -48,6 +56,10 @@ namespace actrium_core {
     /// Realms are rejected.
     [Throws=CoreError]
     RealmProfileInfo accept_realm_profile(string body, string realm_name, string signing_keys_json);
+    [Throws=CoreError]
+    RealmProfileAcceptance accept_realm_profile_successor(string body, string realm_name, string signing_keys_json, sequence<string> previous_documents);
+    [Throws=CoreError]
+    RealmProfileAcceptance? recover_realm_profile_baseline(string realm_name, string signing_keys_json, sequence<string> previous_documents);
 
     /// Validate the descriptor served by a publisher domain and verify its
     /// inline Publisher Profile; extract the package signing keys that
@@ -1057,12 +1069,18 @@ dictionary RealmDependencyInfo {
     string target_package;
 };
 
+dictionary LocalRealmFront {
+    string signing_key_id;
+    boolean allow_rebuild;
+};
+
 dictionary RealmPackageInfo {
     string reference;
     string href;
     string sha256;
     string actor_type;
     sequence<RealmDependencyInfo> dependencies;
+    LocalRealmFront? local_path;
 };
 
 dictionary RealmProfileInfo {
@@ -1091,6 +1109,18 @@ dictionary RealmProfileInfo {
     string provider_id;
 };
 
+dictionary RealmAuthorityAcceptance {
+    AuthorityDiscoveryInfo descriptor;
+    string pins_json;
+};
+
+dictionary RealmProfileAcceptance {
+    RealmProfileInfo? profile;
+    string body;
+    string signing_key_id;
+    sequence<string> baseline_documents;
+};
+
 /// The Realm name carried by a `ri_` invite text.
 dictionary ActrInviteInfo {
     /// Canonical Realm name `<realm_id>@<domain>`.
@@ -1116,10 +1146,20 @@ dictionary PublisherProfileInfo {
     sequence<PublisherPackageKeyInfo> package_signing_keys;
 };
 
+dictionary PublisherProfileAcceptance {
+    PublisherProfileInfo profile;
+    string pins_json;
+};
+
 dictionary VerifiedActrPackageInfo {
     ActrPackageManifestInfo manifest;
     string workload_profile;
     bytes workload_bytes;
+};
+
+dictionary VerifiedLocalRealmFrontInfo {
+    VerifiedActrPackageInfo front;
+    bytes service_public_key;
 };
 
 enum ContractGateStatus {

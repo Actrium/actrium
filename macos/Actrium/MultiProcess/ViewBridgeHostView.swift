@@ -946,6 +946,7 @@ final class ViewBridgeCoordinator {
             }
             if let leftPanelScript = tabConfig.leftPanelScript { config["leftPanelScript"] = leftPanelScript }
             if let serviceCallUrl = tabConfig.serviceCallUrl { config["serviceCallUrl"] = serviceCallUrl }
+            if let serviceEventsUrl = tabConfig.serviceEventsUrl { config["serviceEventsUrl"] = serviceEventsUrl }
             if let appId = tabConfig.appId { config["appId"] = appId }
             if tabConfig.legacyActorBridge { config["legacyActorBridge"] = true }
             config["leftPanelVisible"] = tabConfig.leftPanelVisible
@@ -1484,7 +1485,7 @@ final class ViewBridgeCoordinator {
     }
 
     /// Cleaning XPC Resources
-    func cleanup() {
+    func cleanup(releaseRenderer: Bool = true) {
         // Clean up the throttle timer
         throttleTimer?.invalidate()
         throttleTimer = nil
@@ -1527,10 +1528,12 @@ final class ViewBridgeCoordinator {
         // Disconnect ViewBridge Connection
         hostView?.disconnect()
         hostView = nil
+        onConnectionEstablished = nil
         rendererHostView?.prepareForReuse()
+        rendererHostView?.tabId = nil
         rendererHostView = nil
 
-        if let tabId = tabId, allocatedServiceId != nil {
+        if releaseRenderer, let tabId = tabId, allocatedServiceId != nil {
             RendererProcessPool.shared.releaseRenderer(for: tabId)
             ipcLog("📦 Coordinator cleanup: Tab \(String(tabId.uuidString.prefix(8))) released renderer")
         }
@@ -1624,7 +1627,8 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
     }
 
     func removeCoordinator(for tabId: UUID) {
-        coordinators.removeValue(forKey: tabId)
+        coordinators.removeValue(forKey: tabId)?.cleanup(releaseRenderer: false)
+        RendererProcessPool.shared.releaseRenderer(for: tabId)
     }
 
     /// Internal approach: update all coordinators It's... isOverviewMode and notify services
@@ -2271,7 +2275,8 @@ struct UnifiedReactNativeLayer: View {
                 permissions: tab.permissions,
                 libraryData: libraryData,
                 reloadKey: tab.reloadNonce,
-                serviceCallUrl: tab.serviceCallUrl
+                serviceCallUrl: tab.serviceCallUrl,
+                serviceEventsUrl: tab.serviceEventsUrl
             )
             coordinator.currentViewportSize = currentSize
             ipcLog("📱 UnifiedReactNativeLayer.onAppear: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil"), isFocused=\(isFocused)")
@@ -2322,7 +2327,8 @@ struct UnifiedReactNativeLayer: View {
                 permissions: tab.permissions,
                 libraryData: libraryData,
                 reloadKey: tab.reloadNonce,
-                serviceCallUrl: tab.serviceCallUrl
+                serviceCallUrl: tab.serviceCallUrl,
+                serviceEventsUrl: tab.serviceEventsUrl
             )
             coordinator.lastSentConfigSize = nil
             coordinator.lastSentReloadKey = nil
@@ -2392,6 +2398,9 @@ struct UnifiedReactNativeLayer: View {
         }
         if let serviceCallUrl = tab.serviceCallUrl {
             config["serviceCallUrl"] = serviceCallUrl
+        }
+        if let serviceEventsUrl = tab.serviceEventsUrl {
+            config["serviceEventsUrl"] = serviceEventsUrl
         }
         if let appId = tab.appId {
             config["appId"] = appId

@@ -1,6 +1,6 @@
 import type { RealmInfo } from "../../lib/api";
 import { cn } from "../../lib/utils";
-import { Archive, Pause, Play, UserPlus, Users } from "lucide-react";
+import { Archive, Pause, Play, Settings, UserPlus, Users } from "lucide-react";
 
 interface RealmTableProps {
   realms: RealmInfo[];
@@ -8,6 +8,7 @@ interface RealmTableProps {
   onToggleEnabled: (realm: RealmInfo) => void;
   onIssueOwnerInvite: (realm: string) => void;
   onRetire: (realm: string) => void;
+  onEditAdmission: (realm: RealmInfo) => void;
   onShowMembers: (realm: string) => void;
 }
 
@@ -34,6 +35,7 @@ export function RealmTable({
   onIssueOwnerInvite,
   onRetire,
   onShowMembers,
+  onEditAdmission,
 }: RealmTableProps) {
   if (realms.length === 0) {
     return (
@@ -52,6 +54,8 @@ export function RealmTable({
           <tr className="border-b border-gray-200 bg-gray-50">
             <th className="px-4 py-3 text-left font-medium text-gray-500">Realm</th>
             <th className="px-4 py-3 text-left font-medium text-gray-500">Status</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-500">Admission</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-500">Members</th>
             <th className="px-4 py-3 text-left font-medium text-gray-500">Created</th>
             <th className="px-4 py-3 text-right font-medium text-gray-500">Actions</th>
           </tr>
@@ -71,11 +75,18 @@ export function RealmTable({
                     {status.text}
                   </span>
                 </td>
+                <td className="px-4 py-3">{realm.policy.membership === "open" ? "Open" : "Invitation required"}</td>
+                <td className="px-4 py-3 tabular-nums">{realm.active_members} / {realm.effective_max_members}</td>
                 <td className="px-4 py-3 text-xs text-gray-500">
                   {new Date(realm.created_at * 1000).toLocaleDateString()}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
+                    <button title="Edit admission" aria-label={`Edit admission for ${realm.realm}`}
+                      disabled={!canWrite || !realm.admission_writable}
+                      onClick={() => onEditAdmission(realm)} className={actionClass}>
+                      <Settings className="h-4 w-4" />
+                    </button>
                     <button
                       onClick={() => onShowMembers(realm.realm)}
                       className={cn(actionClass, "hover:bg-gray-100 hover:text-gray-600")}

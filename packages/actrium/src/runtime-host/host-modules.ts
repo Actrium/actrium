@@ -10,9 +10,17 @@ import type {
   ServiceCallInput,
   ServiceEvent,
   ServiceTellInput,
+  ServiceUploadAttachmentInput,
+  ServiceUploadAttachmentOutput,
+  SpeechInterimHandler,
+  SpeechRecognizeInput,
+  SpeechRecognizeOutput,
+  SpeechStateHandler,
 } from './contract';
 import type { FrontCapability } from './capabilities';
 import type { LocalStorageCall } from './local-storage';
+import type { ServiceEventSource } from './service-events';
+import type { AttachmentUploadManager } from './attachment-upload';
 
 export type ServiceCallRequest = ServiceCallInput;
 
@@ -38,9 +46,10 @@ export type HostModules = HostModulesImplementation<ActriumContract>;
 
 /** Methods with a real Host implementation, excluding throwing placeholders. */
 export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
-  'host:service': new Set(['call']),
+  'host:service': new Set(['call', 'on', 'uploadAttachment']),
   'host:clipboard': new Set(['writeText']),
   'host:local-storage': new Set(['getItem', 'setItem', 'removeItem']),
+  'host:speech': new Set(['recognize', 'onInterimResult', 'stop', 'onStateChange']),
   'host:file-import': new Set(['pick']),
 };
 
@@ -78,17 +87,43 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
  */
 export function createHostModules(options: {
   hasServiceCapability: boolean;
+  hasServiceOnCapability: boolean;
   callActor: ActorCall;
+  serviceEventSource?: ServiceEventSource;
   authorizeCapability: (capability: FrontCapability) => Promise<void>;
+  onCapabilityRevoked?: (
+    capability: FrontCapability,
+    listener: () => void
+  ) => () => void;
+  /** Track the complete Guest cleanup for engine reload/tab teardown. */
+  trackServiceEventSubscription?: (cleanup: () => void) => () => void;
   writeClipboardText: (text: string) => Promise<void>;
   localStorage?: LocalStorageCall;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
+  recognizeSpeech?: (
+    input: SpeechRecognizeInput, onInterim?: SpeechInterimHandler, onState?: SpeechStateHandler
+  ) => Promise<SpeechRecognizeOutput>;
+  stopSpeech?: () => Promise<void>;
+  /**
+   * Fixed transport attachment uploader. When absent, `uploadAttachment`
+   * fails closed; there is deliberately no HTTP or legacy fallback.
+   */
+  attachmentUploader?: AttachmentUploadManager;
 }): HostModules {
   let requestSequence = 0;
   const localStorage: LocalStorageCall = async (operation, input) => {
     await options.authorizeCapability(`host:local-storage.${operation}`);
     if (!options.localStorage) throw new Error('The host local storage module is unavailable.');
     return options.localStorage(operation, input);
+  };
+  let cancelSpeechAuthorization: (() => void) | undefined;
+  const speechListeners = new Set<SpeechInterimHandler>();
+  const speechStateListeners = new Set<SpeechStateHandler>();
+  const emitSpeechInterim: SpeechInterimHandler = (result) => {
+    for (const listener of speechListeners) listener(result);
+  };
+  const emitSpeechState: SpeechStateHandler = (state) => {
+    for (const listener of speechStateListeners) listener(state);
   };
 
   return {
@@ -118,8 +153,81 @@ export function createHostModules(options: {
       tell: async (_input: ServiceTellInput) => {
         throw notImplemented('host:service', 'tell');
       },
-      on: (_handler: (event: ServiceEvent) => void) => {
-        throw notImplemented('host:service', 'on');
+      on: (handler: (event: ServiceEvent) => void) => {
+        if (!options.hasServiceOnCapability) {
+          throw new Error(
+            'The application does not declare the service.on capability.'
+          );
+        }
+        if (!options.serviceEventSource) {
+          throw new Error('Service event source is not available.');
+        }
+
+        // Authorize before opening the native or HTTP transport. The cleanup
+        // handle remains synchronous and also cancels a pending authorization.
+        let disposed = false;
+        let unsubscribeTransport: (() => void) | undefined;
+        let stopWatchingRevocation: (() => void) | undefined;
+        let stopTracking: (() => void) | undefined;
+        const cleanup = () => {
+          if (disposed) return;
+          disposed = true;
+          stopWatchingRevocation?.();
+          stopWatchingRevocation = undefined;
+          stopTracking?.();
+          stopTracking = undefined;
+          unsubscribeTransport?.();
+          unsubscribeTransport = undefined;
+        };
+        const untrack = options.trackServiceEventSubscription?.(cleanup);
+        if (disposed) untrack?.();
+        else stopTracking = untrack;
+        void options.authorizeCapability('service.on').then(
+          () => {
+            if (disposed) return;
+            // Attach revocation before startup. `onCapabilityRevoked` checks
+            // the latest snapshot synchronously, so a revoke that landed while
+            // authorization was resolving cannot open the transport.
+            const stopWatching = options.onCapabilityRevoked?.('service.on', cleanup);
+            if (disposed) {
+              stopWatching?.();
+              return;
+            }
+            stopWatchingRevocation = stopWatching;
+            try {
+              unsubscribeTransport = options.serviceEventSource!.subscribe((event) => {
+                if (disposed) return;
+                try {
+                  handler(event);
+                } catch (error) {
+                  console.warn('[Actrium] Service event handler failed:', error);
+                }
+              });
+              if (disposed) {
+                unsubscribeTransport?.();
+                unsubscribeTransport = undefined;
+              }
+            } catch (error) {
+              console.warn('[Actrium] Service event subscription failed:', error);
+              cleanup();
+            }
+          },
+          (error) => {
+            console.warn('[Actrium] service.on authorization rejected:', error);
+            cleanup();
+          }
+        );
+
+        return cleanup;
+      },
+      uploadAttachment: async (
+        input: ServiceUploadAttachmentInput
+      ): Promise<ServiceUploadAttachmentOutput> => {
+        if (!options.attachmentUploader) {
+          throw new Error('The native attachment upload bridge is unavailable.');
+        }
+        await options.authorizeCapability('service.attachmentUpload');
+        return options.attachmentUploader.upload(input);
       },
     },
     'host:assets': {
@@ -155,6 +263,37 @@ export function createHostModules(options: {
     'host:microphone': {
       record: async () => {
         throw notImplemented('host:microphone', 'record');
+      },
+    },
+    'host:speech': {
+      recognize: async (input) => {
+        if (!options.recognizeSpeech) throw new Error('Speech recognition is unavailable.');
+        if (cancelSpeechAuthorization) throw new Error('Speech recognition is already in progress.');
+        const cancellation = new Error('Speech recognition was cancelled.');
+        let cancel!: () => void;
+        const interrupted = new Promise<never>((_, reject) => { cancel = () => reject(cancellation); });
+        cancelSpeechAuthorization = cancel;
+        try {
+          await Promise.race([options.authorizeCapability('host:speech.recognize'), interrupted]);
+          if (cancelSpeechAuthorization !== cancel) throw cancellation;
+        } finally {
+          if (cancelSpeechAuthorization === cancel) cancelSpeechAuthorization = undefined;
+        }
+        return options.recognizeSpeech(input, speechListeners.size ? emitSpeechInterim : undefined, emitSpeechState);
+      },
+      onInterimResult: (handler) => {
+        speechListeners.add(handler);
+        return () => { speechListeners.delete(handler); };
+      },
+      stop: () => {
+        const cancel = cancelSpeechAuthorization;
+        if (!cancel) return options.stopSpeech?.();
+        cancelSpeechAuthorization = undefined;
+        cancel();
+      },
+      onStateChange: (handler) => {
+        speechStateListeners.add(handler);
+        return () => { speechStateListeners.delete(handler); };
       },
     },
     'host:location': {

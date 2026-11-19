@@ -206,6 +206,114 @@ Two TOML files, easily confused:
 | `manifest.toml` | developer | Project metadata, service `[package]`, proto exports, dependencies. Signed as part of `.actr`. |
 | `actr.toml` | operator | Runtime config: package path, signaling URL, realm, data dir. Consumed by `actr run`. |
 
+### WASM workload data
+
+For an `actr-package/2` Component, declare the required capability in the signed
+package manifest:
+
+```toml
+[host]
+profile = "actr.host/1"
+api = "^1.0.0"
+required-capabilities = ["wasi.data.read-only"]
+```
+
+Use `wasi.data.read-write` instead if the workload needs to modify data. A
+package can declare at most one of these capabilities.
+
+The deployer grants access to a specific, existing directory in `actr.toml`:
+
+```toml
+[hyper]
+wasi_data_dir = "./workload-data"
+wasi_data_access = "read-only"
+```
+
+```sh
+mkdir -p "$PWD/workload-data"
+actr run --config actr.toml
+```
+
+Use a dedicated directory per workload. The Host exposes it at `/data` with
+the access requested by the signed package. The deployment setting is a
+ceiling: a read-only package gets a read-only mount even when the ceiling is
+`"read-write"` (the default). A package that requires write access fails to
+attach under a read-only grant. Without a signed data capability, the
+directory is not mounted.
+For `actr run`, setting `wasi_data_access` alone does not grant a directory;
+configure `wasi_data_dir` as well.
+
+When upgrading a workload that used `wasi_data_dir` before capability
+declarations were enforced, add the required data capability to its package
+manifest, then repack and re-sign it before starting it with the upgraded Host.
+Legacy packages must first be rebuilt as `actr-package/2`. When a configured
+directory is ignored because the package lacks a declaration, the Host logs a
+warning and does not mount it.
+
+`actr build` produces a legacy archive. For a Service with a built WASM
+Component, create a separate `actr-package/2` manifest for `actr pkg pack`.
+The `[host]` declaration belongs in this package manifest:
+
+```toml
+format = "actr-package/2"
+
+[actor]
+publisher = "example.com"
+name = "my-service"
+version = "1.0.0"
+
+[workload]
+profile = "actr.component/1"
+entry = "workload/service.wasm"
+
+[host]
+profile = "actr.host/1"
+api = "^1.0.0"
+required-capabilities = ["wasi.data.read-write"]
+
+[signature]
+algorithm = "ed25519"
+key-id = "placeholder"
+
+[[files]]
+path = "workload/service.wasm"
+role = "workload"
+media-type = "application/wasm"
+size = 0
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+```
+
+Save it as `package-v2.toml`, set the actor identity to the existing publisher
+and Service name with a new release version, and put the built Component at
+`payload/workload/service.wasm`. The publisher must match the signing key.
+Pack and verify the archive with the Publisher key:
+
+```sh
+actr pkg pack --manifest-path package-v2.toml --payload-root payload \
+  --key publisher-key.json --output service.actr
+actr pkg verify --package service.actr --pubkey public-key.json
+```
+
+The packer recalculates the file size, SHA-256 and signing key ID. Add any
+required RPC contracts, dependencies and lock file to the manifest and payload
+for your Service. Update `actr.toml` to point to the new archive and retain its
+trust anchor and data directory grant.
+
+Relative paths resolve against the config file's directory. The directory
+cannot be a filesystem root. On macOS, the Host process needs read and
+search permissions on each ancestor of the resolved directory to validate the mount.
+On Linux, the Host requires access to `/proc/self/fdinfo` and
+`/proc/self/mountinfo` to verify the directory is not a filesystem root.
+Unknown keys in `[hyper]` are rejected so a misspelled access limit fails
+configuration loading.
+
+Embedded hosts using `Node::from_hyper` inherit the directory and access limit
+from the runtime configuration by default. `HyperConfig` can deny the grant
+with `WasiDataDir::Disabled`, override the path with `WasiDataDir::Directory`
+while keeping the deployment access limit, or use
+`WasiDataDir::ReadOnlyDirectory` to supply an explicitly read-only absolute
+directory. Restart or reattach the workload to apply a grant change.
+
 Commands that touch `manifest.toml` use `--manifest-path` / `-m`.
 Commands that touch `actr.toml` use `--config` / `-c`.
 

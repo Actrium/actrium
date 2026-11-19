@@ -157,6 +157,15 @@ jobs:
           python-version: "3.11"
 
       - name: Install protoc
+        id: install-protoc
+        continue-on-error: true
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+
+      - name: Retry protoc installation
+        if: steps.install-protoc.outcome == 'failure'
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ github.token }}
@@ -242,6 +251,7 @@ jobs:
           echo "value=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Run dry-run validation
+        id: dry-run
         env:
           BASE_REF: ${{ github.base_ref }}
           REF_NAME: ${{ github.ref_name }}
@@ -256,7 +266,7 @@ jobs:
             --dry-run
 
       - name: Upload dry-run reports
-        if: always()
+        if: always() && (steps.dry-run.outcome == 'success' || steps.dry-run.outcome == 'failure')
         uses: actions/upload-artifact@v4
         with:
           name: basic-release-train-verify-${{ steps.version.outputs.value }}
