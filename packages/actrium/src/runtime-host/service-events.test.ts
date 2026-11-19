@@ -797,6 +797,71 @@ describe('createHttpServiceEventSource', () => {
     }
   });
 
+  test('preserves the SSE pathname with React Native URL behavior', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalXhr = globalThis.XMLHttpRequest;
+    const originalUrl = globalThis.URL;
+    const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    globalThis.fetch = (() => new Promise<Response>(() => {})) as unknown as typeof fetch;
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { product: 'ReactNative' },
+      writable: true,
+    });
+    // react-native-macos 0.81's Libraries/Blob/URL.js appends a slash when the
+    // input has no query or fragment. Keep that behavior in this regression.
+    class ReactNativeUrl extends originalUrl {
+      constructor(input: string | URL, base?: string | URL) {
+        const raw = String(input);
+        super(!/[?#]/.test(raw) && !raw.endsWith('/') ? `${raw}/` : raw, base);
+      }
+    }
+    globalThis.URL = ReactNativeUrl as typeof URL;
+    let openedUrl: string | undefined;
+    class FakeXhr {
+      readyState = 0;
+      status = 0;
+      responseText = '';
+      onreadystatechange: (() => void) | null = null;
+      onprogress: (() => void) | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      open(_method: string, url: string): void {
+        openedUrl = url;
+      }
+      setRequestHeader(): void {}
+      abort(): void {}
+      send(): void {
+        this.readyState = 3;
+        this.status = 200;
+      }
+    }
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    try {
+      const source = createHttpServiceEventSource(
+        'https://example.com/v1/events',
+        ['notes.changed']
+      );
+      const unsubscribe = source.subscribe(() => {});
+      await waitFor(() => openedUrl !== undefined);
+      const request = new originalUrl(openedUrl!);
+      expect(request.pathname).toBe('/v1/events');
+      expect(request.searchParams.getAll('event')).toEqual(['notes.changed']);
+      unsubscribe();
+    } finally {
+      globalThis.fetch = originalFetch;
+      globalThis.XMLHttpRequest = originalXhr;
+      globalThis.URL = originalUrl;
+      if (originalNavigator) {
+        Object.defineProperty(globalThis, 'navigator', originalNavigator);
+      } else {
+        delete (globalThis as { navigator?: Navigator }).navigator;
+      }
+    }
+  });
+
   test('rotates incremental XHR at a parsed frame boundary when chunks end mid-frame', async () => {
     const originalFetch = globalThis.fetch;
     const originalXhr = globalThis.XMLHttpRequest;

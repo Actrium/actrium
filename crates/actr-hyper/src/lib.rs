@@ -1194,8 +1194,11 @@ impl FrontEventRouter {
             .lock()
             .expect("Front Service event lock poisoned")
             .clone();
-        if caller != service.as_ref() {
-            return None;
+        match (caller, service.as_ref()) {
+            (Some(caller), Some(service)) if caller == service => {}
+            // An in-process Tell may have no authenticated caller. Never let
+            // two absent identities compare equal and select an arbitrary peer.
+            _ => return None,
         }
         Some(FrontServiceEvent {
             event: envelope.route_key.clone(),
@@ -1281,6 +1284,7 @@ mod front_event_tests {
         let event = envelope("counter.changed", actr_protocol::Direction::Tell);
 
         assert!(router.accept(&event, Some(&service)).is_none());
+        assert!(router.accept(&event, None).is_none());
         router.set_service(Some(service.clone()));
         assert!(router.accept(&event, Some(&other)).is_none());
         assert!(router.accept(&event, None).is_none());
@@ -1306,8 +1310,17 @@ mod front_event_tests {
                 .is_none()
         );
 
+        let restarted = actr_protocol::ActrId {
+            serial_number: 9,
+            ..service.clone()
+        };
+        router.set_service(Some(restarted.clone()));
+        assert!(router.accept(&event, Some(&service)).is_none());
+        assert!(router.accept(&event, Some(&restarted)).is_some());
+
         router.set_service(None);
         assert!(router.accept(&event, Some(&service)).is_none());
+        assert!(router.accept(&event, None).is_none());
     }
 }
 

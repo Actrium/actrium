@@ -234,6 +234,7 @@ final class RendererProcessPool: ObservableObject {
         // without touching any other tab.
         attachmentDeliveryEpoch[tabId, default: 0] &+= 1
         RealmServiceBindings.shared.cancelAttachmentUploads(tabId)
+        RealmServiceBindings.shared.retireSubscriptions(for: tabId)
         guard let workerId = tabWorkerMap.removeValue(forKey: tabId),
               let worker = workers[workerId] else {
             return
@@ -912,6 +913,7 @@ final class RendererProcessPool: ObservableObject {
             fileImport.cancel(tabId: tabId)
             attachmentDeliveryEpoch[tabId, default: 0] &+= 1
             RealmServiceBindings.shared.cancelAttachmentUploads(tabId)
+            RealmServiceBindings.shared.retireSubscriptions(for: tabId)
             tabWorkerMap.removeValue(forKey: tabId)
         }
         if let fingerprint = worker.fingerprint {

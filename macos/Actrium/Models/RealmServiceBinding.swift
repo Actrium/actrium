@@ -162,6 +162,35 @@ final class RealmServiceBindings {
         }
     }
 
+    /// Retires every event subscription owned by a tab's renderer without
+    /// stopping the Front. A crashed renderer cannot run its JS cleanup, and
+    /// crash recovery reuses the tab ID, so both established and still-pending
+    /// registrations must stop receiving events immediately.
+    func retireSubscriptions(for tabId: UUID) {
+        guard let binding = bindings[tabId] else { return }
+        let bindingId = binding.id
+        let retired = subscriptions.filter { $0.value.bindingId == bindingId }
+        for (subscriptionId, _) in retired {
+            subscriptions.removeValue(forKey: subscriptionId)
+        }
+        // Keep this robust even if a pending registration has not entered the
+        // early-routing table yet. The late reply still rolls back through
+        // cancelledSubscriptions, but no renderer-owned pending state remains.
+        let pending = pendingSubscriptions.filter { $0.value == tabId }.map(\.key)
+        for subscriptionId in pending {
+            cancelledSubscriptions.insert(subscriptionId)
+            pendingSubscriptions.removeValue(forKey: subscriptionId)
+        }
+        guard !retired.isEmpty,
+              !subscriptions.values.contains(where: { $0.bindingId == bindingId }),
+              let generation = bindingEventGenerations[bindingId] else { return }
+        Task { @MainActor in
+            // A replacement renderer may already have subscribed again.
+            guard !subscriptions.values.contains(where: { $0.bindingId == bindingId }) else { return }
+            await binding.suspendEvents(ifGeneration: generation)
+        }
+    }
+
     nonisolated func publish(bindingId: UUID, event: String, payload: Data) {
         Task { @MainActor in
             guard let tabId = bindingTabs[bindingId] else { return }
@@ -255,6 +284,79 @@ private final class RealmServiceEventRelay: ActrBindings.ServiceEventListener, @
     }
 }
 
+/// The discovery and peer-selection surface used by Service event routing.
+/// Internal so tests can drive out-of-order discoveries without a live Realm.
+protocol RealmServiceEventReference: AnyObject, Sendable {
+    func discover(
+        targetType: ActrBindings.ActrType,
+        count: UInt32
+    ) async throws -> [ActrBindings.ActrId]
+    func setServiceEventPeer(peer: ActrBindings.ActrId?) throws
+}
+
+extension ActrRefWrapper: RealmServiceEventReference {}
+
+/// Owns the Front's authenticated event peer. Discovery suspends, so the
+/// generation is checked again when its result is committed: an older
+/// subscription or a retired renderer must never overwrite a newer selection.
+actor RealmServiceEventPeerController {
+    private var generation: UInt64 = 0
+    private var reference: (any RealmServiceEventReference)?
+    private(set) var peer: ActrBindings.ActrId?
+
+    func select(
+        generation: UInt64,
+        reference: any RealmServiceEventReference,
+        serviceType: ActrBindings.ActrType
+    ) async throws {
+        self.generation = max(self.generation, generation)
+        guard self.generation == generation else { throw CancellationError() }
+        guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
+            throw RealmServiceError(message: "The Realm's selected Service is not online.")
+        }
+        guard self.generation == generation else { throw CancellationError() }
+        try reference.setServiceEventPeer(peer: target)
+        self.reference = reference
+        peer = target
+    }
+
+    /// A generation snapshot for `call` only when a subscription is active.
+    /// A call that started before the first subscription must not select a peer.
+    func activeGeneration() -> UInt64? {
+        reference == nil ? nil : generation
+    }
+
+    /// Follow Service rediscovery without reviving a cleared subscription or
+    /// overwriting a newer generation. Event-routing failure must not fail RPC.
+    func refresh(
+        ifGeneration generation: UInt64,
+        reference: any RealmServiceEventReference,
+        target: ActrBindings.ActrId
+    ) {
+        guard self.generation == generation, self.reference != nil else { return }
+        do {
+            try reference.setServiceEventPeer(peer: target)
+            self.reference = reference
+            peer = target
+        } catch {
+            return
+        }
+    }
+
+    func suspend(ifGeneration generation: UInt64) {
+        guard self.generation == generation else { return }
+        clear()
+    }
+
+    func clear() {
+        // Invalidate an in-flight discovery as well as the committed peer.
+        generation &+= 1
+        try? reference?.setServiceEventPeer(peer: nil)
+        reference = nil
+        peer = nil
+    }
+}
+
 actor RealmServiceBinding: RealmServiceBindingHandle {
     private struct Provider: Decodable {
         struct Signaling: Decodable {
@@ -293,8 +395,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     let routes: Set<String>
     private let events: Set<String>
     private let eventRelay: RealmServiceEventRelay
-    private var eventReference: ActrRefWrapper?
-    private var eventGeneration: UInt64 = 0
+    private let eventPeers = RealmServiceEventPeerController()
     /// `true` only when the manifest grants `service.attachmentUpload` AND the
     /// capability manifest declares the reserved `uploadAttachment` transport.
     /// Internal for the attachment transport wiring tests.
@@ -376,6 +477,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
               (1...300_000).contains(request.timeoutMs), request.payload.count <= 1_048_576 else {
             throw RealmServiceError(message: "The Service call is outside this tab's declared capabilities.")
         }
+        let eventGeneration = await eventPeers.activeGeneration()
         let reference = try await connect()
         guard !stopped else { throw CancellationError() }
         // A Realm tab targets the selected Service type. A restarted Service
@@ -384,6 +486,11 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             throw RealmServiceError(message: "The Realm's selected Service is not online.")
         }
         guard !stopped else { throw CancellationError() }
+        if let eventGeneration {
+            await eventPeers.refresh(
+                ifGeneration: eventGeneration, reference: reference, target: target
+            )
+        }
         return try await reference.callPeer(
             target: target,
             routeKey: request.route,
@@ -393,29 +500,27 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     }
 
     func subscribe(events requestedEvents: [String], generation: UInt64) async throws {
-        eventGeneration = max(eventGeneration, generation)
         let requested = Set(requestedEvents)
         guard !stopped, !requested.isEmpty, requested.isSubset(of: events) else {
             throw RealmServiceError(message: "The Service event subscription is outside this tab's declared capabilities.")
         }
         let reference = try await connect()
         guard !stopped else { throw CancellationError() }
-        guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
-            throw RealmServiceError(message: "The Realm's selected Service is not online.")
+        try await eventPeers.select(
+            generation: generation, reference: reference, serviceType: serviceType
+        )
+        guard !stopped else {
+            await eventPeers.suspend(ifGeneration: generation)
+            throw CancellationError()
         }
-        guard !stopped else { throw CancellationError() }
-        try reference.setServiceEventPeer(peer: target)
-        eventReference = reference
     }
 
-    func suspendEvents(ifGeneration generation: UInt64) {
-        guard eventGeneration == generation else { return }
-        clearEventPeer()
+    func suspendEvents(ifGeneration generation: UInt64) async {
+        await eventPeers.suspend(ifGeneration: generation)
     }
 
-    private func clearEventPeer() {
-        try? eventReference?.setServiceEventPeer(peer: nil)
-        eventReference = nil
+    private func clearEventPeer() async {
+        await eventPeers.clear()
     }
 
     /// Availability as seen by this binding: the manifest must opt in and the
@@ -740,7 +845,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
 
     func stop() async {
         stopped = true
-        clearEventPeer()
+        await clearEventPeer()
         if let startup {
             startup.task.cancel()
             let reference = try? await startup.task.value

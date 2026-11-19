@@ -313,8 +313,22 @@ export function createHttpServiceEventSource(
   };
 
   const start = () => {
-      const url = new URL(eventsUrl, typeof location !== 'undefined' ? location.href : undefined);
-      for (const event of events) url.searchParams.append('event', event);
+      // Add the query before constructing the URL. React Native's URL shim
+      // appends a trailing slash to inputs without a query or fragment, which
+      // would turn an exact `/v1/events` route into `/v1/events/`.
+      const query = events
+        .map((event) => `event=${encodeURIComponent(event)}`)
+        .join('&');
+      const hashIndex = eventsUrl.indexOf('#');
+      const pathAndQuery = hashIndex >= 0 ? eventsUrl.slice(0, hashIndex) : eventsUrl;
+      const fragment = hashIndex >= 0 ? eventsUrl.slice(hashIndex) : '';
+      const requestUrl = query
+        ? `${pathAndQuery}${pathAndQuery.includes('?') ? '&' : '?'}${query}${fragment}`
+        : eventsUrl;
+      const url = new URL(
+        requestUrl,
+        typeof location !== 'undefined' ? location.href : undefined
+      );
 
       let active = true;
       let terminal = false;
