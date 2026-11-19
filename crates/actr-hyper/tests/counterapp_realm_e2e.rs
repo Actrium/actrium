@@ -214,7 +214,7 @@ struct Metadata {
 }
 
 fn hex_decode(value: &str) -> Vec<u8> {
-    assert!(value.len() % 2 == 0, "odd-length hex digest");
+    assert!(value.len().is_multiple_of(2), "odd-length hex digest");
     (0..value.len())
         .step_by(2)
         .map(|index| u8::from_str_radix(&value[index..index + 2], 16).expect("valid hex"))
