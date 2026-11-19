@@ -76,3 +76,25 @@ ACCOUNT_PASSWORD="app-specific-password" \
 ```
 
 Artifacts are written to `macos/dist/` (`Actrium_<tag>.dmg`).
+
+### Publish a snapshot from a fork
+
+Sync the fork's `main`, enable Actions, then select **Release Actrium macOS →
+Run workflow** on `main`. The workflow builds the selected commit from scratch
+and uploads the unsigned Apple Silicon DMG and its SHA-256 file to **this
+repository's Releases**. It uses the workflow token, not Apple credentials.
+Downloads require macOS 26.1 or newer. The app is not notarized; macOS may
+block opening it by default.
+
+For workspace version `0.10.7`, the first snapshot is `0.10.7-alpha.1`.
+Each new commit gets the next numeric suffix for that version. Rebuilding a
+previously tagged commit reuses its tag and replaces only its two assets.
+Snapshots are prereleases and never marked Latest. On failure, rerun all jobs.
+Build metadata is updated in a marked block in the snapshot release notes.
+New snapshots stay in draft until both assets are uploaded. Rerunning a failed
+upload resumes the snapshot draft.
+
+For stable releases from `main`, Release Train automatically builds the same
+unsigned DMG from the release tag and attaches it and its SHA-256 file to the
+existing `vX.Y.Z` Release. A Release Train dry run saves the DMG and checksum
+as an Actions artifact. The release report includes the macOS result.

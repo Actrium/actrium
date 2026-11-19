@@ -92,6 +92,7 @@ readonly VALID_STAGES=(
 readonly REPORT_STAGES=(
   "${VALID_STAGES[@]}"
   "publish-actrsharp"
+  "publish-actrium-macos"
 )
 
 readonly OPTIONAL_SKIPPED_COMPONENTS=(
@@ -193,6 +194,22 @@ cleanup() {
   fi
 }
 
+merge_macos_report_state() {
+  local stage_state=$1
+  local result=$2
+  if [[ -s "$stage_state" ]] &&
+    { [[ "$result" == success ]] || awk -F '\t' '$5 == "failure" {failed = 1} END {exit !failed}' "$stage_state"; }; then
+    cat "$stage_state" >>"$STATE_FILE"
+    return
+  fi
+
+  local mode="job_${result}"
+  if [[ "$result" == success ]]; then
+    mode=missing_state
+  fi
+  append_state "Actrium macOS DMG" "publish-actrium-macos" "macos_dmg" failure "$mode" - "${RELEASE_SHA:--}"
+}
+
 generate_report() {
   mkdir -p "$REPORT_DIR"
 
@@ -208,7 +225,9 @@ generate_report() {
     local stage_state
     for stage_name in "${REPORT_STAGES[@]}"; do
       stage_state="$REPORT_DIR/release-train-v${VERSION}.${stage_name}.state.tsv"
-      if [[ -f "$stage_state" ]]; then
+      if [[ "$stage_name" == publish-actrium-macos && -n "${MACOS_RELEASE_JOB_RESULT:-}" ]]; then
+        merge_macos_report_state "$stage_state" "$MACOS_RELEASE_JOB_RESULT"
+      elif [[ -f "$stage_state" ]]; then
         cat "$stage_state" >>"$STATE_FILE"
       fi
     done
@@ -247,6 +266,9 @@ if state_path.exists():
                 "git_sha": git_sha,
             }
         )
+
+if any(row["kind"] == "macos_dmg" and row["status"] == "failure" for row in rows):
+    overall_status = "failure"
 
 payload = {
     "version": version,
@@ -2421,6 +2443,7 @@ kind_order = [
     ("nuget", "NuGet Packages"),
     ("package_sync", "Package Sync"),
     ("cli_binary", "CLI Binaries (GitHub Release)"),
+    ("macos_dmg", "Actrium macOS DMG (GitHub Release)"),
 ]
 
 by_kind = {}

@@ -126,13 +126,13 @@ pub struct TransferOwnerArgs {
 }
 
 /// A loaded key file.
-struct Member {
-    file: RealmClientKeyFile,
+pub(super) struct Member {
+    pub(super) file: RealmClientKeyFile,
     key: SigningKey,
 }
 
 impl Member {
-    fn load(args: &KeyArgs) -> Result<Self> {
+    pub(super) fn load(args: &KeyArgs) -> Result<Self> {
         let (file, key) = RealmClientKeyFile::read(&args.key)?;
         Ok(Self { file, key })
     }
@@ -141,8 +141,20 @@ impl Member {
         MembershipRequest::new(op, &self.file.realm, &self.file.provider_id, &new_nonce())
     }
 
-    async fn send(&self, request: MembershipRequest) -> Result<Value> {
-        Ok(send(&self.file.issuer, &request.sign(&self.key)).await?)
+    pub(super) async fn send(&self, request: MembershipRequest) -> Result<Value> {
+        self.send_with_outcome(request).await.map_err(Into::into)
+    }
+
+    pub(super) async fn send_with_outcome(
+        &self,
+        request: MembershipRequest,
+    ) -> std::result::Result<Value, SendError> {
+        let timeout = match request.op {
+            MembershipOp::UpdateFront | MembershipOp::SwitchService => PACKAGE_RELEASE_TIMEOUT,
+            _ => REQUEST_TIMEOUT,
+        };
+        let client = http_client_with_timeout(timeout).map_err(SendError::Unknown)?;
+        send_with(&client, &self.file.issuer, &request.sign(&self.key)).await
     }
 }
 
@@ -165,7 +177,7 @@ fn url_authority(url: &str) -> Result<String> {
 }
 
 /// Why a membership request got no reply.
-enum SendError {
+pub(super) enum SendError {
     /// The Actr Facility Provider answered with an error: nothing changed.
     Refused(anyhow::Error),
     /// No usable answer: the request may or may not have taken effect.
@@ -184,14 +196,20 @@ impl From<SendError> for anyhow::Error {
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Timeout of a whole Realm request, reply included.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Allow the Issuer's two-minute package verification before it signs the Profile.
+const PACKAGE_RELEASE_TIMEOUT: Duration = Duration::from_secs(150);
 
 /// HTTP client for membership and realm-management requests: with
 /// timeouts, and without redirects, so a signed request (or an invite
 /// secret) goes nowhere but where it was sent.
 pub(super) fn http_client() -> Result<reqwest::Client> {
+    http_client_with_timeout(REQUEST_TIMEOUT)
+}
+
+fn http_client_with_timeout(timeout: Duration) -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
+        .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("Failed to create the HTTP client")
@@ -343,15 +361,6 @@ where
 }
 
 /// POST `document` to `<issuer>/membership`; the reply, or its error.
-async fn send(issuer: &str, document: &Value) -> std::result::Result<Value, SendError> {
-    send_with(
-        &http_client().map_err(SendError::Refused)?,
-        issuer,
-        document,
-    )
-    .await
-}
-
 async fn send_with(
     client: &reqwest::Client,
     issuer: &str,
@@ -569,24 +578,38 @@ pub struct UpdateArgs {
     #[command(flatten)]
     pub key: KeyArgs,
     /// JSON containing both references and the complete packages map
-    #[arg(long, value_name = "FILE")]
-    pub selection: PathBuf,
+    #[arg(long, value_name = "FILE", required_unless_present = "rollback")]
+    pub selection: Option<PathBuf>,
+    /// Restore the previous selection from this output directory at a higher Profile sequence.
+    #[arg(long, conflicts_with = "selection")]
+    pub rollback: bool,
+    /// Directory for verified packages and release history. Defaults to the Realm's local data directory.
+    #[arg(long, value_name = "DIR")]
+    pub output: Option<PathBuf>,
 }
 
 pub async fn update(args: &UpdateArgs) -> Result<Value> {
+    use sha2::{Digest, Sha256};
+
     let member = Member::load(&args.key)?;
-    let selection = super::realm::read_selection(&args.selection)?;
-    let mut request = member.request(MembershipOp::UpdateRealm);
-    request.selection = Some(selection.clone());
-    let reply = member.send(request).await?;
-    let client = discovery_client()?;
-    let profile = realm_profile(&member.file.realm, None, |url| fetch_public(&client, url)).await?;
-    anyhow::ensure!(
-        reply["sequence"].as_u64() == Some(profile.sequence)
-            && profile.selection.as_ref() == Some(&selection),
-        "update was submitted but the published Profile does not match the requested selection and sequence"
-    );
-    Ok(reply)
+    let selection = args
+        .selection
+        .as_deref()
+        .map(super::realm::read_selection)
+        .transpose()?;
+    let output = args
+        .output
+        .clone()
+        .or_else(|| {
+            dirs::data_local_dir().map(|directory| {
+                directory
+                    .join("actr")
+                    .join("realm-releases")
+                    .join(hex::encode(Sha256::digest(member.file.realm.as_bytes())))
+            })
+        })
+        .context("local Realm release directory is unavailable; use --output")?;
+    super::realm_packages::release(&member, &output, selection).await
 }
 
 pub async fn members(args: &KeyArgs) -> Result<Value> {

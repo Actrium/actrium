@@ -40,6 +40,26 @@ extension RealmServiceFailure {
     }
 }
 
+protocol RealmServiceBindingHandle: AnyObject, Sendable {
+    var id: UUID { get }
+    var attachmentUploadAvailable: Bool { get async }
+    func call(_ request: RealmServiceCall) async throws -> Data
+    func subscribe(events: [String], generation: UInt64) async throws
+    func suspendEvents(ifGeneration generation: UInt64) async
+    func prepareAttachmentUpload(
+        _ request: RealmServiceAttachmentPrepareCall,
+        deliver: @escaping @Sendable (RealmServiceAttachmentResultEvent) -> Void
+    ) async -> RealmServiceAttachmentPrepareReply
+    func sendAttachmentChunk(
+        _ request: RealmServiceAttachmentChunkCall
+    ) async -> RealmServiceAttachmentChunkReply
+    func unregisterAttachmentStream(
+        _ request: RealmServiceAttachmentUnregisterCall
+    ) async -> RealmServiceAttachmentUnregisterReply
+    func cancelAttachmentUploads() async
+    func stop() async
+}
+
 /// Receives `Ask_AttachmentUploadResult` protobufs on the per-upload result
 /// stream. The FFI runtime owns the callback while the stream is registered;
 /// the closure hops onto the binding actor for session bookkeeping.
@@ -55,18 +75,95 @@ private final class RealmServiceAttachmentResultCallback: ActrBindings.DataChunk
     }
 }
 
+/// A lock-protected intake snapshot for the nonisolated Rust event callback.
+/// The MainActor registry remains authoritative; queued delivery rechecks each
+/// captured subscription ID so a replacement can never inherit an old event.
+private final class RealmServiceEventRoutingSnapshot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var subscriptions: [UUID: (bindingId: UUID, events: Set<String>)] = [:]
+
+    func replace(with subscriptions: [UUID: (bindingId: UUID, events: Set<String>)]) {
+        lock.lock()
+        self.subscriptions = subscriptions
+        lock.unlock()
+    }
+
+    func matching(bindingId: UUID, event: String) -> [UUID] {
+        lock.lock()
+        defer { lock.unlock() }
+        return subscriptions.compactMap { subscriptionId, subscription in
+            subscription.bindingId == bindingId && subscription.events.contains(event)
+                ? subscriptionId : nil
+        }
+    }
+}
+
 @MainActor
 final class RealmServiceBindings {
     static let shared = RealmServiceBindings()
-    private var bindings: [UUID: RealmServiceBinding] = [:]
+    private var bindings: [UUID: any RealmServiceBindingHandle] = [:]
+    private var bindingTabs: [UUID: UUID] = [:]
+    private var subscriptions: [UUID: (bindingId: UUID, events: Set<String>)] = [:]
+    private let routingSnapshot = RealmServiceEventRoutingSnapshot()
+    private var pendingSubscriptions: [UUID: UUID] = [:]
+    private var cancelledSubscriptions: Set<UUID> = []
+    private var eventGeneration: UInt64 = 0
+    private var bindingEventGenerations: [UUID: UInt64] = [:]
+    var eventHandler: ((UUID, RealmServiceEvent) -> Void)?
 
-    func attach(_ binding: RealmServiceBinding, to tabId: UUID) {
+    func binding(for tabId: UUID) -> RealmServiceBinding? {
+        bindings[tabId] as? RealmServiceBinding
+    }
+
+    private func updateRoutingSnapshot() {
+        routingSnapshot.replace(with: subscriptions)
+    }
+
+    func attach(_ binding: any RealmServiceBindingHandle, to tabId: UUID) {
         remove(tabId)
         bindings[tabId] = binding
+        bindingTabs[binding.id] = tabId
+    }
+
+    /// Keep established Guest subscriptions when only the Realm connection changes.
+    func replaceConnection(
+        _ active: any RealmServiceBindingHandle,
+        with replacement: any RealmServiceBindingHandle,
+        tabId: UUID,
+        isCurrent: () throws -> Bool
+    ) async throws -> Bool {
+        func eventRoutes() -> [UUID: Set<String>] {
+            subscriptions.filter { $0.value.bindingId == active.id }.mapValues { $0.events }
+        }
+
+        guard bindings[tabId] === active, !pendingSubscriptions.values.contains(tabId) else { return false }
+        let routes = eventRoutes()
+        var generation: UInt64?
+        if !routes.isEmpty {
+            eventGeneration &+= 1
+            let nextGeneration = eventGeneration
+            try await replacement.subscribe(events: Array(Set(routes.values.joined())), generation: nextGeneration)
+            generation = nextGeneration
+        }
+        try Task.checkCancellation()
+        guard bindings[tabId] === active, !pendingSubscriptions.values.contains(tabId),
+              eventRoutes() == routes, try isCurrent() else { return false }
+
+        attach(replacement, to: tabId)
+        for (id, events) in routes {
+            subscriptions[id] = (replacement.id, events)
+        }
+        bindingEventGenerations[replacement.id] = generation
+        updateRoutingSnapshot()
+        return true
     }
 
     func remove(_ tabId: UUID) {
         guard let binding = bindings.removeValue(forKey: tabId) else { return }
+        bindingTabs.removeValue(forKey: binding.id)
+        bindingEventGenerations.removeValue(forKey: binding.id)
+        subscriptions = subscriptions.filter { $0.value.bindingId != binding.id }
+        updateRoutingSnapshot()
         Task { await binding.stop() }
     }
 
@@ -75,6 +172,116 @@ final class RealmServiceBindings {
             throw RealmServiceError(message: "The tab has no Realm Service.")
         }
         return try await binding.call(request)
+    }
+
+    func subscribe(_ request: RealmServiceEventSubscription, tabId: UUID) async throws {
+        guard let binding = bindings[tabId] else {
+            throw RealmServiceError(message: "The tab has no Realm Service.")
+        }
+        pendingSubscriptions[request.id] = tabId
+        eventGeneration &+= 1
+        let generation = eventGeneration
+        bindingEventGenerations[binding.id] = generation
+        // The actor may publish as soon as subscribe selects its event peer,
+        // before the subscribe reply crosses the Renderer/Host IPC boundary.
+        // Register first so publish can already address this subscription.
+        subscriptions[request.id] = (binding.id, Set(request.events))
+        updateRoutingSnapshot()
+        defer {
+            pendingSubscriptions.removeValue(forKey: request.id)
+            cancelledSubscriptions.remove(request.id)
+        }
+        func rollback() async {
+            subscriptions.removeValue(forKey: request.id)
+            updateRoutingSnapshot()
+            if !subscriptions.values.contains(where: { $0.bindingId == binding.id }) {
+                // This request may be an older, superseded generation. If it
+                // removes the last routing entry, tear down the latest peer
+                // selected for the binding rather than leaving it enabled.
+                let teardownGeneration = bindingEventGenerations[binding.id] ?? generation
+                await binding.suspendEvents(ifGeneration: teardownGeneration)
+            }
+        }
+        do {
+            try await binding.subscribe(events: request.events, generation: generation)
+        } catch {
+            await rollback()
+            throw error
+        }
+        guard bindings[tabId] === binding, !cancelledSubscriptions.contains(request.id) else {
+            await rollback()
+            throw CancellationError()
+        }
+    }
+
+    func unsubscribe(_ subscriptionId: UUID, tabId: UUID) {
+        if pendingSubscriptions[subscriptionId] == tabId {
+            cancelledSubscriptions.insert(subscriptionId)
+            return
+        }
+        guard let existing = subscriptions[subscriptionId],
+              let tab = bindingTabs[existing.bindingId], tab == tabId,
+              let binding = bindings[tabId] else { return }
+        subscriptions.removeValue(forKey: subscriptionId)
+        updateRoutingSnapshot()
+        if !subscriptions.values.contains(where: { $0.bindingId == existing.bindingId }),
+           let generation = bindingEventGenerations[existing.bindingId] {
+            Task { @MainActor in
+                // A new subscription may have appeared before this task runs.
+                guard !subscriptions.values.contains(where: {
+                    $0.bindingId == existing.bindingId
+                }) else { return }
+                await binding.suspendEvents(ifGeneration: generation)
+            }
+        }
+    }
+
+    /// Retires every event subscription owned by a tab's renderer without
+    /// stopping the Front. A crashed renderer cannot run its JS cleanup, and
+    /// crash recovery reuses the tab ID, so both established and still-pending
+    /// registrations must stop receiving events immediately.
+    func retireSubscriptions(for tabId: UUID) {
+        guard let binding = bindings[tabId] else { return }
+        let bindingId = binding.id
+        let retired = subscriptions.filter { $0.value.bindingId == bindingId }
+        for (subscriptionId, _) in retired {
+            subscriptions.removeValue(forKey: subscriptionId)
+        }
+        updateRoutingSnapshot()
+        // Keep this robust even if a pending registration has not entered the
+        // early-routing table yet. The late reply still rolls back through
+        // cancelledSubscriptions, but no renderer-owned pending state remains.
+        let pending = pendingSubscriptions.filter { $0.value == tabId }.map(\.key)
+        for subscriptionId in pending {
+            cancelledSubscriptions.insert(subscriptionId)
+            pendingSubscriptions.removeValue(forKey: subscriptionId)
+        }
+        guard !retired.isEmpty,
+              !subscriptions.values.contains(where: { $0.bindingId == bindingId }),
+              let generation = bindingEventGenerations[bindingId] else { return }
+        Task { @MainActor in
+            // A replacement renderer may already have subscribed again.
+            guard !subscriptions.values.contains(where: { $0.bindingId == bindingId }) else { return }
+            await binding.suspendEvents(ifGeneration: generation)
+        }
+    }
+
+    nonisolated func publish(bindingId: UUID, event: String, payload: Data) {
+        // Capture ownership before hopping to the MainActor. Enumerating only
+        // inside the task would let a replacement subscription inherit an
+        // event that arrived while its predecessor was still registered.
+        let eligible = routingSnapshot.matching(bindingId: bindingId, event: event)
+        Task { @MainActor in
+            guard let tabId = bindingTabs[bindingId] else { return }
+            for subscriptionId in eligible {
+                guard let subscription = subscriptions[subscriptionId],
+                      subscription.bindingId == bindingId,
+                      subscription.events.contains(event) else { continue }
+                eventHandler?(tabId, RealmServiceEvent(
+                    subscriptionId: subscriptionId, event: event, payload: payload
+                ))
+            }
+        }
     }
 
     func prepareAttachmentUpload(
@@ -144,7 +351,125 @@ final class RealmServiceBindings {
     }
 }
 
-actor RealmServiceBinding {
+/// The Rust callback is synchronous so `publish` snapshots eligible
+/// subscriptions before any executor hop can observe a replacement.
+final class RealmServiceEventRelay: ActrBindings.ServiceEventListener, @unchecked Sendable {
+    private let bindingId: UUID
+    private let registry: RealmServiceBindings
+
+    init(bindingId: UUID, registry: RealmServiceBindings = .shared) {
+        self.bindingId = bindingId
+        self.registry = registry
+    }
+
+    func onEvent(event: ActrBindings.ServiceEventBridge) {
+        registry.publish(
+            bindingId: bindingId, event: event.event, payload: event.payload
+        )
+    }
+}
+
+/// The discovery and peer-selection surface used by Service event routing.
+/// Internal so tests can drive out-of-order discoveries without a live Realm.
+protocol RealmServiceEventReference: AnyObject, Sendable {
+    func discoverService(serviceType: ActrBindings.ActrType) async throws -> ActrBindings.ActrId
+    func setServiceEventPeer(peer: ActrBindings.ActrId?) throws
+}
+
+extension ActrRefWrapper: RealmServiceEventReference {}
+
+/// Owns the Front's authenticated event peer. Discovery suspends, so the
+/// generation is checked again when its result is committed: an older
+/// subscription or a retired renderer must never overwrite a newer selection.
+actor RealmServiceEventPeerController {
+    private var generation: UInt64 = 0
+    private var reference: (any RealmServiceEventReference)?
+    private(set) var peer: ActrBindings.ActrId?
+    private var discoverySequence: UInt64 = 0
+    private var committedDiscoverySequence: UInt64 = 0
+
+    func select(
+        generation: UInt64,
+        reference: any RealmServiceEventReference,
+        serviceType: ActrBindings.ActrType
+    ) async throws {
+        self.generation = max(self.generation, generation)
+        guard self.generation == generation else { throw CancellationError() }
+        // The v1 domain model requires exactly one Service of the signed type;
+        // taking the first of multiple route candidates is not authentication.
+        let target = try await reference.discoverService(serviceType: serviceType)
+        guard self.generation == generation else { throw CancellationError() }
+        try reference.setServiceEventPeer(peer: target)
+        self.reference = reference
+        peer = target
+    }
+
+    /// A generation snapshot for `call` only when a subscription is active.
+    /// A call that started before the first subscription must not select a peer.
+    func activeGeneration() -> UInt64? {
+        reference == nil ? nil : generation
+    }
+
+    /// Strictly rediscover the Service for an RPC and, when this generation's
+    /// subscription is still active, move its event peer to the same ActorId.
+    /// Discovery commits are sequenced within the generation: a slow response
+    /// for a retired Service cannot undo a newer RPC's committed selection.
+    func resolve(
+        ifGeneration generation: UInt64?,
+        reference: any RealmServiceEventReference,
+        serviceType: ActrBindings.ActrType
+    ) async throws -> ActrBindings.ActrId {
+        discoverySequence &+= 1
+        let sequence = discoverySequence
+        let target = try await reference.discoverService(serviceType: serviceType)
+        if let generation {
+            refresh(
+                ifGeneration: generation, reference: reference, target: target,
+                sequence: sequence
+            )
+        }
+        return target
+    }
+
+    /// Follow Service rediscovery without reviving a cleared subscription,
+    /// overwriting a newer generation, or committing an older discovery result.
+    /// Event-routing failure must not fail RPC.
+    private func refresh(
+        ifGeneration generation: UInt64,
+        reference: any RealmServiceEventReference,
+        target: ActrBindings.ActrId,
+        sequence: UInt64
+    ) {
+        guard self.generation == generation, self.reference != nil,
+              sequence >= committedDiscoverySequence else { return }
+        do {
+            try reference.setServiceEventPeer(peer: target)
+            self.reference = reference
+            peer = target
+            committedDiscoverySequence = sequence
+        } catch {
+            return
+        }
+    }
+
+    func suspend(ifGeneration generation: UInt64) {
+        // The manager may already have issued a newer generation whose
+        // discovery never reached this actor. That newer empty-set teardown
+        // must still clear the current peer; only an older teardown is stale.
+        guard generation >= self.generation else { return }
+        clear()
+    }
+
+    func clear() {
+        // Invalidate an in-flight discovery as well as the committed peer.
+        generation &+= 1
+        try? reference?.setServiceEventPeer(peer: nil)
+        reference = nil
+        peer = nil
+    }
+}
+
+actor RealmServiceBinding: RealmServiceBindingHandle {
     private struct Provider: Decodable {
         struct Signaling: Decodable {
             let url: String
@@ -163,19 +488,51 @@ actor RealmServiceBinding {
         let provider: Provider
     }
 
+    struct Connection: Equatable, Sendable {
+        let realm: String
+        let providerId: String
+        let issuerURL: String
+        let signalingURL: String
+        let stunURLs: [String]
+        let turnURLs: [String]
+
+        init(profile: RealmProfileInfo, verifiedProfileBody: Data) throws {
+            let provider = try JSONDecoder().decode(ProfileDocument.self, from: verifiedProfileBody).provider
+            guard let signaling = provider.signaling.sorted(by: { $0.priority < $1.priority }).first,
+                  URL(string: signaling.url)?.scheme?.lowercased() == "wss" else {
+                throw RealmServiceError(message: "The verified Realm profile has invalid signaling information.")
+            }
+            let iceURLs = provider.ice.flatMap(\.urls)
+            realm = profile.realmName
+            providerId = profile.providerId
+            issuerURL = profile.issuerUrl
+            signalingURL = signaling.url
+            stunURLs = iceURLs.filter { $0.hasPrefix("stun:") || $0.hasPrefix("stuns:") }
+            turnURLs = iceURLs.filter { $0.hasPrefix("turn:") || $0.hasPrefix("turns:") }
+        }
+    }
+
     private struct Capabilities: Decodable {
-        struct Service: Decodable { let rpc: [String]? }
+        struct Service: Decodable {
+            let rpc: [String]?
+            let events: [String]?
+        }
         let hostModules: [String: Service]
     }
 
+    let id: UUID
     private let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("actrium-front-" + UUID().uuidString, isDirectory: true)
-    private let profile: RealmProfileInfo
+    nonisolated let connection: Connection
     private let front: Data
+    private let trustedFrontKey: Data
     private let configuration: String
     private let serviceType: ActrBindings.ActrType
     /// Business routes; internal for the attachment transport wiring tests.
     let routes: Set<String>
+    private let events: Set<String>
+    private let eventRelay: RealmServiceEventRelay
+    private let eventPeers = RealmServiceEventPeerController()
     /// `true` only when the manifest grants `service.attachmentUpload` AND the
     /// capability manifest declares the reserved `uploadAttachment` transport.
     /// Internal for the attachment transport wiring tests.
@@ -197,49 +554,66 @@ actor RealmServiceBinding {
         capabilitiesJSON: String,
         permissions: [String]
     ) throws {
-        let document = try JSONDecoder().decode(ProfileDocument.self, from: verifiedProfileBody)
-        let provider = document.provider
-        guard let signaling = provider.signaling.sorted(by: { $0.priority < $1.priority }).first,
-              URL(string: signaling.url)?.scheme?.lowercased() == "wss" else {
-            throw RealmServiceError(message: "The verified Realm profile has invalid signaling information.")
-        }
+        let connection = try Connection(profile: profile, verifiedProfileBody: verifiedProfileBody)
         let capabilities = try JSONDecoder().decode(Capabilities.self, from: Data(capabilitiesJSON.utf8))
-        let declaredRoutes = Set(capabilities.hostModules["service"]?.rpc ?? capabilities.hostModules["host:service"]?.rpc ?? [])
-        self.attachmentUploadAllowed = RealmServiceAttachmentUploadPolicy.isPermitted(
-            permissions: permissions,
-            declaredRoutes: declaredRoutes
+        let services = ["service", "host:service"].compactMap { capabilities.hostModules[$0] }
+        let declaredRoutes = Set(services.flatMap { $0.rpc ?? [] })
+        try self.init(
+            connection: connection,
+            front: front,
+            serviceType: serviceType,
+            trustedFrontKey: trustedFrontKey,
+            routes: RealmServiceAttachmentUploadPolicy.businessRoutes(declaredRoutes),
+            events: Set(services.flatMap { $0.events ?? [] }),
+            attachmentUploadAllowed: RealmServiceAttachmentUploadPolicy.isPermitted(
+                permissions: permissions, declaredRoutes: declaredRoutes
+            )
         )
-        // The attachment transport is verified separately and must never be
-        // reachable through the generic RealmService.call business routes.
-        self.routes = RealmServiceAttachmentUploadPolicy.businessRoutes(declaredRoutes)
-        self.serviceType = serviceType
-        self.profile = profile
+    }
+
+    private init(
+        connection: Connection,
+        front: Data,
+        serviceType: ActrBindings.ActrType,
+        trustedFrontKey: Data,
+        routes: Set<String>,
+        events: Set<String>,
+        attachmentUploadAllowed: Bool
+    ) throws {
+        self.connection = connection
+        let bindingId = UUID()
+        self.id = bindingId
+        self.eventRelay = RealmServiceEventRelay(bindingId: bindingId)
         self.front = front
+        self.serviceType = serviceType
+        self.trustedFrontKey = trustedFrontKey
+        self.routes = routes
+        self.events = events
+        self.attachmentUploadAllowed = attachmentUploadAllowed
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
         func literal<T: Encodable>(_ value: T) throws -> String {
             try String(decoding: encoder.encode(value), as: UTF8.self)
         }
-        let iceURLs = provider.ice.flatMap(\.urls)
         self.configuration = try """
         edition = 1
         [signaling]
-        url = \(literal(signaling.url))
+        url = \(literal(connection.signalingURL))
         [issuer_endpoint]
-        url = \(literal(profile.issuerUrl))
+        url = \(literal(connection.issuerURL))
         [deployment]
-        realm = \(literal(profile.realmName))
+        realm = \(literal(connection.realm))
         [hyper]
         data_dir = \(literal(directory.path))
         [discovery]
         visible = false
         [webrtc]
-        stun_urls = \(literal(iceURLs.filter { $0.hasPrefix("stun:") || $0.hasPrefix("stuns:") }))
-        turn_urls = \(literal(iceURLs.filter { $0.hasPrefix("turn:") || $0.hasPrefix("turns:") }))
+        stun_urls = \(literal(connection.stunURLs))
+        turn_urls = \(literal(connection.turnURLs))
         [[acl.rules]]
         permission = "allow"
-        type = \(literal(profile.serviceType))
+        type = \(literal("\(serviceType.publisher)/\(serviceType.name)@\(serviceType.version)"))
         realm = "self"
         [[trust]]
         kind = "static"
@@ -247,18 +621,38 @@ actor RealmServiceBinding {
         """
     }
 
+    func replacingConnection(_ connection: Connection) throws -> RealmServiceBinding {
+        guard !stopped else { throw CancellationError() }
+        return try RealmServiceBinding(
+            connection: connection, front: front, serviceType: serviceType, trustedFrontKey: trustedFrontKey,
+            routes: routes, events: events, attachmentUploadAllowed: attachmentUploadAllowed
+        )
+    }
+
+    /// Prepare a replacement binding without sending a business RPC.
+    func prepareForSwitch() async throws {
+        try Task.checkCancellation()
+        let reference = try await connect()
+        _ = try await reference.discoverService(serviceType: serviceType)
+        guard !stopped else { throw CancellationError() }
+        try Task.checkCancellation()
+    }
+
     func call(_ request: RealmServiceCall) async throws -> Data {
         guard !stopped, routes.contains(request.route),
               (1...300_000).contains(request.timeoutMs), request.payload.count <= 1_048_576 else {
             throw RealmServiceError(message: "The Service call is outside this tab's declared capabilities.")
         }
+        let eventGeneration = await eventPeers.activeGeneration()
         let reference = try await connect()
         guard !stopped else { throw CancellationError() }
-        // A Realm tab targets the selected Service type. A restarted Service
-        // may register with a different ActorId while the Front stays running.
-        guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
-            throw RealmServiceError(message: "The Realm's selected Service is not online.")
-        }
+        // A Realm tab targets the unique Service of the selected type. A
+        // restarted Service may register with a different ActorId while the
+        // Front stays running; ambiguous discovery fails instead of selecting
+        // an arbitrary event peer.
+        let target = try await eventPeers.resolve(
+            ifGeneration: eventGeneration, reference: reference, serviceType: serviceType
+        )
         guard !stopped else { throw CancellationError() }
         return try await reference.callPeer(
             target: target,
@@ -266,6 +660,34 @@ actor RealmServiceBinding {
             requestPayload: request.payload,
             timeoutMs: Int64(request.timeoutMs)
         )
+    }
+
+    func prepareLocalFront() async throws {
+        try await prepareForSwitch()
+    }
+
+    func subscribe(events requestedEvents: [String], generation: UInt64) async throws {
+        let requested = Set(requestedEvents)
+        guard !stopped, !requested.isEmpty, requested.isSubset(of: events) else {
+            throw RealmServiceError(message: "The Service event subscription is outside this tab's declared capabilities.")
+        }
+        let reference = try await connect()
+        guard !stopped else { throw CancellationError() }
+        try await eventPeers.select(
+            generation: generation, reference: reference, serviceType: serviceType
+        )
+        guard !stopped else {
+            await eventPeers.suspend(ifGeneration: generation)
+            throw CancellationError()
+        }
+    }
+
+    func suspendEvents(ifGeneration generation: UInt64) async {
+        await eventPeers.suspend(ifGeneration: generation)
+    }
+
+    private func clearEventPeer() async {
+        await eventPeers.clear()
     }
 
     /// Availability as seen by this binding: the manifest must opt in and the
@@ -299,10 +721,7 @@ actor RealmServiceBinding {
                       await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
                     throw RealmServiceAttachmentUploadError.cancelled
                 }
-                guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
-                    throw RealmServiceAttachmentUploadError.unavailable(
-                        "The Realm's selected Service is not online.")
-                }
+                let target = try await reference.discoverService(serviceType: serviceType)
                 guard !stopped,
                       await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
                     throw RealmServiceAttachmentUploadError.cancelled
@@ -553,13 +972,18 @@ actor RealmServiceBinding {
         let id = UUID()
         let task = Task {
             let membership = try RealmIdentityStore().membership(
-                realm: profile.realmName, providerId: profile.providerId, issuer: profile.issuerUrl
+                realm: connection.realm, providerId: connection.providerId, issuer: connection.issuerURL
             )
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             let configURL = directory.appendingPathComponent("actr.toml")
             try configuration.write(to: configURL, atomically: true, encoding: .utf8)
-            let node = try await ActrBindings.ActrNode.newFromFrontWithMembership(
-                configPath: configURL.path, frontArchive: front, serviceType: serviceType, membership: membership
+            let node = try await ActrBindings.ActrNode.newFromFrontWithMembershipAndEvents(
+                configPath: configURL.path,
+                frontArchive: front,
+                serviceType: serviceType,
+                membership: membership,
+                events: Array(events).sorted(),
+                listener: eventRelay
             )
             let reference = try await node.start()
             do {
@@ -585,6 +1009,7 @@ actor RealmServiceBinding {
 
     func stop() async {
         stopped = true
+        await clearEventPeer()
         if let startup {
             startup.task.cancel()
             let reference = try? await startup.task.value

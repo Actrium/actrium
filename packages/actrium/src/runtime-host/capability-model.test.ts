@@ -59,7 +59,7 @@ describe('computeFrontCapabilities', () => {
   test('expands module shorthands to method-level capabilities', () => {
     expect(
       computeFrontCapabilities(base, withImplemented('host:assets.read'))
-    ).toEqual(['service.call', 'host:assets.read']);
+    ).toEqual(['service.call', 'service.on', 'host:assets.read']);
   });
 
   test('drops capabilities that require a grant until granted', () => {
@@ -108,6 +108,9 @@ describe('computeFrontCapabilities', () => {
       'service.tell': {
         implemented: true,
         requiresGrant: 'user',
+      },
+      'service.on': {
+        implemented: false,
       },
     });
 
@@ -193,7 +196,7 @@ describe('computeFrontCapabilities', () => {
 
   test('deduplicates a capability declared through aliases', () => {
     expect(
-      computeFrontCapabilities({ ...base, declared: ['service', 'actor.call'] })
+      computeFrontCapabilities({ ...base, declared: ['service.call', 'actor.call'] })
     ).toEqual(['service.call']);
   });
 
@@ -204,7 +207,7 @@ describe('computeFrontCapabilities', () => {
         declared: ['service'],
         hostSupported: new Set(['host:service']),
       })
-    ).toEqual(['service.call']);
+    ).toEqual(['service.call', 'service.on']);
   });
 
   test('silently drops unknown capabilities', () => {
@@ -220,7 +223,7 @@ describe('computeFrontCapabilities', () => {
         declared: ['service'],
         audience: 'system',
       })
-    ).toEqual(['service.call']);
+    ).toEqual(['service.call', 'service.on']);
   });
 });
 
@@ -285,15 +288,20 @@ describe('capability model data', () => {
   });
 
   test('only implemented capabilities count as host-supported', () => {
-    expect(HOST_SUPPORTED_CAPABILITIES.size).toBe(8);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('service.call')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('service.attachmentUpload')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:clipboard.write')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:file-import.pick')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.recognize')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.onInterimResult')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.stop')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.onStateChange')).toBe(true);
+    expect(HOST_SUPPORTED_CAPABILITIES).toEqual(new Set([
+      'service.call',
+      'service.on',
+      'service.attachmentUpload',
+      'host:clipboard.write',
+      'host:file-import.pick',
+      'host:local-storage.getItem',
+      'host:local-storage.setItem',
+      'host:local-storage.removeItem',
+      'host:speech.recognize',
+      'host:speech.onInterimResult',
+      'host:speech.stop',
+      'host:speech.onStateChange',
+    ]));
     for (const capability of FRONT_CAPABILITIES) {
       if (HOST_SUPPORTED_CAPABILITIES.has(capability)) continue;
       expect(FRONT_CAPABILITY_DEFINITIONS[capability].implemented).toBe(false);

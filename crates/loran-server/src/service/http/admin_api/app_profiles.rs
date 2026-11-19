@@ -186,9 +186,14 @@ pub(super) async fn check_selection(
             &first.chars().take(350).collect::<String>(),
         );
     }
+    let count = selection
+        .packages
+        .values()
+        .filter(|package| package.local_path.is_none())
+        .count();
     (
         [(header::CACHE_CONTROL, "no-store")],
-        Json(json!({"verified":true,"count":selection.packages.len()})),
+        Json(json!({"verified":true,"count":count})),
     )
         .into_response()
 }

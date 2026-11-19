@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode, useEffect } from "react";
-import { api, type AppPackage, type PackageSelection, type RealmMutationResponse, type RealmPolicy } from "../../lib/api";
+import { api, type AppPackage, type LocalFront, type PackageSelection, type RealmMutationResponse, type RealmPolicy } from "../../lib/api";
 import { X, Copy, Download, CheckCircle, AlertTriangle } from "lucide-react";
 
 import { copyText } from "../../lib/utils";
@@ -20,6 +20,19 @@ const packageFields = ["href", "sha256", "type"] as const;
 type PackageField = (typeof packageFields)[number];
 const maxPackages = 32;
 const packageReference = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const publisherKey = "actr-pub-[0-9a-f]{16}";
+const validPublisherKey = new RegExp(`^${publisherKey}$`);
+
+function validLocalFrontPath(path: string): boolean {
+  const bytes = new TextEncoder();
+  if (path.trim() !== path || /[\\:\p{Cc}]/u.test(path)) return false;
+  const filename = path.slice(path.lastIndexOf("/") + 1);
+  if (!filename.endsWith(".actr") || filename === ".actr") return false;
+  if (!path.startsWith("/")) return !path.includes("/") && bytes.encode(path).length <= 255;
+  if (bytes.encode(path).length > 1023 || /[%\u200e\u200f\u202a-\u202e\u2066-\u2069]/u.test(path)) return false;
+  if (path.slice(1).split("/").some((part) => !part || part === "." || part === ".." || bytes.encode(part).length > 255)) return false;
+  return !/^\/(?:private\/)?(?:bin|dev|etc|library|net|network|proc|root|run|sbin|sys|system|usr|var\/(?:db|root|run))(?:\/|$)/i.test(path);
+}
 
 const packagePlaceholders: Record<PackageField, string> = {
   href: "HTTPS download URL",
@@ -60,8 +73,24 @@ function parseSelection(text: string): ParsedSelection {
   }
   for (const [ref, pkg] of entries) {
     if (!packageReference.test(ref)) return invalid(`Invalid package reference: ${ref}.`);
-    if (!isObject(pkg) || packageFields.some((field) => typeof pkg[field] !== "string")) {
-      return invalid(`Package "${ref}" needs string href, sha256 and type fields.`);
+    if (!isObject(pkg) || typeof pkg.href !== "string" || typeof pkg.type !== "string") {
+      return invalid(`Package "${ref}" needs string href and type fields.`);
+    }
+    const local = pkg.local_path;
+    if (local !== undefined) {
+      if (ref !== front_package || !isObject(local) || typeof local.allow_rebuild !== "boolean" ||
+          typeof local.signing_key_id !== "string" || !validPublisherKey.test(local.signing_key_id) ||
+          !isObject(pkg.dependencies) || pkg.dependencies.service !== primary_package) {
+        return invalid("Local Front needs a Publisher signing key and a binding to the primary Service.");
+      }
+      if (!validLocalFrontPath(pkg.href)) return invalid("Enter a safe absolute .actr path or a file name.");
+      if (local.allow_rebuild) {
+        if (pkg.sha256 !== undefined) return invalid("Omit SHA-256 for a rebuildable local Front.");
+      } else if (typeof pkg.sha256 !== "string") {
+        return invalid("A fixed local Front needs a SHA-256 digest.");
+      }
+    } else if (typeof pkg.sha256 !== "string") {
+      return invalid(`Package "${ref}" needs a string sha256 field.`);
     }
     if (pkg.dependencies !== undefined) {
       if (!isObject(pkg.dependencies)) return invalid(`Dependencies of "${ref}" must be an object.`);
@@ -98,16 +127,16 @@ function PackageInputs({ pkg, label, prefix, required, onChange, children }: {
   return (
     <fieldset className="grid gap-1">
       <legend className="text-sm font-medium text-gray-700">{label}</legend>
-      {packageFields.map((field) => (
+      {packageFields.filter((field) => field !== "sha256" || !pkg.local_path?.allow_rebuild).map((field) => (
         <input
           key={field}
-          type={field === "href" ? "url" : "text"}
+          type={field === "href" && !pkg.local_path ? "url" : "text"}
           aria-label={prefix + " " + field}
           required={required}
-          value={pkg[field]}
+          value={pkg[field] ?? ""}
           pattern={field === "sha256" ? "[0-9a-f]{64}" : undefined}
-          placeholder={packagePlaceholders[field]}
-          onChange={(event) => onChange(field, event.target.value.trim())}
+          placeholder={field === "href" && pkg.local_path ? "/Users/you/project/front.actr" : packagePlaceholders[field]}
+          onChange={(event) => onChange(field, field === "href" && pkg.local_path ? event.target.value : event.target.value.trim())}
           className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
         />
       ))}
@@ -137,6 +166,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh, provider, limit, packa
   const extraServices = Object.keys(selection.packages).filter(
     (ref) => ref !== selection.primary_package && ref !== selection.front_package,
   );
+  const front = selection.packages[selection.front_package];
   const selectingPackages = Boolean(provider) || extraServices.length > 0 ||
     Object.values(selection.packages).some((pkg) => Object.values(pkg).some(Boolean));
   const [error, setError] = useState("");
@@ -175,6 +205,25 @@ export function RealmForm({ onSubmit, onClose, onRefresh, provider, limit, packa
     }));
   }
 
+  function updateLocalFront(local: LocalFront | undefined) {
+    setSelection((current) => {
+      const ref = current.front_package;
+      const existing = current.packages[ref];
+      const next = { ...existing };
+      if (Boolean(existing.local_path) !== Boolean(local)) next.href = "";
+      if (local) {
+        next.local_path = local;
+        next.dependencies = { ...next.dependencies, service: current.primary_package };
+        if (local.allow_rebuild) delete next.sha256;
+        else next.sha256 ??= "";
+      } else {
+        delete next.local_path;
+        next.sha256 ??= "";
+      }
+      return { ...current, packages: { ...current.packages, [ref]: next } };
+    });
+  }
+
   function addService() {
     setSelection((current) => {
       if (Object.keys(current.packages).length >= maxPackages) return current;
@@ -208,6 +257,9 @@ export function RealmForm({ onSubmit, onClose, onRefresh, provider, limit, packa
           "Create an app under " + provider + " here. For another domain use External domain · signed requests.",
         );
       if (!activeSelection) throw Error(jsonSelection?.error ?? "Invalid package selection.");
+      if (!advanced && front.local_path && !validLocalFrontPath(front.href)) {
+        throw Error("Enter a safe absolute .actr path or a file name.");
+      }
       const resp = await onSubmit({
         realm: name,
         policy,
@@ -483,12 +535,56 @@ export function RealmForm({ onSubmit, onClose, onRefresh, provider, limit, packa
                   Add Service package
                 </button>
                 <PackageInputs
-                  pkg={selection.packages[selection.front_package]}
+                  pkg={front}
                   label="Front package"
                   prefix="front"
                   required={selectingPackages}
                   onChange={(field, value) => updatePackage(selection.front_package, field, value)}
-                />
+                >
+                  <label className="grid gap-1 text-sm">
+                    Front source
+                    <select
+                      aria-label="Front source"
+                      className="rounded-lg border border-gray-300 px-3 py-2"
+                      value={front.local_path ? "local" : "https"}
+                      onChange={(event) => updateLocalFront(
+                        event.target.value === "local" ? { signing_key_id: "", allow_rebuild: false } : undefined,
+                      )}
+                    >
+                      <option value="https">HTTPS release package</option>
+                      <option value="local">Local .actr file</option>
+                    </select>
+                  </label>
+                  {front.local_path && (
+                    <>
+                      <label className="grid gap-1 text-sm">
+                        Front signing key ID
+                        <input
+                          required
+                          className="rounded-lg border border-gray-300 px-3 py-2 font-mono"
+                          pattern={publisherKey}
+                          value={front.local_path.signing_key_id}
+                          placeholder="actr-pub-0123456789abcdef"
+                          onChange={(event) => updateLocalFront({
+                            ...front.local_path!,
+                            signing_key_id: event.target.value.trim(),
+                          })}
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={front.local_path.allow_rebuild}
+                          onChange={(event) => updateLocalFront({ ...front.local_path!, allow_rebuild: event.target.checked })}
+                        />
+                        Allow rebuilds signed by this key
+                      </label>
+                      <p className="text-xs text-gray-500">
+                        The signed Profile includes the path or file name. Actrium requests permission before opening the file.
+                      </p>
+                    </>
+                  )}
+                </PackageInputs>
               </>
             )}
             <p className="text-xs text-gray-500">

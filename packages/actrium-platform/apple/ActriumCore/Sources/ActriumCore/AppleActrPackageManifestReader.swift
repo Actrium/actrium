@@ -119,11 +119,12 @@ public enum AppleActrPackageManifestReader {
     ///
     /// - Parameter trustedKeys: raw 32-byte Ed25519 public keys; the manifest's
     ///   `signature.key_id` selects the verifying key.
-    public static func verifyManifestSignature(fromRoot root: URL, trustedKeys: [Data]) throws {
+    @discardableResult
+    public static func verifyManifestSignature(fromRoot root: URL, trustedKeys: [Data]) throws -> Data? {
         let manifestURL = root.appendingPathComponent("manifest.toml", isDirectory: false)
         guard FileManager.default.fileExists(atPath: manifestURL.path) else {
             // read(fromRoot:) reports the missing manifest with code 1.
-            return
+            return nil
         }
         let signatureURL = manifestURL.deletingLastPathComponent()
             .appendingPathComponent("manifest.sig", isDirectory: false)
@@ -155,7 +156,7 @@ public enum AppleActrPackageManifestReader {
                   keyId(for: keyData) == expectedKeyId
             else { continue }
             if key.isValidSignature(signature, for: manifestBytes) {
-                return
+                return keyData
             }
         }
         throw AppleActrPackageSignatureError.signatureInvalid

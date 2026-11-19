@@ -40,6 +40,8 @@ export type TabConfig = {
   url?: string;
   /** Per-tab Service actor endpoint supplied by the Host after Attach. */
   serviceCallUrl?: string;
+  /** Per-tab Service event stream endpoint supplied by the Host after Attach. */
+  serviceEventsUrl?: string;
   /** Host-designated permission to use the legacy ACTR_CALL bridge. */
   legacyActorBridge?: boolean;
   htmlContent?: string;
@@ -53,6 +55,8 @@ export type TabConfig = {
   capabilityManifestJSON?: string;
   /** Native-owned authorization snapshot consumed by the Keel Host. */
   capabilitySnapshotJSON?: string;
+  /** Broker-owned token for the currently loaded local storage document. */
+  localStorageDocumentId?: string;
   // Legacy: Double Engine Structure
   guestScript?: string;
   leftPanelScript?: string;

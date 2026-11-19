@@ -69,7 +69,7 @@ final class RendererSurfaceHostView: NSView {
     private var surfaceObserver: NSObjectProtocol?
     private var crashObserver: NSObjectProtocol?
     private var configureTask: Task<Void, Never>?
-    private var lastConfig: [String: Any]?
+    private(set) var lastConfig: [String: Any]?
     private var lastConfigData: Data?
     private var lastConfiguredFingerprint: String?
     private var lastSentSize: CGSize?
@@ -94,6 +94,11 @@ final class RendererSurfaceHostView: NSView {
     /// Last remote caret rect in view coordinates; anchors the IME candidate
     /// window through `caretScreenRect()`.
     private var lastCaretRect: CGRect?
+    /// Last text-input focus state reported by the Renderer. The Renderer
+    /// dedupes identical reports, so a click that re-activates an already
+    /// focused input produces no new message; this latch lets the IME
+    /// client restore itself in that case (see `resignFirstResponder`).
+    private var lastRendererTextFocus = false
     private var accessibilityElements: [RemoteAccessibilityElement] = []
     private var accessibilityById: [UInt64: RemoteAccessibilityElement] = [:]
     private var accessibilityTree = Actrium_Ipc_AccessibilityTree()
@@ -155,6 +160,7 @@ final class RendererSurfaceHostView: NSView {
                   let focused = notification.userInfo?["focused"] as? Bool
             else { return }
             if focused {
+                self.lastRendererTextFocus = true
                 // Re-activate after focus churn: SwiftUI may reclaim first
                 // responder once when the click event settles, which resigns
                 // the IME client and blurs the remote input; a later
@@ -163,8 +169,11 @@ final class RendererSurfaceHostView: NSView {
                 if self.hasUserInteraction {
                     self.activateIMEComposition()
                 }
-            } else if self.window?.firstResponder === self.imeCompositionView {
-                self.window?.makeFirstResponder(self)
+            } else {
+                self.lastRendererTextFocus = false
+                if self.window?.firstResponder === self.imeCompositionView {
+                    self.window?.makeFirstResponder(self)
+                }
             }
         }
 
@@ -210,6 +219,11 @@ final class RendererSurfaceHostView: NSView {
             self.coordinator?.hasConnection = false
             self.coordinator?.xpcServiceReady = false
             self.coordinator?.allocatedServiceId = nil
+            // The replacement Renderer starts with no focused text input and
+            // dedupes its (false) initial state, so it will never correct a
+            // stale latch; a leftover true would let the next surface click
+            // pull first responder back to the IME client and swallow keys.
+            self.lastRendererTextFocus = false
             self.recoverRendererAfterCrash()
         }
     }
@@ -241,7 +255,8 @@ final class RendererSurfaceHostView: NSView {
         lastConfiguredFingerprint = requestedFingerprint
         configureTask?.cancel()
         configureTask = Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, !Task.isCancelled,
+                  self.tabId == tabId, self.fingerprint == requestedFingerprint else { return }
             do {
                 // A Tab can navigate from a built-in page to an ordinary app
                 // without SwiftUI recreating this NSView. Always reconcile the
@@ -252,12 +267,6 @@ final class RendererSurfaceHostView: NSView {
                     for: tabId,
                     fingerprint: requestedFingerprint
                 )
-                guard !Task.isCancelled,
-                      self.tabId == tabId,
-                      self.fingerprint == requestedFingerprint else {
-                    return
-                }
-
                 if previousRendererId != nil, previousRendererId != rendererId {
                     self.showPlaceholder()
                     self.coordinator?.xpcServiceReady = false
@@ -320,6 +329,7 @@ final class RendererSurfaceHostView: NSView {
         // autoFocus from stealing first responder).
         hasUserInteraction = false
         lastCaretRect = nil
+        lastRendererTextFocus = false
         if window?.firstResponder === imeCompositionView {
             window?.makeFirstResponder(nil)
         }
@@ -795,7 +805,11 @@ final class RendererSurfaceHostView: NSView {
     }
 
     /// Forwards a non-text key (arrow, enter, backspace, ...) to the Renderer.
-    func sendCommandKey(keyCode: UInt32, modifiers: NSEvent.ModifierFlags) {
+    /// `modifiers` restores flags that interpretKeyEvents discarded when it
+    /// reduced the key event to a selector (e.g. Shift for selection-extending
+    /// movement or Shift-Return); without them the Renderer rebuilds a plain
+    /// caret move / unmodified Return.
+    func sendCommandKey(keyCode: UInt32, modifiers: NSEvent.ModifierFlags = []) {
         guard let tabId else { return }
         // interpretKeyEvents on the render side derives editing commands from
         // the event's characters; an empty string produces no command.
@@ -804,7 +818,11 @@ final class RendererSurfaceHostView: NSView {
             48: "\t",
             51: "\u{7F}",
             53: "\u{1B}",
+            115: String(Unicode.Scalar(NSHomeFunctionKey)!),
+            116: String(Unicode.Scalar(NSPageUpFunctionKey)!),
             117: String(Unicode.Scalar(NSDeleteFunctionKey)!),
+            119: String(Unicode.Scalar(NSEndFunctionKey)!),
+            121: String(Unicode.Scalar(NSPageDownFunctionKey)!),
             123: String(Unicode.Scalar(NSLeftArrowFunctionKey)!),
             124: String(Unicode.Scalar(NSRightArrowFunctionKey)!),
             125: String(Unicode.Scalar(NSDownArrowFunctionKey)!),
@@ -837,6 +855,18 @@ final class RendererSurfaceHostView: NSView {
     /// control); ask the Renderer to blur its text input as well.
     func imeCompositionDidResign() {
         sendIMEPayload(name: "com.actrium.textInputBlurRequest", payload: [:])
+    }
+
+    /// A mouse click handed first responder from the IME client to this
+    /// surface while the Renderer may still be focused on its text input.
+    /// The Renderer dedupes identical focus reports, so it will not ask for
+    /// the IME client back; restore it directly, otherwise TSM goes silent
+    /// and IME stops until the window re-keys. If the click actually blurs
+    /// the remote input, the pending focus=false report hands first
+    /// responder back here through the focus observer.
+    func imeCompositionDidHandoffToSurface() {
+        guard hasUserInteraction, lastRendererTextFocus else { return }
+        window?.makeFirstResponder(imeCompositionView)
     }
 
     private func encodedModifiers(_ flags: NSEvent.ModifierFlags) -> UInt32 {
@@ -952,7 +982,13 @@ final class IMECompositionView: NSTextView {
             surfaceView?.sendTextCommand(command)
             return
         }
-        if !flags.isEmpty, Self.isFunctionKey(event) {
+        // Modified function keys forward raw only OUTSIDE composition. While
+        // marked text is active the Input Method owns these keys (Backspace
+        // erases pinyin, Cmd+Backspace cancels the composition, arrows move
+        // in the candidate window): routing them to the Renderer edits the
+        // remote marked text without TSM knowing, leaving the candidate
+        // window stranded after the pinyin is gone.
+        if !flags.isEmpty, Self.isFunctionKey(event), forwardingMarkedText.isEmpty {
             surfaceView?.forwardKey(event, type: .keyDown)
             surfaceView?.forwardKey(event, type: .keyUp)
             return
@@ -979,23 +1015,29 @@ final class IMECompositionView: NSTextView {
     /// common ones to raw key codes and forward them to the Renderer so RN
     /// keeps working (enter to send, arrows to move, backspace, ...).
     override func doCommand(by aSelector: Selector) {
-        let keyCodes: [Selector: UInt32] = [
-            #selector(NSResponder.deleteBackward(_:)): 51,
-            #selector(NSResponder.deleteForward(_:)): 117,
-            #selector(NSResponder.moveLeft(_:)): 123,
-            #selector(NSResponder.moveRight(_:)): 124,
-            #selector(NSResponder.moveUp(_:)): 126,
-            #selector(NSResponder.moveDown(_:)): 125,
-            #selector(NSResponder.moveToBeginningOfLine(_:)): 115,
-            #selector(NSResponder.moveToEndOfLine(_:)): 119,
-            #selector(NSResponder.moveToBeginningOfDocument(_:)): 115,
-            #selector(NSResponder.moveToEndOfDocument(_:)): 119,
-            #selector(NSResponder.insertNewline(_:)): 36,
-            #selector(NSResponder.insertTab(_:)): 48,
-            #selector(NSResponder.insertBacktab(_:)): 48,
-            #selector(NSResponder.cancelOperation(_:)): 53,
+        let keyCodes: [Selector: (keyCode: UInt32, modifiers: NSEvent.ModifierFlags)] = [
+            #selector(NSResponder.deleteBackward(_:)): (51, []),
+            #selector(NSResponder.deleteForward(_:)): (117, []),
+            #selector(NSResponder.moveLeft(_:)): (123, []),
+            #selector(NSResponder.moveRight(_:)): (124, []),
+            #selector(NSResponder.moveUp(_:)): (126, []),
+            #selector(NSResponder.moveDown(_:)): (125, []),
+            #selector(NSResponder.moveLeftAndModifySelection(_:)): (123, .shift),
+            #selector(NSResponder.moveRightAndModifySelection(_:)): (124, .shift),
+            #selector(NSResponder.moveUpAndModifySelection(_:)): (126, .shift),
+            #selector(NSResponder.moveDownAndModifySelection(_:)): (125, .shift),
+            #selector(NSResponder.moveToBeginningOfLine(_:)): (115, []),
+            #selector(NSResponder.moveToEndOfLine(_:)): (119, []),
+            #selector(NSResponder.moveToBeginningOfDocument(_:)): (115, []),
+            #selector(NSResponder.moveToEndOfDocument(_:)): (119, []),
+            #selector(NSResponder.pageUp(_:)): (116, []),
+            #selector(NSResponder.pageDown(_:)): (121, []),
+            #selector(NSResponder.insertNewline(_:)): (36, []),
+            #selector(NSResponder.insertTab(_:)): (48, []),
+            #selector(NSResponder.insertBacktab(_:)): (48, []),
+            #selector(NSResponder.cancelOperation(_:)): (53, []),
         ]
-        if let keyCode = keyCodes[aSelector] {
+        if let command = keyCodes[aSelector] {
             // With no active composition, Esc means nothing here; forwarding
             // it blurs the remote input and flashes the surface. While
             // composing, TSM consumes Esc itself (it never reaches this
@@ -1004,9 +1046,12 @@ final class IMECompositionView: NSTextView {
                forwardingMarkedText.isEmpty {
                 return
             }
-            // The renderer distinguishes Return from Shift-Return using the original modifiers.
-            let modifiers = keyCode == 36 ? interpretingModifiers : []
-            surfaceView?.sendCommandKey(keyCode: keyCode, modifiers: modifiers)
+            // The renderer distinguishes Return from Shift-Return using the
+            // original modifiers, which the table cannot express.
+            let modifiers = command.keyCode == 36
+                ? interpretingModifiers
+                : command.modifiers
+            surfaceView?.sendCommandKey(keyCode: command.keyCode, modifiers: modifiers)
             return
         }
         super.doCommand(by: aSelector)
@@ -1027,11 +1072,40 @@ final class IMECompositionView: NSTextView {
     @objc func redo(_ sender: Any?) { surfaceView?.sendTextCommand("redo") }
 
     override func resignFirstResponder() -> Bool {
-        // Whatever takes over (address bar, another surface, ...), the
-        // remote text input should blur too.
-        forwardingMarkedText = ""
-        surfaceView?.imeCompositionDidResign()
-        return super.resignFirstResponder()
+        // Defer the handoff until the successor is known. A click that
+        // lands on our own surface view resigns this IME view in favour of
+        // the surface itself. Two cases:
+        //  - The remote text input stays focused (e.g. Shift+click after a
+        //    drag selection): the Renderer sees no focus change and never
+        //    re-reports, so nobody would give this IME view its first
+        //    responder status back — restore it here, otherwise TSM goes
+        //    silent and Chinese input stops until the window re-keys.
+        //    Sending blurRequest instead would restore IME the same way,
+        //    but only by blurring the Renderer first, which destroys the
+        //    drag-built selection (NSTextField's becomeFirstResponder
+        //    selectText runs on refocus).
+        //  - The click blurs the remote input: the Renderer reports
+        //    focus=false and the observer moves first responder to the
+        //    surface; nothing to do here.
+        // A handoff to a foreign control (address bar, another tab) needs
+        // an explicit remote blur.
+        guard super.resignFirstResponder() else { return false }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let successor = self.window?.firstResponder else { return }
+            if successor === self {
+                // No handoff: the focus observer already restored this view
+                // between resign and this check. Treating it as a foreign
+                // handoff would blur the input the user just focused.
+                return
+            }
+            if successor === self.surfaceView {
+                self.surfaceView?.imeCompositionDidHandoffToSurface()
+            } else {
+                self.forwardingMarkedText = ""
+                self.surfaceView?.imeCompositionDidResign()
+            }
+        }
+        return true
     }
 
     // MARK: NSTextInputClient (forwarding overrides)

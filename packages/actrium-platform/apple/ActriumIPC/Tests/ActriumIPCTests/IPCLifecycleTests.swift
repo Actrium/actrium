@@ -101,6 +101,43 @@ final class IPCLifecycleTests: XCTestCase {
         wait(for: [received], timeout: 3)
     }
 
+    func testOversizedHostEventLeavesConnectionUsable() throws {
+        var descriptors: [Int32] = [-1, -1]
+        XCTAssertEqual(Darwin.socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors), 0)
+        let broker = IPCConnection(tabId: "oversized", connectedSocket: descriptors[0])
+        let renderer = IPCHelperConnection(tabId: "oversized", connectedSocket: descriptors[1])
+        defer {
+            renderer.disconnect()
+            broker.stop()
+        }
+        let received = expectation(description: "connection remains usable")
+        renderer.onHostEvent = { name, _, tabId in
+            XCTAssertEqual(name, "valid-event")
+            XCTAssertEqual(tabId, "oversized")
+            received.fulfill()
+        }
+        try broker.start()
+        try renderer.connect()
+
+        let oversized = String(repeating: "x", count: IPCFrameLimits.maxFrameBytes)
+        XCTAssertThrowsError(
+            try broker.sendHostEvent(
+                name: "oversized-event", userInfoJSON: oversized, tabId: "oversized"
+            )
+        ) { error in
+            guard case IPCError.frameTooLarge = error else {
+                return XCTFail("Expected frameTooLarge, received \(error)")
+            }
+        }
+
+        // Nothing may have been written for the rejected frame, so the next
+        // valid event must still arrive on the same connection.
+        try broker.sendHostEvent(
+            name: "valid-event", userInfoJSON: "{}", tabId: "oversized"
+        )
+        wait(for: [received], timeout: 3)
+    }
+
     func testFilesystemListenerAcceptsAnotherClientAfterDisconnect() throws {
         let path = "/tmp/ipc-lifecycle-\(UUID().uuidString).sock"
         let server = IPCServer(socketPath: path)

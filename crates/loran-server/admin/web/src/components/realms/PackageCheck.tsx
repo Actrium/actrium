@@ -16,9 +16,9 @@ export function PackageCheck({ selection, available, disabled = false }: {
       const response = await api.checkPackages(parsed);
       setResult({
         input: selection,
-        message:
-          response.count +
-          " package archives verified, including Publisher signatures and Service / Front compatibility.",
+        message: Object.values(parsed.packages).some((pkg) => pkg.local_path)
+          ? response.count + " package archives verified. The local Front signing key was checked. Actrium verifies the selected file."
+          : response.count + " package archives verified, including Publisher signatures and Service / Front compatibility.",
         ok: true,
       });
     } catch (err) {

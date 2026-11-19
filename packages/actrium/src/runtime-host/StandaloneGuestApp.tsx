@@ -33,9 +33,17 @@ import {
 } from './attachment-upload';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
+import { bindNativeLocalStorage } from './local-storage';
 import { Supramark } from './guest-markdown-renderer';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
 import { callHttpService, callNativeService } from './service-call';
+import {
+  createHttpServiceEventSource,
+  createNativeServiceEventSource,
+  serviceEventsFromManifest,
+  type CapabilityManifestV1,
+  type ServiceEventSource,
+} from './service-events';
 import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
 import type { TabConfig } from './types';
 import { isGuestSpeechAvailable, useGuestSpeech } from './use-guest-speech';
@@ -169,6 +177,10 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     tab.permissions ?? [],
     'service.call'
   );
+  const hasServiceOnCapability = hasDeclaredCapability(
+    tab.permissions ?? [],
+    'service.on'
+  );
   const permissionsKey = [...(tab.permissions ?? [])].sort().join(',');
   const capabilitySnapshot = React.useMemo(
     () =>
@@ -262,6 +274,48 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       logToNative(`[StandaloneGuestApp] service call ${request.route}`);
       return callHttpService(tab.serviceCallUrl, request);
     };
+    const localStorage = bindNativeLocalStorage(
+      NativeModules.GuestLocalStorage, tab.id, tab.localStorageDocumentId
+    );
+    if (v1?.ok && v1.linkage.links.some(([id]) => id === 'host:local-storage') && !localStorage) {
+      setError('Local storage is unavailable for this application.');
+      return;
+    }
+
+    let serviceEventSource: ServiceEventSource | undefined;
+    if (hasServiceOnCapability && capabilityManifestJSON) {
+      try {
+        const manifest = JSON.parse(capabilityManifestJSON) as CapabilityManifestV1;
+        const events = serviceEventsFromManifest(manifest);
+        if (events.length > 0) {
+          serviceEventSource = tab.serviceEventsUrl
+            ? createHttpServiceEventSource(tab.serviceEventsUrl, events)
+            : createNativeServiceEventSource(
+                NativeModules.RealmService,
+                tab.id,
+                events
+              );
+        }
+      } catch {
+        // Verification above has already surfaced the malformed manifest; keep
+        // the source undefined so the engine can still load non-event guests.
+      }
+    }
+
+    // Track complete Host cleanups, including revocation listeners, so engine
+    // reload/tab close works even if the Guest forgets to unsubscribe.
+    const eventSubscriptions = new Set<() => void>();
+    const trackServiceEventSubscription = (cleanup: () => void): (() => void) => {
+      if (disposed) {
+        cleanup();
+        return () => {};
+      }
+      eventSubscriptions.add(cleanup);
+      return () => {
+        eventSubscriptions.delete(cleanup);
+      };
+    };
+
     const fileImport = NativeModules.GuestFileImport as FileImportBridge | undefined;
     const nativePick = fileImport?.pick?.bind(fileImport, tab.id, tab.reloadKey ?? 0);
     if (v1?.ok && v1.linkage.links.some(([id]) => id === 'host:file-import') && !nativePick) {
@@ -317,9 +371,15 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       }
     const hostModules = createHostModules({
       hasServiceCapability,
+      hasServiceOnCapability,
       callActor: callServiceActor,
+      serviceEventSource,
       authorizeCapability: (capability) => authorizer.authorize(capability),
+      onCapabilityRevoked: (capability, listener) =>
+        authorizer.onRevoked(capability, listener),
+      trackServiceEventSubscription,
       writeClipboardText,
+      localStorage,
       pickFiles: nativePick && ((input) => nativePick(
         input.source ?? 'files', input.accept ?? [], input.multiple ?? false
       )),
@@ -453,6 +513,8 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     return () => {
       disposed = true;
       cancelSpeech();
+      for (const cleanup of [...eventSubscriptions]) cleanup();
+      eventSubscriptions.clear();
       attachmentUploader.dispose();
       stopEngine?.();
     };
@@ -462,11 +524,14 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     // reloadKey still forces a clean reload when the package changes.
     guestScript,
     hasServiceCapability,
+    hasServiceOnCapability,
     tab.id,
     tab.legacyActorBridge,
     tab.serviceCallUrl,
+    tab.serviceEventsUrl,
     tab.reloadKey,
     tab.capabilityManifestJSON,
+    tab.localStorageDocumentId,
     permissionsKey,
     capabilitySnapshotAvailable,
     recognizeSpeech,

@@ -26,6 +26,7 @@ pub const MAX_VALIDITY_SECS: i64 = 300;
 pub enum ManagementOp {
     CreateRealm,
     PublishProfile,
+    PublishFrontProfile,
     ReissueOwnerInvite,
     RegisterPublisher,
     DraftProfile,
@@ -54,6 +55,9 @@ pub struct ManagementRequest {
     /// `publish_profile`: the signed Realm Profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<Value>,
+    /// Conditional publication and receipt for a Front-only change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub front_update: Option<crate::realm_profile::FrontUpdate>,
     /// Actr Facility Provider ID of the receiver.
     pub provider_id: String,
     /// Opaque id of whom the key holder's signing service signs for.
@@ -94,6 +98,7 @@ impl ManagementRequest {
             selection: None,
             policy: None,
             profile: None,
+            front_update: None,
             provider_id: provider_id.to_string(),
             requester: None,
             nonce: nonce.to_string(),
@@ -120,6 +125,14 @@ impl ManagementRequest {
             .map_err(|error| invalid(format!("malformed request: {error}")))?;
         if request.signature.is_none() {
             return Err(invalid("request is not signed"));
+        }
+        match (request.op, &request.front_update) {
+            (ManagementOp::PublishFrontProfile, Some(update)) => update.check().map_err(invalid)?,
+            (ManagementOp::PublishFrontProfile, None) => {
+                return Err(invalid("missing front_update"));
+            }
+            (_, Some(_)) => return Err(invalid("front_update requires publish_front_profile")),
+            _ => {}
         }
         if let Value::Object(members) = &mut value {
             members.remove("signature");

@@ -319,22 +319,17 @@ try {
     await http(endpoint(realm, "/operations/" + first.requestId + "/reveal"), {}, true, 409);
     await membership(owner, "revoke_invite", { invite_id: issuedId });
   });
-  await step("Owner-signed rename and Front upgrade keep the same App ID and complete selection", async () => {
+  await step("Owner-signed rename preserves the App ID and complete package selection", async () => {
     const current = (await http(endpoint(realm, "/profile"), null, true)).profile;
     await page.getByText("Edit app profile", { exact: true }).click();
     const nextName = appName + " updated";
     await page.getByLabel("App display name").fill(nextName);
-    const updated = structuredClone(selection);
-    updated.packages.ui.type = "publisher.example/ui@1.1.0";
-    updated.packages.ui.href = "https://packages.example.org/ui-1.1.0.actr";
-    updated.packages.ui.sha256 = "9".repeat(64);
-    await page.getByLabel(/Complete package selection/).fill(JSON.stringify(updated));
     await button("Save signed profile").click();
     await page.getByRole("heading", { name: nextName, exact: true }).waitFor();
     const profile = (await http(endpoint(realm, "/profile"), null, true)).profile;
     assert.equal(profile.realm.name, realm);
     assert(profile.sequence > current.sequence);
-    assert.deepEqual(profile.packages, updated.packages);
+    assert.deepEqual(profile.packages, current.packages);
   });
   await step("Suspension blocks redemption and a resumed app accepts the same invitation", async () => {
     const open = await issue("viewer"),

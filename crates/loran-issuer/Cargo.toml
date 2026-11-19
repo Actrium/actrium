@@ -42,6 +42,7 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 hex = { workspace = true }
 rand = "0.8.5"
+tempfile = { workspace = true }
 
 ## Rate limiting
 tower_governor = "0.8"
@@ -60,7 +61,6 @@ actr-hyper = { workspace = true }
 actr-mock-loran = { workspace = true }
 turn = { path = "../loran-turn", package = "loran-turn", version = "0.10.7" }
 turn_crate = { workspace = true }
-tempfile = { workspace = true }
 nonce-auth = { workspace = true }
 tonic = { workspace = true }
 serial_test = { workspace = true }

@@ -1,6 +1,40 @@
 use super::RealmPackage;
 use serde::{Deserialize, Deserializer, Serialize, de};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+/// A conditional package release based on a specific accepted Profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrontUpdate {
+    pub operation_id: String,
+    pub expected_sequence: u64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rollback: bool,
+}
+
+impl FrontUpdate {
+    pub fn check(&self) -> Result<(), String> {
+        if self.operation_id.len() != 32
+            || !self
+                .operation_id
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            return Err("operation_id must be 32 lowercase hex digits".into());
+        }
+        if self.expected_sequence >= super::MAX_EXACT_INTEGER {
+            return Err("expected_sequence is out of range".into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackageSelectionChange {
+    Front,
+    Service,
+}
 
 /// A complete, atomic selection. Serialized directly into the Profile or management envelope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +128,15 @@ impl RealmPackageSelection {
             package
                 .check()
                 .map_err(|e| format!("packages[{name}]: {e}"))?;
+            if package.local_path.is_some()
+                && (name != &self.front_package
+                    || package.dependencies.get("service") != Some(&self.primary_package))
+            {
+                return Err(
+                    "local_path is only allowed on the selected Front with a Service binding"
+                        .into(),
+                );
+            }
             if digests
                 .insert(&package.r#type, &package.sha256)
                 .is_some_and(|old| old != &package.sha256)
@@ -123,13 +166,135 @@ impl RealmPackageSelection {
         let digests: BTreeMap<_, _> = self
             .packages
             .values()
-            .map(|p| (&p.r#type, &p.sha256))
+            .filter_map(|p| p.fixed_digest().map(|digest| (&p.r#type, digest)))
             .collect();
         for p in next.packages.values() {
-            if digests.get(&p.r#type).is_some_and(|old| *old != &p.sha256) {
+            if let Some(digest) = p.fixed_digest()
+                && digests.get(&p.r#type).is_some_and(|old| *old != digest)
+            {
                 return Err(format!("digest changed for immutable package {}", p.r#type));
             }
         }
         Ok(())
+    }
+
+    /// A Front release must preserve the primary Service and all packages
+    /// reachable through its signed dependency selection.
+    pub fn check_unchanged_service(&self, next: &Self) -> Result<(), String> {
+        if self.primary_package != next.primary_package {
+            return Err("a Front update cannot change primary_package".into());
+        }
+        let mut pending = vec![self.primary_package.as_str()];
+        let mut checked = BTreeSet::new();
+        while let Some(reference) = pending.pop() {
+            if !checked.insert(reference) {
+                continue;
+            }
+            let old = self
+                .packages
+                .get(reference)
+                .ok_or_else(|| format!("unknown Service package reference {reference:?}"))?;
+            if next.packages.get(reference) != Some(old) {
+                return Err(format!(
+                    "a Front update cannot change Service package {reference:?}"
+                ));
+            }
+            pending.extend(old.dependencies.values().map(String::as_str));
+        }
+        Ok(())
+    }
+
+    /// Identify a release from the accepted and proposed selections.
+    pub fn release_change(&self, next: &Self) -> Result<Option<PackageSelectionChange>, String> {
+        self.check_successor(next)?;
+        if self == next {
+            return Ok(None);
+        }
+        if self.selected()?.0.r#type != next.selected()?.0.r#type {
+            return Ok(Some(PackageSelectionChange::Service));
+        }
+        self.check_unchanged_service(next)?;
+        Ok(Some(PackageSelectionChange::Front))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn selection() -> RealmPackageSelection {
+        serde_json::from_value(json!({
+            "primary_package": "service",
+            "front_package": "front",
+            "packages": {
+                "service": {
+                    "href": "https://publisher.example/service.actr",
+                    "sha256": "a".repeat(64),
+                    "type": "publisher.example/service@1.0.0"
+                },
+                "front": {
+                    "href": "front.actr",
+                    "type": "publisher.example/front@1.0.0",
+                    "dependencies": { "service": "service" },
+                    "local_path": {
+                        "signing_key_id": "actr-pub-0123456789abcdef",
+                        "allow_rebuild": true
+                    }
+                }
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn local_front_requires_an_explicit_service_binding_and_safe_hint() {
+        let mut selection = selection();
+        selection.check().unwrap();
+        assert_eq!(selection.selected().unwrap().1.fixed_digest(), None);
+
+        selection.packages.get_mut("front").unwrap().href = "/Users/test/My App/front.actr".into();
+        selection.check().unwrap();
+        for invalid in [
+            "project/front.actr",
+            "//server/share/front.actr",
+            "file:///Users/test/front.actr",
+            "/Users/test/../front.actr",
+            "/Users/test/%2e%2e/front.actr",
+            "/Users/test//front.actr",
+            "/Users/test/.actr",
+            "/Users/test/front.unsigned",
+            "/dev/front.actr",
+            "/EtC/front.actr",
+            "/Library/front.actr",
+            "/System/Library/front.actr",
+            "/System/Volumes/Data/Users/test/front.actr",
+            "/private/etc/front.actr",
+            "/private/var/root/front.actr",
+            "/Users/test/\nfront.actr",
+            "/Users/test/\u{202e}front.actr",
+        ] {
+            selection.packages.get_mut("front").unwrap().href = invalid.into();
+            assert!(selection.check().is_err(), "{invalid:?}");
+        }
+
+        let front = selection.packages.get_mut("front").unwrap();
+        front.href = "front.actr".into();
+        front.dependencies.clear();
+        assert!(selection.check().is_err());
+    }
+
+    #[test]
+    fn rebuild_permission_does_not_apply_to_downloads_or_services() {
+        let mut selection = selection();
+        let local = selection.packages["front"].local_path.clone();
+        selection.packages.get_mut("service").unwrap().local_path = local;
+        assert!(selection.check().is_err());
+
+        let mut selection = self::selection();
+        let front = selection.packages.get_mut("front").unwrap();
+        front.href = "https://publisher.example/front.actr".into();
+        front.local_path = None;
+        assert!(selection.check().is_err());
     }
 }

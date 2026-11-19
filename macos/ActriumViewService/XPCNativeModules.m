@@ -38,6 +38,13 @@ RCT_EXTERN_METHOD(call:(NSString *)tabId
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(subscribeServiceEvents:(NSString *)tabId
+                  events:(NSArray<NSString *> *)events
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(unsubscribeServiceEvents:(NSString *)tabId
+                  subscriptionId:(NSString *)subscriptionId)
 RCT_EXTERN_METHOD(prepareAttachmentUpload:(NSString *)tabId
                   request:(NSDictionary *)request
                   resolver:(RCTPromiseResolveBlock)resolve
@@ -62,6 +69,17 @@ RCT_EXTERN_METHOD(attachmentUploadAvailable:(NSString *)tabId
 @interface RCT_EXTERN_MODULE(CapabilityPermission, NSObject)
 
 RCT_EXTERN_METHOD(requestGrant:(NSString *)tabId capability:(NSString *)capability)
+
+@end
+
+@interface RCT_EXTERN_MODULE(GuestLocalStorage, NSObject)
+
+RCT_EXTERN_METHOD(perform:(NSString *)tabId
+                  documentId:(NSString *)documentId
+                  operation:(NSString *)operation
+                  inputJSON:(NSString *)inputJSON
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 
 @end
 

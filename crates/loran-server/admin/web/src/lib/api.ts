@@ -153,8 +153,24 @@ export interface RealmMembersResponse {
 }
 
 export interface ManagementClient { available: boolean; connected: boolean; key_id?: string; member_id?: string }
-export interface AppPackage { type: string; sha256: string; href: string; dependencies?: Record<string, string> }
+export interface LocalFront {
+  signing_key_id: string;
+  allow_rebuild: boolean;
+}
+
+export interface AppPackage {
+  type: string;
+  sha256?: string;
+  href: string;
+  dependencies?: Record<string, string>;
+  local_path?: LocalFront;
+}
 export interface PackageSelection {primary_package:string; front_package:string; packages:Record<string,AppPackage>}
+export interface RealmPackageState {
+  sequence: number;
+  selection: PackageSelection;
+  previous_selection: PackageSelection | null;
+}
 export interface AppProfile {
   sequence: number;
   realm: { name: string; display_name: string; status: string };
@@ -166,7 +182,7 @@ export interface AppProfile {
   package?: AppPackage;
 }
 export type MemberAction =
-  | { action: "update_app"; display_name?: string; selection?: PackageSelection }
+  | { action: "update_app"; display_name: string }
   | { action: "invite_member"; role: "editor" | "viewer"; days: number }
   | { action: "invite_owner_device"; days: number }
   | { action: "revoke_invite"; invite_id: string }
@@ -338,6 +354,15 @@ export const api = {
 
   signedAppRequest: (id:string, signed:string) => request<Record<string,unknown>>(`/realms/${encodeURIComponent(id)}/signed-management`,{method:"POST",body:signed}),
   checkPackages: (selection:PackageSelection) => request<{verified:boolean;count:number}>("/apps/check-selection",{method:"POST",body:JSON.stringify(selection)}),
+  getRealmPackages: (realm: string) =>
+    request<RealmPackageState>(`/realms/${encodeURIComponent(realm)}/packages`),
+  updateRealmPackages: (realm: string, data: {
+    selection: PackageSelection;
+    operation: { operation_id: string; expected_sequence: number; rollback: boolean };
+  }) => request<{ sequence: number; changed?: boolean }>(`/realms/${encodeURIComponent(realm)}/packages`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  }),
   appProfile: (id: string) => request<{profile: AppProfile | null}>(`/realms/${encodeURIComponent(id)}/profile?optional=true`),
   managementClient: (id: string) => request<ManagementClient>(`/realms/${encodeURIComponent(id)}/management-client`),
   connectManagementClient: (id: string, invite: string) => request<ManagementClient>(`/realms/${encodeURIComponent(id)}/management-client`, {method: "POST", body: JSON.stringify({invite})}),

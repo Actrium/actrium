@@ -22,6 +22,7 @@ use std::sync::Arc;
 mod app_members;
 mod app_profiles;
 mod login_admission;
+mod package_release;
 mod service_access;
 pub(super) use app_members::AppManagement;
 pub(super) use service_access::service_access;
@@ -1123,6 +1124,10 @@ pub fn build_admin_api_router(
         .route("/admin/api/realms", post(create_realm))
         .route("/admin/api/realms/{realm}", get(get_realm))
         .route("/admin/api/realms/{realm}", put(update_realm))
+        .route(
+            "/admin/api/realms/{realm}/packages",
+            get(package_release::current).put(package_release::submit),
+        )
         .route("/admin/api/realms/{realm}/admission", put(set_realm_policy))
         .route(
             "/admin/api/realms/{realm}/issuer-key/rotate",
@@ -1361,6 +1366,7 @@ fn grpc_status_to_response(status: tonic::Status) -> Response {
     let http_status = match status.code() {
         tonic::Code::NotFound => StatusCode::NOT_FOUND,
         tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
+        tonic::Code::Aborted => StatusCode::CONFLICT,
         tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
         tonic::Code::Unauthenticated => StatusCode::UNAUTHORIZED,
         tonic::Code::FailedPrecondition | tonic::Code::Unavailable => {

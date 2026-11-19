@@ -5,8 +5,8 @@
 //! Realm signing key listed in the domain's `realm_signing_keys` member.
 
 use crate::authority::{
-    AuthorityDescriptor, DetachedSignature, KeyStatus, RealmSigningKey, RealmSigningKeys,
-    SIGNATURE_ALGORITHM,
+    AuthorityDescriptor, DetachedSignature, KeyStatus, PinnedKey, PinnedStatus, RealmSigningKey,
+    RealmSigningKeys, SIGNATURE_ALGORITHM,
 };
 use crate::uri::ActrUri;
 use base64::Engine as _;
@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 mod selection;
-pub use selection::RealmPackageSelection;
+pub use selection::{FrontUpdate, PackageSelectionChange, RealmPackageSelection};
 pub const MAX_REALM_PROFILE_BYTES: usize = 64 * 1024;
 
 pub const REALM_PROFILE_SCHEMA: &str = "actr.realm/v1";
@@ -86,9 +86,10 @@ pub enum RealmStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RealmPackage {
-    /// HTTPS download URL.
+    /// HTTPS download URL, or an absolute path or legacy filename hint for a local Front.
     pub href: String,
-    /// Lowercase hex SHA-256 of the whole package.
+    /// Lowercase hex SHA-256 of the whole package, omitted only for a rebuildable local Front.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub sha256: String,
     /// Actor type of the package manifest, `publisher/program@version`.
     pub r#type: String,
@@ -96,17 +97,53 @@ pub struct RealmPackage {
     /// Omitted bindings continue to use the package's normal dependency resolution.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub dependencies: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<LocalRealmFront>,
     /// Preserve extension members when the accepted package map is copied to a draft.
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,
 }
 
+/// A signed declaration for a user-selected local Front. The href is a hint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalRealmFront {
+    pub signing_key_id: String,
+    pub allow_rebuild: bool,
+}
+
 impl RealmPackage {
     /// Check `href`, `sha256` and `type`.
     pub fn check(&self) -> Result<(), String> {
-        check_endpoint_url(&self.href, "https")
-            .map_err(|error| format!("package.href: {error}"))?;
-        if self.sha256.len() != 64
+        if let Some(local) = &self.local_path {
+            if !valid_local_front_href(&self.href) {
+                return Err(
+                    "local package.href must be a safe absolute .actr path or a legacy filename"
+                        .into(),
+                );
+            }
+            if !local
+                .signing_key_id
+                .strip_prefix("actr-pub-")
+                .is_some_and(|id| {
+                    id.len() == 16 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+                })
+            {
+                return Err("local package.signing_key_id must identify a Publisher key".into());
+            }
+        } else {
+            check_endpoint_url(&self.href, "https")
+                .map_err(|error| format!("package.href: {error}"))?;
+        }
+        if self
+            .local_path
+            .as_ref()
+            .is_some_and(|local| local.allow_rebuild)
+        {
+            if !self.sha256.is_empty() {
+                return Err("a rebuildable local Front cannot declare a fixed sha256".into());
+            }
+        } else if self.sha256.len() != 64
             || !self
                 .sha256
                 .bytes()
@@ -118,6 +155,13 @@ impl RealmPackage {
         semver::Version::parse(&actor.version)
             .map_err(|e| format!("package.type needs an exact version: {e}"))?;
         Ok(())
+    }
+
+    pub fn fixed_digest(&self) -> Option<&str> {
+        match &self.local_path {
+            Some(local) if local.allow_rebuild => None,
+            _ => Some(&self.sha256),
+        }
     }
 
     pub(super) fn check_primary_successor(&self, next: &Self) -> Result<(), String> {
@@ -134,6 +178,58 @@ impl RealmPackage {
         crate::ActrType::from_program_identity(&self.r#type)
             .map_err(|error| format!("package.type: {error}"))
     }
+}
+
+fn valid_local_front_href(href: &str) -> bool {
+    let filename = href.rsplit('/').next().unwrap_or_default();
+    if href.trim() != href
+        || href.contains(['\\', ':'])
+        || href.chars().any(char::is_control)
+        || filename.strip_suffix(".actr").is_none_or(str::is_empty)
+    {
+        return false;
+    }
+
+    let Some(relative) = href.strip_prefix('/') else {
+        return href.len() <= 255 && !href.contains('/');
+    };
+    if href.len() > 1023
+        || href.contains('%')
+        || href.chars().any(|c| {
+            matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+        || relative
+            .split('/')
+            .any(|part| part.is_empty() || part.len() > 255 || matches!(part, "." | ".."))
+    {
+        return false;
+    }
+    let mut parts = relative.split('/');
+    let mut root = parts.next().unwrap_or_default().to_ascii_lowercase();
+    if root == "private" {
+        root = parts.next().unwrap_or_default().to_ascii_lowercase();
+    }
+    let system_directory = matches!(
+        root.as_str(),
+        "bin"
+            | "dev"
+            | "etc"
+            | "library"
+            | "net"
+            | "network"
+            | "proc"
+            | "root"
+            | "run"
+            | "sbin"
+            | "sys"
+            | "system"
+            | "usr"
+    );
+    let protected_var_directory = root == "var"
+        && parts.next().is_some_and(|part| {
+            matches!(part.to_ascii_lowercase().as_str(), "db" | "root" | "run")
+        });
+    !(system_directory || protected_var_directory)
 }
 
 // Parse the original RFC 3986 URI without repairing missing authorities (for
@@ -316,7 +412,7 @@ fn parse_realm_name(name: &str) -> Result<ActrUri, String> {
 }
 
 /// Realm Profile URLs for `realm_name`, in document order (section 3): each
-/// `realms` link with protocol `actr-realm-profile/1`, a trailing `/` removed,
+/// `realms` or legacy `realm` link with protocol `actr-realm-profile/1`, a trailing `/` removed,
 /// followed by `/<realm_id>`. Links with a query or fragment are skipped.
 pub fn realm_profile_urls(
     descriptor: &AuthorityDescriptor,
@@ -328,7 +424,7 @@ pub fn realm_profile_urls(
         .services
         .iter()
         .filter(|link| {
-            link.rel == "realms"
+            matches!(link.rel.as_str(), "realms" | "realm")
                 && link.protocol.as_deref() == Some(REALM_PROFILE_PROTOCOL)
                 && link.href.starts_with("https://")
                 && !link.href.contains(['?', '#'])
@@ -372,10 +468,39 @@ impl RealmProfile {
         keys: &RealmSigningKeys,
         stored: bool,
     ) -> Result<Self, RealmProfileError> {
-        let invalid = RealmProfileError::Invalid;
         keys.validate()
             .map_err(|error| RealmProfileError::KeysInvalid(error.to_string()))?;
+        Self::verify_with_listed_keys(document, realm_name, &keys.keys, stored)
+    }
 
+    /// Authenticate a discarded snapshot with its historical pin. This checks
+    /// saved state integrity without making a revoked Profile usable again.
+    pub fn verify_revoked_snapshot(
+        document: &[u8],
+        realm_name: &str,
+        pinned: &PinnedKey,
+    ) -> Result<(), RealmProfileError> {
+        if pinned.status != PinnedStatus::Removed {
+            return Err(RealmProfileError::Invalid(
+                "snapshot signer is not revoked".into(),
+            ));
+        }
+        let key = RealmSigningKey {
+            id: pinned.id.clone(),
+            public_key: pinned.public_key.clone(),
+            algorithm: SIGNATURE_ALGORITHM.into(),
+            status: KeyStatus::Retired,
+        };
+        Self::verify_with_listed_keys(document, realm_name, &[key], false).map(|_| ())
+    }
+
+    fn verify_with_listed_keys(
+        document: &[u8],
+        realm_name: &str,
+        keys: &[RealmSigningKey],
+        stored: bool,
+    ) -> Result<Self, RealmProfileError> {
+        let invalid = RealmProfileError::Invalid;
         if document.len() > MAX_REALM_PROFILE_BYTES {
             return Err(invalid("Realm Profile exceeds 64 KiB".into()));
         }
@@ -399,7 +524,7 @@ impl RealmProfile {
             members.remove("signature");
         }
         let signed_payload = jcs(&value);
-        verify_signature(&keys.keys, &profile.signature, signed_payload.as_bytes())?;
+        verify_signature(keys, &profile.signature, signed_payload.as_bytes())?;
         Ok(Self {
             signed_payload,
             document: document.to_vec(),
@@ -1132,6 +1257,18 @@ mod tests {
                 "https://acme.com/double//k7m2q9xh",
                 "https://p.example:8443/r/k7m2q9xh"
             ]
+        );
+        descriptor.services = vec![
+            ServiceLink::new("realm", "https://acme.com/realm/")
+                .with_protocol(REALM_PROFILE_PROTOCOL),
+        ];
+        descriptor
+            .validate_for(&parse_realm_name(NAME).unwrap())
+            .unwrap();
+        assert_eq!(descriptor.require_service("realms").unwrap().rel, "realm");
+        assert_eq!(
+            realm_profile_urls(&descriptor, NAME).unwrap(),
+            vec!["https://acme.com/realm/k7m2q9xh"]
         );
         descriptor.services.clear();
         assert!(realm_profile_urls(&descriptor, NAME).unwrap().is_empty());

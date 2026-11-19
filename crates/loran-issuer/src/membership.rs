@@ -18,7 +18,9 @@ use axum::{
 };
 use chrono::Utc;
 use platform::realm::membership::{self, Code, MembershipError, Signer};
-use platform::realm::{MembershipMode, Realm, RealmError, RealmProfileRecord};
+use platform::realm::{
+    MembershipMode, Realm, RealmError, RealmPackageReleaseRecord, RealmProfileRecord,
+};
 use serde_json::{Value, json};
 
 use crate::handlers::{IssuerState, expected_provider_id};
@@ -132,7 +134,9 @@ async fn handle(
             membership::transfer_owner(&signer, member_id, previous).await
         }
         MembershipOp::Leave => membership::leave(&signer).await,
-        MembershipOp::UpdateRealm => update_realm(state, &signer, &request).await,
+        MembershipOp::UpdateRealm | MembershipOp::UpdateFront | MembershipOp::SwitchService => {
+            update_realm(state, &signer, &request).await
+        }
     }
 }
 
@@ -249,6 +253,65 @@ async fn update_realm(
     match platform::realm::Realm::get(&signer.realm).await? {
         Some(realm) if realm.is_active() => {}
         _ => return fail(Code::RealmUnavailable, "the Realm is not active"),
+    }
+    if let Some(update) = request
+        .front_update
+        .as_ref()
+        .or(request.service_update.as_ref())
+    {
+        let Some(selection) = &request.selection else {
+            return fail(
+                Code::InvalidRequest,
+                "a package release needs a complete selection",
+            );
+        };
+        if request.status.is_some() || request.display_name.is_some() {
+            return fail(
+                Code::InvalidRequest,
+                "a package release only changes the selection",
+            );
+        }
+        let realm = &signer.realm;
+        if let Some(receipt) = RealmPackageReleaseRecord::get(realm, update, selection).await? {
+            return Ok(receipt.reply(realm, update)?);
+        }
+        let issued = profiles
+            .issue(
+                realm,
+                ProfileChange {
+                    selection: Some(selection.clone()),
+                    owner: Some(signer.clone()),
+                    front_update: request.front_update.clone(),
+                    service_update: request.service_update.clone(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        if let Err(error) = issued {
+            match error {
+                ProfileError::Realm(RealmError::Conflict(message)) => {
+                    if let Some(receipt) =
+                        RealmPackageReleaseRecord::get(realm, update, selection).await?
+                    {
+                        return Ok(receipt.reply(realm, update)?);
+                    }
+                    return fail(Code::Conflict, message);
+                }
+                ProfileError::Invalid(message) => return fail(Code::InvalidRequest, message),
+                ProfileError::Realm(RealmError::Membership(error)) => return Err(error),
+                error => return fail(Code::Unavailable, error.to_string()),
+            }
+        }
+        let Some(receipt) = RealmPackageReleaseRecord::get(realm, update, selection).await? else {
+            return fail(Code::Unavailable, "package release receipt missing");
+        };
+        platform::recording::info!(
+            "Realm {realm}: {:?} operation {} accepted at sequence {}",
+            request.op,
+            update.operation_id,
+            receipt.sequence
+        );
+        return Ok(receipt.reply(realm, update)?);
     }
     let change = match request.status.as_deref() {
         Some("retired") => {

@@ -14,6 +14,7 @@ import { copyText, operationId } from "../lib/utils";
 import { appStatus } from "../components/realms/RealmTable";
 import { SignedAppRequest } from "../components/realms/SignedAppRequest";
 import { AppProfileEditor } from "../components/realms/AppProfileEditor";
+import { RealmPackages } from "../components/realms/RealmPackages";
 import { OwnerInviteModal } from "../components/realms/OwnerInviteModal";
 import { EditRealmAdmission } from "../components/realms/RealmAdmission";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
@@ -68,6 +69,7 @@ function DetailsPage({ id }: { id: string }) {
   const [ownerCode, setOwnerCode] = useState<ActionResult | null>(null);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
   const [editingAdmission, setEditingAdmission] = useState(false);
+  const [editingPackages, setEditingPackages] = useState(false);
   const receiptKey = "loran-admin:invite:" + id;
   const [pendingInvite, setPendingInvite] = useState(() => readPendingInvite(receiptKey));
   const refresh = useCallback(async () => {
@@ -482,16 +484,23 @@ function DetailsPage({ id }: { id: string }) {
                       · <code>{p.type}</code>
                     </summary>
                     <dl className="mt-2 grid gap-1 pl-4 text-gray-600">
-                      <dt>Archive</dt>
+                      <dt>{p.local_path ? "Local Front file" : "Archive"}</dt>
                       <dd>
-                        <a className="text-blue-700" href={p.href} rel="noreferrer" target="_blank">
-                          {p.href}
-                        </a>
+                        {p.local_path ? <code>{p.href}</code> : (
+                          <a className="text-blue-700" href={p.href} rel="noreferrer" target="_blank">
+                            {p.href}
+                          </a>
+                        )}
                       </dd>
-                      <dt>SHA-256</dt>
-                      <dd>
-                        <code>{p.sha256}</code>
-                      </dd>
+                      {p.local_path && (
+                        <>
+                          <dt>Publisher signing key</dt>
+                          <dd><code>{p.local_path.signing_key_id}</code></dd>
+                          <dt>Local Front policy</dt>
+                          <dd>{p.local_path.allow_rebuild ? "Signed rebuilds allowed" : "Fixed archive digest"}</dd>
+                        </>
+                      )}
+                      {p.sha256 && <><dt>SHA-256</dt><dd><code>{p.sha256}</code></dd></>}
                       {Object.keys(p.dependencies || {}).length > 0 && (
                         <>
                           <dt>Dependencies</dt>
@@ -509,13 +518,26 @@ function DetailsPage({ id }: { id: string }) {
                   <p>Legacy package · {data.profile.package.type}</p>
                 )}
                 {ownDomain && (
-                  <AppProfileEditor
-                    key={data.profile.sequence}
-                    profile={data.profile}
-                    disabled={!manage}
-                    packageVerifierAvailable={data.capabilities.package_verifier_available}
-                    onSave={(change) => run(() => memberAction(change))}
-                  />
+                  <>
+                    <AppProfileEditor
+                      key={data.profile.sequence}
+                      profile={data.profile}
+                      disabled={!manage}
+                      onSave={(change) => run(() => memberAction(change))}
+                    />
+                    {data.profile.packages && (
+                      <button className={button} disabled={!manage || busy} onClick={() => setEditingPackages(true)}>
+                        Release packages
+                      </button>
+                    )}
+                    {editingPackages && manage && (
+                      <RealmPackages
+                        realm={id}
+                        onClose={() => setEditingPackages(false)}
+                        onPublished={() => void refresh().catch((e) => setError(e.message))}
+                      />
+                    )}
+                  </>
                 )}
               </>
             ) : (

@@ -8,7 +8,9 @@ use actr_protocol::realm_membership::{
     MembershipOp, MembershipRequest, RealmInvite, Role, body_sha256, client_key_id, invite_id,
     invite_secret_hash,
 };
-use actr_protocol::realm_profile::{RealmPackageSelection, jcs};
+use actr_protocol::realm_profile::{
+    FrontUpdate, PackageSelectionChange, RealmPackageSelection, jcs,
+};
 use axum::{
     Json, Router,
     body::{Body, to_bytes},
@@ -103,6 +105,52 @@ fn management(state: &AdminApiState) -> Result<&AppManagement> {
             "Owner management requires a configured Issuer and Signer on this node".into(),
         )
     })
+}
+
+pub(super) struct PackageReleaseOwner<'a> {
+    admin: &'a AppManagement,
+    signer: u32,
+    key_id: String,
+}
+
+pub(super) async fn package_release_owner<'a>(
+    state: &'a AdminApiState,
+    realm: &str,
+) -> Result<PackageReleaseOwner<'a>> {
+    let admin = management(state)?;
+    admin.ready().await?;
+    let (signer, key) = admin
+        .owner(realm)
+        .await?
+        .ok_or_else(|| conflict("An active Owner must authorize the Admin device"))?;
+    Ok(PackageReleaseOwner {
+        admin,
+        signer,
+        key_id: key.key_id,
+    })
+}
+
+impl PackageReleaseOwner<'_> {
+    pub(super) async fn publish(
+        &self,
+        realm: &str,
+        selection: RealmPackageSelection,
+        operation: FrontUpdate,
+        kind: PackageSelectionChange,
+        peer: ConnectInfo<SocketAddr>,
+    ) -> Result<Value> {
+        let (op, front_update, service_update) = match kind {
+            PackageSelectionChange::Front => (MembershipOp::UpdateFront, Some(operation), None),
+            PackageSelectionChange::Service => (MembershipOp::SwitchService, None, Some(operation)),
+        };
+        let mut request = self.admin.request(op, realm);
+        request.selection = Some(selection);
+        request.front_update = front_update;
+        request.service_update = service_update;
+        self.admin
+            .send(request, self.signer, &self.key_id, peer)
+            .await
+    }
 }
 
 impl AppManagement {
@@ -506,11 +554,12 @@ impl Action {
                 display_name,
                 selection,
             } => {
-                if let Some(selection) = selection {
-                    selection.check().map_err(|msg| invalid(&msg))?;
+                if selection.is_some() {
+                    return Err(invalid(
+                        "Use the guarded package release to change a selection",
+                    ));
                 }
                 req.display_name = display_name.clone();
-                req.selection = selection.clone();
             }
         }
         if let Self::InviteMember { days, .. } | Self::InviteOwnerDevice { days } = self {
