@@ -614,6 +614,11 @@ private final class RendererTabSurface {
     /// mouse-tracking selection cannot run here (mouse events arrive
     /// asynchronously over IPC), so drag selection is driven manually.
     private var dragSelectionAnchor: Int?
+    /// The selection that created `dragSelectionAnchor`. An anchor is only
+    /// reused while this still equals the current selection; keyboard-built
+    /// selections leave a stale anchor whose offset may coincidentally fall
+    /// inside the new range but does not describe it.
+    private var dragSelectionAnchorRange: NSRange?
     /// Last text-input focus state reported to the Host. The Host mirrors
     /// IME composition for whichever surface owns the focused text input.
     private var lastReportedTextFocus = false
@@ -1104,18 +1109,35 @@ private final class RendererTabSurface {
             // undo). The resolved base is stored back so the whole gesture
             // (mouse-down, drag, and repeated Shift+clicks) uses one anchor.
             let current = editor.selectedRange()
-            var base = current.upperBound
-            if current.length > 0, let anchor = dragSelectionAnchor,
-               anchor >= current.location, anchor <= current.upperBound {
+            let base: Int
+            if current.length > 0,
+               let anchor = dragSelectionAnchor,
+               dragSelectionAnchorRange == current {
+                // The stored anchor still describes the current selection.
                 base = anchor
+            } else if index >= current.upperBound {
+                // Untracked selection, click on the right: extend from the
+                // opposite (left) edge so the existing range stays selected.
+                base = current.location
+            } else if index <= current.location {
+                // Click on the left: extend from the right edge.
+                base = current.upperBound
+            } else {
+                // Click inside: keep the farther edge so neither side is
+                // dropped arbitrarily.
+                base = (index - current.location) > (current.upperBound - index)
+                    ? current.location
+                    : current.upperBound
             }
             dragSelectionAnchor = base
             let range = NSRange(location: min(base, index), length: abs(index - base))
+            dragSelectionAnchorRange = range
             editor.setSelectedRange(range)
             publishCaret()
             commit()
         } else {
             dragSelectionAnchor = index
+            dragSelectionAnchorRange = NSRange(location: index, length: 0)
             editor.setSelectedRange(NSRange(location: index, length: 0))
             publishCaret()
         }
