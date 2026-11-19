@@ -4,6 +4,7 @@ import { createHostModuleDispatch } from 'keel/contract';
 import { contract } from './contract';
 import type { FileImportPickInput, FileImportPickOutput } from './contract';
 import type { FrontCapability } from './capabilities';
+import type { AttachmentUploadManager } from './attachment-upload';
 import { createHostModules, type HostModules } from './host-modules';
 
 const input = { route: 'echo.EchoService.Echo', payloadBase64: 'AAEC' };
@@ -13,6 +14,7 @@ function createTestHostModules(options?: {
   authorizeCapability?: (capability: FrontCapability) => Promise<void>;
   writeClipboardText?: (text: string) => Promise<void>;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
+  recognizeSpeech?: Parameters<typeof createHostModules>[0]['recognizeSpeech'];
 }): HostModules {
   return createHostModules({
     hasServiceCapability: options?.hasServiceCapability ?? true,
@@ -20,6 +22,7 @@ function createTestHostModules(options?: {
     authorizeCapability: options?.authorizeCapability ?? (async () => {}),
     writeClipboardText: options?.writeClipboardText ?? (async () => {}),
     pickFiles: options?.pickFiles,
+    recognizeSpeech: options?.recognizeSpeech,
   });
 }
 
@@ -118,6 +121,100 @@ describe('host:service implementation', () => {
   });
 });
 
+describe('host:service.attachmentUpload implementation', () => {
+  function createUploader(result: { attachmentId: string } = { attachmentId: 'a-1' }) {
+    const uploads: unknown[] = [];
+    const uploader = {
+      available: true,
+      upload: async (input: unknown) => {
+        uploads.push(input);
+        return result;
+      },
+      dispose: () => {},
+    };
+    return { uploader, uploads };
+  }
+
+  test('fails closed when the native bridge is unavailable', async () => {
+    const hostModules = createTestHostModules();
+    await expect(
+      hostModules['host:service'].uploadAttachment({
+        filename: 'a.txt',
+        base64: 'AAEC',
+      })
+    ).rejects.toThrow('native attachment upload bridge is unavailable');
+  });
+
+  test('authorizes the capability before uploading', async () => {
+    const { uploader, uploads } = createUploader();
+    const grants: string[] = [];
+    const hostModules = createHostModules({
+      hasServiceCapability: true,
+      callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
+      authorizeCapability: async (capability) => {
+        grants.push(capability);
+      },
+      writeClipboardText: async () => {},
+      attachmentUploader: uploader as unknown as AttachmentUploadManager,
+    });
+
+    await expect(
+      hostModules['host:service'].uploadAttachment({
+        filename: 'a.txt',
+        base64: 'AAEC',
+        type: 'image',
+      })
+    ).resolves.toEqual({ attachmentId: 'a-1' });
+    expect(grants).toEqual(['service.attachmentUpload']);
+    expect(uploads).toEqual([{ filename: 'a.txt', base64: 'AAEC', type: 'image' }]);
+  });
+
+  test('does not upload when authorization fails', async () => {
+    const { uploader, uploads } = createUploader();
+    const hostModules = createHostModules({
+      hasServiceCapability: true,
+      callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
+      authorizeCapability: async () => {
+        throw new Error('permission_required: service.attachmentUpload');
+      },
+      writeClipboardText: async () => {},
+      attachmentUploader: uploader as unknown as AttachmentUploadManager,
+    });
+
+    await expect(
+      hostModules['host:service'].uploadAttachment({
+        filename: 'a.txt',
+        base64: 'AAEC',
+      })
+    ).rejects.toThrow('permission_required');
+    expect(uploads).toEqual([]);
+  });
+
+  test('dispatches through the contract boundary', async () => {
+    const { uploader } = createUploader();
+    const dispatch = createHostModuleDispatch(
+      contract,
+      createHostModules({
+        hasServiceCapability: true,
+        callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
+        authorizeCapability: async () => {},
+        writeClipboardText: async () => {},
+        attachmentUploader: uploader as unknown as AttachmentUploadManager,
+      })
+    );
+
+    await expect(
+      dispatch['host:service'].uploadAttachment({
+        filename: 'a.txt',
+        base64: 'AAEC',
+      })
+    ).resolves.toEqual({ attachmentId: 'a-1' });
+    expect(() =>
+      dispatch['host:service'].uploadAttachment({ filename: 'a.txt', base64: 'AAE' })
+    ).toThrow('Boundary input validation failed');
+  });
+});
+
 describe('host:clipboard implementation', () => {
   test('writes text through the host adapter', async () => {
     let written = '';
@@ -190,6 +287,75 @@ describe('host:file-import implementation', () => {
     });
     await expect(modules['host:file-import'].pick({})).rejects.toThrow('permission_denied');
     expect(opened).toBe(false);
+  });
+});
+
+describe('host:speech implementation', () => {
+  test('stopping a request during Guest authorization prevents capture after late approval', async () => {
+    const grant = Promise.withResolvers<void>();
+    let recognitions = 0;
+    const modules = createTestHostModules({
+      authorizeCapability: () => grant.promise,
+      recognizeSpeech: async () => { recognitions += 1; return { text: 'hello' }; },
+    });
+    const outcome = Promise.resolve(modules['host:speech'].recognize({})).then(
+      (result) => ({ result }),
+      (error: unknown) => ({ error }),
+    );
+    await modules['host:speech'].stop();
+    grant.resolve();
+    expect(await outcome).toMatchObject({ error: { message: 'Speech recognition was cancelled.' } });
+    expect(recognitions).toBe(0);
+    await expect(modules['host:speech'].recognize({})).resolves.toEqual({ text: 'hello' });
+  });
+
+  test('sends interim results only to subscribers on the Guest that started the session', async () => {
+    const first = createTestHostModules({
+      recognizeSpeech: async (_input, interim) => {
+        interim?.({ text: 'interim' });
+        return { text: 'final' };
+      },
+    });
+    const second = createTestHostModules();
+    const own: unknown[] = [];
+    const other: unknown[] = [];
+    const unsubscribe = first['host:speech'].onInterimResult((result) => own.push(result));
+    second['host:speech'].onInterimResult((result) => other.push(result));
+
+    await expect(first['host:speech'].recognize({})).resolves.toEqual({ text: 'final' });
+    expect(own).toEqual([{ text: 'interim' }]);
+    expect(other).toEqual([]);
+    unsubscribe?.();
+    await first['host:speech'].recognize({});
+    expect(own).toHaveLength(1);
+  });
+
+  test('validates the request, authorizes the Guest and returns only text', async () => {
+    const calls: unknown[] = [];
+    const dispatch = createHostModuleDispatch(contract, createTestHostModules({
+      authorizeCapability: async (capability) => { calls.push(capability); },
+      recognizeSpeech: async (input) => {
+        calls.push(input);
+        return { text: '\u4f60\u597d', nativeDetails: 'internal' };
+      },
+    }));
+
+    expect(() => dispatch['host:speech'].recognize({ locale: 'invalid/locale' })).toThrow('locale');
+    expect(() => dispatch['host:speech'].recognize([])).toThrow('must be an object');
+    expect(calls).toEqual([]);
+    await expect(dispatch['host:speech'].recognize({ locale: 'zh-CN' })).resolves.toEqual({ text: '\u4f60\u597d' });
+    expect(calls).toEqual(['host:speech.recognize', { locale: 'zh-CN' }]);
+  });
+
+  test('does not start the recognizer when authorization fails', async () => {
+    let started = false;
+    const modules = createTestHostModules({
+      authorizeCapability: async () => { throw new Error('permission_denied'); },
+      recognizeSpeech: async () => { started = true; return { text: 'hello' }; },
+    });
+
+    await expect(modules['host:speech'].recognize({})).rejects.toThrow('permission_denied');
+    expect(started).toBe(false);
   });
 });
 

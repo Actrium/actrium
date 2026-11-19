@@ -179,7 +179,7 @@ pub use actr_pack::{
     PackageManifest, RuntimePackageManifest, ValidatedActorIdentity, VerifiedPackage,
     VerifiedRuntimePackage,
 };
-pub use config::HyperConfig;
+pub use config::{HyperConfig, WasiDataDir};
 pub use error::HyperError;
 pub(crate) use error::HyperResult;
 
@@ -722,7 +722,15 @@ impl Hyper {
         &self,
         package: &WorkloadPackage,
     ) -> HyperResult<LoadedWorkload> {
-        load_workload_package_inner(&self.inner, package).await
+        load_workload_package_inner(
+            &self.inner,
+            package,
+            self.inner
+                .config
+                .wasi_data_dir
+                .resolve(None, actr_config::WasiDataAccess::default()),
+        )
+        .await
     }
 }
 
@@ -960,7 +968,11 @@ impl Node<Init> {
         #[cfg(feature = "test-utils")]
         let test_faults = self.pending_test_faults;
         let hyper_inner = self.hyper;
-        let loaded = load_workload_package_inner(&hyper_inner, package).await?;
+        let wasi_data_dir = hyper_inner.config.wasi_data_dir.resolve(
+            runtime_config.wasi_data_dir.as_deref(),
+            runtime_config.wasi_data_access,
+        );
+        let loaded = load_workload_package_inner(&hyper_inner, package, wasi_data_dir).await?;
         if matches!(&loaded.verified.manifest, RuntimePackageManifest::V2(_)) {
             let actor_type = loaded.verified.manifest.actor_type();
             runtime_config.package.name.clone_from(&actor_type.name);
@@ -1546,6 +1558,7 @@ async fn verify_package_for_hyper(
 pub(crate) async fn load_workload_package_inner(
     inner: &HyperInner,
     package: &WorkloadPackage,
+    configured_wasi_data: Option<config::WasiDataGrant<'_>>,
 ) -> HyperResult<LoadedWorkload> {
     let bytes = package.bytes();
     let verified = verify_package_for_hyper(inner, bytes).await?;
@@ -1562,13 +1575,22 @@ pub(crate) async fn load_workload_package_inner(
                 None
             };
             let workload = match binary_kind {
-                BinaryKind::Wasm => load_wasm_workload_inner(inner, bytes, manifest).await?,
+                BinaryKind::Wasm => {
+                    if configured_wasi_data.is_some() {
+                        tracing::warn!(
+                            actor_type = %manifest.actr_type_str(),
+                            "configured WASI data directory is not mounted at /data for a legacy package; repack and re-sign it as actr-package/2 with wasi.data.read-only or wasi.data.read-write"
+                        );
+                    }
+                    load_wasm_workload_inner(inner, bytes, manifest).await?
+                }
                 BinaryKind::DynClib => load_dynclib_workload_inner(inner, bytes, manifest)?,
             };
             (binary_kind, workload, packaged_lock, None)
         }
         RuntimePackageManifest::V2(manifest) => {
-            package_runtime::validate_component_host(manifest)?;
+            let grants =
+                package_runtime::resolve_component_host_grants(manifest, configured_wasi_data)?;
             let packaged_lock = package_runtime::read_v2_lock(bytes, manifest, max_bytes)?;
             let service_spec = service_spec::calculate_v2_service_spec(bytes, manifest, max_bytes)?;
             let wasm_bytes = manifest
@@ -1579,6 +1601,7 @@ pub(crate) async fn load_workload_package_inner(
                 wasm_bytes,
                 &manifest.workload.entry,
                 manifest.actor_type(),
+                grants,
             )
             .await?;
             (BinaryKind::Wasm, workload, packaged_lock, service_spec)
@@ -1630,6 +1653,7 @@ async fn load_wasm_workload_inner(
         wasm_bytes,
         &manifest.binary.target,
         manifest.actr_type_str(),
+        None,
     )
     .await
 }
@@ -1640,6 +1664,7 @@ async fn instantiate_wasm_component(
     wasm_bytes: Vec<u8>,
     entry: &str,
     actr_type: String,
+    wasi_data: Option<config::WasiDataGrant<'_>>,
 ) -> HyperResult<crate::workload::Workload> {
     #[cfg(feature = "wasm-engine")]
     {
@@ -1656,7 +1681,7 @@ async fn instantiate_wasm_component(
         .map_err(|e| {
             HyperError::Runtime(format!("failed to compile WASM component `{entry}`: {e}"))
         })?;
-        let mut instance = host.instantiate().await.map_err(|e| {
+        let mut instance = host.instantiate(wasi_data).await.map_err(|e| {
             HyperError::Runtime(format!(
                 "failed to instantiate WASM component `{entry}`: {e}"
             ))
@@ -1679,7 +1704,7 @@ async fn instantiate_wasm_component(
 
     #[cfg(not(feature = "wasm-engine"))]
     {
-        let _ = (inner, wasm_bytes, entry, actr_type);
+        let _ = (inner, wasm_bytes, entry, actr_type, wasi_data);
         Err(HyperError::Runtime(
             "package target requires the `wasm-engine` feature, but it is not enabled".to_string(),
         ))

@@ -91,6 +91,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         // Restore the local-folder browser sync provider selection
         SyncManager.shared.restoreOnLaunch()
+
+        Task.detached(priority: .utility) {
+            ActrPackageDownloadService.cleanupOrphanedTemporaryDownloads()
+        }
     }
 
     private func fileImportWindow(tabId: UUID, reloadKey: Int) -> NSWindow? {
@@ -197,6 +201,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     // MARK: - Window Management
+
+    @MainActor
+    func protectedPackageDigests() -> Set<String> {
+        var digests = Set<String>()
+        for controller in windowControllers {
+            for tab in controller.viewModel.tabs {
+                guard let path = tab.guestExtractedPath,
+                      let digest = ActrPackageCache.digest(fromExtractedPath: path)
+                else { continue }
+                digests.insert(digest)
+            }
+        }
+        return digests
+    }
 
     @objc func createNewWindow() {
         let viewModel = BrowserViewModel()

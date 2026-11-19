@@ -15,7 +15,7 @@ describe('Front capability mapping', () => {
     ]);
   });
 
-  test('expands a module shorthand to every method', () => {
+  test('expands a module shorthand to every pre-existing method', () => {
     expect(expandCapabilityName('service')).toEqual([
       'service.call',
       'service.tell',
@@ -36,6 +36,9 @@ describe('Front capability mapping', () => {
       'service.on',
     ]);
     expect(expandCapabilityName('host:service.call')).toEqual(['service.call']);
+    expect(expandCapabilityName('host:service.uploadAttachment')).toEqual([
+      'service.attachmentUpload',
+    ]);
     // The contract method is `writeText`; the capability name is `.write`.
     expect(expandCapabilityName('host:clipboard.writeText')).toEqual([
       'host:clipboard.write',
@@ -66,5 +69,21 @@ describe('Front capability mapping', () => {
     expect(hasDeclaredCapability(['service.on'], 'service.call')).toBe(false);
     expect(hasDeclaredCapability(['service.tell'], 'service.call')).toBe(false);
     expect(hasDeclaredCapability(['service.call'], 'service.call')).toBe(true);
+    expect(
+      hasDeclaredCapability(['service.attachmentUpload'], 'service.attachmentUpload')
+    ).toBe(true);
+    // Upload is an explicit opt-in: the module shorthand must not grant it.
+    expect(
+      hasDeclaredCapability(['service'], 'service.attachmentUpload')
+    ).toBe(false);
+    expect(
+      hasDeclaredCapability(
+        ['host:service.uploadAttachment'],
+        'service.attachmentUpload'
+      )
+    ).toBe(true);
+    expect(hasDeclaredCapability(['service.call'], 'service.attachmentUpload')).toBe(
+      false
+    );
   });
 });

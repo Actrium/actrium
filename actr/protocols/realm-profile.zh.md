@@ -105,7 +105,7 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `provider.id` | Actr Facility Provider ID：Actr Facility Provider 的规范化 DNS authority，在 Realm 生命周期内不变。 |
 | `provider.signaling` | signaling 端点。共享同一 `control_plane_id` 的条目是同一 Actr Facility Provider control plane 的副本或故障切换入口，不是 federation。 |
 | `provider.ice` | STUN 与 TURN 端点。TURN 条目标明短期 TURN credential 的 `credential_audience`。 |
-| `policy` | 该 Realm 的加入策略。 |
+| `policy` | `membership` 为 `invite-only`（默认）或 `open`。可选正整数 `open_joins_per_minute` 和 `max_members` 分别限制免邀请加入频率和成员总数。 |
 | `issued_at` | Realm Profile 的签署时间（RFC 3339），仅供参考；Realm Profile 不过期。 |
 | `signature` | Realm 签名 key 的 detached 签名。 |
 
@@ -314,9 +314,10 @@ Authority Discovery 第 4.3 节）接受以下 Realm 管理请求：
 
 | `op` | 用途 |
 | --- | --- |
-| `create_realm` | 请求包含两个引用和完整包表。AFP 创建 pending Realm，在未签名的首份草稿中返回该选择。 |
+| `create_realm` | 请求包含两个引用和完整包表。可选的 `policy` 默认为邀请制。AFP 在 pending Realm 中保存选定的包和策略，写入首份草稿。 |
 | `publish_profile` | 在 `profile` 中提交已签名的 Realm Profile：首次提交激活 pending Realm，响应一次性携带 owner 邀请（`owner_invite`）；之后提交 sequence 更高的版本即更新（含退役）。 |
 | `reissue_owner_invite` | 签发新的 owner 邀请（响应 `owner_invite`），并使该 Realm 此前未用的 owner 邀请失效；用于 owner 丢失全部客户端时的恢复（Actr Realm Membership 第 5 节）。 |
+| `get_admission` | 由 Realm 域签名查询指定 Realm 的加入策略、活跃成员数、实际成员上限和每分钟免邀请加入上限。 |
 | `draft_profile` | 对 AFP 域外的 Realm，返回 `sequence` 加一的草稿。未签名草稿沿用已接受的包选择、`display_name` 和 `policy`，使用 AFP 当前的 `issuer` 和 `provider`（§6.1）。发布须单独执行。 |
 
 Realm 管理请求只用于 Actr Facility Provider 域名以外的 Realm（第 7.3 节）。每个请求都是 Actr 管理信封：

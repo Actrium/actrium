@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import AppKit
 
 // MARK: - Time Range
 
@@ -29,6 +30,9 @@ struct PrivacySettingsView: View {
     @State private var isClearing = false
     @State private var showConfirmation = false
     @State private var clearResult: String?
+    @State private var packageCacheSize: Int64?
+    @State private var isClearingPackageCache = false
+    @State private var showPackageCacheConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -94,9 +98,48 @@ struct PrivacySettingsView: View {
                 }
             }
 
+            Divider()
+
+            Text("Application Cache")
+                .font(.headline)
+
+            HStack {
+                Text("Package Cache:")
+                Text(packageCacheSize.map {
+                    ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)
+                } ?? "Calculating…")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button("Clear Package Cache") {
+                    showPackageCacheConfirmation = true
+                }
+                .disabled(isClearingPackageCache)
+                .alert("Clear Package Cache?", isPresented: $showPackageCacheConfirmation) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Clear", role: .destructive) {
+                        clearPackageCache()
+                    }
+                } message: {
+                    Text("Downloaded packages that are not open in any window will be removed. This action cannot be undone.")
+                }
+            }
+
+            Text("Package cache is limited to 2 GB. Least recently used packages are removed first; packages open in any window are kept.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if isClearingPackageCache {
+                Text("Clearing package cache…")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
             Spacer()
         }
         .padding(20)
+        .task {
+            await refreshPackageCacheSize()
+        }
     }
 
     private var hasSelection: Bool {
@@ -113,6 +156,27 @@ struct PrivacySettingsView: View {
         if clearLocalStorage { types.insert(WKWebsiteDataTypeLocalStorage) }
         if clearIndexedDB { types.insert(WKWebsiteDataTypeIndexedDBDatabases) }
         return types
+    }
+
+    @MainActor
+    private func refreshPackageCacheSize() async {
+        packageCacheSize = await Task.detached(priority: .utility) {
+            ActrPackageCache.cacheSize()
+        }.value
+    }
+
+    @MainActor
+    private func clearPackageCache() {
+        guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else { return }
+        isClearingPackageCache = true
+        let protectedDigests = appDelegate.protectedPackageDigests()
+        Task { @MainActor in
+            packageCacheSize = await Task.detached(priority: .utility) {
+                ActrPackageCache.clearAll(protectedDigests: protectedDigests)
+                return ActrPackageCache.cacheSize()
+            }.value
+            isClearingPackageCache = false
+        }
     }
 
     private func clearData() {
@@ -135,5 +199,5 @@ struct PrivacySettingsView: View {
 
 #Preview {
     PrivacySettingsView()
-        .frame(width: 450, height: 350)
+        .frame(width: 450, height: 500)
 }

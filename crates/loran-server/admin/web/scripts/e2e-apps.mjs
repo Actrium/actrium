@@ -38,18 +38,27 @@ async function http(path, body, admin = false, expected = 200, method = body ? "
     ...(body && { body: JSON.stringify(body) }),
   });
   const json = await result.json().catch(() => ({}));
-  if (expected === "reject")
+  const expectedStatus = typeof expected === "object" ? expected.status : expected;
+  if (expectedStatus === "reject")
     assert(result.status >= 400 && result.status < 500, path + " returned " + result.status);
   else
     assert.equal(
       result.status,
-      expected,
+      expectedStatus,
       path +
         " returned " +
         result.status +
         ": " +
         String(json.error || json.message || "").replace(/ri_[\w-]+/g, "[invite]"),
     );
+  if (typeof expected === "object") {
+    assert.equal(json.error, expected.error, path + " membership error");
+    if (expected.error === "join_rate_limited") {
+      const seconds = Number(result.headers.get("retry-after"));
+      assert(Number.isInteger(seconds) && seconds >= 1 && seconds <= 60, "Retry-After is in seconds");
+      assert.equal(json.retry_after_secs, seconds);
+    }
+  }
   return json;
 }
 const now = () => new Date().toISOString();
@@ -114,7 +123,7 @@ async function membership(client, op, fields = {}, expected = 200, id = realm) {
     expected,
   );
 }
-function join(client, invite, expected = 200) {
+function join(client, invite, expected = 200, id = realm) {
   assert(invite.startsWith("ri_"), "Missing invitation");
   const content = JSON.parse(Buffer.from(invite.slice(3), "base64url").toString());
   return membership(
@@ -122,7 +131,11 @@ function join(client, invite, expected = 200) {
     "join",
     { invite: content.secret, public_key: client.pub, label: "E2E device" },
     expected,
+    id,
   );
+}
+function joinWithoutInvite(client, id, expected = 200) {
+  return membership(client, "join", { public_key: client.pub, label: "E2E device" }, expected, id);
 }
 async function confirm(name) {
   await button(name, page.locator(".fixed").last()).click();
@@ -233,6 +246,7 @@ try {
     ownerInvite = await first.innerText();
     const before = await http(endpoint(realm), null, true);
     assert.equal(before.realm.enabled, false);
+    assert.equal(before.realm.policy.membership, "invite-only");
     await page.getByRole("button", { name: /saved the invite, resume app/ }).click();
     await button(appName).click();
     await page.getByRole("heading", { name: appName, exact: true }).waitFor();
@@ -243,6 +257,9 @@ try {
     assert.equal(profile.front_package, "ui");
     assert.deepEqual(Object.keys(profile.packages).sort(), ["core", "extra", "ui"]);
     assert(profile.signature);
+    assert.equal(profile.policy.membership, "invite-only");
+    await joinWithoutInvite(device(), realm, { status: 400, error: "invalid_request" });
+    await page.getByRole("region", { name: "Admission" }).getByText("Invitation required").waitFor();
   });
   await step("Owner redeems first invite and explicitly authorizes the Admin device", async () => {
     await http(endpoint(realm, "/management-client"), { invite: ownerInvite }, true, "reject");
@@ -294,15 +311,83 @@ try {
     assert.equal(joined.role, "viewer");
     await membership(owner, "remove_member", { member_id: joined.member_id });
   });
-  await step("A second app with the same packages has independent memberships and invitations", async () => {
-    const other = realm.replace("admin-e2e-", "isolated-");
-    const created = await http("/admin/api/realms", { realm: other, enabled: true, ...selection }, true, 201);
-    assert.equal(created.realm.realm, other);
-    await http(endpoint(realm, "/management-client"), { invite: created.owner_invite }, true, "reject");
-    const status = await http(endpoint(other, "/management-client"), null, true);
-    assert.equal(status.connected, false);
+  const other = realm.replace("admin-e2e-", "isolated-");
+  const otherName = "Open admission " + other.split("@")[0];
+  const otherOwner = device();
+  let openProfile;
+  await step("Create an open App in the browser with independent membership and a signed admission policy", async () => {
+    await page.goto(url("/admin/apps"));
+    await button("Create app").click();
+    await page.getByLabel("App ID", { exact: true }).fill(other);
+    await page.getByLabel("Display name", { exact: true }).fill(otherName);
+    await page.getByLabel("Membership", { exact: true }).selectOption("open");
+    await page.getByLabel("Invite-free joins per minute", { exact: true }).fill("1");
+    await page.getByLabel("Member limit", { exact: true }).fill("4");
+    await page.getByLabel("Edit complete package selection").check();
+    await page.getByLabel(/Package selection JSON/).fill(JSON.stringify(selection));
+    await button("Next").click();
+    const code = page.locator("code").filter({ hasText: /^ri_/ }).first();
+    await code.waitFor();
+    const otherInvite = await code.innerText();
+    await button("I have saved the invite, resume app").click();
+    const row = page.getByRole("row").filter({ has: button(otherName) });
+    await row.getByText("0 / 4", { exact: true }).waitFor();
+    await row.getByText("Open", { exact: true }).waitFor();
+    await http(endpoint(realm, "/management-client"), { invite: otherInvite }, true, "reject");
+    assert.equal((await http(endpoint(other, "/management-client"), null, true)).connected, false);
     await membership(owner, "list_members", {}, "reject", other);
+    assert.equal((await join(otherOwner, otherInvite, 200, other)).role, "owner");
+    openProfile = (await http(endpoint(other, "/profile"), null, true)).profile;
+    assert(openProfile.signature);
+    assert.deepEqual(openProfile.policy, { membership: "open", open_joins_per_minute: 1, max_members: 4 });
+  });
+  let unusedInvite;
+  const lastEditor = device();
+  await step("Open admission grants Viewer; per-App rate and capacity limits are enforced on real joins", async () => {
+    const first = device(), second = device();
+    const joined = await joinWithoutInvite(first, other);
+    assert.equal(joined.role, "viewer");
+    assert.equal((await joinWithoutInvite(first, other)).member_id, joined.member_id);
+    const limited = await joinWithoutInvite(second, other, { status: 429, error: "join_rate_limited" });
+    const invite = () =>
+      membership(otherOwner, "create_invite", { role: "editor", invite_expires_at: future(3600) }, 200, other);
+    assert.equal((await join(device(), (await invite()).invite, 200, other)).role, "editor");
+
+    console.log("Waiting for the real admission window to expire (" + limited.retry_after_secs + " s)");
+    await new Promise((resolve) => setTimeout(resolve, 1000 * limited.retry_after_secs + 500));
+    assert.equal((await joinWithoutInvite(second, other)).role, "viewer");
+    await joinWithoutInvite(device(), other, { status: 429, error: "quota" });
+    unusedInvite = (await invite()).invite;
+    await join(lastEditor, unusedInvite, { status: 429, error: "quota" }, other);
+    const app = (await http(endpoint(other), null, true)).realm;
+    assert.equal(app.active_members, 4);
+    assert.equal(app.effective_max_members, 4);
+  });
+  await step("Edit admission from App details; a quota refusal preserves an invitation", async () => {
+    await button(otherName).click();
+    const admission = page.getByRole("region", { name: "Admission" });
+    await admission.getByText("4 / 4", { exact: true }).waitFor();
+    await button("Edit admission", admission).click();
+    const dialog = page.getByRole("dialog", { name: "Edit admission" });
+    await dialog.getByLabel("Membership", { exact: true }).selectOption("invite-only");
+    await dialog.getByLabel("Member limit", { exact: true }).fill("5");
+    await button("Save", dialog).click();
+    await dialog.waitFor({ state: "hidden" });
+    await admission.getByText("Invitation required", { exact: true }).waitFor();
+    await admission.getByText("4 / 5", { exact: true }).waitFor();
+    const { profile } = await http(endpoint(other, "/profile"), null, true);
+    assert(profile.signature && profile.sequence > openProfile.sequence);
+    assert.equal(profile.policy.membership, "invite-only");
+    assert.equal(profile.policy.max_members, 5);
+    await joinWithoutInvite(device(), other, { status: 400, error: "invalid_request" });
+    assert.equal((await join(lastEditor, unusedInvite, 200, other)).role, "editor");
+    await page.goto(url("/admin/apps"));
+    const row = page.getByRole("row").filter({ has: button(otherName) });
+    await row.getByText("Invitation required", { exact: true }).waitFor();
+    await row.getByText("5 / 5", { exact: true }).waitFor();
     await http(endpoint(other, "/retire"), {}, true);
+    await page.goto(url("/admin/apps/" + encodeURIComponent(realm)));
+    await page.getByRole("heading", { name: "Invitations", exact: true }).waitFor();
   });
   await step("Viewer, Editor and additional Owner device redeem three distinct invitations", async () => {
     viewerInvite = await issue("viewer");

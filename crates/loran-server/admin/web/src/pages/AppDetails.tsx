@@ -15,6 +15,7 @@ import { appStatus } from "../components/realms/RealmTable";
 import { SignedAppRequest } from "../components/realms/SignedAppRequest";
 import { AppProfileEditor } from "../components/realms/AppProfileEditor";
 import { OwnerInviteModal } from "../components/realms/OwnerInviteModal";
+import { EditRealmAdmission } from "../components/realms/RealmAdmission";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
 import { ServicePageLayout } from "../components/layout/ServicePageLayout";
 
@@ -50,6 +51,7 @@ function DetailsPage({ id }: { id: string }) {
   const [issued, setIssued] = useState<ActionResult | null>(null);
   const [ownerCode, setOwnerCode] = useState<ActionResult | null>(null);
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
+  const [editingAdmission, setEditingAdmission] = useState(false);
   const receiptKey = "loran-admin:invite:" + id;
   const [lastRequest, setLastRequest] = useState(() => sessionStorage.getItem(receiptKey));
   const refresh = useCallback(async () => {
@@ -150,6 +152,36 @@ function DetailsPage({ id }: { id: string }) {
               >
                 {data.app.enabled ? "Suspend app" : "Resume app"}
               </button>
+            )}
+          </section>
+          <section className={section} aria-labelledby="app-admission">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 id="app-admission" className="font-semibold">Admission</h2>
+              {data.app.admission_writable && (
+                <button className={button} disabled={!writable} onClick={() => setEditingAdmission(true)}>
+                  Edit admission
+                </button>
+              )}
+            </div>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-5 gap-y-2 text-sm">
+              <dt className="text-gray-600">Membership</dt>
+              <dd>{data.app.policy.membership === "open" ? "Open (join as Viewer)" : "Invitation required"}</dd>
+              <dt className="text-gray-600">Active members / limit</dt>
+              <dd className="tabular-nums">{data.app.active_members} / {data.app.effective_max_members}</dd>
+              {data.app.policy.membership === "open" && (
+                <>
+                  <dt className="text-gray-600">Invite-free joins per minute</dt>
+                  <dd>{data.app.policy.open_joins_per_minute ?? "10 (default)"}</dd>
+                </>
+              )}
+            </dl>
+            {editingAdmission && writable && data.app.admission_writable && (
+              <EditRealmAdmission
+                realm={data.app}
+                limit={data.capabilities.max_members_per_realm}
+                onClose={() => setEditingAdmission(false)}
+                onSaved={() => void refresh().catch((e) => setError(e.message))}
+              />
             )}
           </section>
           <section className={section}>

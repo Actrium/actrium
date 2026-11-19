@@ -17,6 +17,7 @@
 //! borrows non-overlapping across suspension points. The shape is lifted
 //! directly from the Phase 0.75 `component-spike-runconcurrent` host.
 
+use actr_config::WasiDataAccess;
 use actr_framework::guest::dynclib_abi as guest_abi;
 use actr_framework::guest::dynclib_abi::{
     HostCallRawV1, HostCallV1, HostDiscoverV1, HostRegisterStreamV1, HostResolveDependencyV1,
@@ -33,6 +34,7 @@ use actr_protocol::{
 };
 use wasmtime::component::{Accessor, Component, HasData, Linker};
 use wasmtime::{AsContextMut, Engine, Store};
+use wasmtime_wasi::filesystem::WasiFilesystemCtx;
 
 use super::component_bindings_v2::ActrWorkloadGuestV2;
 use super::component_bindings_v2::actr::workload::host::{Host as HostImportsV2, HostWithStore};
@@ -48,12 +50,13 @@ use super::component_bindings_v2::actr::workload::types::{
 use super::error::{WasmError, WasmResult};
 use super::host::{HostState, epoch_deadline_ticks};
 use super::runtime_limits::{
-    EpochTicker, QuotaPermit, StorePermit, acquire_instantiate, acquire_invocation,
+    EpochTicker, QuotaPermit, StorePermit, acquire_instantiate, acquire_invocation, acquire_store,
     quota_release_snapshot, record_instantiate_failure, record_timeout,
     wait_for_quota_release_after,
 };
-use crate::config::WasmRuntimeLimits;
+use crate::config::{WasiDataGrant, WasmRuntimeLimits};
 use crate::executor::{ActorCmd, LifecyclePhase};
+use crate::package_runtime::{WASI_DATA_READ_ONLY, WASI_DATA_READ_WRITE};
 use crate::workload::{
     HostAbiFn, HostOperation, HostOperationResult, InvocationContext, PackageHookEvent,
 };
@@ -63,9 +66,10 @@ use futures_util::FutureExt as _;
 use futures_util::future::{BoxFuture, poll_fn};
 use futures_util::stream::{FuturesUnordered, StreamExt as _};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot};
+use tokio::runtime::{Builder, Handle, Runtime};
+use tokio::sync::{Semaphore, SemaphorePermit, mpsc, oneshot};
 use tracing::Instrument as _;
 
 /// Reserved guest return value for a successful EXPLICIT dispatch whose reply
@@ -690,14 +694,129 @@ fn wit_payload_type_to_proto(payload_type: WitPayloadType) -> PayloadType {
 // Instantiation
 // ─────────────────────────────────────────────────────────────────────────────
 
+// WASI filesystem operations use the ambient Tokio blocking pool. A separate
+// runtime keeps a stalled guest operation away from the caller's blocking pool.
+// A started filesystem operation cannot be canceled; four stalled operations
+// can exhaust this pool until the underlying I/O returns.
+fn wasi_guest_runtime() -> WasmResult<Handle> {
+    static RUNTIME: OnceLock<std::io::Result<Runtime>> = OnceLock::new();
+    RUNTIME
+        .get_or_init(|| {
+            Builder::new_multi_thread()
+                .worker_threads(2)
+                .max_blocking_threads(4)
+                .thread_name("actr-wasi-guest")
+                .enable_all()
+                .build()
+        })
+        .as_ref()
+        .map(|runtime| runtime.handle().clone())
+        .map_err(|error| {
+            WasmError::LoadFailed(format!("cannot initialize WASI guest runtime: {error}"))
+        })
+}
+
+// Enter only while polling: holding an EnterGuard across an await would leak
+// the runtime context into unrelated tasks on the caller's executor.
+pub(super) async fn with_wasi_runtime<F: std::future::Future>(
+    runtime: Option<Handle>,
+    future: F,
+) -> F::Output {
+    let mut future = std::pin::pin!(future);
+    poll_fn(|cx| {
+        let _guard = runtime.as_ref().map(Handle::enter);
+        future.as_mut().poll(cx)
+    })
+    .await
+}
+
+// A stalled host filesystem must not consume the quota for creating or rebuilding Stores.
+const MAX_CONCURRENT_WASI_PREOPENS: usize = 4;
+static WASI_PREOPEN_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_WASI_PREOPENS);
+const WASI_PREOPEN_QUOTA: &str = "concurrent WASI data directory opens";
+
+fn wasi_preopen_workers() -> WasmResult<&'static Handle> {
+    // The runtime owns only a blocking pool. Deadlines remain on the caller's
+    // runtime, whose blocking workers must stay available for compilation.
+    static WORKERS: OnceLock<std::io::Result<Runtime>> = OnceLock::new();
+    WORKERS
+        .get_or_init(|| {
+            Builder::new_current_thread()
+                .max_blocking_threads(MAX_CONCURRENT_WASI_PREOPENS)
+                .thread_name("actr-wasi-preopen")
+                .build()
+        })
+        .as_ref()
+        .map(Runtime::handle)
+        .map_err(|error| {
+            WasmError::LoadFailed(format!("cannot initialize WASI preopen workers: {error}"))
+        })
+}
+
+// Cancelling a queued blocking task does not immediately drop its captures.
+// Keep the reservation outside the task until the worker claims it.
+struct CancelQueuedOpen {
+    abort: tokio::task::AbortHandle,
+    permit: Arc<Mutex<Option<SemaphorePermit<'static>>>>,
+}
+
+impl Drop for CancelQueuedOpen {
+    fn drop(&mut self) {
+        self.permit
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        self.abort.abort();
+    }
+}
+
+async fn run_wasi_preopen(
+    workers: &Handle,
+    slots: &'static Semaphore,
+    deadline: tokio::time::Instant,
+    timeout: Duration,
+    open: impl FnOnce() -> WasmResult<WasiFilesystemCtx> + Send + 'static,
+) -> WasmResult<WasiFilesystemCtx> {
+    let permit = slots
+        .try_acquire()
+        .map_err(|_| WasmError::ResourceLimitExceeded(WASI_PREOPEN_QUOTA))?;
+    let reservation = Arc::new(Mutex::new(Some(permit)));
+    let worker_reservation = Arc::clone(&reservation);
+    let task = workers.spawn_blocking(move || {
+        let _permit = worker_reservation
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+            .ok_or_else(|| WasmError::LoadFailed("WASI directory open cancelled".into()))?;
+        open()
+    });
+    let _cancel = CancelQueuedOpen {
+        abort: task.abort_handle(),
+        permit: reservation,
+    };
+    match crate::timer::timeout_at(crate::timer::ids::WASM_INSTANTIATION, deadline, task).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => Err(WasmError::LoadFailed(format!(
+            "WASI directory open task failed: {error}"
+        ))),
+        Err(_) => {
+            record_timeout();
+            Err(WasmError::InvocationTimeout(timeout))
+        }
+    }
+}
+
 /// Build a fresh async-world [`Store`] + component instance. Registers WASI
 /// p2 and the Accessor-based `actr:workload/host` (0.6.0) linker imports.
 async fn instantiate_parts_v2(
     engine: &Engine,
     component: &Component,
     limits: &WasmRuntimeLimits,
+    filesystem: &WasiFilesystemCtx,
+    deadline: tokio::time::Instant,
+    _instantiate_permit: QuotaPermit,
+    wasi_runtime: Option<Handle>,
 ) -> WasmResult<(Store<HostState>, ActrWorkloadGuestV2)> {
-    let _instantiate_permit = acquire_instantiate(limits)?;
     let mut linker: Linker<HostState> = Linker::new(engine);
     wasmtime_wasi::p2::add_to_linker_async(&mut linker).map_err(|e| {
         WasmError::LoadFailed(format!("failed to register WASI p2 linker imports: {e}"))
@@ -713,7 +832,10 @@ async fn instantiate_parts_v2(
         ))
     })?;
 
-    let mut store = Store::new(engine, HostState::new(limits));
+    let mut state = HostState::new(limits);
+    state.set_wasi_runtime_isolation(wasi_runtime.is_some());
+    state.set_wasi_filesystem(filesystem.clone());
+    let mut store = Store::new(engine, state);
     // issue #346: install the per-store limiter and initial fuel/epoch budget.
     store.limiter(|s| &mut s.limits);
     store
@@ -723,10 +845,13 @@ async fn instantiate_parts_v2(
         .set_fuel(limits.fuel_per_invocation)
         .map_err(|e| WasmError::LoadFailed(format!("set fuel: {e}")))?;
     store.set_epoch_deadline(epoch_deadline_ticks(limits));
-    let bindings = match crate::timer::timeout(
+    let bindings = match crate::timer::timeout_at(
         crate::timer::ids::WASM_INSTANTIATION,
-        limits.invocation_timeout,
-        ActrWorkloadGuestV2::instantiate_async(&mut store, component, &linker),
+        deadline,
+        with_wasi_runtime(
+            wasi_runtime,
+            ActrWorkloadGuestV2::instantiate_async(&mut store, component, &linker),
+        ),
     )
     .await
     {
@@ -764,6 +889,8 @@ pub(crate) struct WasmWorkloadV2 {
     /// fuel/epoch re-seed.
     limits: WasmRuntimeLimits,
     store: Option<Store<HostState>>,
+    wasi_filesystem: WasiFilesystemCtx,
+    wasi_runtime: Option<Handle>,
     bindings: ActrWorkloadGuestV2,
     _epoch_ticker: Arc<EpochTicker>,
     _store_permit: StorePermit,
@@ -791,16 +918,59 @@ impl WasmWorkloadV2 {
         component: &Component,
         limits: &WasmRuntimeLimits,
         epoch_ticker: Arc<EpochTicker>,
-        store_permit: StorePermit,
         uses_explicit_reply_boundary: bool,
+        wasi_data: Option<WasiDataGrant<'_>>,
     ) -> WasmResult<Self> {
-        let (store, bindings) = instantiate_parts_v2(engine, component, limits).await?;
+        let timeout = limits.invocation_timeout;
+        let deadline = tokio::time::Instant::now() + timeout;
+        let wasi_filesystem = if let Some(WasiDataGrant { directory, access }) = wasi_data {
+            let directory = directory.to_path_buf();
+            let capability = match access {
+                WasiDataAccess::ReadOnly => WASI_DATA_READ_ONLY,
+                WasiDataAccess::ReadWrite => WASI_DATA_READ_WRITE,
+            };
+            run_wasi_preopen(
+                wasi_preopen_workers()?,
+                &WASI_PREOPEN_SLOTS,
+                deadline,
+                timeout,
+                move || {
+                    HostState::preopen_data_dir(&directory, access).map_err(|error| {
+                        WasmError::LoadFailed(format!(
+                            "cannot grant required capability `{capability}` from the configured WASI data directory: {error}"
+                        ))
+                    })
+                },
+            )
+            .await?
+        } else {
+            WasiFilesystemCtx::default()
+        };
+        if tokio::time::Instant::now() >= deadline {
+            record_timeout();
+            return Err(WasmError::InvocationTimeout(timeout));
+        }
+        let wasi_runtime = wasi_data.map(|_| wasi_guest_runtime()).transpose()?;
+        let store_permit = acquire_store(limits)?;
+        let permit = acquire_instantiate(limits)?;
+        let (store, bindings) = instantiate_parts_v2(
+            engine,
+            component,
+            limits,
+            &wasi_filesystem,
+            deadline,
+            permit,
+            wasi_runtime.clone(),
+        )
+        .await?;
         tracing::info!("wasm Component instantiated (v2 async world)");
         Ok(Self {
             engine: engine.clone(),
             component: component.clone(),
             limits: *limits,
             store: Some(store),
+            wasi_filesystem,
+            wasi_runtime,
             bindings,
             _epoch_ticker: epoch_ticker,
             _store_permit: store_permit,
@@ -860,8 +1030,21 @@ impl WasmWorkloadV2 {
             "rebuilding poisoned wasm store (v2) after a prior guest trap; \
              guest in-memory state is discarded (lifecycle/queue not replayed)"
         );
+        // Keep the poisoned Store intact when quota denial must be retried.
+        let permit = acquire_instantiate(&self.limits)?;
+        let deadline = tokio::time::Instant::now() + self.limits.invocation_timeout;
         drop(self.store.take());
-        match instantiate_parts_v2(&self.engine, &self.component, &self.limits).await {
+        match instantiate_parts_v2(
+            &self.engine,
+            &self.component,
+            &self.limits,
+            &self.wasi_filesystem,
+            deadline,
+            permit,
+            self.wasi_runtime.clone(),
+        )
+        .await
+        {
             Ok((store, bindings)) => {
                 self.store = Some(store);
                 self.bindings = bindings;
@@ -974,6 +1157,7 @@ impl WasmWorkloadV2 {
                 reply_deadline,
             );
         let inv = invocation_ctx_to_wit(&ctx, token, expects_response, reply_enabled);
+        let wasi_runtime = self.wasi_runtime.clone();
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -988,7 +1172,7 @@ impl WasmWorkloadV2 {
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
             self.limits.invocation_timeout,
-            region_fut,
+            with_wasi_runtime(wasi_runtime, region_fut),
         )
         .await
         {
@@ -1113,6 +1297,7 @@ impl WasmWorkloadV2 {
         // then bound the whole run_concurrent region with the wall-clock
         // timeout. fuel/epoch preempt non-yielding compute; the timeout bounds
         // a guest that awaits a host import indefinitely.
+        let wasi_runtime = self.wasi_runtime.clone();
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1127,7 +1312,7 @@ impl WasmWorkloadV2 {
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
             self.limits.invocation_timeout,
-            region_fut,
+            with_wasi_runtime(wasi_runtime, region_fut),
         )
         .await
         {
@@ -1152,6 +1337,7 @@ impl WasmWorkloadV2 {
             .data_mut()
             .alloc_invocation(ctx.clone(), host_abi.clone());
         let inv = invocation_ctx_to_wit(&ctx, token, false, false);
+        let wasi_runtime = self.wasi_runtime.clone();
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1166,7 +1352,7 @@ impl WasmWorkloadV2 {
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
             self.limits.invocation_timeout,
-            region_fut,
+            with_wasi_runtime(wasi_runtime, region_fut),
         )
         .await
         {
@@ -1191,6 +1377,7 @@ impl WasmWorkloadV2 {
             .data_mut()
             .alloc_invocation(ctx.clone(), host_abi.clone());
         let inv = invocation_ctx_to_wit(&ctx, token, false, false);
+        let wasi_runtime = self.wasi_runtime.clone();
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1205,7 +1392,7 @@ impl WasmWorkloadV2 {
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
             self.limits.invocation_timeout,
-            region_fut,
+            with_wasi_runtime(wasi_runtime, region_fut),
         )
         .await
         {
@@ -1271,6 +1458,7 @@ impl WasmWorkloadV2 {
         };
         let inv = invocation_ctx_to_wit(&ctx, token, false, false);
 
+        let wasi_runtime = self.wasi_runtime.clone();
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1285,7 +1473,7 @@ impl WasmWorkloadV2 {
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
             self.limits.invocation_timeout,
-            region_fut,
+            with_wasi_runtime(wasi_runtime, region_fut),
         )
         .await
         {
@@ -1338,6 +1526,7 @@ impl WasmWorkloadV2 {
             .alloc_invocation(ctx.clone(), host_abi.clone());
         let inv = invocation_ctx_to_wit(&ctx, token, false, false);
 
+        let wasi_runtime = self.wasi_runtime.clone();
         let bindings = &self.bindings;
         let region_fut = self
             .store
@@ -1349,7 +1538,7 @@ impl WasmWorkloadV2 {
         let region = match crate::timer::timeout(
             crate::timer::ids::WASM_GUEST_INVOCATION,
             self.limits.invocation_timeout,
-            region_fut,
+            with_wasi_runtime(wasi_runtime, region_fut),
         )
         .await
         {
@@ -1454,6 +1643,8 @@ impl WasmWorkloadV2 {
                 return;
             }
 
+            let wasi_runtime = self.wasi_runtime.clone();
+            let caller_runtime = wasi_runtime.as_ref().map(|_| Handle::current());
             let bindings = &self.bindings;
             let ledger_region = Arc::clone(&ledger);
             let pending_barrier_region = Arc::clone(&pending_barrier);
@@ -1469,19 +1660,23 @@ impl WasmWorkloadV2 {
                     .as_mut()
                     .expect("serviceable wasm instance must have a Store")
                     .run_concurrent(async move |accessor| {
-                        resident_region(
-                            accessor,
-                            bindings,
-                            cmd_rx_ref,
-                            &ledger_region,
-                            &pending_barrier_region,
-                            &deadline_tx_region,
-                            generation,
-                            dispatch_timeout,
-                            limits,
+                        with_wasi_runtime(
+                            caller_runtime,
+                            resident_region(
+                                accessor,
+                                bindings,
+                                cmd_rx_ref,
+                                &ledger_region,
+                                &pending_barrier_region,
+                                &deadline_tx_region,
+                                generation,
+                                dispatch_timeout,
+                                limits,
+                            ),
                         )
                         .await
                     });
+                let region = with_wasi_runtime(wasi_runtime, region);
                 tokio::pin!(region);
                 loop {
                     tokio::select! {
@@ -2694,3 +2889,7 @@ mod resident_tests {
         assert_eq!(fuel, SLICE);
     }
 }
+
+#[cfg(test)]
+#[path = "host_v2_preopen_tests.rs"]
+mod preopen_tests;

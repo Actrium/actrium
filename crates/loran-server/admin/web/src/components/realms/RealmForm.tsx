@@ -1,14 +1,16 @@
 import { useState, type FormEvent, useEffect } from "react";
-import { api, type AppPackage, type RealmMutationResponse } from "../../lib/api";
+import { api, type AppPackage, type RealmMutationResponse, type RealmPolicy } from "../../lib/api";
 import { X, Copy, Download, CheckCircle, AlertTriangle } from "lucide-react";
 
 import { copyText } from "../../lib/utils";
 import { PackageCheck } from "./PackageCheck";
+import { RealmAdmissionFields } from "./RealmAdmission";
 
 interface RealmFormProps {
   onSubmit: (data: Parameters<typeof api.createRealm>[0]) => Promise<RealmMutationResponse>;
   onClose: () => void;
   provider?: string | null;
+  limit: number;
   onRefresh?: () => void;
 }
 
@@ -17,7 +19,8 @@ interface RealmFormProps {
  * Realm under the Provider domain gets a Loran-signed Realm Profile, which
  * names its Service and Front packages.
  */
-export function RealmForm({ onSubmit, onClose, onRefresh, provider }: RealmFormProps) {
+export function RealmForm({ onSubmit, onClose, onRefresh, provider, limit }: RealmFormProps) {
+  const [policy, setPolicy] = useState<RealmPolicy>({ membership: "invite-only" });
   const [name, setName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const emptyPackage = { href: "", sha256: "", type: "" };
@@ -69,6 +72,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh, provider }: RealmFormP
       }
       const resp = await onSubmit({
         realm: name,
+        policy,
         enabled: false,
         ...(displayName ? { display_name: displayName } : {}),
         ...(selection && {
@@ -156,8 +160,8 @@ export function RealmForm({ onSubmit, onClose, onRefresh, provider }: RealmFormP
                 <div className="space-y-1">
                   <p className="text-sm font-medium text-amber-900">Save the owner invite now</p>
                   <p className="text-xs text-amber-700">
-                    It is shown only once. Hand it to the app&apos;s Owner, who redeems it with a new client and
-                    then invites the other members.
+                    It is shown only once. Hand it to the app&apos;s Owner, who redeems it with a new client
+                    to claim ownership.
                   </p>
                 </div>
               </div>
@@ -262,6 +266,11 @@ export function RealmForm({ onSubmit, onClose, onRefresh, provider }: RealmFormP
               onChange={(e) => setDisplayName(e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
+          </div>
+
+          <div className="space-y-2 border-t border-gray-100 pt-4">
+            <h3 className="text-sm font-semibold text-gray-900">Admission</h3>
+            <RealmAdmissionFields policy={policy} limit={limit} onChange={setPolicy} />
           </div>
 
           <div className="grid gap-3">

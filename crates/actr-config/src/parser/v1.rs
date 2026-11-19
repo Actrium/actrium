@@ -166,9 +166,6 @@ impl ParserV1 {
             .and_then(|pkg| pkg.path)
             .map(|path| self.resolve_manifest_path(&path));
 
-        // Surface the removed `[hyper].storage_path_template` as a migration error
-        // instead of silently ignoring it, and resolve `[hyper].storage_root`
-        // against the config dir so `actr run` honours it (CWE-22 / CWE-73).
         if raw.deployment.removed_realm_secret.is_some() {
             return Err(ConfigError::InvalidConfig(
                 "`deployment.realm_secret` was removed; join the Realm with `actr realm join` \
@@ -177,23 +174,33 @@ impl ParserV1 {
             ));
         }
 
-        let storage_root = match raw.hyper {
-            Some(hyper) => {
-                if hyper.removed_storage_path_template.is_some() {
+        let hyper = raw.hyper.unwrap_or_default();
+        if hyper.removed_storage_path_template.is_some() {
+            return Err(ConfigError::InvalidConfig(
+                "`storage_path_template` was removed; actor storage now uses a fixed \
+                 hashed layout. Configure `[hyper].storage_root` instead."
+                    .to_string(),
+            ));
+        }
+        let storage_root = hyper.storage_root.map(|path| {
+            let expanded = crate::user_config::expand_tilde(path.to_string_lossy().into_owned());
+            self.resolve_manifest_path(&expanded)
+        });
+        let wasi_data_dir = hyper
+            .wasi_data_dir
+            .map(|path| {
+                if path.as_os_str().is_empty() {
                     return Err(ConfigError::InvalidConfig(
-                        "`storage_path_template` was removed; actor storage now uses a fixed \
-                         hashed layout. Configure `[hyper].storage_root` instead."
-                            .to_string(),
+                        "`[hyper].wasi_data_dir` cannot be empty".to_string(),
                     ));
                 }
-                hyper.storage_root.map(|p| {
-                    let expanded =
-                        crate::user_config::expand_tilde(p.to_string_lossy().into_owned());
-                    self.resolve_manifest_path(&expanded)
+                std::path::absolute(self.resolve_manifest_path(&path)).map_err(|error| {
+                    ConfigError::InvalidConfig(format!(
+                        "cannot resolve `[hyper].wasi_data_dir`: {error}"
+                    ))
                 })
-            }
-            None => None,
-        };
+            })
+            .transpose()?;
 
         Ok(RuntimeConfig {
             package,
@@ -225,6 +232,8 @@ impl ParserV1 {
                 runtime_wasm_url: w.runtime_wasm_url,
             }),
             storage_root,
+            wasi_data_dir,
+            wasi_data_access: hyper.wasi_data_access,
         })
     }
 
@@ -1240,6 +1249,46 @@ realm = "other@example.com"
         assert_eq!(
             config.storage_root,
             Some(tmpdir.path().join("config/store"))
+        );
+    }
+
+    #[test]
+    fn test_runtime_wasi_data_access() {
+        use crate::config::WasiDataAccess;
+
+        let tmpdir = TempDir::new().unwrap();
+        let path = tmpdir.path().join("actr.toml");
+        let with_dir = format!("{RUNTIME_BASE}\n[hyper]\nwasi_data_dir = \"workload-data\"\n");
+        let default_config = parse_runtime_str(&path, &with_dir).unwrap();
+        let read_only = parse_runtime_str(
+            &path,
+            &format!("{with_dir}wasi_data_access = \"read-only\"\n"),
+        )
+        .unwrap();
+        assert_eq!(default_config.wasi_data_access, WasiDataAccess::ReadWrite);
+        assert_eq!(read_only.wasi_data_access, WasiDataAccess::ReadOnly);
+        assert_eq!(
+            read_only.wasi_data_dir,
+            Some(tmpdir.path().join("workload-data"))
+        );
+    }
+
+    #[test]
+    fn test_runtime_rejects_misspelled_wasi_data_access() {
+        let tmpdir = TempDir::new().unwrap();
+        let path = tmpdir.path().join("actr.toml");
+        let config = format!(
+            "{RUNTIME_BASE}\n[hyper]\nwasi_data_dir = \"workload-data\"\nwasi_data_acess = \"read-only\"\n"
+        );
+        std::fs::write(&path, config).unwrap();
+
+        let error =
+            crate::ConfigParser::from_runtime_file(&path, runtime_test_package()).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unknown field `wasi_data_acess`"),
+            "{error}"
         );
     }
 

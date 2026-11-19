@@ -213,6 +213,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bytes",
+ "cap-primitives",
  "chrono",
  "crossbeam",
  "dashmap 5.5.3",
@@ -223,6 +224,7 @@ dependencies = [
  "hex",
  "hmac 0.12.1",
  "if-addrs",
+ "libc",
  "libloading",
  "loran-platform",
  "loran-relay-protocol",
@@ -275,6 +277,7 @@ dependencies = [
  "webpki-roots 1.0.12",
  "webrtc",
  "webrtc-util",
+ "windows-sys 0.61.2",
  "yasm",
  "zip",
 ]

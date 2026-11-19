@@ -111,6 +111,21 @@ pub struct RuntimeConfig {
     /// default (`<data_dir>/storage`). Actor storage uses a fixed hashed layout
     /// under this root (CWE-22 / CWE-73).
     pub storage_root: Option<PathBuf>,
+
+    /// Absolute host directory exposed to a WASM workload at `/data`.
+    pub wasi_data_dir: Option<PathBuf>,
+
+    /// Maximum access the deployment permits for the WASI data directory.
+    pub wasi_data_access: WasiDataAccess,
+}
+
+/// Access to a WASM workload's private data directory.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WasiDataAccess {
+    ReadOnly,
+    #[default]
+    ReadWrite,
 }
 
 /// Trust anchor config — a single `[[trust]]` table in `actr.toml`.
@@ -644,6 +659,8 @@ mod tests {
             package_path: None,
             web: None,
             storage_root: None,
+            wasi_data_dir: None,
+            wasi_data_access: WasiDataAccess::default(),
         };
 
         assert_eq!(config.actr_type().name, "test-service");

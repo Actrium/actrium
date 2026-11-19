@@ -32,6 +32,38 @@ extension Notification.Name {
     static let rendererProcessCrashed = Notification.Name("rendererProcessCrashed")
     static let rendererViewportApplied = Notification.Name("rendererViewportApplied")
     static let rendererAccessibilityUpdated = Notification.Name("rendererAccessibilityUpdated")
+    static let rendererCaretUpdated = Notification.Name("rendererCaretUpdated")
+    static let rendererTextInputFocusChanged = Notification.Name("rendererTextInputFocusChanged")
+}
+
+enum RendererProcessState: String, Sendable, Equatable {
+    case starting
+    case ready
+    case terminating
+}
+
+struct RendererProcessSnapshot: Identifiable, Sendable, Equatable {
+    let id: String
+    let pid: pid_t
+    let fingerprint: String?
+    let tabIDs: Set<UUID>
+    let state: RendererProcessState
+}
+
+struct RendererProcessPoolSnapshot: Sendable, Equatable {
+    let processes: [RendererProcessSnapshot]
+
+    init(processes: [RendererProcessSnapshot] = []) {
+        self.processes = processes.sorted { $0.id < $1.id }
+    }
+
+    func process(for tabID: UUID) -> RendererProcessSnapshot? {
+        processes.first { $0.tabIDs.contains(tabID) }
+    }
+
+    func state(for tabID: UUID) -> RendererProcessState? {
+        process(for: tabID)?.state
+    }
 }
 
 /// Browser-style broker for a dynamically sized pool of homogeneous Renderer
@@ -71,6 +103,17 @@ final class RendererProcessPool: ObservableObject {
         return currentFingerprint == canonicalFingerprint(requestedFingerprint)
     }
 
+    /// A result may reach the renderer only while the tab is still on the
+    /// epoch captured when the upload was prepared. A tab that has never
+    /// released a renderer has no stored epoch, which is the same as epoch 0;
+    /// both reads must apply that default or the tab's first result is dropped.
+    nonisolated static func attachmentResultIsCurrent(
+        capturedEpoch: Int,
+        currentEpoch: Int?
+    ) -> Bool {
+        (currentEpoch ?? 0) == capturedEpoch
+    }
+
     private final class Worker {
         let id: String
         let connection: IPCConnection
@@ -96,6 +139,7 @@ final class RendererProcessPool: ObservableObject {
     }
 
     @Published private(set) var runningProcessCount = 0
+    @Published private(set) var snapshot = RendererProcessPoolSnapshot()
 
     private var workers: [String: Worker] = [:]
     private var tabWorkerMap: [UUID: String] = [:]
@@ -107,6 +151,10 @@ final class RendererProcessPool: ObservableObject {
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private var consecutivePrewarmFailures = 0
     private var prewarmRetryWorkItem: DispatchWorkItem?
+    /// Per-tab epoch for attachment result delivery. Bumped whenever the
+    /// tab's renderer is released or replaced, so results produced by an
+    /// older session can never be delivered to a replacement renderer.
+    private var attachmentDeliveryEpoch: [UUID: Int] = [:]
 
     private init() {
         setupMemoryPressureHandling()
@@ -168,6 +216,11 @@ final class RendererProcessPool: ObservableObject {
 
     func releaseRenderer(for tabId: UUID) {
         fileImport.cancel(tabId: tabId)
+        // The renderer is going away (close or fingerprint replacement):
+        // invalidate late attachment results and cancel the tab's sessions
+        // without touching any other tab.
+        attachmentDeliveryEpoch[tabId, default: 0] &+= 1
+        RealmServiceBindings.shared.cancelAttachmentUploads(tabId)
         guard let workerId = tabWorkerMap.removeValue(forKey: tabId),
               let worker = workers[workerId] else {
             return
@@ -177,6 +230,7 @@ final class RendererProcessPool: ObservableObject {
         worker.tabs.remove(tabId)
         worker.surfaces.removeValue(forKey: tabId)
         worker.lastUsedAt = Date()
+        publishSnapshot()
 
         // System applications deliberately keep their shared renderer. Ordinary
         // renderers retain the fingerprint for fast same-app reuse and are the
@@ -280,6 +334,15 @@ final class RendererProcessPool: ObservableObject {
         } catch {
             AppLogger.reactNative.warning("Renderer keyboard focus update failed: \(error.localizedDescription)")
         }
+    }
+
+    func sendHostEvent(name: String, userInfoJSON: String, to tabId: UUID) {
+        guard let worker = worker(for: tabId), worker.isReady else { return }
+        try? worker.connection.sendHostEvent(
+            name: name,
+            userInfoJSON: userInfoJSON,
+            tabId: tabId.uuidString
+        )
     }
 
     func requestAccessibilityTree(for tabId: UUID) {
@@ -452,6 +515,7 @@ final class RendererProcessPool: ObservableObject {
 
         workers[id] = worker
         runningProcessCount = workers.count
+        publishSnapshot()
         NSLog(
             "Renderer launched: id=%@ pid=%d fingerprint=%@",
             id,
@@ -472,7 +536,7 @@ final class RendererProcessPool: ObservableObject {
             #if DEBUG
             MetroManager.shared.reBroadcastConfig()
             #endif
-            self.objectWillChange.send()
+            self.publishSnapshot()
         }
 
         worker.connection.onTabSurfaceUpdated = { [weak worker] tabIdString, contextId in
@@ -536,6 +600,111 @@ final class RendererProcessPool: ObservableObject {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker else { return }
                 Task { await self.handleFileImport(userInfoJSON, tabId: tabId, worker: worker) }
+                return
+            }
+            if name == "com.actrium.textInputFocus" {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let data = userInfoJSON.data(using: .utf8),
+                      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let focused = payload["focused"] as? Bool else { return }
+                NotificationCenter.default.post(
+                    name: .rendererTextInputFocusChanged,
+                    object: nil,
+                    userInfo: ["tabId": tabId, "focused": focused]
+                )
+                return
+            }
+            if name == "com.actrium.rendererCaret" {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker else { return }
+                var userInfo: [String: Any] = ["tabId": tabId]
+                if userInfoJSON != "null" {
+                    guard let rect = try? JSONDecoder().decode(CGRect.self, from: Data(userInfoJSON.utf8)) else { return }
+                    userInfo["rect"] = rect
+                }
+                NotificationCenter.default.post(
+                    name: .rendererCaretUpdated, object: nil, userInfo: userInfo
+                )
+                return
+            }
+            if name == RealmServiceAttachmentAvailabilityCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let request = try? JSONDecoder().decode(RealmServiceAttachmentAvailabilityCall.self, from: Data(userInfoJSON.utf8)) else {
+                    return
+                }
+                Task { [weak self, weak worker] in
+                    let available = await RealmServiceBindings.shared
+                        .attachmentUploadAvailable(tabId)
+                    let response = RealmServiceAttachmentAvailabilityReply(
+                        id: request.id, available: available
+                    )
+                    guard let self, let worker, self.worker(for: tabId) === worker,
+                          let data = try? JSONEncoder().encode(response) else { return }
+                    try? worker.connection.sendHostEvent(
+                        name: RealmServiceAttachmentAvailabilityCall.responseEvent,
+                        userInfoJSON: String(decoding: data, as: UTF8.self),
+                        tabId: tab
+                    )
+                }
+                return
+            }
+            if name == RealmServiceAttachmentPrepareCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let request = try? JSONDecoder().decode(RealmServiceAttachmentPrepareCall.self, from: Data(userInfoJSON.utf8)) else {
+                    return
+                }
+                Task { [weak self, weak worker] in
+                    let deliver = self?.makeAttachmentResultDeliver(tabId: tabId) ?? { _ in }
+                    let response = await RealmServiceBindings.shared.prepareAttachmentUpload(
+                        request, tabId: tabId, deliver: deliver
+                    )
+                    guard let self, let worker, self.worker(for: tabId) === worker,
+                          let data = try? JSONEncoder().encode(response) else { return }
+                    try? worker.connection.sendHostEvent(
+                        name: RealmServiceAttachmentPrepareCall.responseEvent,
+                        userInfoJSON: String(decoding: data, as: UTF8.self),
+                        tabId: tab
+                    )
+                }
+                return
+            }
+            if name == RealmServiceAttachmentChunkCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let request = try? JSONDecoder().decode(RealmServiceAttachmentChunkCall.self, from: Data(userInfoJSON.utf8)) else {
+                    return
+                }
+                Task { [weak self, weak worker] in
+                    let response = await RealmServiceBindings.shared.sendAttachmentChunk(request, tabId: tabId)
+                    guard let self, let worker, self.worker(for: tabId) === worker,
+                          let data = try? JSONEncoder().encode(response) else { return }
+                    try? worker.connection.sendHostEvent(
+                        name: RealmServiceAttachmentChunkCall.responseEvent,
+                        userInfoJSON: String(decoding: data, as: UTF8.self),
+                        tabId: tab
+                    )
+                }
+                return
+            }
+            if name == RealmServiceAttachmentUnregisterCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let request = try? JSONDecoder().decode(RealmServiceAttachmentUnregisterCall.self, from: Data(userInfoJSON.utf8)) else {
+                    return
+                }
+                Task { [weak self, weak worker] in
+                    let response = await RealmServiceBindings.shared.unregisterAttachmentStream(request, tabId: tabId)
+                    guard let self, let worker, self.worker(for: tabId) === worker,
+                          let data = try? JSONEncoder().encode(response) else { return }
+                    try? worker.connection.sendHostEvent(
+                        name: RealmServiceAttachmentUnregisterCall.responseEvent,
+                        userInfoJSON: String(decoding: data, as: UTF8.self),
+                        tabId: tab
+                    )
+                }
                 return
             }
             if name == RealmServiceCall.requestEvent {
@@ -646,6 +815,30 @@ final class RendererProcessPool: ObservableObject {
         }
     }
 
+    /// Builds the result-delivery closure for one prepare call. The captured
+    /// epoch invalidates the closure as soon as the tab's renderer is
+    /// released or replaced, which stops in-flight or ghost results from
+    /// reaching a renderer that no longer owns the upload session.
+    private func makeAttachmentResultDeliver(tabId: UUID) -> @Sendable (RealmServiceAttachmentResultEvent) -> Void {
+        let epoch = attachmentDeliveryEpoch[tabId] ?? 0
+        return { [weak self] event in
+            Task { @MainActor in
+                guard let self,
+                      Self.attachmentResultIsCurrent(
+                          capturedEpoch: epoch,
+                          currentEpoch: self.attachmentDeliveryEpoch[tabId]
+                      ),
+                      let worker = self.worker(for: tabId), worker.isReady,
+                      let data = try? JSONEncoder().encode(event) else { return }
+                try? worker.connection.sendHostEvent(
+                    name: RealmServiceAttachmentResultEvent.event,
+                    userInfoJSON: String(decoding: data, as: UTF8.self),
+                    tabId: tabId.uuidString
+                )
+            }
+        }
+    }
+
     private func handleFileImport(_ json: String, tabId: UUID, worker: Worker) async {
         do {
             let reply = try await fileImport.reply(to: json, tabId: tabId) { reloadKey in
@@ -670,6 +863,8 @@ final class RendererProcessPool: ObservableObject {
         let affectedTabs = worker.tabs
         for tabId in affectedTabs {
             fileImport.cancel(tabId: tabId)
+            attachmentDeliveryEpoch[tabId, default: 0] &+= 1
+            RealmServiceBindings.shared.cancelAttachmentUploads(tabId)
             tabWorkerMap.removeValue(forKey: tabId)
         }
         if let fingerprint = worker.fingerprint {
@@ -680,6 +875,7 @@ final class RendererProcessPool: ObservableObject {
         }
         workers.removeValue(forKey: worker.id)
         runningProcessCount = workers.count
+        publishSnapshot()
 
         // Publish the crash only after every Broker lookup has stopped pointing
         // at the dead process. Observers may synchronously request a replacement.
@@ -703,6 +899,7 @@ final class RendererProcessPool: ObservableObject {
     private func terminate(_ worker: Worker, reason: String) {
         guard !worker.isTerminating else { return }
         worker.isTerminating = true
+        publishSnapshot()
         worker.connection.terminate(reason: reason)
         if worker.process.isRunning {
             worker.process.terminate()
@@ -715,6 +912,29 @@ final class RendererProcessPool: ObservableObject {
         worker.tabs.insert(tabId)
         worker.lastUsedAt = Date()
         tabWorkerMap[tabId] = worker.id
+        publishSnapshot()
+    }
+
+    private func publishSnapshot() {
+        snapshot = RendererProcessPoolSnapshot(
+            processes: workers.values.map { worker in
+                let state: RendererProcessState
+                if worker.isTerminating {
+                    state = .terminating
+                } else if worker.isReady {
+                    state = .ready
+                } else {
+                    state = .starting
+                }
+                return RendererProcessSnapshot(
+                    id: worker.id,
+                    pid: worker.process.processIdentifier,
+                    fingerprint: worker.fingerprint,
+                    tabIDs: worker.tabs,
+                    state: state
+                )
+            }
+        )
     }
 
     private func worker(for tabId: UUID) -> Worker? {
@@ -790,6 +1010,7 @@ final class RendererProcessPool: ObservableObject {
         }
         workers.removeValue(forKey: victim.id)
         runningProcessCount = workers.count
+        publishSnapshot()
         terminate(victim, reason: "Reclaimed idle Renderer capacity")
     }
 
@@ -812,6 +1033,7 @@ final class RendererProcessPool: ObservableObject {
                 self.terminate(worker, reason: "Memory pressure")
             }
             self.runningProcessCount = self.workers.count
+            self.publishSnapshot()
         }
         source.resume()
         memoryPressureSource = source

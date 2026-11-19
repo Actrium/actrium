@@ -53,6 +53,7 @@ export function Realms() {
       {showForm && caps?.realm_writes_enabled && (
         <RealmForm
           provider={caps.provider_id}
+          limit={caps.max_members_per_realm}
           onSubmit={async (data) => {
             const response = await api.createRealm(data);
             void refresh().catch((e) => setError(e.message));
