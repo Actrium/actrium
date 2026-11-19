@@ -83,6 +83,7 @@ struct PendingInviteRedeem: Identifiable {
     let tabId: UUID
     let uri: String
     let domain: String
+    let realmName: String
 }
 
 enum ActrPackageDownloadError: LocalizedError {

@@ -15,6 +15,52 @@ struct RealmJoinResult {
     let instanceURL: URL
 }
 
+/// Coordinates invite priority across windows, which share the same Realm client keys.
+@MainActor
+final class PendingRealmInvites {
+    static let shared = PendingRealmInvites()
+
+    private struct Invite {
+        let realmName: String
+        let code: String
+        var exchanging = false
+    }
+
+    private var invites: [UUID: Invite] = [:]
+    private var waiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+    func register(_ load: UUID, code: String, for realmName: String) {
+        invites[load] = Invite(realmName: realmName, code: code)
+    }
+
+    func contains(code: String) -> Bool {
+        invites.values.contains { $0.code == code }
+    }
+
+    func exchangeStarted(_ load: UUID) {
+        invites[load]?.exchanging = true
+    }
+
+    func cancelBeforeExchange(_ load: UUID) {
+        guard invites[load]?.exchanging == false else { return }
+        finish(load)
+    }
+
+    func finish(_ load: UUID) {
+        guard let realmName = invites.removeValue(forKey: load)?.realmName,
+              !invites.values.contains(where: { $0.realmName == realmName }) else { return }
+        waiters.removeValue(forKey: realmName)?.forEach { $0.resume() }
+    }
+
+    func wait(for realmName: String) async {
+        while invites.values.contains(where: { $0.realmName == realmName }) {
+            await withCheckedContinuation { continuation in
+                waiters[realmName, default: []].append(continuation)
+            }
+        }
+    }
+}
+
 /// Enroll this installation's device identity with a verified Realm.
 enum RealmJoinService {
     struct VerifiedProfile {

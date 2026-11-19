@@ -352,6 +352,97 @@ final class RealmAdmissionTests: XCTestCase {
     }
 
     @MainActor
+    func testPlainOpenWaitsForInviteExchangeToTheSameRealm() async throws {
+        try await assertPlainOpenWaitsForInvite(inAnotherWindow: false)
+    }
+
+    @MainActor
+    func testPlainOpenInAnotherWindowWaitsForPendingInvite() async throws {
+        try await assertPlainOpenWaitsForInvite(inAnotherWindow: true)
+    }
+
+    @MainActor
+    private func assertPlainOpenWaitsForInvite(inAnotherWindow: Bool) async throws {
+        let instanceURL = try XCTUnwrap(URL(string: realmURI))
+        let invite = try makeInviteText()
+        let inviteURL = try linkCarryingInvite(invite, to: instanceURL)
+        let documents = try discoveryDocuments(membership: "open")
+        let pendingInvites = PendingRealmInvites()
+        let preferences = try makePreferences()
+        let inviteProfile = NavigationGate()
+        let inviteExchange = NavigationGate()
+        defer {
+            inviteProfile.release()
+            inviteExchange.release()
+        }
+        var profileRequests = 0
+        var joinOrder: [String] = []
+        var inviteSettled = false
+        let earlyOpenJoin = expectation(description: "Invite-free admission must wait for the invite")
+        earlyOpenJoin.isInverted = true
+        let fetch: @MainActor (URL, String) async throws -> Data = { url, _ in
+            if url.host == "publisher.example" { throw CancellationError() }
+            if url.path == "/realm/echo" {
+                profileRequests += 1
+                if profileRequests == 1 { await inviteProfile.wait() }
+            }
+            return try XCTUnwrap(documents[url.absoluteString])
+        }
+        let joinOpen: @MainActor (RealmJoinService.VerifiedProfile) async throws -> Void = { profile in
+            XCTAssertEqual(profile.info.realmName, self.realmName)
+            if !inviteSettled { earlyOpenJoin.fulfill() }
+            joinOrder.append("open")
+        }
+        let invitedWindow = BrowserViewModel(
+            realmPreferences: preferences,
+            pendingRealmInvites: pendingInvites,
+            fetchRealmDocument: fetch,
+            joinOpenRealm: joinOpen,
+            joinRealmWithInvite: { code in
+                XCTAssertEqual(code, invite)
+                joinOrder.append("invite")
+                await inviteExchange.wait()
+                inviteSettled = true
+                return RealmJoinResult(
+                    realmName: self.realmName, memberId: "editor", role: "editor", keyId: "key", instanceURL: instanceURL
+                )
+            },
+            saveBrowserSession: { _, _ in }
+        )
+        let plainWindow = inAnotherWindow ? BrowserViewModel(
+            realmPreferences: preferences,
+            pendingRealmInvites: pendingInvites,
+            fetchRealmDocument: fetch,
+            joinOpenRealm: joinOpen,
+            saveBrowserSession: { _, _ in }
+        ) : invitedWindow
+
+        invitedWindow.navigateCurrentTab(to: inviteURL.absoluteString)
+        try await waitUntil { inviteProfile.waiting }
+        if !inAnotherWindow {
+            inviteProfile.release()
+            try await waitUntil { inviteExchange.waiting }
+        }
+        plainWindow.openURLInNewTab(instanceURL)
+        try await waitUntil { profileRequests == 2 }
+        if inAnotherWindow {
+            XCTAssertTrue(joinOrder.isEmpty)
+            inviteProfile.release()
+            try await waitUntil { inviteExchange.waiting }
+            // Closing the invited window must preserve the reservation until
+            // its already-started exchange completes.
+            invitedWindow.invalidateRealmNavigationForWindowClose()
+        }
+        await fulfillment(of: [earlyOpenJoin], timeout: 0.25)
+        XCTAssertEqual(joinOrder, ["invite"])
+
+        inviteExchange.release()
+        try await waitUntil { plainWindow.currentTab?.url == instanceURL }
+        XCTAssertEqual(joinOrder, ["invite", "open"])
+        XCTAssertNil(plainWindow.pendingInviteRedeem)
+    }
+
+    @MainActor
     private func assertOverlappingInvites(navigateAwayFromSecondTab: Bool) async throws {
         let firstURL = try XCTUnwrap(URL(string: realmURI))
         let secondURL = try XCTUnwrap(URL(string: "actr://other.example/other"))
@@ -379,6 +470,7 @@ final class RealmAdmissionTests: XCTestCase {
         let preferences = try makePreferences()
         let view = BrowserViewModel(
             realmPreferences: preferences,
+            pendingRealmInvites: PendingRealmInvites(),
             fetchRealmDocument: { url, _ in
                 if url.host == "publisher.example" { throw CancellationError() }
                 if url.path == "/realm/echo" { await firstProfile.wait() }

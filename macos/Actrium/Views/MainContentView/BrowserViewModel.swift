@@ -93,8 +93,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     private var realmNavigations: [UUID: RealmNavigation] = [:]
-    private var activeInviteCode: String?
     private var inviteRedemptionTail: (load: UUID, task: Task<RealmJoinResult, Error>)?
+    private let pendingRealmInvites: PendingRealmInvites
     private let realmPreferences: UserDefaults
 
     /// Successfully joined Realms for session restore and invite prompts.
@@ -151,6 +151,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     init(
         realmPreferences: UserDefaults = .standard,
         appRepository: AppRepository? = nil,
+        pendingRealmInvites: PendingRealmInvites? = nil,
         fetchRealmDocument: (@MainActor (URL, String) async throws -> Data)? = nil,
         joinOpenRealm: (@MainActor (RealmJoinService.VerifiedProfile) async throws -> Void)? = nil,
         joinRealmWithInvite: (@MainActor (String) async throws -> RealmJoinResult)? = nil,
@@ -160,6 +161,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
     ) {
         self.realmPreferences = realmPreferences
+        self.pendingRealmInvites = pendingRealmInvites ?? .shared
         self.fetchRealmDocument = fetchRealmDocument ?? Self.fetchBoundedDocument(from:insecureMessage:)
         self.joinOpenRealm = joinOpenRealm ?? { try await RealmJoinService.joinOpen($0, label: "Mac") }
         self.joinRealmWithInvite = joinRealmWithInvite ?? { code in
@@ -1081,7 +1083,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     private func hasPendingInvite(_ code: String) -> Bool {
-        activeInviteCode == code || realmNavigations.values.contains {
+        pendingRealmInvites.contains(code: code) || realmNavigations.values.contains {
             guard case .loading(_, let inviteCode) = $0 else { return false }
             return inviteCode == code
         }
@@ -1098,13 +1100,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     private func invalidateRealmNavigation(for tabId: UUID) {
-        realmNavigations[tabId] = nil
+        if case .loading(let load, _)? = realmNavigations.removeValue(forKey: tabId) {
+            pendingRealmInvites.cancelBeforeExchange(load)
+        }
         if currentTabId == tabId { presentCurrentTabInvite() }
     }
 
     func invalidateRealmNavigationForWindowClose() {
-        realmNavigations.removeAll()
-        presentCurrentTabInvite()
+        for tabId in Array(realmNavigations.keys) { invalidateRealmNavigation(for: tabId) }
     }
 
     func cancelInviteRedeem(_ pending: PendingInviteRedeem) {
@@ -1122,6 +1125,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let tabId = pending.tabId
         let load = UUID()
         realmNavigations[tabId] = .loading(load, inviteCode: trimmedCode)
+        pendingRealmInvites.register(load, code: trimmedCode, for: pending.realmName)
         if currentTabId == tabId { presentCurrentTabInvite() }
 
         Task { @MainActor in
@@ -1130,12 +1134,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             }
             guard isCurrentRealmLoad(load, for: tabId) else { return }
             do {
-                let requested = try ActriumCore.parseActrUri(
-                    uri: pending.uri,
-                    installationId: InstallationIdProvider.getOrCreate()
+                let result = try await redeemInvite(
+                    code: trimmedCode, realmName: pending.realmName, tabId: tabId, load: load
                 )
-                let realmName = [requested.realmId, requested.domain].compactMap { $0 }.joined(separator: "@")
-                let result = try await redeemInvite(code: trimmedCode, realmName: realmName, tabId: tabId, load: load)
                 guard isCurrentRealmLoad(load, for: tabId),
                       let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
                 let address = result.instanceURL.absoluteString
@@ -1150,6 +1151,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     private func redeemInvite(code: String, realmName: String, tabId: UUID, load: UUID) async throws -> RealmJoinResult {
+        defer { pendingRealmInvites.finish(load) }
         guard let nonce = tabs.first(where: { $0.id == tabId })?.reloadNonce else { throw CancellationError() }
         // Check the Realm before sending either the invite secret or the client key.
         let invite = try ActriumCore.decodeActrInvite(inviteText: code)
@@ -1167,8 +1169,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             _ = await previous?.result
             guard isCurrentRealmLoad(load, for: tabId),
                   tabs.contains(where: { $0.id == tabId && $0.reloadNonce == nonce }) else { throw CancellationError() }
-            activeInviteCode = code
-            defer { activeInviteCode = nil }
+            pendingRealmInvites.exchangeStarted(load)
             let result = try await joinRealmWithInvite(code)
             markRedeemed(result.realmName)
             logger.notice("🎟️ [InviteRedeem] joined \(result.realmName): member=\(result.memberId), role=\(result.role), key=\(result.keyId)")
@@ -1494,7 +1495,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     ) {
         let replacingTabId = tab.id
         let load = UUID()
+        let realmName = "\(realmId)@\(domain)"
         realmNavigations[replacingTabId] = .loading(load, inviteCode: inviteCode)
+        if let inviteCode { pendingRealmInvites.register(load, code: inviteCode, for: realmName) }
         if currentTabId == replacingTabId { presentCurrentTabInvite() }
         Task { @MainActor in
             var expectedNonce = tab.reloadNonce
@@ -1551,21 +1554,23 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 guard currentTabIndex() != nil else { return }
                 let admission = try RealmJoinService.VerifiedProfile(
                     body: profileData,
-                    realmName: "\(realmId)@\(domain)",
+                    realmName: realmName,
                     signingKeysJSON: descriptor.signingKeysJson
                 )
                 let profile = admission.info
                 logger.notice("📄 [navigateCurrentTab] Realm Profile accepted: \(profile.displayName) (\(profile.realmName)), sequence=\(profile.sequence), package=\(profile.packageHref)")
 
                 if let inviteCode {
-                    _ = try await redeemInvite(code: inviteCode, realmName: profile.realmName, tabId: replacingTabId, load: load)
+                    _ = try await redeemInvite(code: inviteCode, realmName: realmName, tabId: replacingTabId, load: load)
                 } else if admission.isOpen {
                     // Check membership for the current device key on every
                     // invite-free load. Open joins reuse an existing member.
+                    await pendingRealmInvites.wait(for: realmName)
+                    guard currentTabIndex() != nil else { return }
                     try await joinOpenRealm(admission)
                 } else if !redeemedRealms.contains(profile.realmName) {
                     realmNavigations[replacingTabId] = .invite(
-                        PendingInviteRedeem(tabId: replacingTabId, uri: address, domain: domain)
+                        PendingInviteRedeem(tabId: replacingTabId, uri: address, domain: domain, realmName: realmName)
                     )
                     if currentTabId == replacingTabId { presentCurrentTabInvite() }
                     return
@@ -1733,6 +1738,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 persistBrowserPageSession()
                 schedulePackageCacheEviction()
             } catch {
+                pendingRealmInvites.cancelBeforeExchange(load)
                 guard currentTabIndex() != nil, !(error is CancellationError) else { return }
                 logger.warning("⚠️ [navigateCurrentTab] Realm discovery failed: \(error)")
                 presentRealmLinkError(error)
