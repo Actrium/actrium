@@ -1783,9 +1783,16 @@ pub(crate) async fn load_workload_package_inner(
             let privacy_contract = manifest
                 .read_privacy_contract(bytes, max_bytes)
                 .map_err(|error| HyperError::InvalidManifest(error.to_string()))?;
+            let inbound = manifest
+                .host
+                .required_capabilities
+                .iter()
+                .any(|capability| capability == "actor.receive");
             let scoped_egress = privacy_contract
                 .as_ref()
-                .filter(|_| inner.config.has_egress_policy())
+                .filter(|contract| {
+                    (inbound || !contract.egress.is_empty()) && inner.config.has_egress_policy()
+                })
                 .map(|contract| &contract.egress);
             if privacy_contract
                 .as_ref()
@@ -1821,6 +1828,7 @@ pub(crate) async fn load_workload_package_inner(
             } else {
                 #[cfg(feature = "wasm-engine")]
                 let egress = privacy_contract
+                    .filter(|contract| inbound || !contract.egress.is_empty())
                     .zip(inner.config.egress_policy.clone())
                     .map(|(contract, policy)| {
                         use sha2::{Digest, Sha256};

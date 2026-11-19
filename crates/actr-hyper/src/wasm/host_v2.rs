@@ -48,7 +48,7 @@ use super::component_bindings_v2::actr::workload::types::{
     WebrtcUnavailableReason as WitWebrtcUnavailableReason,
 };
 use super::error::{WasmError, WasmResult};
-use super::host::{CallerRuntimeFuture, HostState, epoch_deadline_ticks};
+use super::host::{ActiveEgress, CallerRuntimeFuture, EgressIds, HostState, epoch_deadline_ticks};
 use super::runtime_limits::{
     EpochTicker, QuotaPermit, StorePermit, acquire_instantiate, acquire_invocation, acquire_store,
     quota_release_snapshot, record_instantiate_failure, record_timeout,
@@ -151,6 +151,64 @@ async fn run_host_operation(
     }
 }
 
+struct EgressInFlight {
+    active: ActiveEgress,
+    uncertain: EgressIds,
+    cancelled: EgressIds,
+    id: Arc<OnceLock<String>>,
+    completed: bool,
+}
+
+impl EgressInFlight {
+    fn new(entry: &super::host::InvocationEntry) -> Option<Self> {
+        let id = Arc::new(OnceLock::new());
+        let mut active = entry
+            .active_egress
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !active.is_empty() {
+            return None;
+        }
+        active.push(id.clone());
+        Some(Self {
+            active: entry.active_egress.clone(),
+            uncertain: entry.uncertain_egress.clone(),
+            cancelled: entry.cancelled_egress.clone(),
+            id,
+            completed: false,
+        })
+    }
+
+    fn complete(&mut self, result: &ActorResult<Vec<u8>>) {
+        if let Err(ActrError::DeliveryUncertain { operation_id, .. }) = result
+            && self.id.get() == Some(operation_id)
+        {
+            self.uncertain
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(operation_id.clone());
+        }
+        self.completed = true;
+    }
+}
+
+impl Drop for EgressInFlight {
+    fn drop(&mut self) {
+        if !self.completed
+            && let Some(id) = self.id.get()
+        {
+            self.cancelled
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id.clone());
+        }
+        self.active
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|id| !Arc::ptr_eq(id, &self.id));
+    }
+}
+
 impl HostWithStore<HostState> for HostState {
     async fn call_dependency(
         accessor: &Accessor<HostState, Self>,
@@ -159,21 +217,29 @@ impl HostWithStore<HostState> for HostState {
         route: String,
         payload: Vec<u8>,
     ) -> wasmtime::Result<Result<Vec<u8>, WitActrError>> {
-        let Some((broker, invocation, bridge, scope, caller_runtime)) = accessor.with(|mut a| {
-            let (broker, entry) = a.get().egress_invocation(ctx_token)?;
-            Some((
-                broker.clone(),
-                entry.ctx.clone(),
-                entry.host_abi.clone(),
-                entry.request_scope.clone(),
-                entry.caller_runtime.clone(),
-            ))
-        }) else {
+        let Some((broker, invocation, bridge, scope, caller_runtime, guard)) =
+            accessor.with(|mut a| {
+                let (broker, entry) = a.get().egress_invocation(ctx_token)?;
+                Some((
+                    broker.clone(),
+                    entry.ctx.clone(),
+                    entry.host_abi.clone(),
+                    entry.request_scope.clone(),
+                    entry.caller_runtime.clone(),
+                    EgressInFlight::new(entry),
+                ))
+            })
+        else {
             return Ok(Err(actr_error_to_wit(
                 actr_protocol::ActrError::PermissionDenied(
                     "no scoped egress for this invocation".into(),
                 ),
             )));
+        };
+        let Some(mut guard) = guard else {
+            return Ok(Err(actr_error_to_wit(ActrError::PermissionDenied(
+                "an egress operation is already active".into(),
+            ))));
         };
         let call = broker.actor_call(
             &invocation,
@@ -182,6 +248,7 @@ impl HostWithStore<HostState> for HostState {
             route,
             payload,
             scope.as_deref(),
+            guard.id.clone(),
         );
         let result = match caller_runtime {
             Some(runtime) => {
@@ -193,6 +260,7 @@ impl HostWithStore<HostState> for HostState {
             }
             None => call.await,
         };
+        guard.complete(&result);
         tracing::info!(succeeded = result.is_ok(), "scoped Actor egress result");
         Ok(result.map_err(actr_error_to_wit))
     }
@@ -203,13 +271,14 @@ impl HostWithStore<HostState> for HostState {
         alias: String,
         body: Vec<u8>,
     ) -> wasmtime::Result<Result<Vec<u8>, WitActrError>> {
-        let Some((broker, invocation, scope, caller_runtime)) = accessor.with(|mut a| {
+        let Some((broker, invocation, scope, caller_runtime, guard)) = accessor.with(|mut a| {
             let (broker, entry) = a.get().egress_invocation(ctx_token)?;
             Some((
                 broker.clone(),
                 entry.ctx.clone(),
                 entry.request_scope.clone(),
                 entry.caller_runtime.clone(),
+                EgressInFlight::new(entry),
             ))
         }) else {
             return Ok(Err(actr_error_to_wit(
@@ -218,7 +287,18 @@ impl HostWithStore<HostState> for HostState {
                 ),
             )));
         };
-        let request = broker.https_request(&invocation, &alias, body, scope.as_deref());
+        let Some(mut guard) = guard else {
+            return Ok(Err(actr_error_to_wit(ActrError::PermissionDenied(
+                "an egress operation is already active".into(),
+            ))));
+        };
+        let request = broker.https_request(
+            &invocation,
+            &alias,
+            body,
+            scope.as_deref(),
+            guard.id.clone(),
+        );
         // Scope deadlines use the clock of the runtime that admitted the RPC.
         let result = match caller_runtime {
             Some(runtime) => {
@@ -230,6 +310,7 @@ impl HostWithStore<HostState> for HostState {
             }
             None => request.await,
         };
+        guard.complete(&result);
         tracing::info!(succeeded = result.is_ok(), "scoped HTTPS egress result");
         Ok(result.map_err(actr_error_to_wit))
     }
@@ -300,6 +381,19 @@ impl HostWithStore<HostState> for HostState {
         ctx_token: u64,
         payload: Vec<u8>,
     ) -> wasmtime::Result<Result<(), WitActrError>> {
+        if accessor.with(|mut a| a.get().egress.is_some()) {
+            return Ok(accessor.with(|mut a| {
+                if a.get().deliver_reply(ctx_token, Ok(Bytes::from(payload)))
+                    || !a.get().invocation_exists(ctx_token)
+                {
+                    Ok(())
+                } else {
+                    Err(WitActrError::Internal(
+                        "scoped reply context is unavailable".into(),
+                    ))
+                }
+            }));
+        }
         let (host_abi, invocation_exists) = accessor.with(|mut a| {
             let state = a.get();
             (
@@ -329,21 +423,32 @@ impl HostWithStore<HostState> for HostState {
         ctx_token: u64,
         error: WitActrError,
     ) -> wasmtime::Result<Result<(), WitActrError>> {
-        let (host_abi, invocation_exists) = accessor.with(|mut a| {
+        if accessor.with(|mut a| a.get().egress.is_some()) {
+            return Ok(accessor.with(|mut a| {
+                if a.get()
+                    .deliver_reply(ctx_token, Err(wit_actr_error_to_proto(error)))
+                    || !a.get().invocation_exists(ctx_token)
+                {
+                    Ok(())
+                } else {
+                    Err(WitActrError::Internal(
+                        "scoped reply context is unavailable".into(),
+                    ))
+                }
+            }));
+        }
+        let (host_abi, invocation_exists, error) = accessor.with(|mut a| {
             let state = a.get();
             (
                 state.invocation_host_abi(ctx_token),
                 state.invocation_exists(ctx_token),
+                state.sanitize_guest_error(ctx_token, wit_actr_error_to_proto(error)),
             )
         });
         if host_abi.is_none() && !invocation_exists {
             return Ok(Ok(()));
         }
-        let result = run_host_operation(
-            host_abi,
-            HostOperation::ReplyError(wit_actr_error_to_proto(error)),
-        )
-        .await?;
+        let result = run_host_operation(host_abi, HostOperation::ReplyError(error)).await?;
         if result.is_ok() {
             // Keep the token live until the guest dispatch export also
             // returns, matching the success reply import above.
@@ -923,6 +1028,7 @@ async fn instantiate_parts_v2(
     let mut state = HostState::new(limits);
     state.set_wasi_runtime_isolation(wasi_runtime.is_some());
     state.install_egress(egress);
+    let scoped = state.egress.is_some();
     state.set_wasi_filesystem(filesystem.clone());
     let mut store = Store::new(engine, state);
     // issue #346: install the per-store limiter and initial fuel/epoch budget.
@@ -947,6 +1053,11 @@ async fn instantiate_parts_v2(
         Ok(Ok(bindings)) => bindings,
         Ok(Err(error)) => {
             record_instantiate_failure();
+            if scoped {
+                return Err(WasmError::LoadFailed(
+                    "scoped Component instantiation failed".into(),
+                ));
+            }
             return Err(WasmError::LoadFailed(format!(
                 "Component instantiate_async (v2) failed: {error:#}"
             )));
@@ -990,6 +1101,7 @@ pub(crate) struct WasmWorkloadV2 {
     uses_explicit_reply_boundary: bool,
     poisoned: bool,
     rebuilds: u64,
+    serial_wait_since: Option<tokio::time::Instant>,
 }
 
 impl std::fmt::Debug for WasmWorkloadV2 {
@@ -1069,6 +1181,7 @@ impl WasmWorkloadV2 {
             uses_explicit_reply_boundary,
             poisoned: false,
             rebuilds: 0,
+            serial_wait_since: None,
         })
     }
 
@@ -1159,20 +1272,20 @@ impl WasmWorkloadV2 {
     /// table (every in-flight token is dead). Returns a distinct
     /// [`WasmError::InstanceTrapped`].
     fn trap_poison(&mut self, entry: &str, trap: wasmtime::Error) -> WasmError {
-        self.poisoned = true;
-        if let Some(store) = self.store.as_mut() {
-            store.data_mut().clear_invocations();
-        }
         // Wasmtime does not promise that dropping an individual concurrent
         // call cancels its guest task. The physical Store is the fault and
         // cancellation boundary, so never retain it after a trap.
-        drop(self.store.take());
-        tracing::error!(
-            entry,
-            error = %trap,
-            "wasm guest trapped (v2); store discarded (instance-level fatal). \
-             In-memory guest state is lost; a fresh instance is rebuilt before the next call"
-        );
+        self.discard_store();
+        if self.egress.is_some() {
+            tracing::error!(entry, "scoped wasm guest trapped; store discarded");
+            return match super::error::classify_trap(entry, trap) {
+                WasmError::InstanceTrapped(_) => {
+                    WasmError::InstanceTrapped("scoped guest trapped".into())
+                }
+                error => error,
+            };
+        }
+        tracing::error!(entry, error = %trap, "wasm guest trapped; store discarded");
         super::error::classify_trap(entry, trap)
     }
 
@@ -1261,6 +1374,24 @@ impl WasmWorkloadV2 {
                 reply_deadline,
                 scope.clone(),
             );
+        let active_egress = self
+            .store
+            .as_ref()
+            .expect("serviceable wasm instance must have a Store")
+            .data()
+            .invocation_active_egress(token);
+        let uncertain_egress = self
+            .store
+            .as_ref()
+            .expect("serviceable wasm instance must have a Store")
+            .data()
+            .invocation_uncertain_egress(token);
+        let cancelled_egress = self
+            .store
+            .as_ref()
+            .expect("serviceable wasm instance must have a Store")
+            .data()
+            .invocation_cancelled_egress(token);
         let inv = invocation_ctx_to_wit(&ctx, token, expects_response, reply_enabled);
         let wasi_runtime = self.wasi_runtime.clone();
         let caller_runtime = wasi_runtime.as_ref().map(|_| Handle::current());
@@ -1272,6 +1403,8 @@ impl WasmWorkloadV2 {
         let region_scope = scope.clone();
         let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let guest_started = started.clone();
+        let entered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let region_entered = entered.clone();
         let region = {
             let store = self
                 .store
@@ -1281,7 +1414,8 @@ impl WasmWorkloadV2 {
                 yield_at_each_epoch(&mut store.as_context_mut());
             }
             let region = store.run_concurrent(async move |accessor| {
-                run_serial_export(accessor, token, async {
+                region_entered.store(true, std::sync::atomic::Ordering::Relaxed);
+                run_serial_export(accessor, token, true, async {
                     let scope_ended = {
                         let _guard = caller_runtime.as_ref().map(Handle::enter);
                         region_scope
@@ -1319,19 +1453,84 @@ impl WasmWorkloadV2 {
                 result = poll_region => result,
             }
         };
+        let uncertain = || {
+            active_egress
+                .as_ref()
+                .and_then(|active| {
+                    active
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .iter()
+                        .find_map(|id| id.get().cloned())
+                })
+                .or_else(|| {
+                    cancelled_egress.as_ref().and_then(|cancelled| {
+                        cancelled
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .iter()
+                            .next()
+                            .cloned()
+                    })
+                })
+                .or_else(|| {
+                    uncertain_egress.as_ref().and_then(|known| {
+                        known
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .iter()
+                            .next()
+                            .cloned()
+                    })
+                })
+                .map(|operation_id| {
+                    WasmError::DispatchFailed(ActrError::DeliveryUncertain {
+                        operation_id,
+                        cause: "WASM invocation ended with uncertain egress delivery".into(),
+                    })
+                })
+        };
         if scope.as_ref().is_some_and(|scope| !scope.is_active()) {
-            if started.load(std::sync::atomic::Ordering::Relaxed) {
+            let error = uncertain();
+            let discard = started.load(std::sync::atomic::Ordering::Relaxed)
+                || (self.egress.is_some()
+                    && entered.load(std::sync::atomic::Ordering::Relaxed)
+                    && tokio::time::Instant::now().saturating_duration_since(
+                        *self
+                            .serial_wait_since
+                            .get_or_insert(invocation_deadline - self.limits.invocation_timeout),
+                    ) >= self.limits.invocation_timeout);
+            if discard {
                 self.discard_store();
             } else if let Some(store) = self.store.as_mut() {
                 store.epoch_deadline_trap();
                 store.data_mut().remove_invocation(token);
             }
             record_timeout();
-            return Err(WasmError::RequestScopeEnded);
+            return Err(error.unwrap_or(WasmError::RequestScopeEnded));
         }
         let Some(region) = region else {
-            return Err(self.timeout_poison());
+            let error = uncertain();
+            let timeout = self.timeout_poison();
+            return Err(error.unwrap_or(timeout));
         };
+        self.serial_wait_since = None;
+        let pending_egress = active_egress
+            .as_ref()
+            .is_some_and(|active| !active.lock().unwrap_or_else(|e| e.into_inner()).is_empty())
+            || cancelled_egress.as_ref().is_some_and(|cancelled| {
+                !cancelled
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .is_empty()
+            });
+        if pending_egress {
+            let error = uncertain();
+            self.discard_store();
+            return Err(error.unwrap_or_else(|| {
+                WasmError::ExecutionFailed("scoped guest returned while egress was pending".into())
+            }));
+        }
 
         // Region closed: retire the token unless the guest returned the
         // explicit-boundary marker. A generated EXPLICIT handler may move its
@@ -1351,6 +1550,9 @@ impl WasmWorkloadV2 {
                 store.epoch_deadline_trap();
             }
             let state = store.data_mut();
+            if dispatch_succeeded {
+                state.flush_pending_reply(token);
+            }
             if returned_deferred {
                 state.claim_invocation_reply(token);
             }
@@ -1378,7 +1580,9 @@ impl WasmWorkloadV2 {
                     route_key = %envelope.route_key,
                     "wasm dispatch failed: guest region trapped before completing"
                 );
-                Err(self.trap_poison("dispatch", trap))
+                let uncertain = uncertain();
+                let failure = self.trap_poison("dispatch", trap);
+                Err(uncertain.unwrap_or(failure))
             }
             Ok(call) => match call {
                 Ok(Ok(bytes)) => {
@@ -1408,6 +1612,24 @@ impl WasmWorkloadV2 {
                 }
                 Ok(Err(wit_err)) => {
                     let error = wit_actr_error_to_proto(wit_err);
+                    if self.egress.is_some() {
+                        if let ActrError::DeliveryUncertain { operation_id, .. } = &error
+                            && uncertain_egress.as_ref().is_some_and(|known| {
+                                known
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .contains(operation_id)
+                            })
+                        {
+                            return Err(WasmError::DispatchFailed(ActrError::DeliveryUncertain {
+                                operation_id: operation_id.clone(),
+                                cause: "scoped egress delivery is uncertain".into(),
+                            }));
+                        }
+                        return Err(WasmError::ExecutionFailed(
+                            "scoped guest dispatch returned an error".into(),
+                        ));
+                    }
                     tracing::error!(
                         target: "actr_wasm_dispatch",
                         request_id = %envelope.request_id,
@@ -1430,7 +1652,9 @@ impl WasmWorkloadV2 {
                         route_key = %envelope.route_key,
                         "wasm dispatch failed: guest call trapped"
                     );
-                    Err(self.trap_poison("dispatch", trap))
+                    let uncertain = uncertain();
+                    let failure = self.trap_poison("dispatch", trap);
+                    Err(uncertain.unwrap_or(failure))
                 }
             },
         }
@@ -1467,6 +1691,7 @@ impl WasmWorkloadV2 {
                 run_serial_export(
                     accessor,
                     token,
+                    false,
                     bindings
                         .actr_workload_workload()
                         .call_on_start(accessor, inv),
@@ -1511,6 +1736,7 @@ impl WasmWorkloadV2 {
                 run_serial_export(
                     accessor,
                     token,
+                    false,
                     bindings
                         .actr_workload_workload()
                         .call_on_ready(accessor, inv),
@@ -1555,6 +1781,7 @@ impl WasmWorkloadV2 {
                 run_serial_export(
                     accessor,
                     token,
+                    false,
                     bindings
                         .actr_workload_workload()
                         .call_on_stop(accessor, inv),
@@ -1594,6 +1821,9 @@ impl WasmWorkloadV2 {
             Err(trap) => Err(self.trap_poison(label, trap)),
             Ok(call_result) => match call_result {
                 Ok(inner) => inner.map_err(|e| {
+                    if self.egress.is_some() {
+                        return WasmError::ExecutionFailed(format!("scoped guest {label} failed"));
+                    }
                     WasmError::ExecutionFailed(format!(
                         "{label} error: {:?}",
                         wit_actr_error_to_proto(e)
@@ -1640,6 +1870,7 @@ impl WasmWorkloadV2 {
                 run_serial_export(
                     accessor,
                     token,
+                    false,
                     bindings
                         .actr_workload_workload()
                         .call_on_data_chunk(accessor, wit_chunk, wit_sender, inv),
@@ -1671,6 +1902,11 @@ impl WasmWorkloadV2 {
             Err(trap) => Err(self.trap_poison("on_data_chunk", trap)),
             Ok(call) => match call {
                 Ok(inner) => inner.map_err(|e| {
+                    if self.egress.is_some() {
+                        return WasmError::ExecutionFailed(
+                            "scoped guest data callback failed".into(),
+                        );
+                    }
                     WasmError::ExecutionFailed(format!(
                         "on_data_chunk error: {:?}",
                         wit_actr_error_to_proto(e)
@@ -1712,6 +1948,7 @@ impl WasmWorkloadV2 {
                 run_serial_export(
                     accessor,
                     token,
+                    false,
                     run_hook_region(accessor, bindings, event, inv),
                 )
                 .await
@@ -2009,6 +2246,7 @@ impl WasmWorkloadV2 {
 
     fn discard_store(&mut self) {
         self.poisoned = true;
+        self.serial_wait_since = None;
         if let Some(store) = self.store.as_mut() {
             store.data_mut().clear_invocations();
         }
@@ -2976,6 +3214,7 @@ fn fuel_cap(fuel_per_invocation: u64, live: usize) -> u64 {
 async fn run_serial_export<T>(
     accessor: &Accessor<HostState>,
     token: u64,
+    allow_egress: bool,
     call: impl std::future::Future<Output = wasmtime::Result<T>>,
 ) -> wasmtime::Result<T> {
     if !accessor.with(|mut access| access.get().egress.is_some()) {
@@ -2986,7 +3225,7 @@ async fn run_serial_export<T>(
     // threading is disabled on this engine so spawned threads cannot outlive
     // a tracked task and overlap the next authorized export.
     std::future::poll_fn(|cx| accessor.poll_no_interesting_tasks(cx)).await;
-    accessor.with(|mut access| access.get().set_egress_token(Some(token)));
+    accessor.with(|mut access| access.get().set_egress_token(allow_egress.then_some(token)));
     let result = call.await;
     accessor.with(|mut access| access.get().set_egress_token(None));
     result
@@ -3086,6 +3325,27 @@ async fn run_hook_region(
 #[cfg(test)]
 mod resident_tests {
     use super::*;
+
+    #[test]
+    fn cancelled_egress_releases_slot_and_keeps_dispatched_id() {
+        let active = ActiveEgress::default();
+        let uncertain = EgressIds::default();
+        let cancelled = EgressIds::default();
+        let id = Arc::new(OnceLock::new());
+        active.lock().unwrap().push(id.clone());
+        let guard = EgressInFlight {
+            active: active.clone(),
+            uncertain: uncertain.clone(),
+            cancelled: cancelled.clone(),
+            id: id.clone(),
+            completed: false,
+        };
+        id.set("sent-operation".into()).unwrap();
+        drop(guard);
+        assert!(active.lock().unwrap().is_empty());
+        assert!(cancelled.lock().unwrap().contains("sent-operation"));
+        assert!(uncertain.lock().unwrap().is_empty());
+    }
 
     #[tokio::test]
     async fn host_operation_preserves_connection_not_ready() {

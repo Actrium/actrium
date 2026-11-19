@@ -470,6 +470,64 @@ async fn notebook_scoped_egress_wasm() {
         .await
         .unwrap();
     assert!(contains(&result, "synthetic-needle"));
+
+    let mut timeout_contract = privacy_contract();
+    timeout_contract.egress.actor.insert(
+        "index".into(),
+        ActorPermission {
+            rpc_routes: vec![format!("{PREFIX}.IndexWorkerService.SearchIndex")],
+            data_classes: vec!["private".into()],
+            target_actor_type: "notes.example/index@1.0.0".into(),
+        },
+    );
+    let timeout_limits = crate::config::WasmRuntimeLimits {
+        invocation_timeout: Duration::from_secs(1),
+        ..limits
+    };
+    let timeout_host = WasmHost::compile_with_limits(
+        &std::fs::read(dir.join("application_core.wasm")).unwrap(),
+        &timeout_limits,
+    )
+    .unwrap();
+    let mut timeout_notebook = timeout_host
+        .instantiate_scoped(
+            Some(grant(&notebook_dir)),
+            Some(Arc::new(EgressBroker::new(
+                policy.clone(),
+                "notebook-fixture".into(),
+                timeout_contract,
+                Some(&lock),
+            ))),
+        )
+        .await
+        .unwrap();
+    let delayed: HostAbiFn = Arc::new(|operation| {
+        Box::pin(async move {
+            let HostOperation::ScopedActorCall { dispatch_id, .. } = operation else {
+                panic!("unexpected fixture operation");
+            };
+            dispatch_id.set("delayed-index-operation".into()).unwrap();
+            std::future::pending().await
+        })
+    });
+    let scope = RequestScope::root_at(Instant::now() + Duration::from_secs(10));
+    let error = timeout_notebook
+        .handle_with_reply(
+            &search,
+            invocation(NOTEBOOK, FRONT, "timeout"),
+            &delayed,
+            None,
+            true,
+            None,
+            None,
+            Some(scope),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, crate::wasm::WasmError::DispatchFailed(ActrError::DeliveryUncertain { operation_id, .. }) if operation_id == "delayed-index-operation")
+    );
+
     let count = index_count.load(Ordering::Relaxed);
     policy.index.cancel();
     assert!(

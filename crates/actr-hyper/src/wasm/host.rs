@@ -33,8 +33,8 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Component as PathComponent, Path};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use actr_config::WasiDataAccess;
@@ -186,10 +186,17 @@ impl<F: std::future::Future + ?Sized> Drop for CallerRuntimeFuture<F> {
 
 /// One live invocation's host-facing state, keyed by `ctx-token` in
 /// [`HostState::invocations`].
+pub(super) type ActiveEgress = Arc<std::sync::Mutex<Vec<Arc<OnceLock<String>>>>>;
+pub(super) type EgressIds = Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>;
+
 pub(crate) struct InvocationEntry {
     pub(crate) ctx: InvocationContext,
     pub(super) caller_runtime: Option<tokio::runtime::Handle>,
     pub(super) request_scope: Option<Arc<RequestScope>>,
+    pub(super) active_egress: ActiveEgress,
+    pub(super) uncertain_egress: EgressIds,
+    pub(super) cancelled_egress: EgressIds,
+    pub(super) pending_reply: Option<ReplyOutcome>,
     pub(crate) host_abi: HostAbiFn,
     pub(crate) reply_deliver: Option<Arc<dyn Deliver>>,
     /// Whether expiry should emit an error RESPONSE. TELL invocations still
@@ -390,7 +397,11 @@ impl HostState {
         if self.egress_token != Some(token) {
             return None;
         }
-        Some((self.egress.as_ref()?, self.invocations.get(&token)?))
+        let entry = self.invocations.get(&token)?;
+        if entry.reply_completed {
+            return None;
+        }
+        Some((self.egress.as_ref()?, entry))
     }
 
     pub(super) fn set_wasi_runtime_isolation(&mut self, enabled: bool) {
@@ -603,6 +614,10 @@ impl HostState {
                 ctx,
                 caller_runtime,
                 request_scope,
+                active_egress: Arc::default(),
+                uncertain_egress: Arc::default(),
+                cancelled_egress: Arc::default(),
+                pending_reply: None,
                 host_abi,
                 reply_deliver,
                 expects_response,
@@ -803,6 +818,23 @@ impl HostState {
         result: Result<bytes::Bytes, actr_protocol::ActrError>,
     ) -> bool {
         let token = self.effective_invocation_token(token);
+        let result = result.map_err(|error| self.sanitize_guest_error(token, error));
+        if self.egress.is_some()
+            && let Some(entry) = self.invocations.get_mut(&token)
+            && !entry.dispatch_finished
+            && entry.reply_deliver.is_some()
+        {
+            if entry.reply_completed {
+                return true;
+            }
+            entry.pending_reply = Some(ReplyOutcome {
+                request_id: entry.ctx.request_id.clone(),
+                result,
+                emit_response: entry.expects_response,
+            });
+            entry.reply_completed = true;
+            return true;
+        }
         let Some((deliver, request_id, expects_response, caller_runtime)) =
             self.invocations.get(&token).and_then(|entry| {
                 entry.reply_deliver.clone().map(|deliver| {
@@ -827,8 +859,64 @@ impl HostState {
         true
     }
 
+    pub(super) fn sanitize_guest_error(
+        &self,
+        token: u64,
+        error: actr_protocol::ActrError,
+    ) -> actr_protocol::ActrError {
+        if self.egress.is_none() {
+            return error;
+        }
+        if let actr_protocol::ActrError::DeliveryUncertain { operation_id, .. } = &error
+            && self.invocations.get(&token).is_some_and(|entry| {
+                entry
+                    .uncertain_egress
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .contains(operation_id)
+            })
+        {
+            return actr_protocol::ActrError::DeliveryUncertain {
+                operation_id: operation_id.clone(),
+                cause: "scoped egress delivery is uncertain".into(),
+            };
+        }
+        actr_protocol::ActrError::Internal("scoped guest returned an error".into())
+    }
+
     pub(crate) fn invocation_count(&self) -> usize {
         self.invocations.len()
+    }
+
+    pub(super) fn invocation_active_egress(&self, token: u64) -> Option<ActiveEgress> {
+        self.invocations
+            .get(&token)
+            .map(|entry| entry.active_egress.clone())
+    }
+
+    pub(super) fn invocation_uncertain_egress(&self, token: u64) -> Option<EgressIds> {
+        self.invocations
+            .get(&token)
+            .map(|entry| entry.uncertain_egress.clone())
+    }
+
+    pub(super) fn invocation_cancelled_egress(&self, token: u64) -> Option<EgressIds> {
+        self.invocations
+            .get(&token)
+            .map(|entry| entry.cancelled_egress.clone())
+    }
+
+    pub(super) fn flush_pending_reply(&mut self, token: u64) {
+        if let Some(entry) = self.invocations.get_mut(&token)
+            && let Some(outcome) = entry.pending_reply.take()
+            && let Some(deliver) = &entry.reply_deliver
+        {
+            let _guard = entry
+                .caller_runtime
+                .as_ref()
+                .map(tokio::runtime::Handle::enter);
+            deliver.deliver(outcome);
+        }
     }
 
     pub(super) fn has_scoped_dispatch(&self) -> bool {

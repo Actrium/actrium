@@ -40,6 +40,7 @@ wit-component = { version = "0.254.2", optional = true }
 wit-parser = { version = "0.254.2", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+actr-config.workspace = true
 actr-service-compat.workspace = true
 
 [dev-dependencies]

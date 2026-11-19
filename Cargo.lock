@@ -319,6 +319,7 @@ dependencies = [
 name = "actr-pack"
 version = "0.10.7"
 dependencies = [
+ "actr-config",
  "actr-framework",
  "actr-protocol",
  "actr-service-compat",

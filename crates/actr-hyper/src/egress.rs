@@ -110,6 +110,7 @@ impl EgressBroker {
             .authorize_inbound(invocation, &self.digest, &self.contract_sha256, route)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn actor_call(
         &self,
         invocation: &InvocationContext,
@@ -118,6 +119,7 @@ impl EgressBroker {
         route: String,
         payload: Vec<u8>,
         scope: Option<&RequestScope>,
+        dispatch_id: Arc<OnceLock<String>>,
     ) -> ActorResult<Vec<u8>> {
         use actr_framework::guest::dynclib_abi::HostCallRawV1;
         if scope.is_some_and(|scope| !scope.is_active()) {
@@ -164,7 +166,6 @@ impl EgressBroker {
             .ok_or_else(|| deny("Actor binding is absent or outside the source Realm"))?;
         let deadline = permit.expires_at.min(Instant::now() + MAX_DURATION);
         let deadline = scope.map_or(deadline, |scope| deadline.min(scope.deadline()));
-        let dispatch_id = Arc::new(OnceLock::new());
         let call = async {
             let timeout_ms = deadline
                 .saturating_duration_since(Instant::now())
@@ -186,6 +187,22 @@ impl EgressBroker {
             .await
             {
                 HostOperationResult::Bytes(bytes) if bytes.len() <= MAX_RESPONSE => Ok(bytes),
+                HostOperationResult::Bytes(_) => {
+                    let _ = dispatch_id.get_or_init(|| uuid::Uuid::new_v4().to_string());
+                    Err(delivery_failure(
+                        &dispatch_id,
+                        "Actor response was received but exceeds its limit",
+                    ))
+                }
+                HostOperationResult::Error(ActrError::DeliveryUncertain { .. }) => {
+                    let operation_id = dispatch_id
+                        .get_or_init(|| uuid::Uuid::new_v4().to_string())
+                        .clone();
+                    Err(ActrError::DeliveryUncertain {
+                        operation_id,
+                        cause: "dependency reported uncertain delivery".into(),
+                    })
+                }
                 HostOperationResult::Error(error) => Err(error),
                 _ => Err(deny("Actor response failed or exceeds its limit")),
             }
@@ -199,6 +216,7 @@ impl EgressBroker {
         alias: &str,
         body: Vec<u8>,
         scope: Option<&RequestScope>,
+        dispatch_id: Arc<OnceLock<String>>,
     ) -> ActorResult<Vec<u8>> {
         if scope.is_some_and(|scope| !scope.is_active()) {
             return Err(ActrError::TimedOut);
@@ -231,16 +249,15 @@ impl EgressBroker {
         })?;
         let deadline = permit.expires_at.min(Instant::now() + MAX_DURATION);
         let deadline = scope.map_or(deadline, |scope| deadline.min(scope.deadline()));
-        let dispatch_id = OnceLock::new();
         run_permitted(
             &permit,
             deadline,
             scope,
-            Some(&dispatch_id),
+            Some(dispatch_id.as_ref()),
             fixed_https(
                 rule,
                 body,
-                &dispatch_id,
+                dispatch_id.as_ref(),
                 || {
                     if scope.is_some_and(|scope| !scope.is_active()) {
                         return Err(ActrError::TimedOut);
@@ -379,23 +396,20 @@ async fn fixed_https(
         if error.is_connect() || error.is_builder() {
             deny("HTTPS request failed before sending")
         } else {
-            https_failure(dispatch_id, "HTTPS request failed")
+            delivery_failure(dispatch_id, "HTTPS request failed")
         }
     })?;
-    if response.status().is_server_error() || response.status().is_redirection() {
-        return Err(https_failure(
-            dispatch_id,
-            "HTTPS returned an ambiguous response",
-        ));
-    }
     if !response.status().is_success() {
-        return Err(deny("HTTPS returned a non-success response"));
+        return Err(delivery_failure(
+            dispatch_id,
+            "HTTPS returned a non-success response",
+        ));
     }
     if response
         .content_length()
         .is_some_and(|size| size > MAX_RESPONSE as u64)
     {
-        return Err(https_failure(
+        return Err(delivery_failure(
             dispatch_id,
             "HTTPS response exceeds its limit",
         ));
@@ -404,10 +418,10 @@ async fn fixed_https(
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_| https_failure(dispatch_id, "HTTPS response read failed"))?
+        .map_err(|_| delivery_failure(dispatch_id, "HTTPS response read failed"))?
     {
         if chunk.len() > MAX_RESPONSE - bytes.len() {
-            return Err(https_failure(
+            return Err(delivery_failure(
                 dispatch_id,
                 "HTTPS response exceeds its limit",
             ));
@@ -417,7 +431,7 @@ async fn fixed_https(
     Ok(bytes)
 }
 
-fn https_failure(dispatch_id: &OnceLock<String>, cause: &str) -> ActrError {
+fn delivery_failure(dispatch_id: &OnceLock<String>, cause: &str) -> ActrError {
     match dispatch_id.get() {
         Some(operation_id) => ActrError::DeliveryUncertain {
             operation_id: operation_id.clone(),
@@ -439,6 +453,7 @@ mod tests {
     struct TestPolicy {
         target: ActrId,
         revocation: CancellationToken,
+        permit_ttl: Duration,
     }
 
     impl EgressPolicy for TestPolicy {
@@ -454,7 +469,7 @@ mod tests {
                 _ => return Err(deny("test policy denied")),
             }
             Ok(EgressPermit {
-                expires_at: Instant::now() + Duration::from_secs(5),
+                expires_at: Instant::now() + self.permit_ttl,
                 revocation: self.revocation.clone(),
                 target: Some(self.target.clone()),
             })
@@ -462,12 +477,16 @@ mod tests {
 
         fn authorize_inbound(
             &self,
-            _: &InvocationContext,
+            invocation: &InvocationContext,
             _: &str,
             _: &str,
             _: &str,
         ) -> ActorResult<()> {
-            Err(deny("not used by this fixture"))
+            if invocation.request_id == "approved" {
+                Ok(())
+            } else {
+                Err(deny("test policy denied inbound"))
+            }
         }
     }
 
@@ -523,6 +542,7 @@ files = []
         let policy = Arc::new(TestPolicy {
             target: target.clone(),
             revocation: revocation.clone(),
+            permit_ttl: Duration::from_secs(5),
         });
         let broker = EgressBroker::new(policy, "bb".repeat(32), contract, Some(&lock));
         let count = Arc::new(AtomicUsize::new(0));
@@ -557,6 +577,7 @@ files = []
                     route.into(),
                     vec![],
                     Some(&scope),
+                    Arc::new(OnceLock::new()),
                 )
                 .await
                 .is_err()
@@ -571,6 +592,7 @@ files = []
                     "notes.Index.Forbidden".into(),
                     vec![],
                     Some(&scope),
+                    Arc::new(OnceLock::new()),
                 )
                 .await
                 .is_err()
@@ -584,10 +606,62 @@ files = []
                     route.into(),
                     vec![],
                     Some(&scope),
+                    Arc::new(OnceLock::new()),
                 )
                 .await
                 .unwrap(),
             vec![42]
+        );
+        let oversized_bridge: HostAbiFn = Arc::new(|operation| {
+            Box::pin(async move {
+                let HostOperation::ScopedActorCall { dispatch_id, .. } = operation else {
+                    panic!("unexpected bridge operation");
+                };
+                dispatch_id.set("oversized-response".into()).unwrap();
+                HostOperationResult::Bytes(vec![0; MAX_RESPONSE + 1])
+            })
+        });
+        let error = broker
+            .actor_call(
+                &invocation,
+                oversized_bridge,
+                "index",
+                route.into(),
+                vec![],
+                Some(&scope),
+                Arc::new(OnceLock::new()),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "oversized-response")
+        );
+        let nested_bridge: HostAbiFn = Arc::new(|operation| {
+            Box::pin(async move {
+                let HostOperation::ScopedActorCall { dispatch_id, .. } = operation else {
+                    panic!("unexpected bridge operation");
+                };
+                dispatch_id.set("local-request".into()).unwrap();
+                HostOperationResult::Error(ActrError::DeliveryUncertain {
+                    operation_id: "downstream-request".into(),
+                    cause: "downstream uncertainty".into(),
+                })
+            })
+        });
+        let error = broker
+            .actor_call(
+                &invocation,
+                nested_bridge,
+                "index",
+                route.into(),
+                vec![],
+                Some(&scope),
+                Arc::new(OnceLock::new()),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, ActrError::DeliveryUncertain { operation_id, .. } if operation_id == "local-request")
         );
         let dispatched_bridge: HostAbiFn = Arc::new(move |operation| {
             let revocation = revocation.clone();
@@ -608,6 +682,7 @@ files = []
                 route.into(),
                 vec![],
                 None,
+                Arc::new(OnceLock::new()),
             )
             .await
             .unwrap_err();
@@ -617,11 +692,130 @@ files = []
         ));
         assert!(
             broker
-                .actor_call(&invocation, bridge, "index", route.into(), vec![], None)
+                .actor_call(
+                    &invocation,
+                    bridge,
+                    "index",
+                    route.into(),
+                    vec![],
+                    None,
+                    Arc::new(OnceLock::new())
+                )
                 .await
                 .is_err()
         );
         assert_eq!(count.load(Ordering::Relaxed), 1);
+    }
+
+    #[cfg(actr_wasm_fixture_available)]
+    #[tokio::test]
+    async fn completed_uncertainty_survives_outer_wasm_timeout() {
+        use actr_protocol::prost::Message;
+        let route = "notes.Index.GetTask";
+        let target = ActrId {
+            realm: "test@notes.example".into(),
+            serial_number: 2,
+        };
+        let revocation = CancellationToken::new();
+        let policy = Arc::new(TestPolicy {
+            target: target.clone(),
+            revocation: revocation.clone(),
+            permit_ttl: Duration::from_millis(250),
+        });
+        let contract = PackagePrivacyContract {
+            sha256: "cc".repeat(32),
+            egress: EgressPermissions {
+                actor: BTreeMap::from([(
+                    "index".into(),
+                    actr_pack::egress::ActorPermission {
+                        rpc_routes: vec![route.into()],
+                        data_classes: vec!["private".into()],
+                        target_actor_type: "notes.example/Index@1.0.0".into(),
+                    },
+                )]),
+                ..Default::default()
+            },
+            dependency_digests: BTreeMap::new(),
+        };
+        let lock: actr_config::LockFile = format!(
+            r#"
+[metadata]
+version = 2
+generated_at = "2026-11-19T00:00:00Z"
+[[dependency]]
+name = "index"
+alias = "index"
+actr_type = "notes.example/Index@1.0.0"
+fingerprint = "service_semantic:fixture"
+package-sha256 = "{}"
+cached_at = "2026-11-19T00:00:00Z"
+files = []
+"#,
+            "aa".repeat(32)
+        )
+        .parse()
+        .unwrap();
+        let limits = crate::config::WasmRuntimeLimits {
+            invocation_timeout: Duration::from_secs(2),
+            ..Default::default()
+        };
+        let host = crate::wasm::WasmHost::compile_with_limits(
+            include_bytes!(env!("ACTR_WASM_FIXTURE")),
+            &limits,
+        )
+        .unwrap();
+        let mut workload = host
+            .instantiate_scoped(
+                None,
+                Some(Arc::new(EgressBroker::new(
+                    policy,
+                    "bb".repeat(32),
+                    contract,
+                    Some(&lock),
+                ))),
+            )
+            .await
+            .unwrap();
+        let bridge: HostAbiFn = Arc::new(move |operation| {
+            Box::pin(async move {
+                let HostOperation::ScopedActorCall { dispatch_id, .. } = operation else {
+                    panic!("unexpected operation")
+                };
+                dispatch_id.set("completed-before-timeout".into()).unwrap();
+                std::future::pending().await
+            })
+        });
+        let request = actr_protocol::RpcEnvelope {
+            route_key: "test/scoped-expire".into(),
+            request_id: "approved".into(),
+            ..Default::default()
+        }
+        .encode_to_vec();
+        let invocation = InvocationContext {
+            self_id: ActrId {
+                serial_number: 1,
+                ..target
+            },
+            caller_id: None,
+            request_id: "approved".into(),
+        };
+        let scope = RequestScope::root_at(Instant::now() + Duration::from_secs(10));
+        let error = workload
+            .handle_with_reply(
+                &request,
+                invocation,
+                &bridge,
+                None,
+                true,
+                None,
+                None,
+                Some(scope),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, crate::wasm::WasmError::DispatchFailed(ActrError::DeliveryUncertain { operation_id, .. }) if operation_id == "completed-before-timeout")
+        );
     }
 }
 

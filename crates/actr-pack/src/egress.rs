@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(not(target_arch = "wasm32"))]
 use semver::{Version, VersionReq};
 use serde::Deserialize;
 
@@ -131,7 +132,15 @@ pub(crate) fn validate_privacy_contract<B: AsRef<[u8]>>(
             {
                 return Err(invalid("Actor egress requires a signed manifest.lock.toml"));
             }
-            dependency_digests = validate_lock(manifest, &egress, read(LOCK)?.as_ref())?;
+            if manifest.files.iter().any(|file| {
+                (file.path == LOCK && file.role != "lock")
+                    || (file.role == "lock" && file.path != LOCK)
+            }) {
+                return Err(invalid(
+                    "dependency lock must be manifest.lock.toml with role lock",
+                ));
+            }
+            dependency_digests = validate_lock(manifest, &egress, read(LOCK)?.as_ref(), &read)?;
             validate_actor_contracts(manifest, &egress, &read)?;
         }
         privacy = Some(PackagePrivacyContract {
@@ -306,27 +315,6 @@ fn validate_https(alias: &str, rule: &HttpsPermission) -> Result<(), PackError> 
     Ok(())
 }
 
-#[derive(Deserialize)]
-struct DigestLock {
-    metadata: DigestLockMetadata,
-    #[serde(rename = "dependency", default)]
-    dependencies: Vec<DigestDependency>,
-}
-
-#[derive(Deserialize)]
-struct DigestLockMetadata {
-    version: u32,
-}
-
-#[derive(Deserialize)]
-struct DigestDependency {
-    alias: String,
-    actr_type: String,
-    fingerprint: String,
-    #[serde(rename = "package-sha256")]
-    package_sha256: Option<String>,
-}
-
 /// Validate the signed Unary routes at both signing and verification boundaries.
 #[cfg(not(target_arch = "wasm32"))]
 fn validate_actor_contracts<B: AsRef<[u8]>>(
@@ -372,20 +360,77 @@ fn validate_actor_contracts<B: AsRef<[u8]>>(
     }
 }
 
-fn validate_lock(
+#[cfg(not(target_arch = "wasm32"))]
+fn validate_lock<B: AsRef<[u8]>>(
     manifest: &ActorPackageManifest,
     permissions: &EgressPermissions,
     bytes: &[u8],
+    read: impl Fn(&str) -> Result<B, PackError>,
 ) -> Result<BTreeMap<String, String>, PackError> {
     let source = std::str::from_utf8(bytes)
         .map_err(|error| invalid(format!("invalid manifest.lock.toml: {error}")))?;
-    let lock: DigestLock = toml::from_str(source)
+    let lock: actr_config::LockFile = source
+        .parse()
         .map_err(|error| invalid(format!("invalid egress dependency lock: {error}")))?;
-    if lock.metadata.version != 2 {
+    if lock.format_version() != 2 {
         return Err(invalid("egress dependency locks must use version 2"));
     }
+    lock.validate_aliases()
+        .map_err(|error| invalid(format!("invalid egress dependency lock: {error}")))?;
     let mut entries = BTreeMap::new();
     for entry in lock.dependencies {
+        let declared = manifest
+            .dependencies
+            .get(&entry.alias)
+            .ok_or_else(|| invalid(format!("undeclared dependency alias {}", entry.alias)))?;
+        let actor_type = actr_protocol::ActrType::from_string_repr(&entry.actr_type)
+            .map_err(|error| invalid(format!("invalid locked Actor type: {error}")))?;
+        let version_matches = VersionReq::parse(&declared.version)
+            .ok()
+            .zip(Version::parse(&actor_type.version).ok())
+            .is_some_and(|(requirement, version)| requirement.matches(&version));
+        if format!("{}/{}", actor_type.publisher, actor_type.name) != declared.actor
+            || !version_matches
+            || entry.fingerprint.trim().is_empty()
+        {
+            return Err(invalid(format!(
+                "dependency lock does not match {}",
+                entry.alias
+            )));
+        }
+        if let Some(path) = &declared.contract {
+            let [file] = entry.files.as_slice() else {
+                return Err(invalid(format!(
+                    "dependency {} must lock one RPC Proto",
+                    entry.alias
+                )));
+            };
+            let contents = read(path)?;
+            let content = std::str::from_utf8(contents.as_ref())
+                .map_err(|error| invalid(format!("invalid contract {path}: {error}")))?;
+            let spec = actr_service_compat::build_self_contained_service_spec(
+                &entry.name,
+                actr_service_compat::ProtoFile {
+                    name: file
+                        .path
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(&file.path)
+                        .to_owned(),
+                    content: content.to_owned(),
+                    path: None,
+                },
+            )
+            .map_err(|error| invalid(format!("invalid dependency contract: {error}")))?;
+            if spec.fingerprint != entry.fingerprint
+                || spec.protobufs[0].fingerprint != file.fingerprint
+            {
+                return Err(invalid(format!(
+                    "dependency {} contract fingerprints differ from lock",
+                    entry.alias
+                )));
+            }
+        }
         if entry.actr_type == manifest.actor_type() && entry.package_sha256.is_some() {
             return Err(invalid(format!(
                 "dependency {} creates a self-referencing package digest",
@@ -395,6 +440,13 @@ fn validate_lock(
         let alias = entry.alias.clone();
         if entries.insert(alias.clone(), entry).is_some() {
             return Err(invalid(format!("duplicate dependency lock alias {alias}")));
+        }
+    }
+    for (alias, dependency) in &manifest.dependencies {
+        if dependency.required && !entries.contains_key(alias) {
+            return Err(invalid(format!(
+                "required dependency {alias} is missing from lock"
+            )));
         }
     }
     let mut digests = BTreeMap::new();
@@ -439,6 +491,18 @@ fn validate_lock(
         );
     }
     Ok(digests)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn validate_lock<B: AsRef<[u8]>>(
+    _manifest: &ActorPackageManifest,
+    _permissions: &EgressPermissions,
+    _bytes: &[u8],
+    _read: impl Fn(&str) -> Result<B, PackError>,
+) -> Result<BTreeMap<String, String>, PackError> {
+    Err(invalid(
+        "Actor permission contracts require a native verifier",
+    ))
 }
 
 fn is_digest(value: &str) -> bool {
@@ -580,6 +644,7 @@ data_classes = ["public"]
         assert!(verified.egress.https.is_empty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn signed_egress_lock_requires_exact_target_digest() {
         let manifest = format!(
@@ -655,14 +720,30 @@ rpc_routes = ["notes.Index.Search"]
 "#
             .to_vec(),
         );
-        let lock = r#"
+        let spec = actr_service_compat::build_self_contained_service_spec(
+            "index",
+            actr_service_compat::ProtoFile {
+                name: "index.proto".into(),
+                content: String::from_utf8(payloads["contracts/index.proto"].clone()).unwrap(),
+                path: None,
+            },
+        )
+        .unwrap();
+        let lock = format!(
+            r#"
 [metadata]
 version = 2
+generated_at = "2026-11-19T00:00:00Z"
 [[dependency]]
+name = "index"
 alias = "index"
 actr_type = "egress.example/index@1.0.2"
-fingerprint = "service_semantic:example"
-"#;
+fingerprint = {:?}
+cached_at = "2026-11-19T00:00:00Z"
+files = [{{ path = "index/index.proto", fingerprint = {:?} }}]
+"#,
+            spec.fingerprint, spec.protobufs[0].fingerprint
+        );
         payloads.insert("manifest.lock.toml".into(), lock.as_bytes().to_vec());
         let mut options = ActorPackOptions {
             manifest,
@@ -676,6 +757,13 @@ fingerprint = "service_semantic:example"
                 .contains("package-sha256")
         );
         let digest = "bc".repeat(32);
+        let partial_lock = format!(
+            "[metadata]\nversion = 2\n[[dependency]]\nalias = \"index\"\nactr_type = \"egress.example/index@1.0.2\"\nfingerprint = \"x\"\npackage-sha256 = \"{digest}\"\n"
+        );
+        options
+            .payloads
+            .insert("manifest.lock.toml".into(), partial_lock.into_bytes());
+        assert!(pack_actor_package(&options).is_err());
         options.payloads.insert(
             "manifest.lock.toml".into(),
             format!("{lock}package-sha256 = \"{digest}\"\n").into_bytes(),
@@ -688,5 +776,16 @@ fingerprint = "service_semantic:example"
             .unwrap()
             .unwrap();
         assert_eq!(contract.dependency_digests.get("index"), Some(&digest));
+        options.manifest.files.push(crate::PackageFileEntry {
+            path: "another.lock.toml".into(),
+            role: "lock".into(),
+            media_type: "application/toml".into(),
+            size: 0,
+            sha256: "0".repeat(64),
+        });
+        options
+            .payloads
+            .insert("another.lock.toml".into(), Vec::new());
+        assert!(pack_actor_package(&options).is_err());
     }
 }
