@@ -140,6 +140,14 @@ impl ChannelState {
 
 /// Issuer-signed certificate binding an Actor identity to a Noise static key.
 ///
+/// **Scaffolding for the session handshake.** The wire path verifies the
+/// authoritative `actr_relay_security::ActorChannelCertificate`, whose claims
+/// also carry the policy digest, Actor state digest and runtime instance id.
+/// This copy exists so the `HandshakeStep*` messages have a shared shape; it
+/// is not a verified credential on its own, and [`Self::is_consistent`] only
+/// checks structural consistency. Any code that starts driving a real
+/// handshake from these types must keep the two definitions in sync.
+///
 /// This certificate is produced by the Realm Issuer (loran-issuer) and
 /// carried during the handshake. It binds:
 ///
@@ -182,23 +190,53 @@ pub struct ActorChannelCertificate {
     pub signature: Vec<u8>,
 }
 
+/// Expected audience of an Actor channel certificate.
+///
+/// Mirrors `actr_relay_security::ACTOR_CHANNEL_AUDIENCE`. This crate defines
+/// the shared session types only and cannot depend on the transport's crypto
+/// implementation, so the constant is duplicated deliberately.
+pub const ACTOR_CHANNEL_AUDIENCE: &str = "actr.actor.channel";
+
 impl ActorChannelCertificate {
-    /// Verify that this certificate is valid for the expected parameters.
+    /// Check structural consistency against the accepted Realm Profile.
     ///
-    /// The caller must verify the `signature` field against the Issuer key
-    /// from the accepted Realm Profile. This method checks structural
-    /// consistency and expiry only.
+    /// This mirrors the admission rules the wire path enforces in
+    /// `actr_relay_security::verify_actor_channel_certificate`: the pinned
+    /// audience, issuer/provider binding, non-zero Ed25519/X25519 keys and
+    /// credential digest, non-empty identity claims, and expiry. A certificate
+    /// issued for `actr.signaling` or `actr.turn` therefore cannot be
+    /// reinterpreted as a channel credential here either.
+    ///
+    /// The caller must still verify `signature` against the Issuer key from
+    /// the accepted Realm Profile; this method never authenticates the
+    /// certificate by itself.
     pub fn is_consistent(
         &self,
         expected_realm: &str,
         expected_actor_id: &str,
+        expected_issuer: &str,
+        expected_provider: &str,
         now_epoch_secs: u64,
     ) -> bool {
+        // Keys and the credential digest are fixed-width and must not be the
+        // all-zero placeholder an unsigned or malformed certificate carries.
+        fn is_present_digest(bytes: &[u8]) -> bool {
+            bytes.len() == 32 && bytes.iter().any(|byte| *byte != 0)
+        }
+
         self.realm == expected_realm
             && self.actor_id == expected_actor_id
+            && self.issuer == expected_issuer
+            && self.provider == expected_provider
+            && self.audience == ACTOR_CHANNEL_AUDIENCE
             && self.expires_at_epoch_secs > now_epoch_secs
-            && !self.actor_public_key.is_empty()
-            && !self.noise_public_key.is_empty()
+            && is_present_digest(&self.actor_public_key)
+            && is_present_digest(&self.noise_public_key)
+            && is_present_digest(&self.actor_credential_digest)
+            && self.signature.len() == 64
+            && [&self.actor_type, &self.member, &self.client_key]
+                .iter()
+                .all(|value| !value.is_empty())
     }
 }
 
@@ -394,9 +432,8 @@ mod tests {
         assert!(!channel.is_valid_at(1001));
     }
 
-    #[test]
-    fn actor_channel_certificate_consistency() {
-        let cert = ActorChannelCertificate {
+    fn valid_certificate() -> ActorChannelCertificate {
+        ActorChannelCertificate {
             realm: "realm1".into(),
             actor_id: "actor1".into(),
             actor_type: "front".into(),
@@ -405,16 +442,84 @@ mod tests {
             role: MemberRole::Editor,
             actor_public_key: vec![1; 32],
             noise_public_key: vec![2; 32],
-            actor_credential_digest: vec![0; 32],
+            actor_credential_digest: vec![3; 32],
             issuer: "issuer1".into(),
             provider: "provider1".into(),
-            audience: "actr.actor.channel".into(),
+            audience: ACTOR_CHANNEL_AUDIENCE.into(),
             expires_at_epoch_secs: 2000,
             signature: vec![0; 64],
+        }
+    }
+
+    #[test]
+    fn actor_channel_certificate_consistency() {
+        let cert = valid_certificate();
+        assert!(cert.is_consistent("realm1", "actor1", "issuer1", "provider1", 1000));
+        assert!(!cert.is_consistent("realm1", "actor1", "issuer1", "provider1", 2000));
+        assert!(!cert.is_consistent("realm2", "actor1", "issuer1", "provider1", 1000));
+        assert!(!cert.is_consistent("realm1", "actor2", "issuer1", "provider1", 1000));
+        assert!(!cert.is_consistent("realm1", "actor1", "issuer2", "provider1", 1000));
+        assert!(!cert.is_consistent("realm1", "actor1", "issuer1", "provider2", 1000));
+    }
+
+    #[test]
+    fn actor_channel_certificate_rejects_other_audiences_and_placeholder_keys() {
+        // A certificate minted for another Actr audience is not a channel
+        // credential, even when every identity claim matches.
+        let wrong_audience = ActorChannelCertificate {
+            audience: "actr.signaling".into(),
+            ..valid_certificate()
         };
-        assert!(cert.is_consistent("realm1", "actor1", 1000));
-        assert!(!cert.is_consistent("realm1", "actor1", 2000));
-        assert!(!cert.is_consistent("realm2", "actor1", 1000));
-        assert!(!cert.is_consistent("realm1", "actor2", 1000));
+        assert!(!wrong_audience.is_consistent("realm1", "actor1", "issuer1", "provider1", 1000));
+
+        for (label, cert) in [
+            (
+                "zero Actor key",
+                ActorChannelCertificate {
+                    actor_public_key: vec![0; 32],
+                    ..valid_certificate()
+                },
+            ),
+            (
+                "zero Noise key",
+                ActorChannelCertificate {
+                    noise_public_key: vec![0; 32],
+                    ..valid_certificate()
+                },
+            ),
+            (
+                "zero credential digest",
+                ActorChannelCertificate {
+                    actor_credential_digest: vec![0; 32],
+                    ..valid_certificate()
+                },
+            ),
+            (
+                "empty Noise key",
+                ActorChannelCertificate {
+                    noise_public_key: Vec::new(),
+                    ..valid_certificate()
+                },
+            ),
+            (
+                "empty member claim",
+                ActorChannelCertificate {
+                    member: String::new(),
+                    ..valid_certificate()
+                },
+            ),
+            (
+                "missing signature",
+                ActorChannelCertificate {
+                    signature: Vec::new(),
+                    ..valid_certificate()
+                },
+            ),
+        ] {
+            assert!(
+                !cert.is_consistent("realm1", "actor1", "issuer1", "provider1", 1000),
+                "{label} must be rejected"
+            );
+        }
     }
 }

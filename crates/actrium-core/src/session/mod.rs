@@ -45,9 +45,9 @@ pub mod integration;
 
 // Re-export channel types for convenience.
 pub use channel::{
-    ActorChannelCertificate, ChannelState, HandshakeStep1, HandshakeStep2, HandshakeStep3,
-    HandshakeStep4, HandshakeTranscript, NegotiationParams, PeerBinding, TransportKind,
-    VerifiedChannel,
+    ACTOR_CHANNEL_AUDIENCE, ActorChannelCertificate, ChannelState, HandshakeStep1, HandshakeStep2,
+    HandshakeStep3, HandshakeStep4, HandshakeTranscript, NegotiationParams, PeerBinding,
+    TransportKind, VerifiedChannel,
 };
 
 // Re-export integration traits for convenience.
