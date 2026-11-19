@@ -3,6 +3,8 @@ import { AuthProvider } from "./lib/auth";
 import { AppLayout } from "./components/layout/AppLayout";
 import { Login } from "./pages/Login";
 import { Dashboard } from "./pages/Dashboard";
+import { AppDetails } from "./pages/AppDetails";
+import { RelayService } from "./pages/services/RelayService";
 import { Realms } from "./pages/Realms";
 import { Settings } from "./pages/Settings";
 import { ConfigEditor } from "./pages/ConfigEditor";
@@ -41,7 +43,10 @@ export function App() {
             }
           >
             <Route index element={<Dashboard />} />
-            <Route path="realms" element={<Realms />} />
+            <Route path="realms" element={<Navigate to="/admin/apps" replace />} />
+            <Route path="apps" element={<Realms />} />
+            <Route path="apps/:realm" element={<AppDetails />} />
+            <Route path="services/relay" element={<RelayService />} />
             <Route path="config" element={<ConfigEditor />} />
             <Route path="settings" element={<Settings />} />
             <Route path="general/architecture" element={<Overview2Page />} />

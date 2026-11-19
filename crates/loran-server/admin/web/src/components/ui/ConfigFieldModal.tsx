@@ -92,12 +92,10 @@ function EnableCalculator({
 
 export function ConfigFieldModal({
   field,
-  tomlLine,
   onClose,
   onSaved,
 }: {
   field: ResolvedField;
-  tomlLine?: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -296,16 +294,14 @@ export function ConfigFieldModal({
                       <span className="text-gray-900">
                         {field.config_file_value}
                       </span>
-                      {tomlLine && (
-                        <Link
-                          to={`/admin/config?edit#l1:${field.key}`}
-                          className="text-gray-400 hover:text-blue-600 transition-colors"
-                          title="Edit in config.toml"
-                          onClick={onClose}
-                        >
-                          <ExternalLink className="h-3 w-3" />
-                        </Link>
-                      )}
+                      <Link
+                        to={`/admin/config?edit#l1:${field.key}`}
+                        className="text-gray-400 hover:text-blue-600 transition-colors"
+                        title="Edit in config.toml"
+                        onClick={onClose}
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                      </Link>
                     </span>
                   ) : (
                     <span className="text-gray-300 italic">not set</span>

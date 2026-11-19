@@ -22,6 +22,7 @@ export function StatusBadge({
       </span>
     );
   }
+  if (healthy === undefined) return <span className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600">Status unavailable</span>;
   if (healthy) {
     return (
       <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
@@ -112,17 +113,6 @@ export function ConfigFieldsTable({
   onRefresh?: () => void;
 }) {
   const [editField, setEditField] = useState<ResolvedField | null>(null);
-  const [lineMap, setLineMap] = useState<Record<string, number>>({});
-
-  // Fetch config file content to find TOML line numbers
-  useEffect(() => {
-    api
-      .getConfigFile()
-      .then(({ content }) => {
-        setLineMap(findLineNumbersForFields(content, fields));
-      })
-      .catch(() => {});
-  }, [fields]);
 
   // Group fields by toml_path prefix (section)
   const grouped = groupFieldsBySection(fields);
@@ -185,7 +175,6 @@ export function ConfigFieldsTable({
       {editField && (
         <ConfigFieldModal
           field={editField}
-          tomlLine={lineMap[editField.key]}
           onClose={() => setEditField(null)}
           onSaved={() => {
             setEditField(null);
@@ -195,69 +184,6 @@ export function ConfigFieldsTable({
       )}
     </>
   );
-}
-
-/**
- * Find TOML line numbers for resolved fields by matching their key's
- * last segment against lines in the appropriate TOML section.
- */
-function findLineNumbersForFields(
-  content: string,
-  fields: ResolvedField[],
-): Record<string, number> {
-  const lines = content.split("\n");
-  const result: Record<string, number> = {};
-
-  for (const field of fields) {
-    // Only bother for fields that have a config_file_value
-    if (field.config_file_value == null) continue;
-
-    const lastDot = field.key.lastIndexOf(".");
-
-    if (lastDot < 0) {
-      // Top-level key (no section): search from start until first [section]
-      const re = new RegExp(`^${escapeRegex(field.key)}\\s*=`);
-      for (let i = 0; i < lines.length; i++) {
-        const trimmed = lines[i].trim();
-        if (trimmed.startsWith("[")) break;
-        if (re.test(trimmed)) {
-          result[field.key] = i + 1;
-          break;
-        }
-      }
-      continue;
-    }
-
-    // field.key like "services.signaling.server.rate_limit.connection.per_minute"
-    // TOML section: [services.signaling.server.rate_limit.connection]
-    // TOML key: per_minute
-    const sectionPath = field.key.substring(0, lastDot);
-    const leafKey = field.key.substring(lastDot + 1);
-
-    // Find the section header — could be [section] or [section.sub]
-    const sectionHeader = `[${sectionPath}]`;
-    let sectionStart = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].trim() === sectionHeader) {
-        sectionStart = i;
-        break;
-      }
-    }
-    if (sectionStart === -1) continue;
-
-    // Search within the section for the key
-    const re = new RegExp(`^${escapeRegex(leafKey)}\\s*=`);
-    for (let i = sectionStart + 1; i < lines.length; i++) {
-      const trimmed = lines[i].trim();
-      if (trimmed.startsWith("[") && trimmed !== sectionHeader) break;
-      if (re.test(trimmed)) {
-        result[field.key] = i + 1; // 1-based line number
-        break;
-      }
-    }
-  }
-
-  return result;
 }
 
 /** Group fields by TOML section prefix */
@@ -299,13 +225,13 @@ const TIME_RANGES = [
 
 function samplesToChartData(samples: MetricSample[], timeFmt: (_s: MetricSample, i: number) => string) {
   return samples.map((s, i) => {
-    const successPct = s.requests > 0 ? ((s.requests - s.failed_requests) / s.requests) * 100 : 100;
+    const successPct = s.requests > 0 ? ((s.requests - s.failed_requests) / s.requests) * 100 : null;
     return {
       time: timeFmt(s, i),
       connections: s.active_conns,
       requests: s.requests,
       p95_ms: Math.round(s.latency_p95_ms * 10) / 10,
-      success_pct: Math.round(successPct * 10) / 10,
+      success_pct: successPct == null ? null : Math.round(successPct * 10) / 10,
     };
   });
 }
@@ -319,18 +245,19 @@ export function ServiceMetrics({
 }) {
   const type = status?.type ?? 0;
   const [rangeIdx, setRangeIdx] = useState(0);
-  const [samples, setSamples] = useState<Record<number, MetricSample[]>>({});
+  const [samples, setSamples] = useState<Record<number, MetricSample[] | null>>({});
   const initialRef = useRef(true);
   const range = TIME_RANGES[rangeIdx];
 
   const fetchTimeseries = useCallback(async () => {
+    if (!type) return;
     // Fetch all tiers in parallel
     const results = await Promise.all(
       TIME_RANGES.map((r) => api.getMetricsTimeseries(type, r.tier).catch(() => null)),
     );
-    const map: Record<number, MetricSample[]> = {};
+    const map: Record<number, MetricSample[] | null> = {};
     results.forEach((res, i) => {
-      if (res?.samples) map[TIME_RANGES[i].tier] = res.samples;
+      map[TIME_RANGES[i].tier] = res?.samples ?? null;
     });
     setSamples(map);
   }, [type]);
@@ -373,7 +300,10 @@ export function ServiceMetrics({
           ))}
         </div>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      {!type || samples[range.tier] === null ? <p role="status" className="text-sm text-amber-700">Metrics unavailable for this service.</p>
+        : samples[range.tier] === undefined ? <p className="text-sm">Loading metrics…</p>
+        : !tierSamples.length ? <p className="text-sm text-gray-500">No samples in this period.</p>
+        : <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {/* Connections */}
         <div className="rounded-xl bg-gray-50 p-4">
           <p className="text-[10px] text-gray-400 mb-1">Connections</p>
@@ -429,7 +359,7 @@ export function ServiceMetrics({
             </LineChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </div>}
     </CollapsibleCard>
   );
 }

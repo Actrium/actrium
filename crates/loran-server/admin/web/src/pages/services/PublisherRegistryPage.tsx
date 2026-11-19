@@ -1,6 +1,7 @@
+import { ServiceAccessCard } from "./ServiceAccessCard";
 import { useState, useEffect, useCallback } from 'react';
 import { Building2, CheckCircle, Clock, XCircle, AlertTriangle, Key, ShieldOff, Timer } from 'lucide-react';
-import { publisherApi, type PublisherRecord, type PublisherKeyHistory } from '../../lib/api';
+import { api, type ServiceDetail, publisherApi, type PublisherRecord, type PublisherKeyHistory } from '../../lib/api';
 import { IdentityReview } from '../../components/identity/IdentityReview';
 
 // ── Status badge ──────────────────────────────────────────────────
@@ -173,7 +174,7 @@ function KeyHistoryPanel({ publisher, onRevoked }: { publisher: PublisherRecord;
 function HowItWorks() {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4 text-sm text-gray-600 space-y-2">
-      <div className="font-semibold text-gray-800">How publishers register</div>
+      <h2 className="font-semibold text-gray-800">How publishers register</h2>
       <p>
         A publisher signs a Publisher Profile and serves it as the <code className="bg-gray-100 px-1 rounded">publisher</code> member
         of <code className="bg-gray-100 px-1 rounded">{'https://<publisher>/.well-known/actr'}</code>. It then sends a
@@ -181,8 +182,13 @@ function HowItWorks() {
         signing key, to this Actr Facility Provider&apos;s <code className="bg-gray-100 px-1 rounded">realm-management</code> endpoint.
       </p>
       <p>
-        The first accepted profile pins its signing keys; its active package signing keys verify the publisher&apos;s packages.
-        A key rotation is a later profile with a higher sequence. Replaced keys still verify old packages until revoked here.
+        The registry pins the profile-signing keys from the first accepted profile. Package-signing keys are separate
+        and verify package archives. An update must advance the profile sequence and preserve continuity with the
+        pinned keys. If the publisher changes its signing identity without that continuity, an admin has to confirm it again.
+      </p>
+      <p>
+        A replaced package key can still verify older archives while it remains listed as retired and the publisher
+        is active. Removing the key from a later accepted profile or revoking it here ends that trust.
       </p>
     </div>
   );
@@ -191,6 +197,11 @@ function HowItWorks() {
 // ── Main component ────────────────────────────────────────────────
 
 export function PublisherRegistryPage() {
+  const [detail, setDetail] = useState<ServiceDetail | null>(null);
+  const [detailError, setDetailError] = useState("");
+  useEffect(() => {
+    api.getServiceDetail("publishers").then(setDetail).catch(e => setDetailError(e.message));
+  }, []);
   const [publishers, setPublishers] = useState<PublisherRecord[]>([]);
   const [selectedPublisher, setSelectedPublisher] = useState<PublisherRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -259,6 +270,9 @@ export function PublisherRegistryPage() {
           <p className="text-gray-500 text-sm mt-1">Review registered publishers and their signing keys.</p>
         </div>
       </div>
+
+      {detail ? <ServiceAccessCard service="publishers" data={detail} publisher={selectedPublisher?.name} /> :
+        <p role="status" className="text-sm text-gray-600">{detailError || "Loading service access…"}</p>}
 
       <HowItWorks />
 

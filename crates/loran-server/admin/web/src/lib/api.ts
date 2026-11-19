@@ -43,6 +43,7 @@ export interface PublicNodeNameResponse {
 export interface AdminCapabilities {
   realm_writes_enabled: boolean;
   superv_managed: boolean;
+  provider_id: string | null;
 }
 
 export interface MetricDetail {
@@ -78,6 +79,7 @@ export interface NodeInfo {
 export type RealmStatus = "pending" | "active" | "retired";
 
 export interface RealmInfo {
+  display_name?: string | null;
   realm: string;
   /** false = suspended by the operator */
   enabled: boolean;
@@ -135,8 +137,31 @@ export interface RealmMembersResponse {
   success: boolean;
   members: RealmMemberInfo[];
   /** Open invites, without their secrets. */
-  invites: { invite_id: string; expires_at: string }[];
+  invites: { invite_id: string; role?: string; member_id?: string; created_by: string; expires_at: string }[];
 }
+
+export interface ManagementClient { available: boolean; connected: boolean; key_id?: string; member_id?: string }
+export interface AppPackage { type: string; sha256: string; href: string; dependencies?: Record<string, string> }
+export interface PackageSelection {primary_package:string; front_package:string; packages:Record<string,AppPackage>}
+export interface AppProfile {
+  sequence: number;
+  realm: { name: string; display_name: string; status: string };
+  provider: { id: string; signaling?: {url: string}[]; ice?: {urls: string[]}[] };
+  issuer?: { url: string; keys?: {id:string;status:string}[] };
+  primary_package?: string;
+  front_package?: string;
+  packages?: Record<string, AppPackage>;
+  package?: AppPackage;
+}
+export type MemberAction =
+  | { action: "update_app"; display_name?: string; selection?: PackageSelection }
+  | { action: "invite_member"; role: "editor" | "viewer"; days: number }
+  | { action: "invite_owner_device"; days: number }
+  | { action: "revoke_invite"; invite_id: string }
+  | { action: "revoke_client"; key_id: string }
+  | { action: "set_role"; member_id: string; role: "editor" | "viewer" }
+  | { action: "remove_member" | "transfer_owner"; member_id: string };
+export interface ActionResult { invite?: string; invite_id?: string; expires_at?: string }
 
 export interface ResolvedField {
   key: string;
@@ -170,7 +195,21 @@ export interface ConfigOverrideEntry {
   updated_by: string;
 }
 
+/** Admin-only projection of the running listener configuration. */
+export interface ServiceAccess {
+  url: string | null;
+  listen: string;
+  source: string;
+  shared?: boolean;
+  turn_auth?: "realm" | "static" | "rest";
+  issuer_ttl_secs?: number | null;
+  renewal_ttl_secs?: number | null;
+  relay_identity_max_secs?: number;
+  mtls?: boolean;
+}
+
 export interface ServiceDetail {
+  access: ServiceAccess | null;
   enabled: boolean;
   status: ServiceStatus | null;
   config: Record<string, unknown> | null;
@@ -244,7 +283,7 @@ export const api = {
     display_name?: string;
     primary_package?: string;
     front_package?: string;
-    packages?: Record<string, { href: string; sha256: string; type: string }>;
+    packages?: Record<string, AppPackage>;
   }) =>
     request<RealmMutationResponse>("/realms", {
       method: "POST",
@@ -278,6 +317,14 @@ export const api = {
   listRealmMembers: (realm: string) =>
     request<RealmMembersResponse>(`/realms/${encodeURIComponent(realm)}/members`),
 
+  signedAppRequest: (id:string, signed:string) => request<Record<string,unknown>>(`/realms/${encodeURIComponent(id)}/signed-management`,{method:"POST",body:signed}),
+  checkPackages: (selection:PackageSelection) => request<{verified:boolean;count:number}>("/apps/check-selection",{method:"POST",body:JSON.stringify(selection)}),
+  appProfile: (id: string) => request<{profile: AppProfile | null}>(`/realms/${encodeURIComponent(id)}/profile?optional=true`),
+  managementClient: (id: string) => request<ManagementClient>(`/realms/${encodeURIComponent(id)}/management-client`),
+  connectManagementClient: (id: string, invite: string) => request<ManagementClient>(`/realms/${encodeURIComponent(id)}/management-client`, {method: "POST", body: JSON.stringify({invite})}),
+  memberAction: (id: string, request_id: string, action: MemberAction) => request<ActionResult>(`/realms/${encodeURIComponent(id)}/member-actions`, {method:"POST", body: JSON.stringify({request_id, ...action})}),
+  dismissInvitation: (id:string, requestId:string) => request(`/realms/${encodeURIComponent(id)}/operations/${encodeURIComponent(requestId)}/reveal`,{method:"DELETE"}),
+  revealInvitation: (id: string, requestId: string) => request<ActionResult>(`/realms/${encodeURIComponent(id)}/operations/${encodeURIComponent(requestId)}/reveal`, {method:"POST"}),
   getConfig: (configType: number, key: string) =>
     request<{
       success: boolean;
@@ -343,8 +390,8 @@ export const api = {
       method: "DELETE",
     }),
 
-  probePort: (port: number) =>
-    request<{ reachable: boolean; latency_ms?: number; error?: string }>(`/network/probe/${port}`),
+  probePort: (port: number, serviceType?: number) =>
+    request<{ reachable: boolean; latency_ms?: number; target?:string; error?: string }>(`/network/probe/${port}${serviceType === undefined ? "" : "?service_type="+serviceType}`),
 
   getMetricsTimeseries: (serviceType: number, tier: number) =>
     request<TimeseriesResponse>(`/metrics/timeseries?service_type=${serviceType}&tier=${tier}`),

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { AreaChart, Area, ResponsiveContainer } from "recharts";
 import { api, type NodeInfo, type PlatformDetail, type MetricSample } from "../lib/api";
 import { PowerReserveGauge } from "../components/dashboard/PowerReserveGauge";
@@ -64,7 +64,7 @@ const SERVICES = [
   { name: "TURN", bit: 4, type: 2, route: "/admin/services/turn" },
   { name: "Issuer", bit: 8, type: 4, route: "/admin/services/issuer" },
   { name: "Signer", bit: 16, type: 5, route: "/admin/services/signer" },
-  { name: "Relay", bit: 32, type: 7, route: "/admin/config" },
+  { name: "WSS Relay", bit: 32, type: 7, route: "/admin/services/relay" },
 ] as const;
 
 /* ── Helpers for timeseries data ────────────────────────── */
@@ -81,7 +81,7 @@ function latestVal(samples: MetricSample[], key: keyof MetricSample): number {
   return samples[samples.length - 1][key] as number;
 }
 
-function SparkCell({ data, color, value, label }: { data: { v: number }[]; color: string; value: string; label: string }) {
+function SparkCell({ data, color, value, label }: { data: { v: number | null }[]; color: string; value: string; label: string }) {
   return (
     <div className="pointer-events-none">
       <p className="text-xs text-gray-400 leading-none">{label}</p>
@@ -102,7 +102,7 @@ function MicroCharts({ samples }: { samples: MetricSample[] }) {
   const reqs = latestVal(samples, "requests");
   const fails = latestVal(samples, "failed_requests");
   const p95 = latestVal(samples, "latency_p95_ms");
-  const successRate = reqs > 0 ? ((reqs - fails) / reqs) * 100 : 100;
+  const successRate = reqs > 0 ? ((reqs - fails) / reqs) * 100 : 0;
 
   const data = useMemo(() => ({
     conns: samplesToSpark(samples, "active_conns"),
@@ -110,14 +110,14 @@ function MicroCharts({ samples }: { samples: MetricSample[] }) {
     reqs: samplesToSpark(samples, "requests"),
     success: samples.map((s) => {
       const r = s.requests;
-      return { v: r > 0 ? ((r - s.failed_requests) / r) * 100 : 100 };
+      return { v: r > 0 ? ((r - s.failed_requests) / r) * 100 : null };
     }),
   }), [samples]);
 
   return (
     <div className="grid grid-cols-2 gap-x-4 gap-y-3 pointer-events-none">
       <SparkCell data={data.conns} color="#1a3a6a" value={fmtNum(conns)} label="active conns" />
-      <SparkCell data={data.success} color={successRate >= 99 ? "#22c55e" : successRate >= 95 ? "#e87a20" : "#dc2626"} value={(successRate % 1 === 0 ? successRate.toFixed(0) : successRate.toFixed(1)) + "%"} label="success rate" />
+      <SparkCell data={data.success} color={successRate >= 99 ? "#22c55e" : successRate >= 95 ? "#e87a20" : "#dc2626"} value={reqs ? (successRate % 1 === 0 ? successRate.toFixed(0) : successRate.toFixed(1)) + "%" : "—"} label="success rate" />
       <SparkCell data={data.p95} color={p95 <= 5 ? "#22c55e" : p95 <= 20 ? "#e87a20" : "#dc2626"} value={p95.toFixed(1) + "ms"} label="p95 latency" />
       <SparkCell data={data.reqs} color="#1a3a6a" value={fmtNum(reqs)} label="requests" />
     </div>
@@ -131,7 +131,7 @@ export function Dashboard() {
   const [info, setInfo] = useState<NodeInfo | null>(null);
   const [platform, setPlatform] = useState<PlatformDetail | null>(null);
   const [error, setError] = useState("");
-  const [timeseries, setTimeseries] = useState<Record<number, MetricSample[]>>({});
+  const [timeseries, setTimeseries] = useState<Record<number, MetricSample[] | null>>({});
 
   /* Gauge animation */
   const [gaugeValue, setGaugeValue] = useState(0);
@@ -165,14 +165,14 @@ export function Dashboard() {
       }
 
       // Fetch tier 0 timeseries for all service types in parallel
-      const svcTypes = [1, 2, 3, 4, 5];
+      const svcTypes = [1, 2, 3, 4, 5, 7];
       const tsResults = await Promise.all(
         svcTypes.map((t) => api.getMetricsTimeseries(t, 0).catch(() => null)),
       );
       if (isMountedRef.current) {
-        const ts: Record<number, MetricSample[]> = {};
+        const ts: Record<number, MetricSample[] | null> = {};
         svcTypes.forEach((t, i) => {
-          if (tsResults[i]?.samples) ts[t] = tsResults[i]!.samples;
+          ts[t] = tsResults[i]?.samples ?? null;
         });
         setTimeseries(ts);
       }
@@ -247,7 +247,8 @@ export function Dashboard() {
     return <div className="text-sm text-gray-500">Loading...</div>;
   }
 
-  const allHealthy = info.services.every((s) => s.is_healthy);
+  const availability = !info.services.length ? "No service status reported" : info.services.some(s=>!s.is_healthy) ? "Degraded" : SERVICES.some(svc=>Boolean(enableMask & svc.bit) && !info.services.some(s=>s.type===svc.type)) ? "Status unavailable" : "All reported services healthy";
+  const allHealthy = availability === "All reported services healthy";
 
   /* Host info from platform config */
   const httpPort = fieldVal("bind.http.port");
@@ -268,7 +269,7 @@ export function Dashboard() {
               : "inline-flex items-center rounded-full bg-red-50 px-3 py-1 text-xs font-medium text-red-700"
           }
         >
-          {allHealthy ? "All systems operational" : "Degraded"}
+          {availability}
         </span>
       }
     >
@@ -277,22 +278,23 @@ export function Dashboard() {
         <h2 className="mb-3 text-xs font-bold text-gray-400 uppercase tracking-wide">Services</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {SERVICES.map((svc) => {
-            const enabled = (enableMask & svc.bit) !== 0;
             const status = info.services.find((s) => s.type === svc.type);
+            const enabled = platform ? (enableMask & svc.bit) !== 0 : Boolean(status);
             const healthy = status?.is_healthy ?? false;
-            const samples = timeseries[svc.type] ?? [];
+            const samples = timeseries[svc.type];
 
             return (
-              <div
+              <Link
                 key={svc.name}
-                onClick={() => navigate(svc.route)}
+                to={svc.route}
+                aria-label={svc.name+" service details"}
                 className="rounded-xl border border-gray-200 bg-transparent p-5 cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
               >
                 {/* Header: name + dot + 15min badge */}
                 <div className="flex items-center gap-3 mb-3">
                   <span
                     className={`relative flex h-3 w-3 items-center justify-center rounded-full border ${
-                      !enabled
+                      !enabled || !status
                         ? "border-gray-300"
                         : healthy
                           ? "border-green-400"
@@ -300,7 +302,7 @@ export function Dashboard() {
                     }`}
                   >
                     <span className={`h-1.5 w-1.5 rounded-full ${
-                      !enabled ? "bg-gray-300" : healthy ? "bg-green-500" : "bg-red-500"
+                      !enabled || !status ? "bg-gray-300" : healthy ? "bg-green-500" : "bg-red-500"
                     }`} />
                     {enabled && healthy && (
                       <span className="absolute inset-0 rounded-full border border-green-400 animate-ping opacity-40" />
@@ -312,14 +314,14 @@ export function Dashboard() {
                   )}
                 </div>
 
-                {enabled && status ? (
+                {enabled && status && samples?.length ? (
                   <MicroCharts samples={samples} />
                 ) : (
                   <div className="py-6 text-center">
-                    <p className="text-lg font-medium text-gray-300">Off</p>
+                    <p className="text-sm text-gray-500">{!enabled ? (platform ? "Off" : "Status unavailable") : !status ? "Status unavailable" : samples === null ? "Metrics unavailable" : samples === undefined ? "Loading metrics…" : "No samples in this period."}</p>
                   </div>
                 )}
-              </div>
+              </Link>
             );
           })}
         </div>
@@ -355,7 +357,7 @@ export function Dashboard() {
               {[
                 { label: "http", value: `${httpPort}/tcp`, healthy: info.services.some(s => s.is_healthy) },
                 { label: "ice", value: `${icePort}/udp`, healthy: info.services.some(s => (s.type === 1 || s.type === 2) && s.is_healthy) },
-                { label: "relay", value: `${relayRange}/udp`, healthy: info.services.some(s => s.type === 2 && s.is_healthy) },
+                { label: "TURN relay ports", value: `${relayRange}/udp`, healthy: info.services.some(s => s.type === 2 && s.is_healthy) },
               ].map((port) => (
                 <div key={port.label} className="whitespace-nowrap">
                   <p className="text-xs text-gray-400">{port.label}</p>

@@ -1,10 +1,14 @@
 import { useState, type FormEvent, useEffect } from "react";
-import { api, type RealmMutationResponse } from "../../lib/api";
+import { api, type AppPackage, type RealmMutationResponse } from "../../lib/api";
 import { X, Copy, Download, CheckCircle, AlertTriangle } from "lucide-react";
+
+import { copyText } from "../../lib/utils";
+import { PackageCheck } from "./PackageCheck";
 
 interface RealmFormProps {
   onSubmit: (data: Parameters<typeof api.createRealm>[0]) => Promise<RealmMutationResponse>;
   onClose: () => void;
+  provider?: string | null;
   onRefresh?: () => void;
 }
 
@@ -13,13 +17,16 @@ interface RealmFormProps {
  * Realm under the Provider domain gets a Loran-signed Realm Profile, which
  * names its Service and Front packages.
  */
-export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
+export function RealmForm({ onSubmit, onClose, onRefresh, provider }: RealmFormProps) {
   const [name, setName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const emptyPackage = { href: "", sha256: "", type: "" };
   const [service, setService] = useState(emptyPackage);
   const [front, setFront] = useState(emptyPackage);
-  const selectingPackages = Object.values(service).some(Boolean) || Object.values(front).some(Boolean);
+  const selectingPackages =
+    Boolean(provider) || Object.values(service).some(Boolean) || Object.values(front).some(Boolean);
+  const [advanced, setAdvanced] = useState(false);
+  const [selectionText, setSelectionText] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -33,14 +40,11 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onClose();
-      } else if (e.key === "Enter" && step === "success") {
-        e.preventDefault();
-        handleActivate();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, step, createdRealm]); // Add step dependency
+  }, [onClose]);
 
   // The Realm is created suspended so the owner invite can be saved before
   // it serves Actors; the second step resumes it.
@@ -50,22 +54,36 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
     setLoading(true);
 
     try {
+      if (provider && name.split("@")[1] !== provider)
+        throw Error(
+          "Create an app under " + provider + " here. For another domain use External domain · signed requests.",
+        );
+      let selection:
+        { primary_package: string; front_package: string; packages: Record<string, AppPackage> } | undefined;
+      if (advanced) {
+        selection = JSON.parse(selectionText);
+        if (!selection || !selection.packages || !selection.primary_package || !selection.front_package)
+          throw Error("Supply primary_package, front_package and the complete packages object.");
+      } else if (selectingPackages) {
+        selection = { primary_package: "service", front_package: "front", packages: { service, front } };
+      }
       const resp = await onSubmit({
         realm: name,
         enabled: false,
         ...(displayName ? { display_name: displayName } : {}),
-        ...(selectingPackages
-          ? { primary_package: "service", front_package: "front", packages: { service, front } }
-          : {}),
+        ...(selection && {
+          primary_package: selection.primary_package,
+          front_package: selection.front_package,
+          packages: selection.packages,
+        }),
       });
+      if (!resp.success) throw Error(resp.error_message || "App creation failed");
+      setCreatedRealm(resp.realm?.realm ?? name);
       if (resp.owner_invite) {
         setOwnerInvite(resp.owner_invite);
         setInviteExpiresAt(resp.owner_invite_expires_at ?? null);
-        setCreatedRealm(resp.realm?.realm ?? name);
-        setStep("success");
-      } else {
-        onClose();
       }
+      setStep("success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Operation failed");
     } finally {
@@ -81,7 +99,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
       if (onRefresh) onRefresh();
       onClose();
     } catch {
-      setError("Failed to resume realm");
+      setError("Failed to resume app");
     } finally {
       setLoading(false);
     }
@@ -100,18 +118,34 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
 
   function handleCopy() {
     if (ownerInvite) {
-      navigator.clipboard.writeText(ownerInvite);
+      void copyText(ownerInvite).catch(() => setError("Select the invite code and copy it manually."));
     }
+  }
+
+  if (step === "success" && !ownerInvite) {
+    return (
+      <div role="dialog" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="max-w-md space-y-4 rounded-xl bg-white p-6">
+          <h2 className="font-semibold">App created. Owner invite unavailable.</h2>
+          <p className="text-sm">
+            {createdRealm} is suspended. Open the app to review its status and use Owner recovery if needed.
+          </p>
+          <button type="button" onClick={onClose} className="rounded border px-3 py-2">
+            Close
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (step === "success" && ownerInvite && createdRealm) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-        <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+        <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
               <CheckCircle className="h-5 w-5 text-green-500" />
-              Realm Created
+              App created
             </h2>
           </div>
 
@@ -122,8 +156,8 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
                 <div className="space-y-1">
                   <p className="text-sm font-medium text-amber-900">Save the owner invite now</p>
                   <p className="text-xs text-amber-700">
-                    It is shown only once. Hand it to the Realm&apos;s owner, who redeems it with a
-                    new client and then invites the other members.
+                    It is shown only once. Hand it to the app&apos;s Owner, who redeems it with a new client and
+                    then invites the other members.
                   </p>
                 </div>
               </div>
@@ -131,7 +165,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
 
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-medium text-gray-500 uppercase">Realm Name</label>
+                <label className="text-xs font-medium text-gray-500 uppercase">App ID</label>
                 <p className="text-sm font-mono text-gray-900">{createdRealm}</p>
               </div>
               <div>
@@ -169,7 +203,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
                 disabled={loading}
                 className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? "Resuming..." : "I have saved the invite, resume Realm"}
+                {loading ? "Resuming..." : "I have saved the invite, resume app"}
               </button>
               <button
                 onClick={onClose}
@@ -186,11 +220,9 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Create Realm
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-900">Create app</h2>
           <button
             onClick={onClose}
             className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
@@ -201,11 +233,10 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Realm Name
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">App ID</label>
             <input
               type="text"
+              aria-label="App ID"
               value={name}
               onChange={(e) => setName(e.target.value.trim())}
               placeholder="realm-id@example.com"
@@ -215,7 +246,8 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
               autoFocus
             />
             <p className="mt-1 text-xs text-gray-500">
-              The name cannot be changed later, and a retired name is never reused.
+              Use {provider ? "an ID ending in @" + provider : "the full Realm name"}. The App ID stays fixed,
+              including after retirement.
             </p>
           </div>
 
@@ -225,6 +257,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
             </label>
             <input
               type="text"
+              aria-label="Display name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -232,28 +265,86 @@ export function RealmForm({ onSubmit, onClose, onRefresh }: RealmFormProps) {
           </div>
 
           <div className="grid gap-3">
-            {(["service", "front"] as const).map((role) => {
-              const [pkg, setPackage] = role === "service" ? [service, setService] : [front, setFront];
-              return (
-                <fieldset key={role} className="grid gap-1">
-                  <legend className="text-sm font-medium text-gray-700">{role === "service" ? "Service package" : "Front package"}</legend>
-                  {(["href", "sha256", "type"] as const).map((field) => (
-                    <input key={field} type={field === "href" ? "url" : "text"}
-                      aria-label={role + " " + field} required={selectingPackages}
-                      value={pkg[field]} pattern={field === "sha256" ? "[0-9a-f]{64}" : undefined}
-                      placeholder={{ href: "HTTPS download URL", sha256: "SHA-256 (64 lowercase hex digits)", type: "publisher.example/program@1.0.0" }[field]}
-                      onChange={(event) => setPackage({ ...pkg, [field]: event.target.value.trim() })}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono" />
-                  ))}
-                </fieldset>
-              );
-            })}
-            <p className="text-xs text-gray-500">Both packages are required for a Realm signed by this Provider.</p>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={advanced}
+                onChange={(e) => {
+                  setAdvanced(e.target.checked);
+                  if (e.target.checked && !selectionText)
+                    setSelectionText(
+                      JSON.stringify(
+                        { primary_package: "service", front_package: "front", packages: { service, front } },
+                        null,
+                        2,
+                      ),
+                    );
+                }}
+              />
+              Edit complete package selection
+            </label>
+            {advanced ? (
+              <label className="grid gap-1 text-sm">
+                Package selection JSON (2–32 packages)
+                <textarea
+                  required
+                  rows={9}
+                  value={selectionText}
+                  onChange={(e) => setSelectionText(e.target.value)}
+                  className="rounded-lg border p-2 font-mono text-xs"
+                />
+              </label>
+            ) : (
+              (["service", "front"] as const).map((role) => {
+                const [pkg, setPackage] = role === "service" ? [service, setService] : [front, setFront];
+                return (
+                  <fieldset key={role} className="grid gap-1">
+                    <legend className="text-sm font-medium text-gray-700">
+                      {role === "service" ? "Service package" : "Front package"}
+                    </legend>
+                    {(["href", "sha256", "type"] as const).map((field) => (
+                      <input
+                        key={field}
+                        type={field === "href" ? "url" : "text"}
+                        aria-label={role + " " + field}
+                        required={selectingPackages}
+                        value={pkg[field]}
+                        pattern={field === "sha256" ? "[0-9a-f]{64}" : undefined}
+                        placeholder={
+                          {
+                            href: "HTTPS download URL",
+                            sha256: "SHA-256 (64 lowercase hex digits)",
+                            type: "publisher.example/program@1.0.0",
+                          }[field]
+                        }
+                        onChange={(event) => setPackage({ ...pkg, [field]: event.target.value.trim() })}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
+                      />
+                    ))}
+                  </fieldset>
+                );
+              })
+            )}
+            <p className="text-xs text-gray-500">
+              Both packages are required for a Realm signed by this Provider.
+            </p>
           </div>
 
-          {error && (
-            <p className="text-sm text-red-600">{error}</p>
+          {(advanced || selectingPackages) && (
+            <PackageCheck
+              selection={
+                advanced
+                  ? selectionText
+                  : JSON.stringify({
+                      primary_package: "service",
+                      front_package: "front",
+                      packages: { service, front },
+                    })
+              }
+              disabled={loading}
+            />
           )}
+          {error && <p className="text-sm text-red-600">{error}</p>}
 
           <div className="flex justify-end gap-3 pt-2">
             <button

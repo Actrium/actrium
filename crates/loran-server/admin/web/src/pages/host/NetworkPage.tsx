@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   RefreshCw,
   Loader2,
@@ -95,25 +95,8 @@ export function NetworkPage() {
     }
   };
 
-  const [autoTested, setAutoTested] = useState(false);
-
-  useEffect(() => {
-    fetchServices();
-  }, []);
-
-  // Auto-run all tests once services are loaded
-  useEffect(() => {
-    if (!autoTested && services.length > 0 && !loading) {
-      setAutoTested(true);
-      services.forEach(s => {
-        if (s.type === 1 || s.type === 2) {
-          testStunTurnService(s);
-        } else {
-          testHttpService(s);
-        }
-      });
-    }
-  }, [services, loading]);
+  const inFlight = useRef(new Set<string>());
+  useEffect(() => { void fetchServices(); }, []);
 
   const updateTestResult = (name: string, result: ServiceTestResult) => {
     setTestResults(prev => ({ ...prev, [name]: result }));
@@ -125,9 +108,10 @@ export function NetworkPage() {
     updateTestResult(name, { status: "testing" });
 
     try {
-      const data = await api.probePort(service.port || 80);
+      if (!service.port) throw Error("No port reported");
+      const data = await api.probePort(service.port, service.type);
       if (data.reachable) {
-        updateTestResult(name, { status: "success", message: "Reachable", latency: data.latency_ms });
+        updateTestResult(name, { status: "success", message: "Node connected to "+data.target, latency: data.latency_ms });
       } else {
         updateTestResult(name, { status: "failure", message: data.error || "Unreachable" });
       }
@@ -140,63 +124,40 @@ export function NetworkPage() {
   };
 
   // Test UDP reachability via STUN binding request (shared by STUN & TURN on same port)
-  const testedPorts = new Set<number>();
+
   const testStunTurnService = async (service: ServiceStatus) => {
-    const port = service.port || 3478;
+    const advertised = platformData?.config_fields.find(f => f.key === "bind.ice.advertised_port")?.effective_value;
+    const port = Number(advertised) || service.port;
+    const host = platformData?.config_fields.find(f => f.key === "bind.ice.advertised_ip")?.effective_value;
+    if (!port || !host) { updateTestResult(service.name,{status:"failure",message:"Advertised ICE address unavailable"}); return; }
 
     // Only test each UDP port once — apply result to all services on that port
-    if (testedPorts.has(port)) return;
-    testedPorts.add(port);
+    const probe = formatHostPort(host,port);
+    if (inFlight.current.has(probe)) return;
+    inFlight.current.add(probe);
 
-    const samePort = services.filter(s => s.port === port && (s.type === 1 || s.type === 2));
+    const samePort = services.filter(s => s.port === service.port && (s.type === 1 || s.type === 2));
     samePort.forEach(s => updateTestResult(s.name, { status: "testing" }));
     const startTime = performance.now();
 
+    let pc: RTCPeerConnection | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-        const iceServerUrl = `stun:${window.location.hostname}:${port}`;
-        const pc = new RTCPeerConnection({ iceServers: [{ urls: iceServerUrl }] });
-        pc.createDataChannel("test");
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        const result = await new Promise<string>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                pc.close();
-                reject(new Error("No STUN response (timeout)"));
-            }, 5000);
-
-            pc.onicecandidate = (event) => {
-                if (event.candidate) {
-                    const t = event.candidate.type;
-                    if (t === "srflx" || t === "relay" || t === "prflx") {
-                        clearTimeout(timeout);
-                        pc.close();
-                        resolve(t);
-                    }
-                } else {
-                    // gathering done, null candidate
-                }
-            };
-
-            pc.onicegatheringstatechange = () => {
-                if (pc.iceGatheringState === "complete") {
-                    clearTimeout(timeout);
-                    pc.close();
-                    reject(new Error("No reflexive candidate"));
-                }
-            };
-        });
-
-        const duration = Math.round(performance.now() - startTime);
-        samePort.forEach(s => updateTestResult(s.name, {
-            status: "success", message: `${result} candidate`, latency: duration
-        }));
+      pc = new RTCPeerConnection({iceServers:[{urls:"stun:"+probe}]});
+      const peer = pc;
+      await new Promise<void>((resolve,reject) => {
+        timeout = setTimeout(() => reject(Error("Browser did not obtain a STUN reflexive candidate")), 7000);
+        peer.onicecandidate = ({candidate}) => {
+          if (candidate?.type === "srflx") resolve();
+          if (!candidate) reject(Error("ICE gathering ended without a reflexive candidate"));
+        };
+        peer.createDataChannel("probe");
+        peer.createOffer().then(offer => peer.setLocalDescription(offer)).catch(reject);
+      });
+      samePort.forEach(s => updateTestResult(s.name, {status:"success", message:"Browser STUN binding only",latency:Math.round(performance.now()-startTime)}));
     } catch (err) {
-        samePort.forEach(s => updateTestResult(s.name, {
-            status: "failure",
-            message: err instanceof Error ? err.message : "ICE check failed"
-        }));
-    }
+      samePort.forEach(s => updateTestResult(s.name,{status:"failure",message:err instanceof Error ? err.message : "ICE check failed"}));
+    } finally { clearTimeout(timeout); pc?.close(); inFlight.current.delete(probe); }
   };
 
   const runTest = (service: ServiceStatus) => {
@@ -209,52 +170,48 @@ export function NetworkPage() {
 
 
   const runAllTests = () => {
-    testedPorts.clear();
+
     services.forEach(runTest);
   };
+
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current || !platformData || !services.length) return;
+    started.current = true;
+    runAllTests();
+  }, [platformData, services]);
 
   if (loading) return <div className="flex h-full items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /></div>;
   if (error) return <div className="p-8 text-center text-red-600">{error}</div>;
 
-  // All expected services — ones missing from API are treated as disabled
-  const ALL_SERVICES: { name: string; type: number; port: number }[] = [
-    { name: "Signer Service", type: 5, port: 80 },
-    { name: "Issuer Service", type: 4, port: 80 },
-    { name: "Signaling Service", type: 3, port: 80 },
-    { name: "STUN Server", type: 1, port: 3478 },
-    { name: "TURN Server", type: 2, port: 3478 },
-  ];
-
-  const apiMap = new Map(services.map(s => [s.name, s]));
-
+  const configPort = (key: string) => Number(platformData?.config_fields.find(f => f.key === key)?.effective_value) || null;
+  const httpPort = configPort("bind.http.port");
+  const icePort = configPort("bind.ice.port");
   type ExtendedService = ServiceStatus & { enabled: boolean };
-  const allServices: ExtendedService[] = ALL_SERVICES.map(def => {
-    const s = apiMap.get(def.name);
-    if (s) return { ...s, enabled: true };
-    return {
-      name: def.name, type: def.type, port: def.port,
-      is_healthy: false, active_connections: 0, total_requests: 0,
-      failed_requests: 0, average_latency_ms: 0, url: null, domain: null,
-      enabled: false,
-    };
+  const known = [
+    {name:"Signer Service",type:5,port:null}, {name:"Issuer Service",type:4,port:httpPort},
+    {name:"Signaling Service",type:3,port:httpPort}, {name:"WSS Relay",type:7,port:httpPort},
+    {name:"STUN Server",type:1,port:icePort}, {name:"TURN Server",type:2,port:icePort},
+  ];
+  const allServices: ExtendedService[] = known.map(def => {
+    const actual = services.find(s => s.type === def.type);
+    return actual ? {...actual, enabled:true} : {...def,enabled:false,is_healthy:false,
+      active_connections:0,total_requests:0,failed_requests:0,average_latency_ms:0,url:null,domain:null};
   });
-
-  // Group services by port
-  const portGroups: Record<number, ExtendedService[]> = {};
-  allServices.forEach(s => {
-      if (s.port) {
-          if (!portGroups[s.port]) portGroups[s.port] = [];
-          portGroups[s.port].push(s);
-      }
-  });
-  
+  const portGroups: Record<string, ExtendedService[]> = {};
+  for (const service of allServices) {
+    if (!service.port) continue;
+    const protocol = service.type === 1 || service.type === 2 ? "udp" : "tcp";
+    const key = service.port + "/" + protocol;
+    (portGroups[key] ||= []).push(service);
+  }
 
   // ── Diagram layout ──────────────────────────────────────────
-  const groupKeys = Object.keys(portGroups).map(Number).sort((a, b) => a - b);
+  const groupKeys = Object.keys(portGroups).sort((a, b) => parseInt(a) - parseInt(b) || a.localeCompare(b));
   const rowCount = groupKeys.length;
 
   // Pill zone (left)
-  const PILL_W = 105, PILL_H = 42, PILL_GAP = 10;
+  const PILL_W = 78, PILL_H = 42, PILL_GAP = 10;
   // Port-bar zone (center)
   const BAR_H = 26;
   const FW_X = 510;                            // center line of firewall/boundary
@@ -273,6 +230,7 @@ export function NetworkPage() {
 
   // Short pill labels — strip verbose suffixes
   const shortLabel = (name: string): string => {
+    if (name === "WebSocket Relay Service") return "WSS Relay";
     return name.replace(/\s+(Service|Server)$/i, "");
   };
 
@@ -306,11 +264,9 @@ export function NetworkPage() {
   };
 
   // Labels beside ports
-  const domainHost = typeof window !== "undefined" ? window.location.hostname : "";
   const advIp = platformData?.config_fields.find(f => f.key === "bind.ice.advertised_ip")?.effective_value ?? "";
   const advPort = platformData?.config_fields.find(f => f.key === "bind.ice.advertised_port")?.effective_value ?? "";
-  const relayPortMin = platformData?.config_fields.find(f => f.key === "bind.ice.relay_port_min")?.effective_value ?? "49152";
-  const relayPortMax = platformData?.config_fields.find(f => f.key === "bind.ice.relay_port_max")?.effective_value ?? "65535";
+  const relayRange = platformData?.config_fields.find(f => f.key === "turn.relay_port_range")?.effective_value || "—";
 
   const isTesting = (svcs: ExtendedService[]) =>
     svcs.some(s => testResults[s.name]?.status === "testing");
@@ -320,10 +276,10 @@ export function NetworkPage() {
   return (
     <ServicePageLayout
       title="Network Diagnostics"
-      description="Visual network topology and firewall status."
+      description="Configured listeners and reachability checks. TCP runs on this node. Browser ICE checks STUN binding only. TURN allocation and WSS channel authentication require their own clients."
       headerActions={
         <button onClick={runAllTests} className="inline-flex items-center rounded-md bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm border border-gray-300 hover:bg-gray-50 active:scale-95 active:bg-gray-100 transition-transform duration-75">
-          <RefreshCw className="mr-2 h-4 w-4" /> retest
+          <RefreshCw className="mr-2 h-4 w-4" /> Run checks
         </button>
       }
     >
@@ -406,6 +362,12 @@ export function NetworkPage() {
           {/* ── Port-group rows ── */}
           {groupKeys.map((port, idx) => {
             const svcs = [...portGroups[port]].sort((a, b) => (NAME_ORDER[a.name] ?? 99) - (NAME_ORDER[b.name] ?? 99));
+            const udp = port.endsWith("/udp");
+            const relayPorts = svcs.some(s => s.enabled && s.type === 2) && relayRange !== "—";
+            const endpoints = [...new Set(svcs.flatMap(s => {
+              if (!s.url || udp) return [];
+              try { return [new URL(s.url).host]; } catch { return []; }
+            }))];
             const cy = rowCY(idx);
             const iFill = intBarFill(svcs);
             const eFill = extBarFill(svcs);
@@ -443,43 +405,43 @@ export function NetworkPage() {
                 })}
 
                 {/* Bars and port labels */}
-                {port === 3478 ? (
+                {udp ? (
                   <>
-                    {/* Thin 2px line for :3478 */}
+                    {/* ICE listener */}
                     <rect x={BAR_INT_LEFT} y={cy - 10} width={effectiveFW_X - BAR_INT_LEFT - 35} height={2} fill={iFill} />
                     <rect x={effectiveFW_X + 35} y={cy - 10} width={BAR_EXT_RIGHT - effectiveFW_X - 35} height={2} fill={eFill} className={extClass} />
-                    <text x={effectiveFW_X - 50} y={cy - 14} textAnchor="end" fontSize="10" fontWeight="600" fontFamily="monospace" fill="#64748b">3478/udp</text>
+                    <text x={effectiveFW_X - 50} y={cy - 14} textAnchor="end" fontSize="10" fontWeight="600" fontFamily="monospace" fill="#64748b">{port}</text>
                     {advIp && advPort && (
                       <text x={LABEL_X} y={cy - 14} textAnchor="start" fontSize="10" fontWeight="600" fill="#334155">
                         {formatHostPort(advIp, advPort)}
                       </text>
                     )}
-                    {advIp && (
+                    {relayPorts && (
                       <text x={LABEL_X} y={cy + 21} textAnchor="start" fontSize="10" fontWeight="600" fill="#334155">
-                        {`:${relayPortMin}–${relayPortMax}`}
+                        {relayRange}
                       </text>
                     )}
 
-                    {/* Wide 16px bar for relay port range */}
+                    {relayPorts && <>
                     <rect x={BAR_INT_LEFT} y={cy - 5} width={effectiveFW_X - BAR_INT_LEFT - 35} height={16} fill={iFill} />
                     <rect x={effectiveFW_X + 35} y={cy - 5} width={BAR_EXT_RIGHT - effectiveFW_X - 35} height={16} fill={eFill} className={extClass} />
-                    <text x={effectiveFW_X - 50} y={cy + 21} textAnchor="end" fontSize="10" fontWeight="600" fontFamily="monospace" fill="#64748b">{`${relayPortMin}–${relayPortMax}/udp`}</text>
+                    <text x={effectiveFW_X - 50} y={cy + 21} textAnchor="end" fontSize="10" fontWeight="600" fontFamily="monospace" fill="#64748b">{relayRange+"/udp"}</text></>}
                   </>
                 ) : (
                   <>
-                    {(() => { const h = port === 80 ? 2 : BAR_H; return (
+                    {(() => { const h = BAR_H; return (
                       <>
                         <rect x={BAR_INT_LEFT} y={cy - h / 2} width={effectiveFW_X - BAR_INT_LEFT - 35} height={h} fill={iFill} />
 
                         <rect x={effectiveFW_X + 35} y={cy - h / 2} width={BAR_EXT_RIGHT - effectiveFW_X - 35} height={h} fill={eFill} className={extClass} />
                       </>
                     ); })()}
-                    <text x={effectiveFW_X - 50} y={port === 80 ? cy - 5 : cy + 4} textAnchor="end" fontSize="10" fontWeight="600" fontFamily="monospace" fill={port === 80 ? "#64748b" : "white"}>
-                      {`${port}/${port === 80 ? "tcp" : "udp"}`}
+                    <text x={effectiveFW_X - 50} y={cy + 4} textAnchor="end" fontSize="10" fontWeight="600" fontFamily="monospace" fill="white">
+                      {port}
                     </text>
-                    {port === 80 && domainHost && (
+                    {endpoints.length > 0 && (
                       <text x={LABEL_X} y={cy - 5} textAnchor="start" fontSize="10" fontWeight="600" fill="#334155">
-                        {formatHostPort(domainHost, port)}
+                        <title>{endpoints.join(", ")}</title>{endpoints.length === 1 ? endpoints[0] : endpoints.length+" service endpoints"}
                       </text>
                     )}
                   </>
@@ -513,8 +475,8 @@ export function NetworkPage() {
                   <tr key={s.name} className="border-b border-gray-100 last:border-0 align-top">
                     <td className="py-2 pr-4 font-medium text-gray-900">{label}</td>
                     <td className="py-2 pr-4 font-mono text-gray-600">
-                      {s.port}/{proto.toLowerCase()}
-                      {s.type === 2 && <>, 49152–65535/udp</>}
+                      {s.port ? s.port + "/" + proto.toLowerCase() : "Unavailable"}
+                      {s.type === 2 && relayRange !== "—" && <>, {relayRange}/udp</>}
                     </td>
                     <td className="py-2 pr-4">
                       {!s.enabled ? (
@@ -530,7 +492,7 @@ export function NetworkPage() {
                         {s.enabled && !s.is_healthy && (<>
                           {label} failed to initialize. Check logs
                           with <C c="journalctl -u loran -n 50 --no-pager" /> and
-                          verify port binding via <C c={`sudo ss -tlnp sport = :${s.port}`} />.
+                          verify port binding via <C c={`sudo ss -${proto === 'UDP' ? 'u' : 't'}lnp sport = :${s.port}`} />.
                           Review <C c="cat /etc/loran/config.toml" /> for config errors.
                         </>)}
                       </td>
@@ -546,12 +508,12 @@ export function NetworkPage() {
 
       {/* ── Firewall / External Reachability ── */}
       {(() => {
-        const fwGroups = Object.keys(portGroups).map(Number).sort((a, b) => a - b);
+        const fwGroups = Object.keys(portGroups).sort((a, b) => parseInt(a) - parseInt(b) || a.localeCompare(b));
         const hasFirewallIssue = fwGroups.some(port =>
           portGroups[port].some(s => testResults[s.name]?.status === "failure")
         );
         return (
-        <CollapsibleCard storageKey="net_firewall" title="Firewall">
+        <CollapsibleCard storageKey="net_firewall" title="Reachability checks">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs font-mono text-gray-400">
@@ -564,42 +526,31 @@ export function NetworkPage() {
             <tbody>
               {fwGroups.map(port => {
                 const svcs = portGroups[port];
-                const proto = svcs[0].type === 1 || svcs[0].type === 2 ? "UDP" : "TCP";
-                const protoLower = proto.toLowerCase();
+
                 const names = svcs.map(s => shortLabel(s.name)).join(", ");
                 const isTesting = svcs.some(s => testResults[s.name]?.status === "testing");
                 const isFail = svcs.some(s => testResults[s.name]?.status === "failure");
                 const isSuccess = svcs.every(s => testResults[s.name]?.status === "success");
                 const isIce = svcs[0].type === 1 || svcs[0].type === 2;
-                const hostname = window.location.hostname;
+
                 return (
                   <tr key={port} className="border-b border-gray-100 last:border-0 align-top">
-                    <td className="py-2 pr-4 font-mono text-gray-600">{port}/{protoLower}</td>
+                    <td className="py-2 pr-4 font-mono text-gray-600">{port}</td>
                     <td className="py-2 pr-4 text-gray-900">{names}</td>
                     <td className="py-2 pr-4">
                       {isTesting ? (
                         <span className="flex items-center gap-1 text-blue-600 text-xs"><Loader2 className="h-3 w-3 animate-spin" />Testing</span>
                       ) : isSuccess ? (
-                        <span className="text-green-700 text-xs font-medium">Reachable</span>
+                        <span className="text-green-700 text-xs font-medium">{isIce ? "STUN binding confirmed" : "TCP connected"}</span>
                       ) : isFail ? (
-                        <span className="text-red-700 text-xs font-medium">Unreachable</span>
+                        <span className="text-red-700 text-xs font-medium">Check unsuccessful</span>
                       ) : (
                         <span className="text-gray-400 text-xs">—</span>
                       )}
                     </td>
                     {hasFirewallIssue && (
                       <td className="py-2 text-xs text-gray-500 leading-relaxed">
-                        {isFail && (<>
-                          Inbound {protoLower} blocked. Open
-                          with <C c={`sudo ufw allow ${port}/${protoLower}`} /> and
-                          verify via <C c={isIce ? `stun ${hostname} ${port}` : `curl -sI http://${hostname}:${port}`} />.
-                          Check rules: <C c={`sudo ufw status | grep ${port}`} />.
-                          {isIce && port === 3478 && <>{" "}Relay range
-                            also needed: <C c="sudo ufw allow 49152:65535/udp" />.</>}
-                          {isIce && <>{" "}Also verify
-                            that <C c="bind.ice.advertised_ip" /> in <C c="/etc/loran/config.toml" /> matches
-                            the host's actual public IP: <C c="curl -s ifconfig.me" />.</>}
-                        </>)}
+                        {isFail && <span>{svcs.map(s => testResults[s.name]?.message).filter(Boolean)[0] || "Check failed"}</span>}
                       </td>
                     )}
                   </tr>

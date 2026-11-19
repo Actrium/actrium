@@ -44,7 +44,7 @@ export function ConfirmModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+      <div role="dialog" aria-modal="true" aria-label={title} className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
         <div className="flex items-start gap-4">
           <div className={`rounded-full p-2 ${isDestructive ? "bg-red-100 text-red-600" : "bg-blue-100 text-blue-600"}`}>
             <AlertTriangle className="h-5 w-5" />

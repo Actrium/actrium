@@ -103,13 +103,11 @@ function SectionHeader({
   badge?: number;
 }) {
   const s = LAYER_STYLES[id] ?? LAYER_STYLES.l0;
+  const Icon = open ? Minus : Plus;
   return (
-    <button
-      onClick={onToggle}
-      className={`w-full flex items-center justify-between px-4 py-3 text-left transition-colors ${open ? s.bgOpen : s.bg}`}
-    >
-      <div className="flex items-center gap-3">
-        <span className={`text-sm font-semibold ${s.label}`}>{title}</span>
+    <div className={`flex items-center gap-2 px-4 transition-colors ${open ? s.bgOpen : s.bg}`}>
+      <div className="flex cursor-text items-center gap-3 py-3">
+        <h2 className={`text-sm font-semibold ${s.label}`}>{title}</h2>
         {badge !== undefined && badge > 0 && (
           <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
             id === "eff" ? "bg-emerald-100 text-emerald-600" : "bg-purple-100 text-purple-600"
@@ -119,12 +117,16 @@ function SectionHeader({
         )}
         <span className={`text-xs ${s.desc}`}>{description}</span>
       </div>
-      {open ? (
-        <Minus className={`h-4 w-4 ${s.label}`} />
-      ) : (
-        <Plus className={`h-4 w-4 ${s.label}`} />
-      )}
-    </button>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex min-w-6 flex-1 cursor-pointer items-center justify-end self-stretch rounded"
+        aria-label={`${open ? "Collapse" : "Expand"} ${title}`}
+        aria-expanded={open}
+      >
+        <Icon aria-hidden="true" className={`h-4 w-4 ${s.label}`} />
+      </button>
+    </div>
   );
 }
 

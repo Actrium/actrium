@@ -26,7 +26,7 @@ const nodeSections = [
   },
   {
     title: "HTTP Binding",
-    desc: "Foundation for Signaling, Issuer, Signer, and Control",
+    desc: "Foundation for Signaling, WSS Relay, Issuer and Control",
     keys: ["bind.http"],
   },
   {
@@ -81,7 +81,7 @@ export function Overview2Page() {
         }
 
         const ENABLE_BITS: Record<string, number> = {
-          Signaling: 1, STUN: 2, TURN: 4, Issuer: 8, Signer: 16,
+          Signaling: 1, STUN: 2, TURN: 4, Issuer: 8, Signer: 16, "WSS Relay": 32,
         };
         const serviceOn = (name: string) =>
           (enableMask & (ENABLE_BITS[name] ?? 0)) !== 0 || name === "Control";
@@ -89,7 +89,7 @@ export function Overview2Page() {
         const pillRoutes: Record<string, string> = {
           Admin: "/admin", Control: "/admin/services/control", Signer: "/admin/services/signer",
           Issuer: "/admin/services/issuer", "Publisher Registry": "/admin/publishers", Signaling: "/admin/services/signaling",
-          STUN: "/admin/services/stun", TURN: "/admin/services/turn",
+          "WSS Relay": "/admin/services/relay", STUN: "/admin/services/stun", TURN: "/admin/services/turn",
         };
         const pillHoverStrokes: Record<string, string> = {
           Admin: "#6366f1", Control: "#d97706", Signer: "#d97706",
@@ -164,7 +164,7 @@ export function Overview2Page() {
                     <polygon points="25,16 33,20.5 33,29.5 25,34 17,29.5 17,20.5" fill="none" stroke="#94a3b8" strokeWidth={1.6} />
                   </g>
                   <text x={60} y={34} textAnchor="start" fontSize={12} fontWeight={600} fill="#475569">Actor Peers</text>
-                  <text x={60} y={52} textAnchor="start" fontSize={9} fill="#94a3b8">WS Signaling · Credentials · Realm Discovery / ACL · Capability Negotiation · STUN · TURN</text>
+                  <text x={60} y={52} textAnchor="start" fontSize={9} fill="#94a3b8">App (Realm) · Signaling · Actor credentials · STUN / TURN · WSS Relay</text>
                 </g>
 
                 {/* Metrics  (w=168) */}
@@ -197,28 +197,23 @@ export function Overview2Page() {
                   <line x1={760} y1={34} x2={998} y2={34} stroke="#cbd5e1" strokeWidth={0.8} />
                   <text x={878} y={30} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#94a3b8">udp/{icePort}</text>
 
-                  {/* 8 pills: w=112, gap=12 */}
-                  {pill(16, 41, "Admin", true, 112, controlColors)}
-                  {pill(140, 41, "Control", true, 112, signerColors)}
-                  {pill(264, 41, "Signer", serviceOn("Signer"), 112, signerColors)}
-                  {pill(388, 41, "Issuer", serviceOn("Issuer"), 112)}
-                  {pill(500, 41, "Publisher Registry", true, 136)}
-                  {pill(636, 41, "Signaling", serviceOn("Signaling"), 112)}
-                  {pill(760, 41, "STUN", serviceOn("STUN"), 112)}
-                  {pill(884, 41, "TURN", serviceOn("TURN"), 112)}
-
-                  <text x={72} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/admin</text>
-                  <text x={196} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">gRPC</text>
-                  <text x={320} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">gRPC</text>
-                  <text x={444} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/issuer</text>
-                  <text x={568} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/registry</text>
-                  <text x={692} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">/signaling</text>
-                  <text x={816} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">:{icePort}</text>
-                  <text x={940} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">:{icePort}, 49152-65535</text>
+                  {[
+                    {name:"Admin", x:16, w:86, path:"/admin", on:true, colors:controlColors},
+                    {name:"Control", x:110, w:88, path:"gRPC", on:true, colors:signerColors},
+                    {name:"Signer", x:206, w:88, path:"gRPC", on:serviceOn("Signer"), colors:signerColors},
+                    {name:"Issuer", x:302, w:90, path:"/issuer", on:serviceOn("Issuer")},
+                    {name:"Publisher Registry", x:400, w:132, path:"/admin/publishers", on:true},
+                    {name:"Signaling", x:540, w:96, path:"WebSocket", on:serviceOn("Signaling")},
+                    {name:"WSS Relay", x:644, w:104, path:"/relay/ws", on:serviceOn("WSS Relay")},
+                    {name:"STUN", x:760, w:112, path:icePort+"/udp", on:serviceOn("STUN")},
+                    {name:"TURN", x:884, w:112, path:getField(d.config_fields,"turn.relay_port_range"), on:serviceOn("TURN")},
+                  ].map(s => <g key={s.name}>{pill(s.x,41,s.name,s.on,s.w,s.colors)}
+                    <text x={s.x+s.w/2} y={75} textAnchor="middle" fontSize={7} fontFamily="monospace" fill="#64748b">{s.path}</text>
+                  </g>)}
 
                   {/* Cluster internal label under Control + Signer */}
-                  <line x1={140} y1={93} x2={376} y2={93} stroke="#d97706" strokeWidth={0.6} opacity={0.5} />
-                  <text x={258} y={101} textAnchor="middle" fontSize={7} fill="#92400e" opacity={0.6}>cluster internal service</text>
+                  <line x1={110} y1={93} x2={294} y2={93} stroke="#d97706" strokeWidth={0.6} opacity={0.5} />
+                  <text x={202} y={101} textAnchor="middle" fontSize={7} fill="#92400e" opacity={0.6}>cluster internal service</text>
                 </g>
 
                 {/* ═══════════════════════════════════════════ */}
