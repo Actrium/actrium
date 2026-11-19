@@ -320,7 +320,7 @@ try {
     await button("Create app").click();
     await page.getByLabel("App ID", { exact: true }).fill(other);
     await page.getByLabel("Display name", { exact: true }).fill(otherName);
-    await page.getByLabel("Membership", { exact: true }).selectOption("open");
+    await page.getByRole("combobox", { name: "Membership", exact: true }).selectOption("open");
     await page.getByLabel("Invite-free joins per minute", { exact: true }).fill("1");
     await page.getByLabel("Member limit", { exact: true }).fill("4");
     await page.getByLabel("Edit complete package selection").check();
@@ -369,7 +369,7 @@ try {
     await admission.getByText("4 / 4", { exact: true }).waitFor();
     await button("Edit admission", admission).click();
     const dialog = page.getByRole("dialog", { name: "Edit admission" });
-    await dialog.getByLabel("Membership", { exact: true }).selectOption("invite-only");
+    await dialog.getByRole("combobox", { name: "Membership", exact: true }).selectOption("invite-only");
     await dialog.getByLabel("Member limit", { exact: true }).fill("5");
     await button("Save", dialog).click();
     await dialog.waitFor({ state: "hidden" });
