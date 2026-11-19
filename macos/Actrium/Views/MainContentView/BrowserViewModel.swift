@@ -538,10 +538,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         newTab.groupId = groupId
         if let address = newTab.url, address.scheme?.lowercased() == "actr" {
             let linkAddress = ActrLinkInvite.strippingInviteArgs(from: address.absoluteString)
-            newTab.url = URL(string: linkAddress)
-            let link = try? ActriumCore.parseActrUri(
-                uri: linkAddress, installationId: InstallationIdProvider.getOrCreate()
-            )
+            newTab.url = linkAddress.flatMap { URL(string: $0) }
+            let link = newTab.url.flatMap {
+                try? ActriumCore.parseActrUri(
+                    uri: $0.absoluteString, installationId: InstallationIdProvider.getOrCreate()
+                )
+            }
             // Transfer payloads contain serialized Guest content, so reopen remote
             // Realm addresses through signed discovery in the destination.
             if link?.isLocal != true {

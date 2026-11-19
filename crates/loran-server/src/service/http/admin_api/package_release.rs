@@ -64,7 +64,14 @@ async fn release(
         return Ok(receipt);
     }
     let snapshot = state.service.realm_package_state(realm).await?;
-    if snapshot.sequence != operation.expected_sequence {
+    let conflict = if snapshot.sequence != operation.expected_sequence {
+        Some("The Profile changed. Reload the selection before submitting again.")
+    } else if operation.rollback && snapshot.previous_selection.as_ref() != Some(&selection) {
+        Some("There is no matching previous package selection to restore.")
+    } else {
+        None
+    };
+    if let Some(message) = conflict {
         // An identical request may have committed while the snapshot loaded.
         if let Some(receipt) = state
             .service
@@ -73,14 +80,7 @@ async fn release(
         {
             return Ok(receipt);
         }
-        return Err(Status::aborted(
-            "The Profile changed. Reload the selection before submitting again.",
-        ));
-    }
-    if operation.rollback && snapshot.previous_selection.as_ref() != Some(&selection) {
-        return Err(Status::aborted(
-            "There is no matching previous package selection to restore.",
-        ));
+        return Err(Status::aborted(message));
     }
     let kind = snapshot
         .selection

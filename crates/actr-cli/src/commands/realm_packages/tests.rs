@@ -626,6 +626,9 @@ async fn traverses_local_front_dependencies_and_defers_its_incoming_export_check
     let args = CheckArgs {
         selection: selection_path.clone(),
         output: dir.path().join("check"),
+        trust_dir: None,
+        probe_realm: None,
+        probe: ServiceProbeArgs::default(),
     };
     let check = |url: String, _limit| {
         std::future::ready(
