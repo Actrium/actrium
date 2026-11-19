@@ -1,3 +1,4 @@
+import AppKit
 import ActriumIPC
 import Foundation
 import XCTest
@@ -28,11 +29,10 @@ final class LocalRealmFrontEchoTests: XCTestCase {
         }
         let initial = try XCTUnwrap(viewModel.currentTab?.id)
         viewModel.navigateCurrentTab(to: address)
-        if viewModel.pendingInviteRedeem != nil {
+        let first = try await waitForFront(in: viewModel, replacing: initial) {
             let invite = try String(contentsOf: directory.appendingPathComponent("viewer-invite"), encoding: .utf8)
             viewModel.confirmInviteRedeem(code: invite)
         }
-        let first = try await waitForFront(in: viewModel, replacing: initial)
         XCTAssertEqual(first.url?.absoluteString, address)
         try await echo("original", tabId: first.id)
 
@@ -48,13 +48,71 @@ final class LocalRealmFrontEchoTests: XCTestCase {
     }
 
     @MainActor
-    private func waitForFront(in viewModel: BrowserViewModel, replacing previous: UUID) async throws -> Tab {
+    func testOpenRealmEchoesWithoutAnInvite() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let address = env["ACTRIUM_OPEN_REALM_TEST_URI"],
+              let front = env["ACTRIUM_OPEN_REALM_TEST_FRONT"] else {
+            throw XCTSkip("Requires a published Open Realm, local Front and independently running Echo Service.")
+        }
+        let approval = ExpectedFrontApproval(front: front)
+        let timer = Timer(timeInterval: 0.05, repeats: true) { _ in
+            MainActor.assumeIsolated { approval.acceptIfShown() }
+        }
+        RunLoop.main.add(timer, forMode: .modalPanel)
+        defer { timer.invalidate() }
+
+        let suiteName = "ActriumTests.OpenRealm.\(UUID())"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { preferences.removePersistentDomain(forName: suiteName) }
+        let viewModel = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
+        defer {
+            if let tab = viewModel.currentTab { RealmServiceBindings.shared.remove(tab.id) }
+        }
+        let initial = try XCTUnwrap(viewModel.currentTab?.id)
+        viewModel.navigateCurrentTab(to: address)
+        let frontTab = try await waitForFront(in: viewModel, replacing: initial) {
+            throw NSError(domain: "LocalRealmFrontEchoTests", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "An Open Realm requested an invite."
+            ])
+        }
+        XCTAssertEqual(frontTab.url?.absoluteString, address)
+        XCTAssertEqual(approval.count, 1)
+        XCTAssertNil(viewModel.pendingInviteRedeem)
+        try await echo("invite-free", tabId: frontTab.id)
+    }
+
+    @MainActor
+    func testInviteOnlyRealmStillPromptsForAnInvite() async throws {
+        guard let address = ProcessInfo.processInfo.environment["ACTRIUM_INVITE_ONLY_REALM_TEST_URI"] else {
+            throw XCTSkip("Requires a published invite-only Realm.")
+        }
+        let suiteName = "ActriumTests.InviteOnlyRealm.\(UUID())"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { preferences.removePersistentDomain(forName: suiteName) }
+        let viewModel = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
+        viewModel.navigateCurrentTab(to: address)
+        let deadline = ContinuousClock.now + .seconds(15)
+        while ContinuousClock.now < deadline, viewModel.pendingInviteRedeem == nil {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(viewModel.pendingInviteRedeem?.uri, address)
+        XCTAssertNil(viewModel.currentTab?.appId)
+        viewModel.cancelInviteRedeem()
+    }
+
+    @MainActor
+    private func waitForFront(
+        in viewModel: BrowserViewModel,
+        replacing previous: UUID,
+        onInvite: () throws -> Void = {}
+    ) async throws -> Tab {
         let deadline = ContinuousClock.now + .seconds(25)
         while ContinuousClock.now < deadline {
             if let tab = viewModel.currentTab,
                tab.id != previous, tab.appId?.hasPrefix("actrium.local-front/") == true {
                 return tab
             }
+            if viewModel.pendingInviteRedeem != nil { try onInvite() }
             try await Task.sleep(for: .milliseconds(100))
         }
         throw NSError(domain: "LocalRealmFrontEchoTests", code: 1, userInfo: [
@@ -74,5 +132,31 @@ final class LocalRealmFrontEchoTests: XCTestCase {
         )
         let expected = Data("echo: \(message)".utf8)
         XCTAssertEqual(response, Data([10, UInt8(expected.count)]) + expected)
+    }
+}
+
+@MainActor
+private final class ExpectedFrontApproval {
+    private let front: String
+    private(set) var count = 0
+
+    init(front: String) {
+        self.front = front
+    }
+
+    // Only act on the local Front confirmation in this XCTest process.
+    func acceptIfShown() {
+        guard count == 0, let view = NSApp.modalWindow?.contentView else { return }
+        let views = descendants(of: view)
+        let captions = views.compactMap { ($0 as? NSTextField)?.stringValue ?? ($0 as? NSTextView)?.string }
+        guard captions.contains("Open this local Realm Front?"),
+              captions.contains(where: { $0.contains(front) }),
+              let button = views.compactMap({ $0 as? NSButton }).first(where: { $0.title == "Allow and Open" }) else { return }
+        count += 1
+        button.performClick(nil)
+    }
+
+    private func descendants(of view: NSView) -> [NSView] {
+        [view] + view.subviews.flatMap { descendants(of: $0) }
     }
 }

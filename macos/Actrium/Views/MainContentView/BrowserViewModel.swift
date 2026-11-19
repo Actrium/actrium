@@ -82,12 +82,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// actr:// link awaiting invite-code redemption (temporary-flow sheet presented).
     @Published var pendingInviteRedeem: PendingInviteRedeem?
 
-    /// Realms this installation has already redeemed an invite for. Opening
-    /// their actr:// links skips the invite sheet (re-asking would dead-end
-    /// in `invite_used`). Persisted across launches.
+    /// Realms this installation has successfully joined. Keep the existing
+    /// preferences key so previously redeemed invites remain usable.
+    private let realmPreferences: UserDefaults
     private var redeemedRealms: Set<String> {
-        get { Set(UserDefaults.standard.stringArray(forKey: "actr.redeemedRealms") ?? []) }
-        set { UserDefaults.standard.set(Array(newValue), forKey: "actr.redeemedRealms") }
+        get { Set(realmPreferences.stringArray(forKey: "actr.redeemedRealms") ?? []) }
+        set { realmPreferences.set(Array(newValue), forKey: "actr.redeemedRealms") }
     }
 
     private func markRedeemed(_ realmName: String) {
@@ -152,11 +152,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         chooseLocalFrontFile: @escaping (NSOpenPanel) -> URL? = { panel in
             panel.runModal() == .OK ? panel.url : nil
         },
+        realmPreferences: UserDefaults = .standard,
         saveBrowserSession: @escaping ([Tab], UUID?) -> Void = { tabs, currentTabId in
             BrowserDataRepository.shared.saveSession(tabs: tabs, currentTabId: currentTabId)
         }
     ) {
         self.chooseLocalFrontFile = chooseLocalFrontFile
+        self.realmPreferences = realmPreferences
         self.saveBrowserSession = saveBrowserSession
         // Initialize slot positions first
         initializeSlotPositions()
@@ -879,16 +881,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     handleResolvedRealmLink(info, input: trimmed, tabIndex: index)
                     return
                 }
-                // Temporary flow: opening a remote actr:// link first requires
-                // an invite code; a Realm already redeemed goes straight
-                // through (its RealmMembership identity is in the Keychain).
                 let realmName = [info.realmId, info.domain].compactMap { $0 }.joined(separator: "@")
                 guard pendingInviteRedeem == nil else { return }
                 guard !redeemedRealms.contains(realmName) else {
                     handleResolvedRealmLink(info, input: trimmed, tabIndex: index)
                     return
                 }
-                pendingInviteRedeem = PendingInviteRedeem(uri: trimmed, domain: info.domain)
+                openRealmAfterAdmissionCheck(info, input: trimmed, realmName: realmName, tabId: currentTabId)
                 return
             } catch {
                 logger.warning("⚠️ [navigateCurrentTab] actr:// input rejected: \(error)")
@@ -1077,8 +1076,39 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     // MARK: - Invite Code Redemption (temporary flow)
-    // Address-bar actr:// links are gated behind an invite-code sheet; redeem
-    // hands over to the Rust-provided method for the follow-up flow.
+    // First-time Realm links use the admission policy in the verified Profile.
+
+    private func openRealmAfterAdmissionCheck(_ info: ActrUriInfo, input: String, realmName: String, tabId: UUID) {
+        let load = UUID()
+        realmLoads[tabId] = load
+        Task { @MainActor in
+            @MainActor func isCurrent() -> Bool {
+                currentTabId == tabId && realmLoads[tabId] == load
+            }
+            defer {
+                if realmLoads[tabId] == load { realmLoads[tabId] = nil }
+            }
+            do {
+                let admission = try await RealmJoinService.admission(for: realmName)
+                guard isCurrent() else { return }
+                guard admission.isOpen else {
+                    if pendingInviteRedeem == nil {
+                        pendingInviteRedeem = PendingInviteRedeem(uri: input, domain: info.domain)
+                    }
+                    return
+                }
+                let result = try await RealmJoinService.joinOpen(
+                    admission, label: Host.current().localizedName ?? "Mac"
+                )
+                markRedeemed(result.realmName)
+                guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+                handleResolvedRealmLink(info, input: input, tabIndex: index)
+            } catch {
+                guard isCurrent() else { return }
+                presentRealmLinkError(error)
+            }
+        }
+    }
 
     func cancelInviteRedeem() {
         pendingInviteRedeem = nil

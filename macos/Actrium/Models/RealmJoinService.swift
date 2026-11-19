@@ -3,7 +3,7 @@ import ActriumCore
 import Actr
 import ActrBindings
 
-/// The outcome of a successful invite redemption.
+/// The outcome of a successful Realm admission.
 struct RealmJoinResult {
     /// Canonical Realm name `<realm_id>@<domain>`.
     let realmName: String
@@ -15,15 +15,27 @@ struct RealmJoinResult {
     let instanceURL: URL
 }
 
-/// The complete invite redemption flow: decode the `ri_` text, verify the
-/// Realm through the existing authority/profile funnel, create this
-/// installation's device identity, and exchange the invite.
+/// Authenticate the Realm and enroll this installation's device identity.
 ///
 /// Reuses the same core verification entry points as the address-bar
 /// discovery flow (`acceptAuthorityDescriptor`, `acceptRealmProfile`) and
 /// the same device identity storage as #417 (`RealmIdentityStore`); it
 /// changes nothing about how those steps verify.
 enum RealmJoinService {
+    struct Admission {
+        fileprivate let profile: RealmProfileInfo
+        fileprivate let instanceURL: URL
+        let isOpen: Bool
+    }
+
+    private struct AdmissionDocument: Decodable {
+        struct Policy: Decodable {
+            let membership: String
+        }
+
+        let policy: Policy?
+    }
+
     /// Redeem `inviteText` (an `ri_…` invite) and join as a new device.
     ///
     /// - Parameters:
@@ -43,20 +55,32 @@ enum RealmJoinService {
         // 1. Decode the invite locally: learn the Realm name. The secret
         //    stays inside the invite text; `join` consumes it in Rust.
         let invite = try ActriumCore.decodeActrInvite(inviteText: inviteText)
-        let realmName = invite.realmName
+        let admission = try await Self.admission(for: invite.realmName)
+        return try await join(
+            admission, inviteText: inviteText, label: label,
+            allowInsecureDevelopment: allowInsecureDevelopment
+        )
+    }
 
+    static func joinOpen(_ admission: Admission, label: String) async throws -> RealmJoinResult {
+        guard admission.isOpen else {
+            throw joinError("This Realm requires an invite.")
+        }
+        return try await join(admission, inviteText: "", label: label, allowInsecureDevelopment: false)
+    }
+
+    static func admission(for realmName: String) async throws -> Admission {
         guard let at = realmName.firstIndex(of: "@") else {
-            throw joinError("The invite names a malformed Realm.")
+            throw joinError("The Realm name is malformed.")
         }
         let realmId = String(realmName[..<at])
         let domain = String(realmName[realmName.index(after: at)...])
         guard !realmId.isEmpty, !domain.isEmpty else {
-            throw joinError("The invite names a malformed Realm.")
+            throw joinError("The Realm name is malformed.")
         }
 
-        // 2. Realm discovery: the authority descriptor for the Realm domain.
         guard let discoveryURL = URL(string: "https://\(domain)/.well-known/actr") else {
-            throw joinError("The Realm domain in the invite is invalid.")
+            throw joinError("The Realm domain is invalid.")
         }
         let descriptorBody = try await fetchBoundedDocument(discoveryURL)
         guard let descriptorText = String(data: descriptorBody, encoding: .utf8) else {
@@ -67,8 +91,7 @@ enum RealmJoinService {
             domain: domain
         )
 
-        // 3. Realm Profile: verify it with the keys accepted in step 2 and
-        //    learn the membership endpoints (issuer, provider id).
+        // Authenticate the Profile before interpreting its admission policy.
         var profilePath = descriptor.realmsHref
         if profilePath.hasSuffix("/") { profilePath.removeLast() }
         profilePath += "/\(realmId)"
@@ -85,8 +108,20 @@ enum RealmJoinService {
             signingKeysJson: descriptor.signingKeysJson
         )
 
-        // 4. Device identity (created and persisted on first use) and the
-        //    invite exchange. The same signer later registers the Host.
+        let document = try JSONDecoder().decode(AdmissionDocument.self, from: profileBody)
+        guard let instanceURL = URL(string: "actr://\(domain)/\(realmId)") else {
+            throw joinError("The instance address could not be built.")
+        }
+        return Admission(profile: profile, instanceURL: instanceURL, isOpen: document.policy?.membership == "open")
+    }
+
+    private static func join(
+        _ admission: Admission,
+        inviteText: String,
+        label: String,
+        allowInsecureDevelopment: Bool
+    ) async throws -> RealmJoinResult {
+        let profile = admission.profile
         let store = try RealmIdentityStore()
         let membership = try store.membership(
             realm: profile.realmName,
@@ -96,7 +131,6 @@ enum RealmJoinService {
         )
         let memberJSON = try await membership.join(invite: inviteText, label: label)
 
-        // 5. Surface the redemption result and the instance address.
         guard let member = try JSONSerialization.jsonObject(with: Data(memberJSON.utf8))
                 as? [String: Any],
             let memberId = member["member_id"] as? String,
@@ -104,15 +138,12 @@ enum RealmJoinService {
             let keyId = member["key_id"] as? String else {
             throw joinError("The join response could not be read.")
         }
-        guard let instanceURL = URL(string: "actr://\(domain)/\(realmId)") else {
-            throw joinError("The instance address could not be built.")
-        }
         return RealmJoinResult(
             realmName: profile.realmName,
             memberId: memberId,
             role: role,
             keyId: keyId,
-            instanceURL: instanceURL
+            instanceURL: admission.instanceURL
         )
     }
 
