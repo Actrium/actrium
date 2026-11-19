@@ -110,8 +110,11 @@ pub fn front_session_metadata(
         )));
     }
 
-    let guest = actr_pack::read_actor_workload(front_archive, front_manifest)
-        .map_err(|error| invalid(error.to_string()))?;
+    let guest = read_declared(
+        front_archive,
+        front_manifest,
+        &front_manifest.workload.entry,
+    )?;
     let guest_digest = sha2::Sha256::digest(&guest).to_vec();
 
     let capabilities_path = front_manifest
