@@ -2742,6 +2742,15 @@ impl Inner {
         let gate_on = dispatch_concurrency.enabled;
         let scheduler_on = scheduler_engaged(gate_on, !conflict_keys.is_empty());
         let is_linked = matches!(workload, crate::workload::Workload::Linked(_));
+        #[cfg(feature = "wasm-engine")]
+        if scheduler_on
+            && dispatch_concurrency.dispatch_timeout.is_some()
+            && matches!(&workload, crate::workload::Workload::Wasm(wasm) if wasm.egress_broker().is_some())
+        {
+            return Err(ActrError::InvalidArgument(
+                "dispatch timeout is unsupported for scoped WASM services".into(),
+            ));
+        }
 
         // Retain a clone of the linked handle so the pump can query
         // `reply_mode_for_route` before dispatch (RFC-0323). Only the `Linked`

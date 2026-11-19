@@ -1223,7 +1223,7 @@ impl WasmWorkloadV2 {
         if let Some(broker) = &self.egress {
             broker
                 .authorize_inbound(&ctx, &envelope.route_key)
-                .map_err(|error| WasmError::ExecutionFailed(error.to_string()))?;
+                .map_err(WasmError::DispatchFailed)?;
         }
         if scope.as_ref().is_some_and(|scope| !scope.is_active()) {
             return Err(WasmError::RequestScopeEnded);
@@ -1270,6 +1270,8 @@ impl WasmWorkloadV2 {
             invocation_deadline.min(scope.deadline())
         });
         let region_scope = scope.clone();
+        let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let guest_started = started.clone();
         let region = {
             let store = self
                 .store
@@ -1289,10 +1291,17 @@ impl WasmWorkloadV2 {
                     if scope_ended {
                         return Ok(Err(WitActrError::TimedOut));
                     }
-                    bindings
-                        .actr_workload_workload()
-                        .call_dispatch(accessor, wit_envelope, inv)
-                        .await
+                    let call = bindings.actr_workload_workload().call_dispatch(
+                        accessor,
+                        wit_envelope,
+                        inv,
+                    );
+                    let mut call = std::pin::pin!(call);
+                    poll_fn(|cx| {
+                        guest_started.store(true, std::sync::atomic::Ordering::Relaxed);
+                        call.as_mut().poll(cx)
+                    })
+                    .await
                 })
                 .await
             });
@@ -1311,7 +1320,12 @@ impl WasmWorkloadV2 {
             }
         };
         if scope.as_ref().is_some_and(|scope| !scope.is_active()) {
-            self.discard_store();
+            if started.load(std::sync::atomic::Ordering::Relaxed) {
+                self.discard_store();
+            } else if let Some(store) = self.store.as_mut() {
+                store.epoch_deadline_trap();
+                store.data_mut().remove_invocation(token);
+            }
             record_timeout();
             return Err(WasmError::RequestScopeEnded);
         }
@@ -1401,9 +1415,13 @@ impl WasmWorkloadV2 {
                         error = %error,
                         "wasm dispatch failed: guest dispatch returned error"
                     );
-                    Err(WasmError::ExecutionFailed(format!(
-                        "guest dispatch returned error: {error:?}",
-                    )))
+                    if matches!(error, ActrError::DeliveryUncertain { .. }) {
+                        Err(WasmError::DispatchFailed(error))
+                    } else {
+                        Err(WasmError::ExecutionFailed(format!(
+                            "guest dispatch returned error: {error:?}"
+                        )))
+                    }
                 }
                 Err(trap) => {
                     tracing::error!(
@@ -2008,7 +2026,6 @@ enum PendingReply {
     Dispatch {
         reply: ReplySlot<Bytes>,
         _permit: QuotaPermit,
-        _deadline: DeadlineGuard,
     },
     Unit {
         reply: ReplySlot<()>,
@@ -2142,6 +2159,8 @@ enum DispatchOutcome {
     Completed(wasmtime::Result<Result<Vec<u8>, WitActrError>>),
     CallerCanceled,
     RequestScopeEnded,
+    RejectedBeforeDispatch,
+    CallerCanceledBeforeDispatch,
 }
 
 /// Force every individual Wasmtime call error onto the Store-fatal path. The
@@ -2406,12 +2425,6 @@ async fn resident_region(
                             .insert(token, PendingReply::Dispatch {
                                 reply: reply.clone(),
                                 _permit: permit,
-                                _deadline: arm_deadline(
-                                    generation,
-                                    token,
-                                    deadline,
-                                    deadline_tx,
-                                ),
                             });
                         if let Err(error) =
                             arm_region_budget(accessor, &limits, live, &mut fuel_budget)
@@ -2431,13 +2444,35 @@ async fn resident_region(
                         let call = wl.call_dispatch(accessor, wit_env, inv);
                         let fut = async move {
                             let scope_ended = || scope.as_ref().is_some_and(|scope| !scope.is_active());
-                            let outcome = if scope_ended() {
-                                DispatchOutcome::RequestScopeEnded
+                            let outcome = if scope_ended() || tokio::time::Instant::now() >= deadline {
+                                DispatchOutcome::RejectedBeforeDispatch
                             } else {
+                                let mut deadline_guard = None;
+                                let started = std::sync::atomic::AtomicBool::new(false);
+                                let mut call = std::pin::pin!(call);
+                                let call = poll_fn(|cx| {
+                                    if deadline_guard.is_none() {
+                                        deadline_guard = Some(arm_deadline(generation, token, deadline, deadline_tx));
+                                    }
+                                    started.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    call.as_mut().poll(cx)
+                                });
                                 tokio::select! {
                                     biased;
-                                    _ = reply.closed() => DispatchOutcome::CallerCanceled,
-                                    _ = RequestScope::wait_cancelled(scope.as_deref()) => DispatchOutcome::RequestScopeEnded,
+                                    _ = reply.closed() => {
+                                        if started.load(std::sync::atomic::Ordering::Relaxed) {
+                                            DispatchOutcome::CallerCanceled
+                                        } else {
+                                            DispatchOutcome::CallerCanceledBeforeDispatch
+                                        }
+                                    },
+                                    _ = RequestScope::wait_cancelled(scope.as_deref()) => {
+                                        if started.load(std::sync::atomic::Ordering::Relaxed) {
+                                            DispatchOutcome::RequestScopeEnded
+                                        } else {
+                                            DispatchOutcome::RejectedBeforeDispatch
+                                        }
+                                    },
                                     result = call => {
                                         if scope_ended() {
                                             DispatchOutcome::RequestScopeEnded
@@ -2469,6 +2504,21 @@ async fn resident_region(
                     DispatchOutcome::Completed(result) => result,
                     DispatchOutcome::CallerCanceled => return RegionExit::CallerCanceled(token),
                     DispatchOutcome::RequestScopeEnded => return RegionExit::RequestScopeEnded(token),
+                    DispatchOutcome::RejectedBeforeDispatch | DispatchOutcome::CallerCanceledBeforeDispatch => {
+                        let live = accessor.with(|mut a| {
+                            let state = a.get();
+                            state.remove_invocation(token);
+                            state.invocation_count()
+                        });
+                        if let Err(error) = clamp_region_budget(accessor, &limits, live, &mut fuel_budget) {
+                            return RegionExit::GuestCallFailed { token, error };
+                        }
+                        let pending = ledger.lock().expect("reply ledger mutex poisoned").remove(&token);
+                        if let Some(pending) = pending {
+                            pending.fail(ActrError::TimedOut);
+                        }
+                        continue;
+                    }
                 };
                 let call_result = match guest_call_completion(call) {
                     GuestCallCompletion::Completed(result) => result,

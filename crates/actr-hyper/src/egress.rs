@@ -231,14 +231,16 @@ impl EgressBroker {
         })?;
         let deadline = permit.expires_at.min(Instant::now() + MAX_DURATION);
         let deadline = scope.map_or(deadline, |scope| deadline.min(scope.deadline()));
+        let dispatch_id = OnceLock::new();
         run_permitted(
             &permit,
             deadline,
             scope,
-            None,
+            Some(&dispatch_id),
             fixed_https(
                 rule,
                 body,
+                &dispatch_id,
                 || {
                     if scope.is_some_and(|scope| !scope.is_active()) {
                         return Err(ActrError::TimedOut);
@@ -303,6 +305,7 @@ struct HttpsFixture {
 async fn fixed_https(
     rule: &HttpsPermission,
     body: Vec<u8>,
+    dispatch_id: &OnceLock<String>,
     check_before_send: impl FnOnce() -> ActorResult<()>,
     #[cfg(test)] fixture: Option<&HttpsFixture>,
 ) -> ActorResult<Vec<u8>> {
@@ -369,10 +372,22 @@ async fn fixed_https(
         request.body(body)
     };
     check_before_send()?;
-    let mut response = request
-        .send()
-        .await
-        .map_err(|_| deny("HTTPS request failed"))?;
+    if !matches!(rule.method.as_str(), "GET" | "HEAD" | "OPTIONS") {
+        let _ = dispatch_id.set(uuid::Uuid::new_v4().to_string());
+    }
+    let mut response = request.send().await.map_err(|error| {
+        if error.is_connect() || error.is_builder() {
+            deny("HTTPS request failed before sending")
+        } else {
+            https_failure(dispatch_id, "HTTPS request failed")
+        }
+    })?;
+    if response.status().is_server_error() || response.status().is_redirection() {
+        return Err(https_failure(
+            dispatch_id,
+            "HTTPS returned an ambiguous response",
+        ));
+    }
     if !response.status().is_success() {
         return Err(deny("HTTPS returned a non-success response"));
     }
@@ -380,20 +395,36 @@ async fn fixed_https(
         .content_length()
         .is_some_and(|size| size > MAX_RESPONSE as u64)
     {
-        return Err(deny("HTTPS response exceeds its limit"));
+        return Err(https_failure(
+            dispatch_id,
+            "HTTPS response exceeds its limit",
+        ));
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_| deny("HTTPS response read failed"))?
+        .map_err(|_| https_failure(dispatch_id, "HTTPS response read failed"))?
     {
         if chunk.len() > MAX_RESPONSE - bytes.len() {
-            return Err(deny("HTTPS response exceeds its limit"));
+            return Err(https_failure(
+                dispatch_id,
+                "HTTPS response exceeds its limit",
+            ));
         }
         bytes.extend_from_slice(&chunk);
     }
     Ok(bytes)
+}
+
+fn https_failure(dispatch_id: &OnceLock<String>, cause: &str) -> ActrError {
+    match dispatch_id.get() {
+        Some(operation_id) => ActrError::DeliveryUncertain {
+            operation_id: operation_id.clone(),
+            cause: cause.to_owned(),
+        },
+        None => deny(cause),
+    }
 }
 
 fn deny(reason: &str) -> ActrError {

@@ -750,6 +750,7 @@ impl Workload {
                         .map(Bytes::from)
                         .map_err(|error| match error {
                             crate::wasm::WasmError::RequestScopeEnded => ActrError::TimedOut,
+                            crate::wasm::WasmError::DispatchFailed(error) => error,
                             _ => ActrError::Internal(format!("workload dispatch failed: {error}")),
                         })
                 }
