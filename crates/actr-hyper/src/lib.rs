@@ -1131,10 +1131,11 @@ pub struct FrontServiceEvent {
 }
 
 /// Host callback for Service business events delivered to a Front actor.
+/// Synchronous so the embedding host can capture subscription ownership at the
+/// acceptance boundary, before any executor hop can observe a replacement.
 #[cfg(not(target_arch = "wasm32"))]
-#[async_trait::async_trait]
 pub trait FrontEventListener: Send + Sync + 'static {
-    async fn on_event(&self, event: FrontServiceEvent);
+    fn on_event(&self, event: FrontServiceEvent);
 }
 
 /// Authenticates and filters inbound Service events before they cross into the
@@ -1206,8 +1207,8 @@ impl FrontEventRouter {
         })
     }
 
-    async fn deliver(&self, event: FrontServiceEvent) {
-        self.inner.listener.on_event(event).await;
+    fn deliver(&self, event: FrontServiceEvent) {
+        self.inner.listener.on_event(event);
     }
 }
 
@@ -1235,7 +1236,7 @@ impl actr_framework::MessageDispatcher for FrontWorkload {
             && let Some(events) = &workload.events
         {
             if let Some(event) = events.accept(&envelope, ctx.caller_id()) {
-                events.deliver(event).await;
+                events.deliver(event);
             }
             // Tell has no response body. Undeclared events and events from any
             // other peer are acknowledged but never exposed to the Host.
@@ -1253,9 +1254,8 @@ mod front_event_tests {
 
     struct NoopListener;
 
-    #[async_trait::async_trait]
     impl FrontEventListener for NoopListener {
-        async fn on_event(&self, _: FrontServiceEvent) {}
+        fn on_event(&self, _: FrontServiceEvent) {}
     }
 
     fn envelope(route: &str, direction: actr_protocol::Direction) -> actr_protocol::RpcEnvelope {

@@ -524,25 +524,23 @@ pub struct ServiceEventBridge {
 }
 
 /// Host callback for authenticated, manifest-allowed Service events.
+/// Synchronous so the host can snapshot subscription ownership before this
+/// event crosses any executor or main-thread hop.
 #[uniffi::export(callback_interface)]
-#[async_trait::async_trait]
 pub trait ServiceEventListener: Send + Sync + 'static {
-    async fn on_event(&self, event: ServiceEventBridge);
+    fn on_event(&self, event: ServiceEventBridge);
 }
 
 struct FrontEventListenerAdapter {
     listener: Arc<dyn ServiceEventListener>,
 }
 
-#[async_trait::async_trait]
 impl actr_hyper::FrontEventListener for FrontEventListenerAdapter {
-    async fn on_event(&self, event: actr_hyper::FrontServiceEvent) {
-        self.listener
-            .on_event(ServiceEventBridge {
-                event: event.event,
-                payload: event.payload.to_vec(),
-            })
-            .await;
+    fn on_event(&self, event: actr_hyper::FrontServiceEvent) {
+        self.listener.on_event(ServiceEventBridge {
+            event: event.event,
+            payload: event.payload.to_vec(),
+        });
     }
 }
 

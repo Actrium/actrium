@@ -787,7 +787,8 @@ final class RendererProcessPool: ObservableObject {
                 return
             }
             if name == RealmServiceEventSubscription.cancelEvent {
-                guard let tabId = UUID(uuidString: tab),
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
                       let request = try? JSONDecoder().decode(
                           RealmServiceEventSubscription.self, from: Data(userInfoJSON.utf8)
                       ) else { return }

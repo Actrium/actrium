@@ -178,6 +178,15 @@ export function createHostModules(options: {
         void options.authorizeCapability('service.on').then(
           () => {
             if (disposed) return;
+            // Attach revocation before startup. `onCapabilityRevoked` checks
+            // the latest snapshot synchronously, so a revoke that landed while
+            // authorization was resolving cannot open the transport.
+            const stopWatching = options.onCapabilityRevoked?.('service.on', cleanup);
+            if (disposed) {
+              stopWatching?.();
+              return;
+            }
+            stopWatchingRevocation = stopWatching;
             try {
               unsubscribeTransport = options.serviceEventSource!.subscribe((event) => {
                 if (disposed) return;
@@ -190,11 +199,7 @@ export function createHostModules(options: {
               if (disposed) {
                 unsubscribeTransport?.();
                 unsubscribeTransport = undefined;
-                return;
               }
-              const stopWatching = options.onCapabilityRevoked?.('service.on', cleanup);
-              if (disposed) stopWatching?.();
-              else stopWatchingRevocation = stopWatching;
             } catch (error) {
               console.warn('[Actrium] Service event subscription failed:', error);
               cleanup();

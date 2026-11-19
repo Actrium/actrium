@@ -182,16 +182,17 @@ final class RealmServiceBindings {
             cancelledSubscriptions.insert(subscriptionId)
             return
         }
-        guard let removed = subscriptions.removeValue(forKey: subscriptionId) else { return }
-        updateRoutingSnapshot()
-        guard let tab = bindingTabs[removed.bindingId], tab == tabId,
+        guard let existing = subscriptions[subscriptionId],
+              let tab = bindingTabs[existing.bindingId], tab == tabId,
               let binding = bindings[tabId] else { return }
-        if !subscriptions.values.contains(where: { $0.bindingId == removed.bindingId }),
-           let generation = bindingEventGenerations[removed.bindingId] {
+        subscriptions.removeValue(forKey: subscriptionId)
+        updateRoutingSnapshot()
+        if !subscriptions.values.contains(where: { $0.bindingId == existing.bindingId }),
+           let generation = bindingEventGenerations[existing.bindingId] {
             Task { @MainActor in
                 // A new subscription may have appeared before this task runs.
                 guard !subscriptions.values.contains(where: {
-                    $0.bindingId == removed.bindingId
+                    $0.bindingId == existing.bindingId
                 }) else { return }
                 await binding.suspendEvents(ifGeneration: generation)
             }
@@ -313,14 +314,16 @@ final class RealmServiceBindings {
     }
 }
 
-private final class RealmServiceEventRelay: ActrBindings.ServiceEventListener, @unchecked Sendable {
+/// The Rust callback is synchronous so `publish` snapshots eligible
+/// subscriptions before any executor hop can observe a replacement.
+final class RealmServiceEventRelay: ActrBindings.ServiceEventListener, @unchecked Sendable {
     private let bindingId: UUID
 
     init(bindingId: UUID) {
         self.bindingId = bindingId
     }
 
-    func onEvent(event: ActrBindings.ServiceEventBridge) async {
+    func onEvent(event: ActrBindings.ServiceEventBridge) {
         RealmServiceBindings.shared.publish(
             bindingId: bindingId, event: event.event, payload: event.payload
         )

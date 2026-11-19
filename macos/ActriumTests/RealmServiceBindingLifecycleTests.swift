@@ -258,7 +258,29 @@ struct RealmServiceBindingLifecycleTests {
         bindings.remove(tabId)
     }
 
-    @Test func queuedEventDoesNotCrossUnsubscribeAndResubscribe() async throws {
+    @Test func cancellationFromAnotherTabCannotRemoveTheOwnerSubscription() async throws {
+        let bindings = RealmServiceBindings()
+        let binding = ControlledRealmServiceBinding()
+        let tabId = UUID()
+        let subscriptionId = UUID()
+        var delivered: [UUID] = []
+        bindings.attach(binding, to: tabId)
+        bindings.eventHandler = { _, event in delivered.append(event.subscriptionId) }
+        await binding.setCompletesSubscribeImmediately()
+        try await bindings.subscribe(
+            RealmServiceEventSubscription(id: subscriptionId, events: ["notes.changed"]),
+            tabId: tabId
+        )
+
+        bindings.unsubscribe(subscriptionId, tabId: UUID())
+        bindings.publish(bindingId: binding.id, event: "notes.changed", payload: Data([1]))
+        for _ in 0..<20 where delivered.isEmpty { await Task.yield() }
+        #expect(delivered == [subscriptionId])
+        let suspendCount = await binding.suspendCount
+        #expect(suspendCount == 0)
+    }
+
+    @Test func rustCallbackCapturesOwnershipBeforeUnsubscribeAndResubscribe() async throws {
         let bindings = RealmServiceBindings()
         let binding = ControlledRealmServiceBinding()
         let tabId = UUID()
@@ -272,9 +294,12 @@ struct RealmServiceBindingLifecycleTests {
             RealmServiceEventSubscription(id: oldId, events: ["notes.changed"]), tabId: tabId
         )
 
-        // Intake captures the old ID. Before the queued MainActor delivery runs,
-        // unsubscribe it and register a replacement on the same binding.
-        bindings.publish(bindingId: binding.id, event: "notes.changed", payload: Data([1]))
+        // The synchronous Rust callback captures the old ID before the queued
+        // MainActor delivery runs. Replacement on the same binding must not
+        // inherit that event.
+        RealmServiceEventRelay(bindingId: binding.id).onEvent(event: ActrBindings.ServiceEventBridge(
+            event: "notes.changed", payload: Data([1])
+        ))
         bindings.unsubscribe(oldId, tabId: tabId)
         try await bindings.subscribe(
             RealmServiceEventSubscription(id: replacementId, events: ["notes.changed"]),
@@ -283,7 +308,9 @@ struct RealmServiceBindingLifecycleTests {
         for _ in 0..<5 { await Task.yield() }
         #expect(delivered.isEmpty)
 
-        bindings.publish(bindingId: binding.id, event: "notes.changed", payload: Data([2]))
+        RealmServiceEventRelay(bindingId: binding.id).onEvent(event: ActrBindings.ServiceEventBridge(
+            event: "notes.changed", payload: Data([2])
+        ))
         for _ in 0..<20 where delivered.isEmpty { await Task.yield() }
         #expect(delivered == [replacementId])
     }
