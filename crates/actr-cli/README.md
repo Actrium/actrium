@@ -79,24 +79,24 @@ actr realm fetch-packages --realm echo@realm.example --output ./echo-cache
 For Front releases under the Provider's domain, use the same output directory for the update and rollback.
 
 ```sh
-actr realm update --front-only --key client.json --selection selection.json --output ./echo-cache
-actr realm update --front-only --rollback --key client.json --output ./echo-cache
+actr realm update --key client.json --selection selection.json --output ./echo-cache
+actr realm update --rollback --key client.json --output ./echo-cache
 ```
 
-Both commands verify the archives before publishing. The primary Service and its selected dependencies must stay fixed. Rollback republishes the previous selection at a higher Profile sequence. If publication times out, retry the same command and selection to recover the recorded result.
+The CLI compares the complete selection with the signed Profile. It verifies changed archives before publishing and keeps the current sequence when the selection is identical. Rollback republishes the previous selection at a higher Profile sequence. If publication times out, retry the same command and selection to recover the recorded result.
 
 For another Realm domain, the signing key holder runs `check-selection` before `sign-profile --front-operation <32-lowercase-hex-digits> --key realm-key.json --selection selection.json current-profile.json`. Submit the resulting `publish_front_profile` envelope to the Provider. Keep its `previous_selection` for rollback. When hosting the public Profile externally, confirm the receipt's sequence is still current with the Provider, then publish its signed `profile`.
 
 For a stateless Service in a Provider-domain Realm, start the target with `actr run` using the verified archive and an owner Realm key. Keep the original running for rollback. Use a separate runtime config for the probe Front with a Realm member key, trust for the Front package, and permission to dial the target Service.
 
 ```sh
-actr realm update --service --key owner.json --selection next-selection.json --output ./realm-cache \
+actr realm update --key owner.json --selection next-selection.json --output ./realm-cache \
   --probe-config probe-next.toml --probe-route example.Health.Ready
-actr realm update --service --rollback --key owner.json --output ./realm-cache \
+actr realm update --rollback --key owner.json --output ./realm-cache \
   --probe-config probe-original.toml --probe-route example.Health.Ready
 ```
 
-Use a read-only RPC that returns success when the Service is ready. Pass `--probe-request` if it expects an encoded request body. The CLI requires one discoverable Actor of the exact Service package type, including its version. The Profile selects that package type. Include a compatible Front if the current Front locks the old Service version. The original and candidate runtime lifecycles remain under operator control.
+The selection JSON can also carry a `readiness` object with `config` (relative to the JSON file), `route`, and optional `request_base64`. The readiness fields stay local to the command. Use a read-only RPC that returns success when the Service is ready. Pass `--probe-request` if it expects an encoded request body. The CLI requires one discoverable Actor of the exact Service package type, including its version. The Profile selects that package type. Include a compatible Front if the current Front locks the old Service version. The original and candidate runtime lifecycles remain under operator control.
 
 An external Realm signing tool can run the same readiness check before signing its next Profile with `realm check-selection --probe-realm <realm> --probe-config <file> --probe-route <rpc>` plus the usual `--selection` and `--output`.
 

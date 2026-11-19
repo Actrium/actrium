@@ -1,5 +1,6 @@
 use actr_protocol::realm_membership::{MembershipOp, MembershipRequest};
-use actr_protocol::realm_profile::FrontUpdate;
+use actr_protocol::realm_profile::{FrontUpdate, PackageSelectionChange};
+use base64::Engine as _;
 
 use super::*;
 use crate::commands::realm_members::Member;
@@ -23,6 +24,7 @@ impl ServiceProbeArgs {
             probe_config: self.probe_config.clone()?,
             probe_route: self.probe_route.clone()?,
             probe_request: self.probe_request.clone(),
+            probe_payload: None,
         })
     }
 }
@@ -31,6 +33,53 @@ pub struct ServiceProbe {
     pub probe_config: PathBuf,
     pub probe_route: String,
     pub probe_request: Option<PathBuf>,
+    pub probe_payload: Option<Vec<u8>>,
+}
+
+pub fn read_release_selection(
+    path: &Path,
+) -> Result<(RealmPackageSelection, Option<ServiceProbe>)> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Readiness {
+        config: PathBuf,
+        route: String,
+        request_base64: Option<String>,
+    }
+    let bytes = std::fs::read(path)?;
+    ensure!(
+        bytes.len() <= 2 * 1024 * 1024,
+        "selection and readiness JSON exceeds 2 MiB"
+    );
+    let document = actr_protocol::signed_json::parse(&bytes)?;
+    let selection: RealmPackageSelection = serde_json::from_value(document.clone())?;
+    selection.check().map_err(anyhow::Error::msg)?;
+    ensure!(
+        serde_json::to_vec(&selection)?.len() <= DOCUMENT_LIMIT,
+        "package selection exceeds 64 KiB"
+    );
+    let readiness = document
+        .get("readiness")
+        .map(|value| -> Result<ServiceProbe> {
+            let readiness: Readiness = serde_json::from_value(value.clone())?;
+            let probe_payload = readiness
+                .request_base64
+                .as_deref()
+                .map(|body| base64::engine::general_purpose::STANDARD.decode(body))
+                .transpose()
+                .context("invalid readiness.request_base64")?;
+            Ok(ServiceProbe {
+                probe_config: path
+                    .parent()
+                    .context("selection path has no parent")?
+                    .join(readiness.config),
+                probe_route: readiness.route,
+                probe_request: None,
+                probe_payload,
+            })
+        })
+        .transpose()?;
+    Ok((selection, readiness))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -38,6 +87,8 @@ struct Release {
     update: FrontUpdate,
     selection: RealmPackageSelection,
     rollback: bool,
+    #[serde(default)]
+    kind: Option<PackageSelectionChange>,
 }
 
 #[derive(Deserialize)]
@@ -52,6 +103,42 @@ struct Journal {
     pending: Option<Release>,
     previous: Option<RealmPackageSelection>,
     current: Option<RealmPackageSelection>,
+}
+
+fn load_journal(path: &Path, current: &RealmPackageSelection) -> Result<Journal> {
+    match std::fs::read(path) {
+        Ok(bytes) => return Ok(serde_json::from_slice(&bytes)?),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    let mut candidates = Vec::new();
+    for (name, kind) in [
+        ("front-release.json", PackageSelectionChange::Front),
+        ("service-release.json", PackageSelectionChange::Service),
+    ] {
+        let legacy = path.with_file_name(name);
+        let bytes = match std::fs::read(&legacy) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        let mut journal: Journal = serde_json::from_slice(&bytes)?;
+        if let Some(pending) = &mut journal.pending {
+            pending.kind = Some(kind);
+            pending.update.rollback = pending.rollback;
+        }
+        if journal.pending.is_some() || journal.current.as_ref() == Some(current) {
+            candidates.push((
+                journal.pending.is_some(),
+                std::fs::metadata(&legacy)?.modified()?,
+                journal,
+            ));
+        }
+    }
+    Ok(candidates
+        .into_iter()
+        .max_by_key(|(pending, modified, _)| (*pending, *modified))
+        .map_or_else(Journal::default, |(_, _, journal)| journal))
 }
 
 pub async fn release(
@@ -134,17 +221,7 @@ where
         cache.realm == realm,
         "output directory belongs to a different Realm"
     );
-    let kind = if service.is_some() {
-        "service"
-    } else {
-        "front"
-    };
-    let path = output.join(format!("{kind}-release.json"));
-    let mut journal: Journal = match std::fs::read(&path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Journal::default(),
-        Err(error) => return Err(error.into()),
-    };
+    let path = output.join("package-release.json");
     let (profile, keys, pins) = resolve_profile(
         realm,
         None,
@@ -165,6 +242,7 @@ where
         .selection
         .as_ref()
         .context("missing active selection")?;
+    let mut journal = load_journal(&path, current)?;
 
     if let Some(pending) = &journal.pending
         && profile.sequence > pending.update.expected_sequence
@@ -172,16 +250,14 @@ where
     {
         journal.pending = None;
         write_atomic(&path, &serde_json::to_vec(&journal)?)?;
-        bail!(
-            "the pending {kind} operation was superseded; review the current selection and retry"
-        );
+        bail!("the pending package release was superseded; review the current selection and retry");
     }
     let rollback = requested.is_none();
     let selection = if let Some(pending) = &journal.pending {
         ensure!(
             pending.rollback == rollback
                 && requested.as_ref().is_none_or(|s| *s == pending.selection),
-            "{kind} operation {} is pending; retry the same command and selection",
+            "package release {} is pending; retry the same command and selection",
             pending.update.operation_id
         );
         pending.selection.clone()
@@ -190,25 +266,26 @@ where
     } else {
         ensure!(
             journal.current.as_ref() == Some(current),
-            "the current selection no longer matches the last {kind} release"
+            "the current selection no longer matches the last release"
         );
         journal
             .previous
             .clone()
-            .with_context(|| format!("no previous {kind} selection in this directory"))?
+            .context("no previous selection in this directory")?
     };
-    if service.is_none() {
-        current
-            .check_unchanged_service(&selection)
-            .map_err(anyhow::Error::msg)?;
-    } else if current != &selection {
-        current
-            .check_service_switch(&selection)
-            .map_err(anyhow::Error::msg)?;
-    }
-    current
-        .check_successor(&selection)
-        .map_err(anyhow::Error::msg)?;
+    let kind = if let Some(pending) = &journal.pending {
+        pending
+            .kind
+            .context("release journal is missing the change type")?
+    } else if let Some(change) = current
+        .release_change(&selection)
+        .map_err(anyhow::Error::msg)?
+    {
+        change
+    } else {
+        return Ok(json!({"realm": realm, "sequence": profile.sequence, "changed": false}));
+    };
+    let service_change = kind == PackageSelectionChange::Service;
     for package in selection.packages.values() {
         ensure!(
             cache
@@ -220,19 +297,20 @@ where
         );
     }
     let new_operation = journal.pending.is_none();
-    if new_operation {
-        ensure!(
-            selection != *current,
-            "package selection is already current"
-        );
-    }
     if new_operation
-        || (service.is_some()
+        || (service_change
             && journal
                 .pending
                 .as_ref()
                 .is_some_and(|pending| pending.update.expected_sequence == profile.sequence))
     {
+        let probe = if service_change {
+            Some(service.context(
+                "Service change requires readiness in the JSON or --probe-config and --probe-route",
+            )?)
+        } else {
+            None
+        };
         let verified = prepare_selection(
             &selection,
             output,
@@ -242,7 +320,7 @@ where
             get,
         )
         .await?;
-        if let Some(probe) = service {
+        if let Some(probe) = probe {
             probe.check_ready(&profile, &selection, &verified).await?;
         }
     }
@@ -251,9 +329,11 @@ where
             update: FrontUpdate {
                 operation_id: hex::encode(rand::random::<[u8; 16]>()),
                 expected_sequence: profile.sequence,
+                rollback,
             },
             selection,
             rollback,
+            kind: Some(kind),
         });
         write_atomic(&path, &serde_json::to_vec(&journal)?)?;
     }
@@ -262,7 +342,7 @@ where
         .as_ref()
         .context("missing planned package release")?;
     let mut request = MembershipRequest::new(
-        if service.is_some() {
+        if service_change {
             MembershipOp::SwitchService
         } else {
             MembershipOp::UpdateFront
@@ -272,7 +352,7 @@ where
         &hex::encode(rand::random::<[u8; 16]>()),
     );
     request.selection = Some(pending.selection.clone());
-    if service.is_some() {
+    if service_change {
         request.service_update = Some(pending.update.clone());
     } else {
         request.front_update = Some(pending.update.clone());
@@ -282,12 +362,12 @@ where
         operation_id = pending.update.operation_id,
         base = pending.update.expected_sequence,
         rollback,
-        kind,
+        ?kind,
         "publishing package selection"
     );
     let output = send(request)
         .await
-        .with_context(|| format!("{kind} operation {}", pending.update.operation_id))?;
+        .with_context(|| format!("package release {}", pending.update.operation_id))?;
     let receipt: Receipt =
         serde_json::from_value(output.clone()).context("invalid package release receipt")?;
     ensure!(
@@ -309,14 +389,14 @@ where
         journal.pending = None;
         write_atomic(&path, &serde_json::to_vec(&journal)?)?;
         bail!(
-            "{kind} operation {} was accepted, then superseded",
+            "package release {} was accepted, then superseded",
             receipt.operation_id
         );
     }
     ensure!(
         published.sequence >= receipt.sequence
             && published.selection.as_ref() == Some(&pending.selection),
-        "{kind} operation {} was accepted at sequence {}, but the public selection is different; retry the same command",
+        "package release {} was accepted at sequence {}, but the public selection is different; retry the same command",
         receipt.operation_id,
         receipt.sequence
     );
@@ -328,7 +408,7 @@ where
         realm,
         operation_id = receipt.operation_id,
         sequence = published.sequence,
-        kind,
+        ?kind,
         "package selection verified at public address"
     );
     Ok(output)
@@ -352,16 +432,16 @@ impl ServiceProbe {
             !self.probe_route.trim().is_empty(),
             "readiness probe route is empty"
         );
-        let mut payload = Vec::new();
+        let mut payload = self.probe_payload.clone().unwrap_or_default();
         if let Some(path) = &self.probe_request {
             File::open(path)?
                 .take(1024 * 1024 + 1)
                 .read_to_end(&mut payload)?;
-            ensure!(
-                payload.len() <= 1024 * 1024,
-                "readiness probe request exceeds 1 MiB"
-            );
         }
+        ensure!(
+            payload.len() <= 1024 * 1024,
+            "readiness probe request exceeds 1 MiB"
+        );
         let archive = std::fs::read(
             verified["front"]
                 .as_str()

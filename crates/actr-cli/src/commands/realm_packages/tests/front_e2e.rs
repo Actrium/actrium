@@ -133,9 +133,26 @@ async fn realm_front_release_fixture() -> Result<()> {
                 let mut probe = front::ServiceProbe {
                     probe_config,
                     probe_request: Some(payload),
+                    probe_payload: None,
                     probe_route: EchoRequest::route_key().to_owned(),
                 };
                 if step == 1 {
+                    let missing = front::release_with(
+                        realm,
+                        provider,
+                        &request.output,
+                        selection.clone(),
+                        &get,
+                        |_| async { bail!("unprobed Service attempted publication") },
+                    )
+                    .await
+                    .unwrap_err();
+                    ensure!(
+                        missing
+                            .to_string()
+                            .contains("Service change requires readiness"),
+                        "unexpected missing probe error: {missing:#}"
+                    );
                     probe.probe_route = "echo.EchoService.NotReady".into();
                     let refused = front::release_selection_with(
                         realm,

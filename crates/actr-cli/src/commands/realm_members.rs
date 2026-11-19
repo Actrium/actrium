@@ -565,56 +565,51 @@ pub async fn invite(args: &InviteArgs) -> Result<Value> {
 }
 
 #[derive(Args, Debug)]
-#[command(group(clap::ArgGroup::new("release_mode").args(["front_only", "service"])))]
 pub struct UpdateArgs {
     #[command(flatten)]
     pub key: KeyArgs,
     /// JSON containing both references and the complete packages map
     #[arg(long, value_name = "FILE", required_unless_present = "rollback")]
     pub selection: Option<PathBuf>,
-    /// Verify a Front release while preserving the primary Service and its dependencies.
-    #[arg(long, requires = "output")]
-    pub front_only: bool,
-    /// Probe the target Service version before releasing a compatible package selection.
-    #[arg(long, requires_all = ["output", "probe_config"])]
-    pub service: bool,
     /// Restore the previous selection from this output directory at a higher Profile sequence.
-    #[arg(long, requires = "release_mode", conflicts_with = "selection")]
+    #[arg(long, conflicts_with = "selection")]
     pub rollback: bool,
-    /// Directory for verified packages and release history.
-    #[arg(long, value_name = "DIR", requires = "release_mode")]
+    /// Directory for verified packages and release history. Defaults to the Realm's local data directory.
+    #[arg(long, value_name = "DIR")]
     pub output: Option<PathBuf>,
     #[command(flatten)]
     pub probe: super::realm_packages::ServiceProbeArgs,
 }
 
 pub async fn update(args: &UpdateArgs) -> Result<Value> {
+    use sha2::{Digest, Sha256};
+
     let member = Member::load(&args.key)?;
-    let selection = args
+    let (selection, file_probe) = args
         .selection
         .as_deref()
-        .map(super::realm::read_selection)
-        .transpose()?;
-    let probe = args.probe.probe();
+        .map(super::realm_packages::read_release_selection)
+        .transpose()?
+        .map_or((None, None), |(selection, probe)| (Some(selection), probe));
+    let argument_probe = args.probe.probe();
     anyhow::ensure!(
-        args.service || probe.is_none(),
-        "probe options require --service"
+        argument_probe.is_none() || file_probe.is_none(),
+        "use readiness in the selection JSON or the probe options"
     );
-    if let Some(output) = &args.output {
-        return super::realm_packages::release(&member, output, selection, probe.as_ref()).await;
-    }
-    let selection = selection.context("missing package selection")?;
-    let mut request = member.request(MembershipOp::UpdateRealm);
-    request.selection = Some(selection.clone());
-    let reply = member.send(request).await?;
-    let client = discovery_client()?;
-    let profile = realm_profile(&member.file.realm, None, |url| fetch_public(&client, url)).await?;
-    anyhow::ensure!(
-        reply["sequence"].as_u64() == Some(profile.sequence)
-            && profile.selection.as_ref() == Some(&selection),
-        "update was submitted but the published Profile does not match the requested selection and sequence"
-    );
-    Ok(reply)
+    let output = args
+        .output
+        .clone()
+        .or_else(|| {
+            dirs::data_local_dir().map(|directory| {
+                directory
+                    .join("actr")
+                    .join("realm-releases")
+                    .join(hex::encode(Sha256::digest(member.file.realm.as_bytes())))
+            })
+        })
+        .context("local Realm release directory is unavailable; use --output")?;
+    let probe = argument_probe.or(file_probe);
+    super::realm_packages::release(&member, &output, selection, probe.as_ref()).await
 }
 
 pub async fn members(args: &KeyArgs) -> Result<Value> {

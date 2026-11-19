@@ -25,7 +25,7 @@ use tempfile::NamedTempFile;
 use super::realm_members::resolve_profile;
 
 mod front;
-pub(super) use front::{ServiceProbeArgs, release};
+pub(super) use front::{ServiceProbeArgs, read_release_selection, release};
 
 const DOCUMENT_LIMIT: usize = actr_protocol::realm_profile::MAX_REALM_PROFILE_BYTES;
 const ARCHIVE_LIMIT: usize = 64 * 1024 * 1024;

@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 mod selection;
-pub use selection::{FrontUpdate, RealmPackageSelection};
+pub use selection::{FrontUpdate, PackageSelectionChange, RealmPackageSelection};
 pub const MAX_REALM_PROFILE_BYTES: usize = 64 * 1024;
 
 pub const REALM_PROFILE_SCHEMA: &str = "actr.realm/v1";

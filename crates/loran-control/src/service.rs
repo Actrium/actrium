@@ -1,6 +1,7 @@
 use crate::error::Result as AdminResult;
 use crate::metrics::collect_system_metrics;
 use crate::realm::realm_to_proto;
+use actr_protocol::realm_profile::{FrontUpdate, PackageSelectionChange, RealmPackageSelection};
 use chrono::Utc;
 use issuer::realm_profile::{ProfileChange, ProfileError, RealmProfiles};
 use loran_proto::NodeAdminService;
@@ -20,7 +21,9 @@ use platform::config::config_store::{ConfigOverride, ConfigOverrideStore};
 use platform::config::registry;
 use platform::config::resolver::{self, ResolvedField};
 use platform::realm::membership::{self, BY_OPERATOR, IssuedInvite};
-use platform::realm::{Realm, RealmError, RealmProfileRecord, RealmStatus};
+use platform::realm::{
+    Realm, RealmError, RealmPackageReleaseRecord, RealmProfileRecord, RealmStatus,
+};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -39,6 +42,13 @@ mod admission_policy_tests;
 
 /// A created Realm: the response and its owner invite, returned once.
 pub type CreatedRealm = (CreateRealmResponse, Option<IssuedInvite>);
+
+#[derive(Serialize)]
+pub struct RealmPackageState {
+    pub sequence: u64,
+    pub selection: RealmPackageSelection,
+    pub previous_selection: Option<RealmPackageSelection>,
+}
 type MetricsFuture = Pin<Box<dyn Future<Output = AdminResult<SystemMetrics>> + Send>>;
 type MetricsProvider = Arc<dyn Fn() -> MetricsFuture + Send + Sync>;
 type ShutdownFuture = Pin<Box<dyn Future<Output = AdminResult<()>> + Send>>;
@@ -205,6 +215,75 @@ impl AdminApiService {
         self.realm_profiles
             .as_ref()
             .filter(|profiles| profiles.holds_key_for(realm))
+    }
+
+    pub async fn realm_package_state(&self, realm: &str) -> GrpcResult<RealmPackageState> {
+        let profiles = self.signs_profiles_for(realm).ok_or_else(|| {
+            Status::permission_denied("only the Realm signing authority can update these packages")
+        })?;
+        if !self.load_realm(realm).await?.is_active() {
+            return Err(Status::failed_precondition(
+                "only active Realms accept package releases",
+            ));
+        }
+        let keys = profiles
+            .signing_keys()
+            .ok_or_else(|| Status::unavailable("Realm signing key is not ready"))?;
+        let record = RealmProfileRecord::get(realm)
+            .await
+            .map_err(|error| Status::internal(error.to_string()))?
+            .ok_or_else(|| Status::failed_precondition("Realm has no signed Profile"))?;
+        let profile = record
+            .verify_for_update(keys)
+            .map_err(|error| Status::failed_precondition(error.to_string()))?;
+        let selection = profile.selection.ok_or_else(|| {
+            Status::failed_precondition("Realm has no complete package selection")
+        })?;
+        let previous_selection = RealmPackageReleaseRecord::rollback_selection(realm, &selection)
+            .await
+            .map_err(|error| Status::internal(error.to_string()))?;
+        Ok(RealmPackageState {
+            sequence: profile.sequence,
+            selection,
+            previous_selection,
+        })
+    }
+
+    /// Publish the selection after the caller has verified its archives and, for a Service change, probed readiness.
+    pub async fn publish_verified_packages(
+        &self,
+        realm: &str,
+        selection: RealmPackageSelection,
+        update: FrontUpdate,
+        kind: PackageSelectionChange,
+    ) -> GrpcResult<JsonValue> {
+        let profiles = self.signs_profiles_for(realm).ok_or_else(|| {
+            Status::permission_denied("only the Realm signing authority can update these packages")
+        })?;
+        let mut change = ProfileChange {
+            selection: Some(selection.clone()),
+            ..Default::default()
+        };
+        match kind {
+            PackageSelectionChange::Front => change.front_update = Some(update.clone()),
+            PackageSelectionChange::Service => change.service_update = Some(update.clone()),
+        }
+        profiles
+            .issue(realm, change)
+            .await
+            .map_err(|error| match error {
+                ProfileError::Invalid(message) => Status::invalid_argument(message),
+                ProfileError::Realm(RealmError::Conflict(message)) => {
+                    Status::failed_precondition(message)
+                }
+                error => Status::unavailable(error.to_string()),
+            })?;
+        RealmPackageReleaseRecord::get(realm, &update, &selection)
+            .await
+            .map_err(|error| Status::internal(error.to_string()))?
+            .ok_or_else(|| Status::internal("package release receipt missing"))?
+            .reply(realm, &update)
+            .map_err(|error| Status::internal(error.to_string()))
     }
 
     pub fn override_store(&self) -> Option<&Arc<ConfigOverrideStore>> {

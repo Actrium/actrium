@@ -5320,6 +5320,56 @@ async fn admin_api_manages_many_realms_by_name() {
         assert_eq!(status, reqwest::StatusCode::BAD_REQUEST, "{error}");
     }
 
+    let packages_url = format!("{realm_url}/packages");
+    let snapshot: Value = client
+        .get(&packages_url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(snapshot["sequence"], 2);
+    let mut release = json!({
+        "selection": snapshot["selection"],
+        "operation": { "expected_sequence": 2, "operation_id": "a".repeat(32) }
+    });
+    let unchanged: Value = client
+        .put(&packages_url)
+        .bearer_auth(token)
+        .json(&release)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(unchanged["changed"], false);
+    assert_eq!(unchanged["sequence"], 2);
+    let primary = release["selection"]["primary_package"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let kind = release["selection"]["packages"][&primary]["type"]
+        .as_str()
+        .unwrap();
+    let program = kind.rsplit_once('@').unwrap().0;
+    release["selection"]["packages"][&primary]["type"] = json!(format!("{program}@2.0.0"));
+    let refused = client
+        .put(&packages_url)
+        .bearer_auth(token)
+        .json(&release)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), reqwest::StatusCode::BAD_REQUEST);
+    assert!(refused.text().await.unwrap().contains("readiness RPC"));
+
     // The operator sees the members, read-only.
     let members: Value = client
         .get(format!("{realm_url}/members"))

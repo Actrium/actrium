@@ -255,6 +255,20 @@ impl RealmProfiles {
             .as_ref()
             .map(|record| record.verify_for_update(keys))
             .transpose()?;
+        if change.owner.is_some()
+            && change.front_update.is_none()
+            && change.service_update.is_none()
+            && let Some(proposed) = &change.selection
+            && previous
+                .as_ref()
+                .and_then(|profile| profile.selection.as_ref())
+                != Some(proposed)
+        {
+            return Err(ProfileError::Invalid(
+                "package changes require a guarded release; use the current realm update command"
+                    .into(),
+            ));
+        }
 
         let selection = if change.retire {
             None

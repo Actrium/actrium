@@ -143,33 +143,24 @@ fn realm_update_checks_release_arguments() {
     for args in [
         vec!["--selection", "selection.json"],
         vec![
-            "--front-only",
-            "--output",
-            "cache",
             "--selection",
             "selection.json",
-        ],
-        vec!["--front-only", "--output", "cache", "--rollback"],
-        vec![
-            "--service",
             "--output",
             "cache",
             "--probe-config",
             "probe.toml",
             "--probe-route",
-            "echo.EchoService.Echo",
-            "--selection",
-            "selection.json",
+            "echo.v1.EchoService.Echo",
         ],
+        vec!["--rollback"],
         vec![
-            "--service",
-            "--output",
-            "cache",
-            "--probe-config",
-            "probe.toml",
-            "--probe-route",
-            "echo.EchoService.Echo",
             "--rollback",
+            "--output",
+            "cache",
+            "--probe-config",
+            "probe.toml",
+            "--probe-route",
+            "echo.v1.EchoService.Echo",
         ],
     ] {
         cli()
@@ -177,33 +168,15 @@ fn realm_update_checks_release_arguments() {
             .unwrap();
     }
     for args in [
-        vec!["--rollback"],
+        vec!["--rollback", "--selection", "selection.json"],
         vec![
-            "--front-only",
-            "--rollback",
-            "--output",
-            "cache",
-            "--selection",
-            "selection.json",
-        ],
-        vec![
-            "--service",
-            "--output",
-            "cache",
-            "--selection",
-            "selection.json",
-        ],
-        vec![
-            "--front-only",
-            "--service",
-            "--output",
-            "cache",
             "--probe-config",
             "probe.toml",
-            "--probe-route",
-            "ready",
-            "--rollback",
+            "--selection",
+            "selection.json",
         ],
+        vec!["--front-only", "--selection", "selection.json"],
+        vec!["--service", "--selection", "selection.json"],
     ] {
         assert!(
             cli()

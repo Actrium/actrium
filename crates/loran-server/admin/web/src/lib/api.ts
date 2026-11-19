@@ -98,6 +98,25 @@ export interface RealmInfo {
   status: RealmStatus;
 }
 
+export interface RealmPackage {
+  href: string;
+  sha256: string;
+  type: string;
+  dependencies?: Record<string, string>;
+}
+
+export interface RealmPackageSelection {
+  primary_package: string;
+  front_package: string;
+  packages: Record<string, RealmPackage>;
+}
+
+export interface RealmPackageState {
+  sequence: number;
+  selection: RealmPackageSelection;
+  previous_selection: RealmPackageSelection | null;
+}
+
 export interface RealmsResponse {
   success: boolean;
   realms: RealmInfo[];
@@ -274,6 +293,18 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+
+  getRealmPackages: (realm: string) =>
+    request<RealmPackageState>(`/realms/${encodeURIComponent(realm)}/packages`),
+
+  updateRealmPackages: (realm: string, data: {
+    selection: RealmPackageSelection;
+    operation: { operation_id: string; expected_sequence: number; rollback: boolean };
+    readiness?: { route: string; request_base64?: string };
+  }) => request<{ sequence: number; changed?: boolean }>(`/realms/${encodeURIComponent(realm)}/packages`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  }),
 
   setRealmPolicy: (realm: string, policy: RealmPolicy) =>
     request<RealmMutationResponse>(`/realms/${encodeURIComponent(realm)}/admission`, {

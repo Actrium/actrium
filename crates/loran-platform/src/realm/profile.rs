@@ -6,7 +6,8 @@
 
 use actr_protocol::RealmSigningKeys;
 use actr_protocol::realm_profile::{
-    FrontUpdate, RealmPackageSelection, RealmProfile, RealmProfileError, RealmStatus,
+    FrontUpdate, PackageSelectionChange, RealmPackageSelection, RealmProfile, RealmProfileError,
+    RealmStatus,
 };
 use chrono::Utc;
 
@@ -30,6 +31,7 @@ pub struct RealmPackageReleaseRecord {
     pub sequence: i64,
     previous_document: String,
     document: String,
+    rollback: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -54,7 +56,7 @@ impl RealmPackageReleaseRecord {
     ) -> Result<Option<Self>, RealmError> {
         update.check().map_err(RealmError::Conflict)?;
         let receipt = sqlx::query_as::<_, Self>(
-            "SELECT sequence, previous_document, document FROM realm_package_release
+            "SELECT sequence, previous_document, document, rollback FROM realm_package_release
              WHERE realm = ? AND operation_id = ?",
         )
         .bind(realm)
@@ -70,6 +72,35 @@ impl RealmPackageReleaseRecord {
             ));
         }
         Ok(receipt)
+    }
+
+    pub async fn rollback_selection(
+        realm: &str,
+        current: &RealmPackageSelection,
+    ) -> Result<Option<RealmPackageSelection>, RealmError> {
+        let mut connection = get_database().get_pool().acquire().await?;
+        Self::rollback_selection_on(&mut connection, realm, current).await
+    }
+
+    async fn rollback_selection_on(
+        connection: &mut sqlx::SqliteConnection,
+        realm: &str,
+        current: &RealmPackageSelection,
+    ) -> Result<Option<RealmPackageSelection>, RealmError> {
+        let latest = sqlx::query_as::<_, Self>(
+            "SELECT sequence, previous_document, document, rollback FROM realm_package_release
+             WHERE realm = ? ORDER BY sequence DESC LIMIT 1",
+        )
+        .bind(realm)
+        .fetch_optional(connection)
+        .await?;
+        let Some(latest) = latest else {
+            return Ok(None);
+        };
+        if latest.rollback || read_selection(&latest.document)? != *current {
+            return Ok(None);
+        }
+        read_selection(&latest.previous_document).map(Some)
     }
 
     pub fn reply(
@@ -202,7 +233,7 @@ impl RealmProfileRecord {
             previous_digest,
             None,
             owner,
-            owner.is_some(),
+            owner.is_some() || matches!(release, PackageRelease::Service(_)),
             Some(release),
         )
         .await
@@ -266,44 +297,57 @@ impl RealmProfileRecord {
             let new = profile.selection.as_ref().ok_or_else(|| {
                 RealmError::Conflict("a package release needs a complete selection".into())
             })?;
-            match release {
-                PackageRelease::Front(_) => old
-                    .check_unchanged_service(new)
-                    .map_err(RealmError::Conflict)?,
-                PackageRelease::Service(_) => {
-                    old.check_service_switch(new)
-                        .map_err(RealmError::Conflict)?;
-                    let owner = owner.ok_or_else(|| {
-                        RealmError::Conflict("Service cutover needs the Realm owner".into())
-                    })?;
-                    let service_type = &new.selected().map_err(RealmError::Conflict)?.0.r#type;
-                    let registered: bool = sqlx::query_scalar(
-                        "SELECT EXISTS(SELECT 1 FROM issued_actor_identity
+            let change = old.release_change(new).map_err(RealmError::Conflict)?;
+            let expected = match release {
+                PackageRelease::Front(_) => PackageSelectionChange::Front,
+                PackageRelease::Service(_) => PackageSelectionChange::Service,
+            };
+            if change != Some(expected) {
+                return Err(RealmError::Conflict(
+                    "package release does not match the selection change".into(),
+                ));
+            }
+            if update.rollback
+                && RealmPackageReleaseRecord::rollback_selection_on(&mut tx, name, &old)
+                    .await?
+                    .as_ref()
+                    != Some(new)
+            {
+                return Err(RealmError::Conflict(
+                    "the last package release is no longer available for rollback".into(),
+                ));
+            }
+            if expected == PackageSelectionChange::Service
+                && let Some(owner) = owner
+            {
+                let service_type = &new.selected().map_err(RealmError::Conflict)?.0.r#type;
+                let registered: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM issued_actor_identity
                          WHERE realm = ? AND actor_type = ?
                            AND member_id = ? AND auth_mode = 1 AND development = 0)",
-                    )
-                    .bind(name)
-                    .bind(service_type)
-                    .bind(&owner.member_id)
-                    .fetch_one(&mut *tx)
-                    .await?;
-                    if !registered {
-                        return Err(RealmError::Conflict(
-                            "the owner has not registered this Service type".into(),
-                        ));
-                    }
+                )
+                .bind(name)
+                .bind(service_type)
+                .bind(&owner.member_id)
+                .fetch_one(&mut *tx)
+                .await?;
+                if !registered {
+                    return Err(RealmError::Conflict(
+                        "the owner has not registered this Service type".into(),
+                    ));
                 }
             }
             let inserted = sqlx::query(
                 "INSERT INTO realm_package_release
-                 (realm, operation_id, sequence, previous_document, document)
-                 VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                 (realm, operation_id, sequence, previous_document, document, rollback)
+                 VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
             )
             .bind(name)
             .bind(&update.operation_id)
             .bind(profile.sequence as i64)
             .bind(previous)
             .bind(document)
+            .bind(update.rollback)
             .execute(&mut *tx)
             .await?
             .rows_affected();
@@ -519,6 +563,7 @@ mod tests {
         let operation = FrontUpdate {
             expected_sequence: 1,
             operation_id: "a".repeat(32),
+            rollback: false,
         };
         let mut second: Value = serde_json::from_str(&first)?;
         second["sequence"] = json!(2);
@@ -575,6 +620,7 @@ mod tests {
         let operation = FrontUpdate {
             expected_sequence: 2,
             operation_id: "b".repeat(32),
+            rollback: true,
         };
         RealmProfileRecord::store_front_update(
             &rollback,

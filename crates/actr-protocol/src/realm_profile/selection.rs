@@ -8,6 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct FrontUpdate {
     pub operation_id: String,
     pub expected_sequence: u64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rollback: bool,
 }
 
 impl FrontUpdate {
@@ -25,6 +27,13 @@ impl FrontUpdate {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackageSelectionChange {
+    Front,
+    Service,
 }
 
 /// A complete, atomic selection. Serialized directly into the Profile or management envelope.
@@ -184,14 +193,16 @@ impl RealmPackageSelection {
         Ok(())
     }
 
-    /// A managed cutover is between distinct versions of the same Service.
-    pub fn check_service_switch(&self, next: &Self) -> Result<(), String> {
-        let (old, _) = self.selected()?;
-        let (target, _) = next.selected()?;
-        old.check_primary_successor(target)?;
-        if old.r#type == target.r#type {
-            return Err("a Service cutover requires a different Service version".into());
+    /// Identify a release from the accepted and proposed selections.
+    pub fn release_change(&self, next: &Self) -> Result<Option<PackageSelectionChange>, String> {
+        self.check_successor(next)?;
+        if self == next {
+            return Ok(None);
         }
-        Ok(())
+        if self.selected()?.0.r#type != next.selected()?.0.r#type {
+            return Ok(Some(PackageSelectionChange::Service));
+        }
+        self.check_unchanged_service(next)?;
+        Ok(Some(PackageSelectionChange::Front))
     }
 }

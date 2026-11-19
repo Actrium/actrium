@@ -553,6 +553,7 @@ fn sign_front_profile(
     let update = FrontUpdate {
         operation_id: operation_id.to_owned(),
         expected_sequence: previous.sequence,
+        rollback: false,
     };
     update.check().map_err(anyhow::Error::msg)?;
     let signed = sign_profile(key_path, profile, None, Some(selection))?;
