@@ -1,4 +1,4 @@
-//! Validate native v2 package requirements before instantiating the workload.
+//! Validate v2 workload requirements and signed dependency locks.
 
 use std::str::FromStr;
 
@@ -12,6 +12,23 @@ use crate::error::{HyperError, HyperResult};
 
 const V2_LOCK_PATH: &str = "manifest.lock.toml";
 
+pub(crate) fn validate_native_host(manifest: &ActorPackageManifest) -> HyperResult<()> {
+    if manifest.workload.profile != "actr.native/1" || manifest.host.profile != "actr.host/1" {
+        return Err(HyperError::InvalidManifest(
+            "unsupported native workload or host profile".into(),
+        ));
+    }
+    validate_host_api(&manifest.host.api)?;
+    if !manifest.host.required_capabilities.is_empty()
+        || !manifest.host.optional_capabilities.is_empty()
+    {
+        return Err(HyperError::InvalidManifest(
+            "actr.native/1 does not support host capabilities".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) use actr_pack::actor_package::{WASI_DATA_READ_ONLY, WASI_DATA_READ_WRITE};
 
 pub(crate) fn resolve_component_host_grants<'a>(
@@ -24,15 +41,7 @@ pub(crate) fn resolve_component_host_grants<'a>(
             manifest.workload.profile, manifest.host.profile
         )));
     }
-    let host_api = Version::new(1, 0, 0);
-    let requirement = VersionReq::parse(&manifest.host.api)
-        .map_err(|e| HyperError::InvalidManifest(format!("invalid host.api: {e}")))?;
-    if !requirement.matches(&host_api) {
-        return Err(HyperError::InvalidManifest(format!(
-            "native host API {host_api} does not satisfy {}",
-            manifest.host.api
-        )));
-    }
+    validate_host_api(&manifest.host.api)?;
     if !manifest.host.optional_capabilities.is_empty() {
         return Err(HyperError::InvalidManifest(
             "actr.component/1 does not support optional capability discovery".into(),
@@ -78,6 +87,18 @@ pub(crate) fn resolve_component_host_grants<'a>(
         directory: grant.directory,
         access,
     }))
+}
+
+fn validate_host_api(api: &str) -> HyperResult<()> {
+    let host_api = Version::new(1, 0, 0);
+    let requirement = VersionReq::parse(api)
+        .map_err(|e| HyperError::InvalidManifest(format!("invalid host.api: {e}")))?;
+    if !requirement.matches(&host_api) {
+        return Err(HyperError::InvalidManifest(format!(
+            "native host API {host_api} does not satisfy {api}"
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) fn parse_lock(bytes: &[u8]) -> HyperResult<LockFile> {
@@ -244,7 +265,23 @@ service Echo { rpc Echo(Request) returns (Request); }
 "#;
 
     #[test]
-    fn issuer_fixture_matches_the_supported_native_profile() {
+    fn native_profile_rejects_unsupported_host_requirements() {
+        let source = include_str!("../../actr-pack/tests/fixtures/registration-v2.toml");
+        let mut manifest = ActorPackageManifest::from_toml(source).unwrap();
+        manifest.workload.profile = "actr.native/1".into();
+        validate_native_host(&manifest).unwrap();
+        manifest.host.api = ">=2.0.0".into();
+        assert!(validate_native_host(&manifest).is_err());
+        manifest.host.api = "^1.0.0".into();
+        manifest
+            .host
+            .required_capabilities
+            .push("wasi.data.read-write".into());
+        assert!(validate_native_host(&manifest).is_err());
+    }
+
+    #[test]
+    fn issuer_fixture_matches_the_supported_component_profile() {
         let source = include_str!("../../actr-pack/tests/fixtures/registration-v2.toml");
         let manifest = ActorPackageManifest::from_toml(source).unwrap();
         let registration = actr_pack::RegistrationManifest::parse(source.as_bytes()).unwrap();

@@ -299,6 +299,31 @@ service.tell(route, event)
 service.on(eventName, handler)
 ```
 
+A Service publishes an event to a Front over the existing reliable actor lane as
+a one-way Tell. The Tell route is the declared `eventName`; its payload is the
+original business payload without a JSON wrapper. The Front workload accepts
+the event only when its authenticated caller is the Service ActorId selected by
+Realm discovery and the route is present in the Front's signed capability
+manifest. The Host then delivers `{ event, payloadBase64 }` to the Guest.
+`service.on` does not expose a general Guest-to-Service Tell capability:
+`service.tell` remains a separate, unimplemented capability.
+
+A Service normally learns a Front's ActorId from `Context::caller_id()` while
+handling one of its business RPCs. It can later publish to that Front with
+`tell_raw(Dest::Peer(front_id), event_name, PayloadType::RpcReliable, payload)`.
+The v1 actor event stream has no replay or retained-event semantics; events
+published while no native subscription is active are not queued for later
+delivery. An HTTP embedding may expose the same event shape as
+`text/event-stream`, with the SSE `event` field carrying `eventName` and a JSON
+`data` object carrying `payloadBase64`. The HTTP client uses streaming fetch or
+incremental XHR on React Native, accepts LF and CRLF framing, and limits an
+incomplete frame to 1,048,576 decoded characters. Reconnect uses exponential
+backoff and sends `Last-Event-ID` after the server supplies an SSE `id`; this
+resume signal does not add replay guarantees to the native actor transport. A
+server that supports SSE replay may recover those IDs, while a server without
+replay support can still omit events published during a disconnect. Permanent
+HTTP client errors stop the stream instead of retrying indefinitely.
+
 The Guest does not directly get:
 
 - `discover(ActrType)`;

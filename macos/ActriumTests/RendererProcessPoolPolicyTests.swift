@@ -105,39 +105,38 @@ struct RendererProcessPoolPolicyTests {
         #expect(snapshot.process(for: terminatingTab)?.tabIDs == [terminatingTab])
     }
 
-    @Test func attachmentResultReachesATabThatNeverReleasedItsRenderer() {
-        // A tab that has never released a renderer has no stored epoch. The
-        // captured epoch defaults to zero, so the first result must still be
-        // delivered instead of being compared against nil.
+    @Test func rendererOperationReachesAFreshTabWithNoStoredEpoch() {
+        // Both a first attachment result and a first event subscription use
+        // this check. A fresh tab's missing entry is epoch zero, not a mismatch.
         #expect(
-            RendererProcessPool.attachmentResultIsCurrent(
+            RendererProcessPool.rendererEpochIsCurrent(
                 capturedEpoch: 0,
                 currentEpoch: nil
             )
         )
         #expect(
-            RendererProcessPool.attachmentResultIsCurrent(
+            RendererProcessPool.rendererEpochIsCurrent(
                 capturedEpoch: 0,
                 currentEpoch: 0
             )
         )
     }
 
-    @Test func attachmentResultIsDroppedAfterTheEpochAdvances() {
+    @Test func rendererOperationIsRejectedAfterReplacement() {
         #expect(
-            !RendererProcessPool.attachmentResultIsCurrent(
+            !RendererProcessPool.rendererEpochIsCurrent(
                 capturedEpoch: 0,
                 currentEpoch: 1
             )
         )
         #expect(
-            RendererProcessPool.attachmentResultIsCurrent(
+            RendererProcessPool.rendererEpochIsCurrent(
                 capturedEpoch: 2,
                 currentEpoch: 2
             )
         )
         #expect(
-            !RendererProcessPool.attachmentResultIsCurrent(
+            !RendererProcessPool.rendererEpochIsCurrent(
                 capturedEpoch: 2,
                 currentEpoch: 3
             )

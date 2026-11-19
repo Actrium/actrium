@@ -1,0 +1,206 @@
+name: Reusable Actrium macOS Release
+
+on:
+  workflow_call:
+    inputs:
+      source_sha: { required: true, type: string }
+      tag: { required: false, type: string, default: "" }
+      publish: { required: true, type: boolean }
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build and publish Actrium DMG
+    runs-on: macos-26
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      PUBLISH: ${{ inputs.publish }}
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: automation
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Validate source and choose the tag
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          if [[ -z "$RELEASE_TAG" ]]; then
+            test "$GITHUB_REF" = refs/heads/main
+            python3 ../automation/.github/scripts/macos_snapshot_tag.py >> "$GITHUB_ENV"
+            exit 0
+          fi
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${RELEASE_TAG#v}"
+          workspace_version=$(python3 -c 'import tomllib; print(tomllib.loads(open("Cargo.toml").read())["workspace"]["package"]["version"])')
+          test "$workspace_version" = "$version"
+          if [[ "$PUBLISH" == true ]]; then
+            test "$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")" = "$SOURCE_SHA"
+          fi
+          printf 'TAG=%s\nAPP_VERSION=%s\n' "$RELEASE_TAG" "$version" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: source
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: "29.3"
+          repo-token: ${{ github.token }}
+
+      - name: Prepare React Native and CocoaPods
+        run: |
+          xcodebuild -version
+          pnpm --filter @actrium/runtime install --frozen-lockfile --ignore-scripts
+          (cd packages/actrium && node node_modules/keel/scripts/keel_postinstall.js)
+          pnpm --dir packages/actrium run postinstall
+          pod install --project-directory=macos
+
+      - name: Build the local Swift package binaries
+        run: |
+          cargo install --locked uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
+          bash scripts/actrium/build-actrium-rust-bindings.sh apple-macos
+          ACTR_XCFRAMEWORK_TARGETS=macos bash packages/actr-swift/build-xcframework.sh
+
+      - name: Build the unsigned Release DMG
+        run: |
+          export XCODE_XCCONFIG_FILE="$RUNNER_TEMP/release.xcconfig"
+          printf 'MARKETING_VERSION = %s\nCURRENT_PROJECT_VERSION = %s\n' \
+            "$APP_VERSION" "$GITHUB_RUN_NUMBER" > "$XCODE_XCCONFIG_FILE"
+          npm run package:macos:dmg -- --unsigned
+
+      - name: Verify the mounted image and checksum
+        id: verify
+        run: |
+          cd macos/dist
+          asset="Actrium_${TAG}_macos-arm64_unsigned.dmg"
+          mv "$DMG_PATH" "$asset"
+          bash ../../../automation/.github/scripts/verify_macos_dmg.sh "$asset" "$APP_VERSION" "$GITHUB_RUN_NUMBER"
+
+      - name: Store the dry-run DMG and checksum
+        if: "!inputs.publish"
+        uses: actions/upload-artifact@v4
+        with:
+          name: actrium-macos-${{ env.TAG }}
+          path: source/macos/dist/Actrium_${{ env.TAG }}_macos-arm64_unsigned.dmg*
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Publish the alpha snapshot
+        if: inputs.publish && inputs.tag == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh auth setup-git
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$SOURCE_SHA"
+          else
+            git tag "$TAG" "$SOURCE_SHA"
+          fi
+          git push origin "refs/tags/$TAG:refs/tags/$TAG"
+          notes="$RUNNER_TEMP/release-notes.md"
+          asset="macos/dist/Actrium_${TAG}_macos-arm64_unsigned.dmg"
+          if release=$(gh release view "$TAG" --json isPrerelease,isDraft,body); then
+            jq -e '.isPrerelease and (if .isDraft then (.body // "" | contains("<!-- actrium-macos-build:start -->")) else true end)' <<< "$release" >/dev/null
+            draft=$(jq -r '.isDraft' <<< "$release")
+            printf '%s' "$release" | python3 ../automation/.github/scripts/macos_snapshot_notes.py "$SOURCE_SHA" > "$notes"
+          else
+            draft=true
+            printf '{"body":""}' | python3 ../automation/.github/scripts/macos_snapshot_notes.py "$SOURCE_SHA" > "$notes"
+            gh release create "$TAG" --verify-tag --draft --prerelease --latest=false --title "$TAG" --notes-file "$notes"
+          fi
+          gh release upload "$TAG" "$asset" "$asset.sha256" --clobber
+          edit_args=(--latest=false --notes-file "$notes")
+          if [[ "$draft" == true ]]; then
+            edit_args+=(--draft=false)
+          fi
+          gh release edit "$TAG" "${edit_args[@]}"
+          gh release view "$TAG" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach assets to the official Release
+        if: inputs.publish && inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh auth setup-git
+          git fetch --no-tags origin "refs/tags/$TAG"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$SOURCE_SHA"
+          gh release view "$TAG" --json isPrerelease,isDraft --jq '.isPrerelease or .isDraft' | grep -qx false
+          asset="macos/dist/Actrium_${TAG}_macos-arm64_unsigned.dmg"
+          gh release upload "$TAG" "$asset" "$asset.sha256" --clobber
+          gh release view "$TAG" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record the Release Train result
+        if: always() && inputs.tag != ''
+        working-directory: ${{ runner.temp }}
+        env:
+          JOB_STATUS: ${{ job.status }}
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          url=-
+          if [[ "$JOB_STATUS" != success ]]; then
+            status=failure
+            if [[ "$VERIFY_OUTCOME" == success ]]; then
+              mode=delivery_failed
+            elif [[ "$VERIFY_OUTCOME" == failure ]]; then
+              mode=verification_failed
+            else
+              mode=build_failed
+            fi
+          elif [[ "$PUBLISH" == true ]]; then
+            status=success
+            mode=published
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG"
+          else
+            status=success
+            mode=dry_run_validated
+          fi
+          printf 'Actrium macOS DMG\tpublish-actrium-macos\tmacos_dmg\t%s\t%s\t%s\t%s\t%s\n' \
+            "${RELEASE_TAG#v}" "$status" "$mode" "$url" "$SOURCE_SHA" \
+            > "release-train-${RELEASE_TAG}.publish-actrium-macos.state.tsv"
+
+      - name: Upload Release Train state
+        if: always() && inputs.tag != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: actrium-macos-release-state
+          path: ${{ runner.temp }}/release-train-*.publish-actrium-macos.state.tsv
+          if-no-files-found: error
+          overwrite: true

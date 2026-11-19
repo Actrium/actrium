@@ -15,6 +15,8 @@ use crate::{CompatibilityError, Fingerprint, ProtoFile, Result};
 use actr_protocol::service_spec::Protobuf;
 use anyhow::{Context, bail};
 use sha2::{Digest, Sha256};
+use unicase::UniCase;
+use unicode_normalization::UnicodeNormalization;
 
 /// Inputs for [`build_service_spec`].
 ///
@@ -77,22 +79,49 @@ pub fn build_self_contained_service_spec(
     name: &str,
     proto: ProtoFile,
 ) -> Result<actr_protocol::ServiceSpec> {
-    let hash = self_contained_proto_hash(&proto.content).map_err(|source| {
-        CompatibilityError::ProtoParseError {
+    build_self_contained_service_spec_from_files(name, vec![proto])
+}
+
+/// Build a spec from authenticated RPC exports without resolving any imports.
+///
+/// Every file must be self-contained. Service fingerprints use the same sorted
+/// name/hash aggregation as the legacy builder. Published-name collision keys use
+/// canonical Unicode normalization and full case folding, without changing export
+/// spelling or fingerprint inputs.
+pub fn build_self_contained_service_spec_from_files(
+    name: &str,
+    proto_files: Vec<ProtoFile>,
+) -> Result<actr_protocol::ServiceSpec> {
+    let mut names = std::collections::BTreeSet::new();
+    let mut hashes = Vec::with_capacity(proto_files.len());
+    let mut protobufs = Vec::with_capacity(proto_files.len());
+    for proto in &proto_files {
+        let decomposed_name: String = published_proto_name(&proto.name).nfd().collect();
+        let comparison_key: String = UniCase::new(decomposed_name)
+            .to_folded_case()
+            .nfd()
+            .collect();
+        let hash = if names.insert(comparison_key) {
+            self_contained_proto_hash(&proto.content)
+        } else {
+            Err(anyhow::anyhow!(
+                "duplicate published Proto name `{}`",
+                proto.name
+            ))
+        }
+        .map_err(|source| CompatibilityError::ProtoParseError {
             file_name: proto.name.clone(),
             source,
-        }
-    })?;
-    let fingerprint = format!(
-        "service_semantic:{:x}",
-        Sha256::digest(format!("{}:{hash}", proto.name))
-    );
+        })?;
+        protobufs.push(make_protobuf(proto, format!("semantic:{hash}")));
+        hashes.push((proto.name.clone(), hash));
+    }
     Ok(assemble_spec(
         name,
         None,
         vec![],
-        fingerprint,
-        vec![make_protobuf(&proto, format!("semantic:{hash}"))],
+        Fingerprint::service_fingerprint_from_hashes(hashes),
+        protobufs,
     ))
 }
 
@@ -126,9 +155,13 @@ pub fn validate_self_contained_rpc_proto(source: &str) -> Result<()> {
         .map_err(CompatibilityError::ProtoSignError)
 }
 
+fn published_proto_name(name: &str) -> &str {
+    name.trim_end_matches(".proto")
+}
+
 fn make_protobuf(proto: &ProtoFile, fingerprint: String) -> Protobuf {
     Protobuf {
-        package: proto.name.trim_end_matches(".proto").to_string(),
+        package: published_proto_name(&proto.name).to_string(),
         content: proto.content.clone(),
         fingerprint,
     }
@@ -193,6 +226,114 @@ mod tests {
         let mut imported = proto;
         imported.content.push_str("\nimport \"other.proto\";");
         assert!(build_self_contained_service_spec("echo", imported).is_err());
+    }
+
+    #[test]
+    fn signed_exports_keep_the_legacy_aggregate_and_reject_name_conflicts() {
+        let proto_files = vec![
+            ProtoFile {
+                name: "Ping.proto".into(),
+                content: PROTO_A.into(),
+                path: None,
+            },
+            ProtoFile {
+                name: "pONG.proto".into(),
+                content: PROTO_B.into(),
+                path: None,
+            },
+        ];
+        let legacy = build_service_spec(ServiceSpecInput {
+            name: "echo",
+            description: None,
+            tags: vec![],
+            proto_files: proto_files.clone(),
+        })
+        .unwrap();
+        let signed =
+            build_self_contained_service_spec_from_files("echo", proto_files.clone()).unwrap();
+        assert_eq!(signed.fingerprint, legacy.fingerprint);
+        assert_eq!(signed.protobufs, legacy.protobufs);
+        assert_eq!(signed.protobufs[0].package, "Ping");
+        assert_eq!(signed.protobufs[1].package, "pONG");
+
+        let mut reordered = proto_files.clone();
+        reordered.reverse();
+        assert_eq!(
+            signed.fingerprint,
+            build_self_contained_service_spec_from_files("echo", reordered)
+                .unwrap()
+                .fingerprint
+        );
+
+        for duplicate in ["ping.proto", "ping.proto.proto"] {
+            let mut conflicting = proto_files.clone();
+            conflicting[1].name = duplicate.into();
+            assert!(build_self_contained_service_spec_from_files("echo", conflicting).is_err());
+        }
+    }
+
+    #[test]
+    fn signed_exports_preserve_unicode_spelling_and_fingerprints() {
+        let proto_files = [
+            ("\u{c9}cho.proto", PROTO_A),
+            ("e\u{301}cho_other.proto", PROTO_B),
+        ]
+        .into_iter()
+        .map(|(name, content)| ProtoFile {
+            name: name.into(),
+            content: content.into(),
+            path: None,
+        })
+        .collect::<Vec<_>>();
+        let legacy = build_service_spec(ServiceSpecInput {
+            name: "echo",
+            description: None,
+            tags: vec![],
+            proto_files: proto_files.clone(),
+        })
+        .unwrap();
+        let signed =
+            build_self_contained_service_spec_from_files("echo", proto_files.clone()).unwrap();
+        assert_eq!(signed.fingerprint, legacy.fingerprint);
+        assert_eq!(signed.protobufs, legacy.protobufs);
+        assert_eq!(signed.protobufs[0].package, "\u{c9}cho");
+        assert_eq!(signed.protobufs[1].package, "e\u{301}cho_other");
+
+        let mut reordered = proto_files;
+        reordered.reverse();
+        assert_eq!(
+            signed.fingerprint,
+            build_self_contained_service_spec_from_files("echo", reordered)
+                .unwrap()
+                .fingerprint
+        );
+    }
+
+    #[test]
+    fn signed_exports_reject_normalized_case_insensitive_name_collisions() {
+        for names in [
+            ["Echo.proto", "echo.proto"],
+            ["ECHO.proto", "echo.proto"],
+            ["echo.proto.proto", "Echo.proto"],
+            ["\u{c9}cho.proto", "\u{e9}cho.proto"],
+            ["\u{e9}cho.proto", "e\u{301}cho.proto"],
+            ["\u{c9}cho.proto.proto", "e\u{301}cho.proto"],
+            ["\u{3a3}.proto", "\u{3c2}.proto"],
+            ["Stra\u{df}e.proto", "STRASSE.proto"],
+        ] {
+            let proto_files = names
+                .into_iter()
+                .zip([PROTO_A, PROTO_B])
+                .map(|(name, content)| ProtoFile {
+                    name: name.into(),
+                    content: content.into(),
+                    path: None,
+                })
+                .collect();
+            let error = build_self_contained_service_spec_from_files("echo", proto_files)
+                .expect_err("published filenames must not collide on case-insensitive volumes");
+            assert!(error.to_string().contains("duplicate published Proto name"));
+        }
     }
 
     #[test]

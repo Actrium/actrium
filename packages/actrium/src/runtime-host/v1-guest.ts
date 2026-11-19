@@ -1,4 +1,4 @@
-import { type HostModuleImplementationMap, type KeelContractShape, isHostModuleId, rpc } from 'keel/contract';
+import { type HostModuleImplementationMap, type KeelContractShape, isHostModuleId, rpc, subscription } from 'keel/contract';
 import {
   type V1CapabilityManifest,
   type V1Linkage,
@@ -9,8 +9,9 @@ import {
   v1ServiceLink,
 } from 'keel/v1';
 import type { CapabilityVerificationCode } from './capability-verify';
-import { type ServiceCallInput, type ServiceCallOutput, contract } from './contract';
+import { type ServiceCallInput, type ServiceCallOutput, type ServiceEvent, contract } from './contract';
 import { HOST_SUPPORTED_METHODS, type HostModules } from './host-modules';
+import type { FrontCapability } from './capabilities';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
 
 /** Return a comparison key that treats manifest arrays as unordered sets of entries. */
@@ -44,8 +45,9 @@ export function verifyV1RuntimeGuest(
       if (!exportName || !moduleId.startsWith('host:')) continue;
       const isService = moduleId.startsWith(V1_SERVICE_PREFIX);
       const hostId = isService ? 'host:service' : moduleId;
-      // A fixed Service link also needs a transport adapter in this loader.
-      if ((isService && exportName !== 'call') || !HOST_SUPPORTED_METHODS[hostId]?.has(exportName)) {
+      // HOST_SUPPORTED_METHODS is the single source of truth for implemented
+      // Service operations; fixed links reuse the same support decision.
+      if (!HOST_SUPPORTED_METHODS[hostId]?.has(exportName)) {
         return {
           ok: false,
           code: 'unknown_capability',
@@ -80,37 +82,48 @@ export function verifyV1RuntimeGuest(
 export function bindV1HostModules(
   linkage: V1Linkage,
   implementations: HostModules,
-  authorizeCall: (capability: 'service.call') => Promise<void>
+  authorize: (capability: FrontCapability) => Promise<void>
 ): { contract: KeelContractShape; hostModules: HostModuleImplementationMap } {
   const modules: KeelContractShape['hostModules'] = {};
   const hostModules: HostModuleImplementationMap = {};
   const available: HostModuleImplementationMap = implementations;
   const descriptors: KeelContractShape['hostModules'] = contract.hostModules;
   for (const [moduleId, exportName] of linkage.links) {
-    // Only the implemented service call has a fixed-route adapter today.
+    // Only the implemented service call and event subscription have fixed-route adapters today.
     if (moduleId.startsWith(V1_SERVICE_PREFIX) && exportName === 'call') {
       const { name } = v1ServiceLink(moduleId, exportName);
       const id = v1ServiceDispatchId(moduleId, exportName);
       const original = contract.hostModules['host:service'].call;
-      modules[id] = {
-        call: rpc<ServiceCallInput, ServiceCallOutput>({
-          schema: {
-            ...original.schema,
-            parseInput: (value) => {
-              // Validate the wire payload and overwrite any Guest-supplied route.
-              const data = value !== null && typeof value === 'object' && !Array.isArray(value)
-                ? { ...value, route: name }
-                : value;
-              return original.schema!.parseInput!(data);
-            },
+      modules[id] ??= {};
+      hostModules[id] ??= {};
+      modules[id].call = rpc<ServiceCallInput, ServiceCallOutput>({
+        schema: {
+          ...original.schema,
+          parseInput: (value) => {
+            // Validate the wire payload and overwrite any Guest-supplied route.
+            const data = value !== null && typeof value === 'object' && !Array.isArray(value)
+              ? { ...value, route: name }
+              : value;
+            return original.schema!.parseInput!(data);
           },
-        }),
-      };
-      hostModules[id] = {
-        call: async (input: ServiceCallInput) => {
-          await authorizeCall('service.call');
-          return implementations['host:service'].call(input);
         },
+      });
+      hostModules[id].call = async (input: ServiceCallInput) => {
+        await authorize('service.call');
+        return implementations['host:service'].call(input);
+      };
+    } else if (moduleId.startsWith(V1_SERVICE_PREFIX) && exportName === 'on') {
+      const { name } = v1ServiceLink(moduleId, exportName);
+      const id = v1ServiceDispatchId(moduleId, exportName);
+      const original = contract.hostModules['host:service'].on;
+      modules[id] ??= {};
+      hostModules[id] ??= {};
+      modules[id].on = subscription<ServiceEvent>({ schema: original.schema });
+      hostModules[id].on = (handler: (event: ServiceEvent) => void) => {
+        // host:service.on enforces capability/session authorization.
+        return implementations['host:service'].on((event) => {
+          if (event.event === name) handler(event);
+        });
       };
     } else if (exportName && isHostModuleId(moduleId) && HOST_SUPPORTED_METHODS[moduleId]?.has(exportName)) {
       // Reuse the schema and implementation for each linked non-Service method.

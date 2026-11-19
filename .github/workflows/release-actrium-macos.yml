@@ -1,0 +1,17 @@
+name: Release Actrium macOS
+
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: actrium-macos-alpha
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    uses: ./.github/workflows/_actrium-macos-release.yml
+    with:
+      source_sha: ${{ github.sha }}
+      publish: true

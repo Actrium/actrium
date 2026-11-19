@@ -84,6 +84,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         return pending
     }
 
+    // A single-use invitation has one redemption task. Keep the task ID so
+    // finishing an earlier discovery cannot clear a later redemption.
+    @Published private var inviteRedemptionId: UUID?
+    var inviteRedemptionInFlight: Bool { inviteRedemptionId != nil }
+
     /// Successfully joined Realms for session restore and invite prompts.
     /// Open admission still checks the current device key with the Issuer.
     private var redeemedRealms: Set<String> {
@@ -841,6 +846,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     /// Navigation Current Tab To Assign URL Or apply ID
     func openURLInNewTab(_ url: URL) {
+        // Drop duplicate actr:// deliveries before they create a tab: the
+        // navigation entry ignores them while a redemption is in flight, and
+        // an orphaned blank tab would be the only trace.
+        if inviteRedemptionInFlight, url.scheme?.lowercased() == "actr" { return }
         // These flows manage their own tabs when they recover an instance or import a package.
         if !ActrInstanceAddress.isLocalInstanceURL(url), !ActrPackageLinkPolicy.isPackageDownloadURL(url) {
             addNewTab(focusAddressBar: false)
@@ -855,6 +864,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// - Load if input is a local file path ACTR Apply
     /// - Otherwise, as app id Process
     func navigateCurrentTab(to input: String, fromAddressBar: Bool = false) {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isStandaloneInvite = trimmed.hasPrefix("ri_")
+        let isRealmAddress = trimmed.lowercased().hasPrefix("actr://")
+        guard !isStandaloneInvite || fromAddressBar else { return }
+        if inviteRedemptionInFlight, isStandaloneInvite || isRealmAddress { return }
+
         // Address-bar navigation must always land somewhere: create a tab
         // when the window has none (e.g. right after a relaunch).
         if currentTabId == nil || tabs.firstIndex(where: { $0.id == currentTabId }) == nil {
@@ -868,11 +883,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
         cancelRealmRefresh(currentTabId)
         pendingInviteRedeems.removeValue(forKey: currentTabId)
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // A standalone invite goes through the Realm flow before address or search handling.
-        if trimmed.hasPrefix("ri_") {
-            guard fromAddressBar else { return }
+        if isStandaloneInvite {
             do {
                 let address = try RealmJoinService.address(forInvite: trimmed)
                 openRealmAddress(address, tabIndex: index, inviteText: trimmed)
@@ -881,7 +894,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             }
             return
         }
-        if trimmed.lowercased().hasPrefix("actr://") {
+        if isRealmAddress {
             openRealmAddress(trimmed, tabIndex: index)
             return
         }
@@ -1074,7 +1087,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     func confirmInviteRedeem(_ pending: PendingInviteRedeem, code: String) {
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedCode.isEmpty, pendingInviteRedeems[pending.tabId]?.id == pending.id,
+        guard !inviteRedemptionInFlight, !trimmedCode.isEmpty,
+              pendingInviteRedeems[pending.tabId]?.id == pending.id,
               let index = tabs.firstIndex(where: pending.matches) else { return }
         cancelInviteRedeem(pending)
         openRealmAddress(pending.uri, tabIndex: index, inviteText: trimmedCode)
@@ -1293,13 +1307,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private func openRealmAddress(_ input: String, tabIndex: Int, inviteText: String? = nil) {
         do {
+            let linkAddress = ActrLinkInvite.strippingInviteArgs(from: input)
             let info = try ActriumCore.parseActrUri(
-                uri: input, installationId: InstallationIdProvider.getOrCreate()
+                uri: linkAddress, installationId: InstallationIdProvider.getOrCreate()
             )
             guard inviteText == nil || !info.isLocal else {
                 throw RealmServiceError(message: "Local Realms do not accept invitations.")
             }
-            handleResolvedRealmLink(info, input: input, tabIndex: tabIndex, inviteText: inviteText)
+            let suppliedInvite = info.isLocal ? nil : (inviteText ?? ActrLinkInvite.invite(from: input))
+            handleResolvedRealmLink(info, input: linkAddress, tabIndex: tabIndex, inviteText: suppliedInvite)
         } catch {
             logger.warning("⚠️ [navigateCurrentTab] actr:// input rejected: \(error)")
             presentRealmLinkError(error)
@@ -1320,6 +1336,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     ) {
         // The core parser guarantees a RealmId for every resolved link.
         guard let realmId = info.realmId else { return }
+        // A consumed invite must not survive in the tab address, the restored
+        // session, or history, so every resolution path stores the link with
+        // its `args` removed (09 §13: invites travel out of band).
+        let linkAddress = ActrLinkInvite.strippingInviteArgs(from: input)
 
         let realmDisplay: String
         if let serial = info.serial {
@@ -1332,17 +1352,17 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         // 04 §3: a local instance address opens the same instance — focus it
         // when already open, otherwise recover it through the instance store.
         if info.isLocal {
-            if let existing = tabs.first(where: { $0.url?.absoluteString == input }) {
+            if let existing = tabs.first(where: { $0.url?.absoluteString == linkAddress }) {
                 switchToTab(id: existing.id)
                 return
             }
-            guard let address = URL(string: input) else { return }
+            guard let address = URL(string: linkAddress) else { return }
             if serviceInstanceStore.resolveActorId(byAddressLabel: realmId) != nil {
                 restoreInstanceTab(address: address, title: realmDisplay, isActiveTab: true)
             } else {
-                logger.error("❌ [navigateCurrentTab] local instance not found: \(input)")
+                logger.error("❌ [navigateCurrentTab] local instance not found for \(realmDisplay)")
                 actrUriNotice = ActrUriNotice(
-                    uri: input,
+                    uri: linkAddress,
                     domain: info.domain,
                     detail: "The local instance was not found or has been cleared (SERVICE_NOT_FOUND); the address cannot be opened."
                 )
@@ -1350,7 +1370,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             return
         }
 
-        guard let address = URL(string: input),
+        guard let address = URL(string: linkAddress),
               let discoveryURL = info.discoveryUrl, let url = URL(string: discoveryURL)
         else { return }
         let tab = tabs[tabIndex]
@@ -1424,9 +1444,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     ) {
         let replacingTabId = tab.id
         let refreshId = UUID()
+        if inviteText != nil {
+            guard !inviteRedemptionInFlight else { return }
+            inviteRedemptionId = refreshId
+        }
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             defer {
+                if inviteRedemptionId == refreshId { inviteRedemptionId = nil }
                 if realmRefreshes[replacingTabId]?.id == refreshId {
                     realmRefreshes.removeValue(forKey: replacingTabId)
                 }
@@ -1545,6 +1570,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                               try RealmFrontTrustStore.read(.profile, name: realmName) == accepted.stateJson
                         else { return }
                         markRedeemed(realmName)
+                        if inviteRedemptionId == refreshId { inviteRedemptionId = nil }
                     }
                 }
 
@@ -1594,13 +1620,16 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                             let replacement = try await activeBinding.replacingConnection(connection)
                             candidateBinding = replacement
                             try await replacement.prepareForSwitch()
-                            try Task.checkCancellation()
-                            guard tabIndex() != nil,
-                                  bindings.binding(for: replacingTabId) === activeBinding,
-                                  try RealmFrontTrustStore.read(.profile, name: realmName) == accepted.stateJson,
-                                  try RealmFrontTrustStore.read(.authority, name: domain) == authority.pinsJson
-                            else { return }
-                            bindings.attach(replacement, to: replacingTabId)
+                            let replaced = try await bindings.replaceConnection(
+                                activeBinding, with: replacement, tabId: replacingTabId
+                            ) {
+                                guard tabIndex() != nil,
+                                      try RealmFrontTrustStore.read(.profile, name: realmName) == accepted.stateJson,
+                                      try RealmFrontTrustStore.read(.authority, name: domain) == authority.pinsJson
+                                else { return false }
+                                return true
+                            }
+                            guard replaced else { return }
                             candidateBinding = nil
                             logger.notice("Realm \(realmName): refreshed Service connection at Profile sequence \(availableProfile.sequence)")
                         }
