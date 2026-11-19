@@ -624,6 +624,10 @@ private final class RendererTabSurface {
     /// mid-drag (e.g. an RN callback) must not apply this drag's anchor to
     /// a different input.
     private var dragOwner: AnyObject?
+    /// The control the saved anchor/range pair belongs to. A range match in
+    /// another control (e.g. the same offsets re-selected with the keyboard)
+    /// must not reuse this anchor.
+    private weak var anchorOwner: AnyObject?
     /// Last text-input focus state reported to the Host. The Host mirrors
     /// IME composition for whichever surface owns the focused text input.
     private var lastReportedTextFocus = false
@@ -869,6 +873,20 @@ private final class RendererTabSurface {
                     dragOwner = nil
                     dragSelectionAnchor = nil
                     dragSelectionAnchorRange = nil
+                    anchorOwner = nil
+                    return
+                }
+                // A controlled input may replace its value while the mouse
+                // is down (e.g. RN re-renders with a shorter string); an
+                // anchor past the new end must end the drag instead of
+                // feeding an out-of-bounds range to AppKit.
+                let textLength = (editor.string as NSString).length
+                guard anchor <= textLength else {
+                    textInputPresses.remove(input.button)
+                    dragOwner = nil
+                    dragSelectionAnchor = nil
+                    dragSelectionAnchorRange = nil
+                    anchorOwner = nil
                     return
                 }
                 let point = editor.convert(location, from: nil)
@@ -1133,8 +1151,10 @@ private final class RendererTabSurface {
             let base: Int
             if current.length > 0,
                let anchor = dragSelectionAnchor,
-               dragSelectionAnchorRange == current {
-                // The stored anchor still describes the current selection.
+               dragSelectionAnchorRange == current,
+               anchorOwner === currentControl() {
+                // The stored anchor still describes the current selection
+                // in this control.
                 base = anchor
             } else if index >= current.upperBound {
                 // Untracked selection, click on the right: extend from the
@@ -1153,12 +1173,14 @@ private final class RendererTabSurface {
             dragSelectionAnchor = base
             let range = NSRange(location: min(base, index), length: abs(index - base))
             dragSelectionAnchorRange = range
+            anchorOwner = currentControl()
             editor.setSelectedRange(range)
             publishCaret()
             commit()
         } else {
             dragSelectionAnchor = index
             dragSelectionAnchorRange = NSRange(location: index, length: 0)
+            anchorOwner = currentControl()
             editor.setSelectedRange(NSRange(location: index, length: 0))
             publishCaret()
         }
