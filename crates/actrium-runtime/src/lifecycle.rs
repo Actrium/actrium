@@ -5,11 +5,10 @@
 //! private key or provider credential is written to these files.
 
 use std::{
-    collections::HashMap,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -27,6 +26,8 @@ const SCHEMA_VERSION: u32 = 1;
 const INSTANCE_FILE: &str = "instance.json";
 const TOMBSTONE_FILE: &str = "tombstone.json";
 const START_LOCK_FILE: &str = "start.lock";
+const LIFECYCLE_LOCK_FILE: &str = "lifecycle.lock";
+const OPERATION_LOCK_STRIPES: usize = 64;
 const PRIVATE_DIRECTORIES: [&str; 5] = [
     "actor-store",
     "workload-state",
@@ -52,6 +53,8 @@ pub enum LifecycleError {
     ConcurrentStart(String),
     #[error("another lifecycle manager is already creating idempotency key {0}")]
     ConcurrentCreation(String),
+    #[error("cannot recover while another lifecycle operation or recovery is active")]
+    ConcurrentRecovery,
     #[error("Service {actor_id} cannot Attach while lifecycle is {state:?}")]
     NotAttachable {
         actor_id: String,
@@ -407,7 +410,7 @@ impl Drop for FileLockGuard {
 struct Inner {
     root: PathBuf,
     sessions: Option<InMemorySessionService>,
-    locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+    locks: [Arc<AsyncMutex<()>>; OPERATION_LOCK_STRIPES],
 }
 
 /// Local durable lifecycle manager. Clones share operation locks and the
@@ -439,7 +442,7 @@ impl LifecycleService {
             inner: Arc::new(Inner {
                 root,
                 sessions,
-                locks: Mutex::new(HashMap::new()),
+                locks: std::array::from_fn(|_| Arc::new(AsyncMutex::new(()))),
             }),
         })
     }
@@ -479,15 +482,39 @@ impl LifecycleService {
     }
 
     fn operation_lock(&self, key: String) -> Arc<AsyncMutex<()>> {
-        let mut locks = self
-            .inner
-            .locks
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        locks
-            .entry(key)
-            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
-            .clone()
+        // Fixed striping keeps the registry bounded without changing the lock
+        // identity while holders or waiters for the same key are active.
+        let digest = Sha256::digest(key.as_bytes());
+        let index = usize::from(digest[0]) % OPERATION_LOCK_STRIPES;
+        Arc::clone(&self.inner.locks[index])
+    }
+
+    fn lifecycle_lock_file(&self) -> Result<File, LifecycleError> {
+        Ok(File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.inner.root.join(LIFECYCLE_LOCK_FILE))?)
+    }
+
+    fn lock_operation(&self) -> Result<File, LifecycleError> {
+        let file = self.lifecycle_lock_file()?;
+        // The OS releases this shared lock if the owning process crashes.
+        // Keeping the File alive guards the complete durable operation.
+        file.lock_shared()?;
+        Ok(file)
+    }
+
+    fn lock_recovery(&self) -> Result<File, LifecycleError> {
+        let file = self.lifecycle_lock_file()?;
+        match file.try_lock() {
+            Ok(()) => Ok(file),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                Err(LifecycleError::ConcurrentRecovery)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub fn creation_intent(
@@ -555,6 +582,7 @@ impl LifecycleService {
         validate_create_request(&request)?;
         let operation_lock = self.operation_lock(format!("create:{}", request.idempotency_key));
         let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
         let _creation_lock = self.acquire_creation_lock(&request.idempotency_key)?;
         let path = self.intent_path(&request.idempotency_key);
         let mut intent = if let Some(existing) = read_optional_json::<CreationIntent>(&path)? {
@@ -742,6 +770,7 @@ impl LifecycleService {
     {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
         let _start_lock = self.acquire_start_lock(actor_id)?;
         let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Starting)?;
@@ -769,6 +798,7 @@ impl LifecycleService {
     pub async fn stop(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Stopping)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
@@ -786,6 +816,7 @@ impl LifecycleService {
     pub async fn restart(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
         let _start_lock = self.acquire_start_lock(actor_id)?;
         let mut instance = self.instance(actor_id)?;
         if !matches!(
@@ -822,6 +853,7 @@ impl LifecycleService {
     ) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
         // Only a pending start can commit Running. In particular, do not let a
         // stale completion revive a suspended instance through the ordinary
@@ -845,6 +877,7 @@ impl LifecycleService {
     pub async fn suspend(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Suspended)?;
         instance.desired_state = DesiredState::Running;
@@ -857,6 +890,7 @@ impl LifecycleService {
     pub async fn resume(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Running)?;
         instance.desired_state = DesiredState::Running;
@@ -869,6 +903,7 @@ impl LifecycleService {
     pub async fn archive(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Archived)?;
         self.mark_offline(&mut instance, DesiredState::Archived);
@@ -879,6 +914,7 @@ impl LifecycleService {
     pub async fn trash(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Trashed)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
@@ -891,6 +927,7 @@ impl LifecycleService {
     pub async fn restore(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Stopped)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
@@ -905,6 +942,7 @@ impl LifecycleService {
     ) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Migrating)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
@@ -919,6 +957,7 @@ impl LifecycleService {
     pub async fn purge(&self, actor_id: &str) -> Result<InstanceTombstone, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Deleting)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
@@ -1017,8 +1056,10 @@ impl LifecycleService {
     /// and Suspended cannot survive a process restart, so they become Stopped.
     /// Incomplete creation intents remain resumable by their idempotency key.
     pub async fn recover(&self) -> Result<(), LifecycleError> {
-        // Recovery is exclusive host startup work, so these locks belong to
-        // the previous process rather than a live creator.
+        // No manager may converge durable state while another manager is
+        // creating, starting, or otherwise mutating the same root. Unlike a
+        // marker file, this OS lock is released automatically on process death.
+        let _recovery_guard = self.lock_recovery()?;
         for entry in fs::read_dir(self.inner.root.join("creation-intents"))? {
             let entry = entry?;
             if entry
@@ -1035,8 +1076,8 @@ impl LifecycleService {
             if !entry.file_type()?.is_dir() {
                 continue;
             }
-            // recover() is a host-startup operation and must not race an active
-            // lifecycle manager. A leftover lock belongs to the crashed host.
+            // The exclusive root lock proves this marker is not owned by a
+            // live lifecycle operation in any manager or process.
             remove_if_exists(&entry.path().join(START_LOCK_FILE))?;
             let path = entry.path().join(INSTANCE_FILE);
             let Some(mut instance) = read_optional_json::<ServiceInstance>(&path)? else {
@@ -1309,5 +1350,29 @@ fn remove_tree_if_exists(path: &Path) -> Result<(), std::io::Error> {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn operation_lock_stripes_stay_bounded_and_preserve_key_identity() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let service = LifecycleService::open(temp.path()).unwrap();
+        let original = service.operation_lock("actor:stable".into());
+
+        for index in 0..(OPERATION_LOCK_STRIPES * 4) {
+            let key = format!("actor:key-{index}");
+            let lock = service.operation_lock(key.clone());
+            assert!(Arc::ptr_eq(&lock, &service.operation_lock(key)));
+        }
+
+        assert_eq!(service.inner.locks.len(), OPERATION_LOCK_STRIPES);
+        assert!(Arc::ptr_eq(
+            &original,
+            &service.operation_lock("actor:stable".into())
+        ));
     }
 }

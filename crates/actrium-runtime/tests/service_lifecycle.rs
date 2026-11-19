@@ -315,6 +315,45 @@ async fn lifecycle_concurrent_managers_cannot_allocate_two_identities_for_one_ke
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lifecycle_recovery_rejects_active_creation_from_another_manager() {
+    let temp = TempDir::new().unwrap();
+    let first_manager = LifecycleService::open(temp.path()).unwrap();
+    let second_manager = LifecycleService::open(temp.path()).unwrap();
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let mut entered = Some(entered_tx);
+    let mut release = Some(release_rx);
+
+    let first = tokio::spawn(async move {
+        first_manager
+            .create_with_observer(request("recovery-races-create"), move |stage| {
+                if stage == CreationStage::Prepared {
+                    entered.take().unwrap().send(()).unwrap();
+                    release.take().unwrap().recv().unwrap();
+                }
+                Ok(())
+            })
+            .await
+    });
+    entered_rx.await.unwrap();
+    let creation_lock = temp
+        .path()
+        .join("creation-intents")
+        .join(format!("{}.lock", actor_id_hash("recovery-races-create")));
+    assert!(creation_lock.exists());
+    assert!(matches!(
+        second_manager.recover().await.unwrap_err(),
+        LifecycleError::ConcurrentRecovery
+    ));
+    assert!(creation_lock.exists());
+
+    release_tx.send(()).unwrap();
+    let created = first.await.unwrap().unwrap();
+    assert_eq!(created.lifecycle_state, LifecycleState::Stopped);
+    assert!(!creation_lock.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lifecycle_creation_recovers_after_every_durable_stage() {
     let stages = [
         CreationStage::Prepared,
@@ -485,6 +524,7 @@ async fn lifecycle_start_lock_excludes_a_second_manager_on_the_same_directory() 
     let created = create(&first_manager, "cross-manager-start").await;
     let actor_id = created.actor_id;
     let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
 
     let first = tokio::spawn({
         let manager = first_manager.clone();
@@ -493,15 +533,26 @@ async fn lifecycle_start_lock_excludes_a_second_manager_on_the_same_directory() 
             manager
                 .start_with(&actor_id, || {
                     entered_tx.send(()).unwrap();
-                    std::thread::sleep(Duration::from_millis(100));
+                    release_rx.recv().unwrap();
                     Ok(())
                 })
                 .await
         }
     });
     entered_rx.await.unwrap();
+    let start_lock = first_manager.instance_dir(&actor_id).join("start.lock");
     let error = second_manager.start(&actor_id).await.unwrap_err();
     assert!(matches!(error, LifecycleError::ConcurrentStart(_)));
+    assert!(matches!(
+        second_manager.recover().await.unwrap_err(),
+        LifecycleError::ConcurrentRecovery
+    ));
+    assert!(start_lock.exists());
+    assert_eq!(
+        first_manager.instance(&actor_id).unwrap().lifecycle_state,
+        LifecycleState::Starting
+    );
+    release_tx.send(()).unwrap();
     first.await.unwrap().unwrap();
     assert_eq!(
         first_manager.instance(&actor_id).unwrap().lifecycle_state,
