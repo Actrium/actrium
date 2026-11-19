@@ -192,14 +192,14 @@ rusqlite = { version = "0.41.1", default-features = false, features = ["bundled"
 # `default-features = false` keeps the feature set minimal: 48's default
 # additions (gc-*, wat, profiling, parallel-compilation, pooling-allocator,
 # wit-parser, ...) are not pulled in and are not needed.
-wasmtime = { version = "=48.0.8", default-features = false, features = [
+wasmtime = { version = "=48.0.9", default-features = false, features = [
     "runtime",
     "cranelift",
     "component-model",
     "component-model-async",
     "async",
 ] }
-wasmtime-wasi = "=48.0.8"
+wasmtime-wasi = "=48.0.9"
 
 # === Networking ===
 tokio-tungstenite = { version = "0.28.0", features = [
