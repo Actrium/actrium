@@ -100,6 +100,14 @@ fn cache_path(data_dir: &Path, binary_hash: &[u8; 32]) -> PathBuf {
         .join(format!("{}{}", hex::encode(binary_hash), dynclib_suffix()))
 }
 
+fn v2_cache_path(data_dir: &Path, binary_hash: &[u8; 32]) -> PathBuf {
+    data_dir.join("dynclib-cache").join("v2").join(format!(
+        "{}{}",
+        hex::encode(binary_hash),
+        dynclib_suffix()
+    ))
+}
+
 #[tokio::test]
 async fn dynclib_cache_is_created_on_first_load() {
     let signing_key = SigningKey::generate(&mut OsRng);
@@ -182,7 +190,7 @@ async fn v2_native_package_loads_with_default_config_and_repairs_cache() {
         .await
         .unwrap();
     let binary_hash: [u8; 32] = Sha256::digest(&dylib_bytes).into();
-    let cache_file = cache_path(dir.path(), &binary_hash);
+    let cache_file = v2_cache_path(dir.path(), &binary_hash);
 
     // A same-length corrupt cache must never be passed to the native loader.
     fs::create_dir_all(cache_file.parent().unwrap()).unwrap();

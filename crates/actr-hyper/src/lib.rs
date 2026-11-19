@@ -1642,7 +1642,7 @@ fn load_v2_dynclib(
     {
         use sha2::{Digest, Sha256};
         let hash: [u8; 32] = Sha256::digest(binary).into();
-        let path = dynclib_cache_path(&_inner.config.data_dir, &hash);
+        let path = v2_dynclib_cache_path(&_inner.config.data_dir, &hash);
         ensure_v2_dynclib_cache_file(&path, binary)?;
         let host = crate::dynclib::DynclibHost::load(&path)
             .map_err(|e| HyperError::Runtime(format!("failed to load native package: {e}")))?;
@@ -2094,6 +2094,15 @@ fn dynclib_cache_dir(data_dir: &Path) -> PathBuf {
 #[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
 fn dynclib_cache_path(data_dir: &Path, binary_hash: &[u8; 32]) -> PathBuf {
     dynclib_cache_dir(data_dir).join(format!(
+        "{}{}",
+        hex::encode(binary_hash),
+        dynclib_tempfile_suffix()
+    ))
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
+fn v2_dynclib_cache_path(data_dir: &Path, binary_hash: &[u8; 32]) -> PathBuf {
+    dynclib_cache_dir(data_dir).join("v2").join(format!(
         "{}{}",
         hex::encode(binary_hash),
         dynclib_tempfile_suffix()

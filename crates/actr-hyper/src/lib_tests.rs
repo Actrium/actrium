@@ -953,6 +953,25 @@ fn dynclib_cache_path_uses_hash_and_platform_suffix() {
 
 #[cfg(feature = "dynclib-engine")]
 #[test]
+fn legacy_rebuild_does_not_remove_v2_cache_for_the_same_binary() {
+    let dir = TempDir::new().unwrap();
+    let binary = b"shared dylib bytes";
+    let (package, manifest) = fake_dynclib_package_bytes(binary);
+    let hash = manifest.binary.hash_bytes().unwrap();
+    let legacy_path = dynclib_cache_path(dir.path(), &hash);
+    let v2_path = v2_dynclib_cache_path(dir.path(), &hash);
+
+    ensure_v2_dynclib_cache_file(&v2_path, binary).unwrap();
+    std::fs::write(&legacy_path, b"corrupt").unwrap();
+    rebuild_dynclib_cache_file(&legacy_path, &package, &manifest).unwrap();
+
+    assert_ne!(legacy_path, v2_path);
+    assert_eq!(std::fs::read(&legacy_path).unwrap(), binary);
+    assert_eq!(std::fs::read(&v2_path).unwrap(), binary);
+}
+
+#[cfg(feature = "dynclib-engine")]
+#[test]
 fn v2_dynclib_cache_replaces_corrupted_bytes() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("cached.so");
