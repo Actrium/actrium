@@ -7,7 +7,10 @@ use actrium_core::{
         SUPPORTED_INTEGRITY_ALGORITHM,
     },
     auth,
-    bridge::{actr_bridge_contract, email_bridge_contract, user_info_bridge_contract},
+    bridge::{
+        actr_bridge_contract, email_bridge_contract, realm_service_contract,
+        user_info_bridge_contract,
+    },
     domain::SystemAppType,
     runtime_container_size_change_event_name, runtime_extension_panel_visible_change_event_name,
     runtime_login_result_code_key, runtime_login_result_error_key, runtime_login_result_event_name,
@@ -73,6 +76,7 @@ fn render_typescript() -> String {
     let tts_bridge_contract = render_tts_bridge_contract();
     let email_bridge_contract = render_email_bridge_contract();
     let user_info_bridge_contract = render_user_info_bridge_contract();
+    let realm_service_contract = render_realm_service_contract();
     let auth_environment_contract = render_auth_environment_contract();
     let auth_endpoint_contract = render_auth_endpoint_contract();
     let actr_config_helpers = render_actr_config_helpers();
@@ -153,6 +157,7 @@ export const RUNTIME_NATIVE_EVENTS = {{
 {tts_bridge_contract}
 {email_bridge_contract}
 {user_info_bridge_contract}
+{realm_service_contract}
 {auth_environment_contract}
 {auth_endpoint_contract}
 {actr_config_helpers}
@@ -928,6 +933,30 @@ fn render_email_bridge_contract() -> String {
         uri_scheme_mailto = quote_ts(contract::URI_SCHEME_MAILTO),
         error_invalid_recipients = quote_ts(contract::ERROR_INVALID_RECIPIENTS),
         error_open_failed = quote_ts(contract::ERROR_OPEN_FAILED),
+    )
+}
+
+fn render_realm_service_contract() -> String {
+    use realm_service_contract as contract;
+
+    format!(
+        r#"export const REALM_SERVICE_CONTRACT = {{
+  moduleName: '{module_name}',
+  methods: {{
+    prepareAttachmentUpload: '{method_prepare_attachment_upload}',
+    sendAttachmentChunk: '{method_send_attachment_chunk}',
+    unregisterStream: '{method_unregister_stream}',
+  }},
+  events: {{
+    attachmentResult: '{event_attachment_result}',
+  }},
+}} as const;
+"#,
+        module_name = quote_ts(contract::MODULE_NAME),
+        method_prepare_attachment_upload = quote_ts(contract::METHOD_PREPARE_ATTACHMENT_UPLOAD),
+        method_send_attachment_chunk = quote_ts(contract::METHOD_SEND_ATTACHMENT_CHUNK),
+        method_unregister_stream = quote_ts(contract::METHOD_UNREGISTER_STREAM),
+        event_attachment_result = quote_ts(contract::EVENT_ATTACHMENT_RESULT),
     )
 }
 

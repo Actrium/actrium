@@ -43,6 +43,17 @@ These checks do not read Realm private keys or require signing certificates.
 Runtime bundles can be generated independently with
 `npm run bundle:macos:system`.
 
+To enable the local Guest `Supramark` component, point
+`ACTRIUM_SUPRAMARK_DIR` to a Supramark checkout with its workspace dependencies
+and macOS parser dylib prepared. Use `react-native-svg` 15.15.3 in that checkout;
+its example's 15.12.1 pin fails to compile with macOS Fabric.
+
+```sh
+export ACTRIUM_SUPRAMARK_DIR=/path/to/supramark
+(cd macos && pod install)
+npm run verify:macos
+```
+
 ## Package a DMG
 
 `scripts/package-dmg.sh` builds a Release app and packages it into a DMG.

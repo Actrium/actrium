@@ -1,0 +1,45 @@
+syntax = "proto3";
+package ask;
+
+service AskService {
+  rpc PrepareAttachmentUpload(PrepareAttachmentUploadRequest) returns (PrepareAttachmentUploadResponse);
+}
+
+enum AttachmentType {
+  ATTACHMENT_TYPE_UNKNOWN = 0;
+  IMAGE = 1;
+  DOCUMENT = 2;
+  AUDIO = 3;
+  VIDEO = 4;
+  OTHER = 99;
+}
+
+enum AttachmentUploadStatus {
+  ATTACHMENT_UPLOAD_STATUS_UNKNOWN = 0;
+  COMPLETED = 1;
+  FAILED = 2;
+}
+
+message PrepareAttachmentUploadRequest {
+  string id = 1;
+  string filename = 2;
+  AttachmentType type = 3;
+  string stream_id = 4;
+  string checksum = 5;
+  string checksum_algorithm = 6;
+  uint64 size_bytes = 7;
+  string result_stream_id = 8;
+}
+
+message PrepareAttachmentUploadResponse {
+  string id = 1;
+  int32 status_code = 2;
+  string error_message = 3;
+}
+
+message AttachmentUploadResult {
+  string id = 1;
+  AttachmentUploadStatus status = 2;
+  int32 status_code = 3;
+  string error_message = 4;
+}
