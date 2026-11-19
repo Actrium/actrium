@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ActriumCore
 import Actr
 import ActrBindings
@@ -43,6 +44,35 @@ enum RealmJoinService {
         _ = try await join(profile.info, inviteText: "", label: label)
     }
 
+    /// Recover admission by signing a membership request with this device's key.
+    /// This also migrates clients that joined before confirmations were recorded.
+    static func hasConfirmedMembership(_ profile: VerifiedProfile) async throws -> Bool {
+        let membership = try membershipClient(for: profile.info)
+        let keyId = membership.keyId()
+        let confirmation = confirmationKey(for: profile.info, keyId: keyId)
+        if UserDefaults.standard.bool(forKey: confirmation) { return true }
+
+        let json: String
+        do {
+            json = try await membership.members()
+        } catch ActrBindings.RealmMembershipError.Rejected(let status, let code)
+            where status == 403 && code == "client_unknown" {
+            return false
+        }
+        guard let reply = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+              reply["realm"] as? String == profile.info.realmName,
+              let members = reply["members"] as? [[String: Any]],
+              members.contains(where: { member in
+                  guard member["status"] as? String == "active",
+                        let clients = member["clients"] as? [[String: Any]] else { return false }
+                  return clients.contains { $0["key_id"] as? String == keyId && $0["revoked_at"] is NSNull }
+              }) else {
+            throw joinError("The Issuer did not confirm membership for this device.")
+        }
+        UserDefaults.standard.set(true, forKey: confirmation)
+        return true
+    }
+
     /// Resolve a standalone invite to its Realm address without including the code.
     static func address(forInvite inviteText: String) throws -> String {
         let realmName = try inviteRealm(inviteText)
@@ -66,15 +96,7 @@ enum RealmJoinService {
             throw joinError("This invite belongs to another Realm.")
         }
 
-        let memberJSON = try await join(profile.info, inviteText: inviteText, label: label)
-        guard let member = try JSONSerialization.jsonObject(with: Data(memberJSON.utf8))
-                as? [String: Any],
-            let memberId = member["member_id"] as? String,
-            let role = member["role"] as? String,
-            let keyId = member["key_id"] as? String else {
-            throw joinError("The join response could not be read.")
-        }
-        return RealmJoinResult(memberId: memberId, role: role, keyId: keyId)
+        return try await join(profile.info, inviteText: inviteText, label: label)
     }
 
     // MARK: - Helpers
@@ -86,17 +108,37 @@ enum RealmJoinService {
         return invite.realmName
     }
 
+    private static func membershipClient(for profile: RealmProfileInfo) throws -> ActrBindings.RealmMembership {
+        try RealmIdentityStore().membership(
+            realm: profile.realmName, providerId: profile.providerId, issuer: profile.issuerUrl
+        )
+    }
+
+    private static func confirmationKey(for profile: RealmProfileInfo, keyId: String) -> String {
+        let scope = [profile.realmName, profile.providerId, profile.issuerUrl, keyId].joined(separator: "\u{0}")
+        let digest = SHA256.hash(data: Data(scope.utf8)).map { String(format: "%02x", $0) }.joined()
+        return "actr.realmMembership.\(digest)"
+    }
+
     private static func join(
         _ profile: RealmProfileInfo,
         inviteText: String,
         label: String
-    ) async throws -> String {
-        let membership = try RealmIdentityStore().membership(
-            realm: profile.realmName,
-            providerId: profile.providerId,
-            issuer: profile.issuerUrl
-        )
-        return try await membership.join(invite: inviteText, label: label)
+    ) async throws -> RealmJoinResult {
+        let membership = try membershipClient(for: profile)
+        let keyId = membership.keyId()
+        let json = try await membership.join(invite: inviteText, label: label)
+        guard let member = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+              member["realm"] as? String == profile.realmName,
+              member["key_id"] as? String == keyId,
+              let memberId = member["member_id"] as? String,
+              let role = member["role"] as? String else {
+            throw joinError("The join response could not be read.")
+        }
+        // Membership belongs to the captured signer. Its confirmation survives
+        // the tab or Profile snapshot that initiated the request.
+        UserDefaults.standard.set(true, forKey: confirmationKey(for: profile, keyId: keyId))
+        return RealmJoinResult(memberId: memberId, role: role, keyId: keyId)
     }
 
     private static func joinError(_ message: String) -> NSError {

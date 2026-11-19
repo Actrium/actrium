@@ -89,8 +89,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     @Published private var inviteRedemptionId: UUID?
     var inviteRedemptionInFlight: Bool { inviteRedemptionId != nil }
 
-    /// Successfully joined Realms for session restore and invite prompts.
-    /// Open admission still checks the current device key with the Issuer.
+    /// Realm names remembered for session restore. Admission checks the current device separately.
     private var redeemedRealms: Set<String> {
         get { Set(UserDefaults.standard.stringArray(forKey: "actr.redeemedRealms") ?? []) }
         set { UserDefaults.standard.set(Array(newValue), forKey: "actr.redeemedRealms") }
@@ -98,8 +97,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private func markRedeemed(_ realmName: String) {
         var updated = redeemedRealms
-        updated.insert(realmName)
-        redeemedRealms = updated
+        if updated.insert(realmName).inserted { redeemedRealms = updated }
     }
 
     /// Current download task handle, kept for cancellation.
@@ -1547,14 +1545,26 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     let admission = try RealmJoinService.VerifiedProfile(
                         body: currentProfileData, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson
                     )
+                    let admitted: Bool
                     if let inviteText {
                         let result = try await RealmJoinService.joinWithInvite(
                             admission, inviteText: inviteText, label: Host.current().localizedName ?? "Mac"
                         )
                         logger.notice("🎟️ [InviteRedeem] joined \(realmName): member=\(result.memberId), role=\(result.role), key=\(result.keyId)")
+                        admitted = true
                     } else if admission.isOpen {
                         try await RealmJoinService.joinOpen(admission, label: "Mac")
-                    } else if !redeemedRealms.contains(realmName) {
+                        admitted = true
+                    } else {
+                        admitted = try await RealmJoinService.hasConfirmedMembership(admission)
+                    }
+
+                    try Task.checkCancellation()
+                    guard tabIndex() != nil,
+                          try RealmFrontTrustStore.read(.authority, name: domain) == authority.pinsJson,
+                          try RealmFrontTrustStore.read(.profile, name: realmName) == accepted.stateJson
+                    else { return }
+                    guard admitted else {
                         if !background {
                             pendingInviteRedeems[replacingTabId] = PendingInviteRedeem(
                                 tabId: replacingTabId, sourceURL: expectedURL, navigationNonce: navigationNonce,
@@ -1563,15 +1573,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         }
                         return
                     }
-                    if inviteText != nil || admission.isOpen {
-                        try Task.checkCancellation()
-                        guard tabIndex() != nil,
-                              try RealmFrontTrustStore.read(.authority, name: domain) == authority.pinsJson,
-                              try RealmFrontTrustStore.read(.profile, name: realmName) == accepted.stateJson
-                        else { return }
-                        markRedeemed(realmName)
-                        if inviteRedemptionId == refreshId { inviteRedemptionId = nil }
-                    }
+                    markRedeemed(realmName)
+                    if inviteRedemptionId == refreshId { inviteRedemptionId = nil }
                 }
 
                 guard let index = tabIndex() else { return }
