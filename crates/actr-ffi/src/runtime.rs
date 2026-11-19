@@ -700,6 +700,81 @@ impl ActrRefWrapper {
         Ok(response_bytes.to_vec())
     }
 
+    /// Call a discovered remote actor using this node's authenticated identity.
+    pub async fn call_peer(
+        &self,
+        target: ActrId,
+        route_key: String,
+        request_payload: Vec<u8>,
+        timeout_ms: i64,
+    ) -> ActrResult<Vec<u8>> {
+        let response = self
+            .inner
+            .app_context()
+            .await
+            .call_raw(
+                &Dest::Peer(target.into()),
+                route_key,
+                actr_protocol::PayloadType::RpcReliable,
+                Bytes::from(request_payload),
+                timeout_ms,
+            )
+            .await?;
+        Ok(response.to_vec())
+    }
+
+    /// Send a DataChunk to a discovered remote actor.
+    pub async fn send_data_chunk(
+        &self,
+        target: ActrId,
+        chunk: crate::types::DataChunk,
+        payload_type: PayloadType,
+    ) -> ActrResult<()> {
+        self.inner
+            .app_context()
+            .await
+            .send_data_chunk(
+                &Dest::Peer(target.into()),
+                chunk.into(),
+                payload_type.into(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Register a DataChunk callback for a stream ID.
+    pub async fn register_stream(
+        &self,
+        stream_id: String,
+        callback: Box<dyn crate::context::DataChunkCallback>,
+    ) -> ActrResult<()> {
+        let callback: Arc<dyn crate::context::DataChunkCallback> = Arc::from(callback);
+        self.inner
+            .app_context()
+            .await
+            .register_stream(stream_id, move |chunk, sender| {
+                let callback = callback.clone();
+                Box::pin(async move {
+                    callback
+                        .on_stream(chunk.into(), sender.into())
+                        .await
+                        .map_err(actr_protocol::ActrError::from)
+                })
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Unregister a DataChunk callback for a stream ID.
+    pub async fn unregister_stream(&self, stream_id: String) -> ActrResult<()> {
+        self.inner
+            .app_context()
+            .await
+            .unregister_stream(&stream_id)
+            .await?;
+        Ok(())
+    }
+
     /// Send a one-way message to the local guest workload.
     pub async fn tell(
         &self,
@@ -809,6 +884,19 @@ mod tests {
     #[derive(Default)]
     struct TestLifecycleBridge {
         starts: AtomicUsize,
+    }
+
+    struct TestDataChunkCallback;
+
+    #[async_trait::async_trait]
+    impl crate::context::DataChunkCallback for TestDataChunkCallback {
+        async fn on_stream(
+            &self,
+            _chunk: crate::types::DataChunk,
+            _sender: ActrId,
+        ) -> ActrResult<()> {
+            Ok(())
+        }
     }
 
     #[async_trait::async_trait]
@@ -1176,6 +1264,54 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
 
         actr_ref.shutdown();
         actr_ref.wait_for_shutdown().await;
+        server.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn actor_ref_stream_methods_delegate_to_runtime_context() {
+        let mut server = MockLoranServer::start()
+            .await
+            .expect("mock loran server should start");
+        let temp = tempdir().expect("temp dir");
+        let config_path = write_test_config(temp.path(), &server);
+        let node = linked_node_for_test(&config_path)
+            .await
+            .expect("linked workload node should be created");
+        let actr_ref = node.start().await.expect("node should start");
+        let target = actr_ref.actor_id();
+
+        actr_ref
+            .register_stream("ffi-result".to_string(), Box::new(TestDataChunkCallback))
+            .await
+            .expect("register_stream should delegate to the runtime registry");
+        actr_ref
+            .unregister_stream("ffi-result".to_string())
+            .await
+            .expect("unregister_stream should delegate to the runtime registry");
+        actr_ref
+            .unregister_stream("ffi-result".to_string())
+            .await
+            .expect("unregister_stream should preserve idempotent registry semantics");
+
+        actr_ref.shutdown();
+        actr_ref.wait_for_shutdown().await;
+        let chunk = crate::types::DataChunk {
+            stream_id: "ffi-upload".to_string(),
+            sequence: 1,
+            payload: b"chunk".to_vec(),
+            metadata: Vec::new(),
+            timestamp_ms: None,
+        };
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            actr_ref.send_data_chunk(target, chunk, PayloadType::StreamReliable),
+        )
+        .await
+        .expect("send_data_chunk should not hang after shutdown");
+        assert!(
+            result.is_err(),
+            "send_data_chunk should propagate runtime transport errors"
+        );
         server.shutdown().await;
     }
 }

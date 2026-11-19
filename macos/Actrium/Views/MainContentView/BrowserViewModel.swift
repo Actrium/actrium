@@ -1560,7 +1560,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     else { return nil }
                     return data
                 }
-                _ = try ActrPackageCache.extractArchiveIfNeeded(cachedArchiveURL, digest: digest) {
+                let frontDirectory = try ActrPackageCache.extractArchiveIfNeeded(cachedArchiveURL, digest: digest) {
                     try self.validateExtractedPackage(
                         at: $0,
                         requireSignature: true,
@@ -1582,12 +1582,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 )
                 logger.notice("🔐 [navigateCurrentTab] Package verified: digest matches the Realm Profile, manifest signature verified with \(publisherKeys.count) publisher key(s)")
 
+                let manifest = try readPackageManifest(fromRoot: frontDirectory)
                 let binding = try RealmServiceBinding(
                     profile: profile,
                     verifiedProfileBody: profileData,
                     front: packageBytes,
                     metadata: sessionMetadata,
-                    trustedFrontKey: trustedKey
+                    trustedFrontKey: trustedKey,
+                    permissions: manifest.permissions
                 )
                 guard let tabIndex = tabs.firstIndex(where: {
                     $0.id == replacingTabId && $0.url == URL(string: address)

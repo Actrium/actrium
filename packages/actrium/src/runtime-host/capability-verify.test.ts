@@ -346,4 +346,53 @@ describe('verifyCapabilityManifest', () => {
       )
     ).toEqual({ ok: true, details: [] });
   });
+
+  test('accepts the fixed uploadAttachment transport with its exact capability', () => {
+    const uploadManifest: CapabilityManifestV1 = {
+      ...manifest,
+      hostModules: { service: { rpc: ['uploadAttachment'], events: [] } },
+    };
+    expect(
+      verifyCapabilityManifest(uploadManifest, {
+        ...options,
+        declaredCapabilities: ['service.attachmentUpload'],
+      })
+    ).toEqual({ ok: true, details: [] });
+    // The module shorthand covers the pre-existing methods only; upload is an
+    // explicit opt-in and must be declared by name.
+    const shorthand = verifyCapabilityManifest(uploadManifest, {
+      ...options,
+      declaredCapabilities: ['service'],
+    });
+    expect(shorthand.ok).toBe(false);
+    expect(shorthand.details.join('\n')).toContain('service.attachmentUpload');
+  });
+
+  test('rejects the uploadAttachment transport without its capability', () => {
+    const result = verifyCapabilityManifest(
+      {
+        ...manifest,
+        hostModules: { service: { rpc: ['uploadAttachment'], events: [] } },
+      },
+      { ...options, declaredCapabilities: ['service.call'] }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('capability_mismatch');
+    expect(result.details.join('\n')).toContain('service.attachmentUpload');
+  });
+
+  test('business routes still require service.call alongside uploadAttachment', () => {
+    const result = verifyCapabilityManifest(
+      {
+        ...manifest,
+        hostModules: {
+          service: { rpc: ['uploadAttachment', 'notes.save'], events: [] },
+        },
+      },
+      { ...options, declaredCapabilities: ['service.attachmentUpload'] }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('capability_mismatch');
+    expect(result.details.join('\n')).toContain('service.call');
+  });
 });

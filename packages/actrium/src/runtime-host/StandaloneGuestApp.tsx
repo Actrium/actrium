@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ActivityIndicator as NativeActivityIndicator,
+  DeviceEventEmitter,
   Image as NativeImage,
   NativeModules,
   Pressable as NativePressable,
@@ -25,6 +26,11 @@ import {
   evaluateCapabilityAccess,
 } from './capability-authorization';
 import { contract, type FileImportPickInput, type FileImportPickOutput } from './contract';
+import {
+  AttachmentUploadManager,
+  createRealmServiceAttachmentAdapter,
+  type RealmServiceAttachmentBridge,
+} from './attachment-upload';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
 import { Supramark } from './guest-markdown-renderer';
@@ -267,6 +273,48 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       setError('Speech recognition is unavailable for this application.');
       return;
     }
+    // The fixed upload transport is native-only through the per-tab
+    // RealmService module. HTTP tabs and the legacy echo tab never reach the
+    // native uploader; when the manifest links uploadAttachment there, the
+    // app fails closed instead of silently uploading.
+    const nativeUploadSupported = !tab.serviceCallUrl && !legacyEchoTab;
+    const attachmentBridge = nativeUploadSupported
+      ? (NativeModules.RealmService as RealmServiceAttachmentBridge | undefined)
+      : undefined;
+    const attachmentUploader = new AttachmentUploadManager({
+      adapter: createRealmServiceAttachmentAdapter({
+        bridge: attachmentBridge,
+        emitter: DeviceEventEmitter,
+        tabId: tab.id,
+      }),
+    });
+    const attachmentsLinked =
+      v1?.ok === true &&
+      v1.linkage.links.some(
+        ([id, exportName]) => id === 'host:service' && exportName === 'uploadAttachment'
+      );
+    let stopEngine: (() => void) | undefined;
+    const start = async () => {
+      if (attachmentsLinked) {
+        // Process-wide module presence is not tab availability: a locally
+        // bundled Guest shares this renderer process without owning a
+        // Realm Service binding. Query the Host about this tab before the
+        // engine starts so the Guest never links an unusable transport.
+        const uploadAvailable = await attachmentUploader.checkAvailable();
+        if (disposed) {
+          attachmentUploader.dispose();
+          return;
+        }
+        if (!uploadAvailable) {
+          attachmentUploader.dispose();
+          setError('Attachment upload is unavailable for this application.');
+          return;
+        }
+      }
+      if (disposed) {
+        attachmentUploader.dispose();
+        return;
+      }
     const hostModules = createHostModules({
       hasServiceCapability,
       callActor: callServiceActor,
@@ -282,6 +330,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       stopSpeech: speechAvailable ? async () => {
         if (!disposed) await stopSpeech();
       } : undefined,
+      attachmentUploader,
     });
     // Expose exactly the verified method and component set to this Guest Engine.
     const linked = v1?.ok ? v1 : undefined;
@@ -393,12 +442,19 @@ export const StandaloneGuestApp: React.FC<Props> = ({
         }
       });
 
+      stopEngine = () => {
+        unsubscribeEvents();
+        unsubscribeUpdate();
+        engine.destroy();
+      };
+    };
+    void start();
+
     return () => {
       disposed = true;
       cancelSpeech();
-      unsubscribeEvents();
-      unsubscribeUpdate();
-      engine.destroy();
+      attachmentUploader.dispose();
+      stopEngine?.();
     };
   }, [
     // Do not recreate the engine on window resize. The first layout size is

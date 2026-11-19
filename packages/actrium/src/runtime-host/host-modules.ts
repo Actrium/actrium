@@ -8,12 +8,15 @@ import type {
   ServiceCallInput,
   ServiceEvent,
   ServiceTellInput,
+  ServiceUploadAttachmentInput,
+  ServiceUploadAttachmentOutput,
   SpeechInterimHandler,
   SpeechRecognizeInput,
   SpeechRecognizeOutput,
   SpeechStateHandler,
 } from './contract';
 import type { FrontCapability } from './capabilities';
+import type { AttachmentUploadManager } from './attachment-upload';
 
 export type ServiceCallRequest = ServiceCallInput;
 
@@ -39,7 +42,7 @@ export type HostModules = HostModulesImplementation<ActriumContract>;
 
 /** Methods with a real Host implementation, excluding throwing placeholders. */
 export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
-  'host:service': new Set(['call']),
+  'host:service': new Set(['call', 'uploadAttachment']),
   'host:clipboard': new Set(['writeText']),
   'host:speech': new Set(['recognize', 'onInterimResult', 'stop', 'onStateChange']),
   'host:file-import': new Set(['pick']),
@@ -90,6 +93,11 @@ export function createHostModules(options: {
     input: SpeechRecognizeInput, onInterim?: SpeechInterimHandler, onState?: SpeechStateHandler
   ) => Promise<SpeechRecognizeOutput>;
   stopSpeech?: () => Promise<void>;
+  /**
+   * Fixed transport attachment uploader. When absent, `uploadAttachment`
+   * fails closed; there is deliberately no HTTP or legacy fallback.
+   */
+  attachmentUploader?: AttachmentUploadManager;
 }): HostModules {
   let requestSequence = 0;
   let cancelSpeechAuthorization: (() => void) | undefined;
@@ -131,6 +139,15 @@ export function createHostModules(options: {
       },
       on: (_handler: (event: ServiceEvent) => void) => {
         throw notImplemented('host:service', 'on');
+      },
+      uploadAttachment: async (
+        input: ServiceUploadAttachmentInput
+      ): Promise<ServiceUploadAttachmentOutput> => {
+        if (!options.attachmentUploader) {
+          throw new Error('The native attachment upload bridge is unavailable.');
+        }
+        await options.authorizeCapability('service.attachmentUpload');
+        return options.attachmentUploader.upload(input);
       },
     },
     'host:assets': {
