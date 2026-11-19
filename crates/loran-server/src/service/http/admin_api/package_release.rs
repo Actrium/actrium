@@ -65,6 +65,14 @@ async fn release(
     }
     let snapshot = state.service.realm_package_state(realm).await?;
     if snapshot.sequence != operation.expected_sequence {
+        // An identical request may have committed while the snapshot loaded.
+        if let Some(receipt) = state
+            .service
+            .package_release_receipt(realm, &operation, &selection)
+            .await?
+        {
+            return Ok(receipt);
+        }
         return Err(Status::aborted(
             "The Profile changed. Reload the selection before submitting again.",
         ));

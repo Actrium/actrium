@@ -268,7 +268,7 @@ RustBuffer uniffi_actrium_core_fn_func_accept_realm_profile(RustBuffer body, Rus
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRIUM_CORE_FN_FUNC_ACCEPT_REALM_PROFILE_UPDATE
 #define UNIFFI_FFIDEF_UNIFFI_ACTRIUM_CORE_FN_FUNC_ACCEPT_REALM_PROFILE_UPDATE
-RustBuffer uniffi_actrium_core_fn_func_accept_realm_profile_update(RustBuffer body, RustBuffer realm_name, RustBuffer signing_keys_json, RustBuffer previous_state_json, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_actrium_core_fn_func_accept_realm_profile_update(RustBuffer body, RustBuffer realm_name, RustBuffer signing_keys_json, RustBuffer previous_state_json, RustBuffer authority_pins_json, RustBuffer installed_profile_json, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTRIUM_CORE_FN_FUNC_ACTIVE_TAB_FROM_ROW

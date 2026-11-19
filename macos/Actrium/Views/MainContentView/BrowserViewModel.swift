@@ -109,6 +109,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let selection: RealmFrontSelection
     }
 
+    private struct VerifiedRealmFront {
+        let bytes: Data
+        let trustedKey: Data
+        let serviceType: ActrBindings.ActrType
+    }
+
     private var loadedRealmFronts: [UUID: LoadedRealmFront] = [:]
     private var realmRefreshes: [UUID: (id: UUID, task: Task<Void, Never>)] = [:]
     private static var backgroundRealmDocuments: [URL: Task<Data, Error>] = [:]
@@ -1315,8 +1321,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             guard inviteText == nil || !info.isLocal else {
                 throw RealmServiceError(message: "Local Realms do not accept invitations.")
             }
-            let suppliedInvite = info.isLocal ? nil : (inviteText ?? ActrLinkInvite.invite(from: input))
-            handleResolvedRealmLink(info, input: linkAddress, tabIndex: tabIndex, inviteText: suppliedInvite)
+            let invite = info.isLocal ? nil : (inviteText.map(RealmJoinService.Invite.explicit)
+                ?? ActrLinkInvite.invite(from: input).map(RealmJoinService.Invite.sharedLink))
+            handleResolvedRealmLink(info, input: linkAddress, tabIndex: tabIndex, invite: invite)
         } catch {
             logger.warning("⚠️ [navigateCurrentTab] actr:// input rejected: \(error)")
             presentRealmLinkError(error)
@@ -1333,7 +1340,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         _ info: ActrUriInfo,
         input linkAddress: String,
         tabIndex: Int,
-        inviteText: String? = nil
+        invite: RealmJoinService.Invite? = nil
     ) {
         // The core parser guarantees a RealmId for every resolved link.
         guard let realmId = info.realmId else { return }
@@ -1373,7 +1380,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         cancelRealmRefresh(tab.id)
         discoverAuthority(
             url: url, domain: info.domain, realmId: realmId, address: address,
-            title: realmDisplay, replacing: tab, background: false, approved: nil, inviteText: inviteText
+            title: realmDisplay, replacing: tab, background: false, approved: nil, invite: invite
         )
     }
 
@@ -1436,11 +1443,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         replacing tab: Tab,
         background: Bool,
         approved: RealmFrontSelection?,
-        inviteText: String? = nil
+        invite: RealmJoinService.Invite? = nil
     ) {
         let replacingTabId = tab.id
         let refreshId = UUID()
-        if inviteText != nil {
+        if invite != nil {
             guard !inviteRedemptionInFlight else { return }
             inviteRedemptionId = refreshId
         }
@@ -1527,11 +1534,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 guard tabIndex() != nil,
                       try RealmFrontTrustStore.read(.authority, name: domain) == authority.pinsJson
                 else { return }
+                let savedInstalledProfile = try? RealmFrontTrustStore.read(.installedProfile, name: installedProfileName)
                 let accepted = try ActriumCore.acceptRealmProfileUpdate(
                     body: profileBody,
                     realmName: realmName,
                     signingKeysJson: descriptor.signingKeysJson,
-                    previousStateJson: RealmFrontTrustStore.read(.profile, name: realmName)
+                    previousStateJson: RealmFrontTrustStore.read(.profile, name: realmName),
+                    authorityPinsJson: authority.pinsJson,
+                    installedProfileJson: savedInstalledProfile
                 )
                 try RealmFrontTrustStore.save(accepted.stateJson, .profile, name: realmName)
                 guard let availableProfile = accepted.profile else {
@@ -1544,11 +1554,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         body: currentProfileData, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson
                     )
                     let admitted: Bool
-                    if let inviteText {
-                        let result = try await RealmJoinService.joinWithInvite(
-                            admission, inviteText: inviteText, label: Host.current().localizedName ?? "Mac"
-                        )
-                        logger.notice("🎟️ [InviteRedeem] joined \(realmName): member=\(result.memberId), role=\(result.role), key=\(result.keyId)")
+                    if let invite {
+                        if let result = try await RealmJoinService.joinWithInvite(
+                            admission, invite: invite, label: Host.current().localizedName ?? "Mac"
+                        ) {
+                            logger.notice("🎟️ [InviteRedeem] joined \(realmName): member=\(result.memberId), role=\(result.role), key=\(result.keyId)")
+                        }
                         admitted = true
                     } else if admission.isOpen {
                         try await RealmJoinService.joinOpen(admission, label: "Mac")
@@ -1592,10 +1603,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
                 let previous = loadedRealmFronts[replacingTabId]
                 let available = RealmFrontSelection(front: accepted.frontSelectionKey, service: accepted.serviceSelectionKey)
-                let installedBody = previous == nil ? (try? RealmFrontTrustStore.read(.installedProfile, name: installedProfileName)) : nil
+                let installedBody = previous == nil ? savedInstalledProfile : nil
                 let installed = installedBody.flatMap { body in
                     try? ActriumCore.acceptRealmProfileUpdate(
-                        body: body, realmName: realmName, signingKeysJson: descriptor.signingKeysJson, previousStateJson: nil
+                        body: body, realmName: realmName, signingKeysJson: descriptor.signingKeysJson,
+                        previousStateJson: nil, authorityPinsJson: authority.pinsJson, installedProfileJson: nil
                     )
                 }
                 let installedSelection: RealmFrontSelection? = installed.flatMap { snapshot in
@@ -1705,64 +1717,41 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 try RealmFrontTrustStore.save(pinnedPublisher.pinsJson, .publisher, name: publisherDomain)
                 let packageKeys = pinnedPublisher.profile.packageSigningKeys
 
-                guard let packageURL = URL(string: profile.packageHref),
-                      packageURL.scheme?.lowercased() == "https" else {
-                    throw NSError(
-                        domain: "ActrDiscovery", code: 10,
-                        userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                            "The package location is invalid.",
-                            comment: "Actr package URL error")])
+                let digest = profile.packageSha256.lowercased()
+                guard ActrPackageCache.isValidDigest(digest) else {
+                    throw CoreError.RealmProfileInvalid(message: "The Front package digest is invalid.")
                 }
-                // 15-B B3: the package is downloaded through the streaming
-                // path (64 MiB abort, redirect-host guard), then verified
-                // before anything is cached or executed.
-                let downloadedURL = try await ActrPackageDownloadService.download(from: packageURL)
-                defer { try? FileManager.default.removeItem(at: downloadedURL) }
-                let digest = try await ActrPackageDownloadService.sha256Digest(of: downloadedURL)
-                // 04 §3: fail closed when the bytes do not match the digest
-                // authenticated by the Realm Profile.
-                guard digest == profile.packageSha256.lowercased() else {
-                    throw NSError(
-                        domain: "ActrDiscovery", code: 25,
-                        userInfo: [NSLocalizedDescriptionKey: String(
-                            format: NSLocalizedString(
-                                "The downloaded package does not match the digest in the Realm Profile (PACKAGE_DIGEST_MISMATCH): expected %@…, got %@…",
-                                comment: "Actr package digest mismatch"),
-                            String(profile.packageSha256.prefix(12)),
-                            String(digest.prefix(12)))])
-                }
-
-                // Full archive verification via actr-pack (FFI): ZIP
-                // structural safety, per-file digests and the manifest
-                // Ed25519 signature, anchored on the publisher key the
-                // profile funnel authenticated.
-                let packageBytes = try Data(contentsOf: downloadedURL)
                 let publisherKeys = packageKeys.compactMap { Data(base64Encoded: $0.publicKeyBase64) }
-                guard let trustedKey = publisherKeys.first(where: { key in
-                    (try? ActriumCore.verifyRealmFrontPackage(
-                        archive: packageBytes, trustedPublicKey: key, profile: profile
-                    )) != nil
-                }) else {
-                    throw NSError(
-                        domain: "ActrDiscovery", code: 26,
-                        userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                            "The Front package could not be verified.",
-                            comment: "Actr Front verification error")])
+                let cachedArchiveURL = ActrPackageCache.archiveURL(forDigest: digest)
+                let verified: VerifiedRealmFront
+                if let cached = try? Self.verifyRealmFront(at: cachedArchiveURL, profile: profile, publisherKeys: publisherKeys) {
+                    verified = cached
+                } else {
+                    guard let packageURL = URL(string: profile.packageHref),
+                          packageURL.scheme?.lowercased() == "https" else {
+                        throw NSError(
+                            domain: "ActrDiscovery", code: 10,
+                            userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                                "The package location is invalid.",
+                                comment: "Actr package URL error")])
+                    }
+                    let downloadedURL = try await ActrPackageDownloadService.download(from: packageURL)
+                    defer { try? FileManager.default.removeItem(at: downloadedURL) }
+                    let actualDigest = try await ActrPackageDownloadService.sha256Digest(of: downloadedURL)
+                    guard actualDigest == digest else {
+                        throw NSError(
+                            domain: "ActrDiscovery", code: 25,
+                            userInfo: [NSLocalizedDescriptionKey: String(
+                                format: NSLocalizedString(
+                                    "The downloaded package does not match the digest in the Realm Profile (PACKAGE_DIGEST_MISMATCH): expected %@…, got %@…",
+                                    comment: "Actr package digest mismatch"),
+                                String(digest.prefix(12)), String(actualDigest.prefix(12)))])
+                    }
+                    verified = try Self.verifyRealmFront(at: downloadedURL, profile: profile, publisherKeys: publisherKeys)
+                    _ = try ActrPackageCache.installArchive(at: downloadedURL, digest: digest, replacingRejectedArchive: true)
+                    ActrPackageCache.rememberDownloadURL(packageURL, digest: digest)
                 }
-                let serviceType = try ActrBindings.verifyRealmFront(
-                    frontArchive: packageBytes,
-                    trustedPublicKey: trustedKey,
-                    frontType: profile.packageType,
-                    serviceType: profile.serviceType
-                )
                 logger.notice("🔐 [navigateCurrentTab] Verified Realm Front \(profile.packageType) for Service \(profile.serviceType)")
-
-                let cachedArchiveURL = try ActrPackageCache.installArchive(
-                    at: downloadedURL,
-                    digest: digest
-                )
-                try? FileManager.default.removeItem(at: downloadedURL)
-                ActrPackageCache.rememberDownloadURL(packageURL, digest: digest)
 
                 // Verify the manifest signature with the publisher keys the
                 // profile funnel authenticated, then pin them per publisher
@@ -1796,9 +1785,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     try RealmServiceBinding(
                         profile: profile,
                         verifiedProfileBody: profileData,
-                        front: packageBytes,
-                        serviceType: serviceType,
-                        trustedFrontKey: trustedKey,
+                        front: verified.bytes,
+                        serviceType: verified.serviceType,
+                        trustedFrontKey: verified.trustedKey,
                         capabilitiesJSON: capabilities,
                         permissions: manifest.permissions
                     )
@@ -1880,6 +1869,30 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 domain: "ActrDiscovery", code: 21,
                 userInfo: [NSLocalizedDescriptionKey: insecureMessage])
         }
+    }
+
+    /// Apply the same signed digest, publisher and Service checks to cached and downloaded Fronts.
+    private static func verifyRealmFront(at url: URL, profile: RealmProfileInfo, publisherKeys: [Data]) throws -> VerifiedRealmFront {
+        guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+            throw CoreError.RealmProfileInvalid(message: "The Front archive is unavailable.")
+        }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let limit = ActrPackageDownloadLimits.maxBytes
+        let bytes = try handle.read(upToCount: Int(limit) + 1) ?? Data()
+        guard bytes.count <= Int(limit) else { throw ActrPackageDownloadError.sizeExceeded(maxBytes: limit) }
+        guard let key = publisherKeys.first(where: {
+            (try? ActriumCore.verifyRealmFrontPackage(archive: bytes, trustedPublicKey: $0, profile: profile)) != nil
+        }) else {
+            throw NSError(
+                domain: "ActrDiscovery", code: 26,
+                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                    "The Front package could not be verified.", comment: "Actr Front verification error")])
+        }
+        let serviceType = try ActrBindings.verifyRealmFront(
+            frontArchive: bytes, trustedPublicKey: key, frontType: profile.packageType, serviceType: profile.serviceType
+        )
+        return VerifiedRealmFront(bytes: bytes, trustedKey: key, serviceType: serviceType)
     }
 
     /// Coalesce background fetches without sharing a tab's trust or approval state.

@@ -8246,13 +8246,15 @@ public func acceptRealmProfile(body: String, realmName: String, signingKeysJson:
     )
 })
 }
-public func acceptRealmProfileUpdate(body: String, realmName: String, signingKeysJson: String, previousStateJson: String?)throws  -> RealmProfileUpdateInfo  {
+public func acceptRealmProfileUpdate(body: String, realmName: String, signingKeysJson: String, previousStateJson: String?, authorityPinsJson: String?, installedProfileJson: String?)throws  -> RealmProfileUpdateInfo  {
     return try  FfiConverterTypeRealmProfileUpdateInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
     uniffi_actrium_core_fn_func_accept_realm_profile_update(
         FfiConverterString.lower(body),
         FfiConverterString.lower(realmName),
         FfiConverterString.lower(signingKeysJson),
-        FfiConverterOptionString.lower(previousStateJson),$0
+        FfiConverterOptionString.lower(previousStateJson),
+        FfiConverterOptionString.lower(authorityPinsJson),
+        FfiConverterOptionString.lower(installedProfileJson),$0
     )
 })
 }
@@ -10789,7 +10791,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_actrium_core_checksum_func_accept_realm_profile() != 6481) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_actrium_core_checksum_func_accept_realm_profile_update() != 1226) {
+    if (uniffi_actrium_core_checksum_func_accept_realm_profile_update() != 40113) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_func_active_tab_from_row() != 51323) {

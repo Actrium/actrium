@@ -5,8 +5,8 @@
 //! Realm signing key listed in the domain's `realm_signing_keys` member.
 
 use crate::authority::{
-    AuthorityDescriptor, DetachedSignature, KeyStatus, RealmSigningKey, RealmSigningKeys,
-    SIGNATURE_ALGORITHM,
+    AuthorityDescriptor, DetachedSignature, KeyStatus, PinnedKey, PinnedStatus, RealmSigningKey,
+    RealmSigningKeys, SIGNATURE_ALGORITHM,
 };
 use crate::uri::ActrUri;
 use base64::Engine as _;
@@ -372,10 +372,39 @@ impl RealmProfile {
         keys: &RealmSigningKeys,
         stored: bool,
     ) -> Result<Self, RealmProfileError> {
-        let invalid = RealmProfileError::Invalid;
         keys.validate()
             .map_err(|error| RealmProfileError::KeysInvalid(error.to_string()))?;
+        Self::verify_with_listed_keys(document, realm_name, &keys.keys, stored)
+    }
 
+    /// Authenticate a discarded snapshot with its historical pin. This checks
+    /// saved state integrity without making a revoked Profile usable again.
+    pub fn verify_revoked_snapshot(
+        document: &[u8],
+        realm_name: &str,
+        pinned: &PinnedKey,
+    ) -> Result<(), RealmProfileError> {
+        if pinned.status != PinnedStatus::Removed {
+            return Err(RealmProfileError::Invalid(
+                "snapshot signer is not revoked".into(),
+            ));
+        }
+        let key = RealmSigningKey {
+            id: pinned.id.clone(),
+            public_key: pinned.public_key.clone(),
+            algorithm: SIGNATURE_ALGORITHM.into(),
+            status: KeyStatus::Retired,
+        };
+        Self::verify_with_listed_keys(document, realm_name, &[key], false).map(|_| ())
+    }
+
+    fn verify_with_listed_keys(
+        document: &[u8],
+        realm_name: &str,
+        keys: &[RealmSigningKey],
+        stored: bool,
+    ) -> Result<Self, RealmProfileError> {
+        let invalid = RealmProfileError::Invalid;
         if document.len() > MAX_REALM_PROFILE_BYTES {
             return Err(invalid("Realm Profile exceeds 64 KiB".into()));
         }
@@ -399,7 +428,7 @@ impl RealmProfile {
             members.remove("signature");
         }
         let signed_payload = jcs(&value);
-        verify_signature(&keys.keys, &profile.signature, signed_payload.as_bytes())?;
+        verify_signature(keys, &profile.signature, signed_payload.as_bytes())?;
         Ok(Self {
             signed_payload,
             document: document.to_vec(),

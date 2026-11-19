@@ -13,6 +13,17 @@ struct RealmJoinResult {
 
 /// Enroll this installation's device identity with a verified Realm.
 enum RealmJoinService {
+    enum Invite {
+        case explicit(String)
+        case sharedLink(String)
+
+        var code: String {
+            switch self {
+            case .explicit(let code), .sharedLink(let code): return code
+            }
+        }
+    }
+
     struct VerifiedProfile {
         let info: RealmProfileInfo
         let isOpen: Bool
@@ -88,10 +99,15 @@ enum RealmJoinService {
         return "actr://\(domain)/\(realmId)"
     }
 
-    /// Redeem an explicit invite against the verified Profile for this navigation.
+    /// Open shared links for existing members. Explicit entry still redeems the code.
     static func joinWithInvite(
-        _ profile: VerifiedProfile, inviteText: String, label: String
-    ) async throws -> RealmJoinResult {
+        _ profile: VerifiedProfile, invite: Invite, label: String
+    ) async throws -> RealmJoinResult? {
+        if case .sharedLink = invite, try await hasConfirmedMembership(profile) {
+            return nil
+        }
+        try Task.checkCancellation()
+        let inviteText = invite.code
         guard try inviteRealm(inviteText) == profile.info.realmName else {
             throw joinError("This invite belongs to another Realm.")
         }

@@ -1,11 +1,13 @@
 use actr_protocol::authority::{
-    AuthorityDescriptor, AuthorityDescriptorError, KeyPinOutcome, KeyPins, RealmSigningKeys,
+    AuthorityDescriptor, AuthorityDescriptorError, KeyPinOutcome, KeyPins, MAX_SIGNING_KEYS,
+    PinnedStatus, RealmSigningKeys,
 };
 use actr_protocol::realm_membership::RealmInvite;
 use actr_protocol::realm_profile::{RealmProfile, RealmProfileError, RealmStatus};
 use actr_protocol::uri::{ActrUri, ActrUriError};
 use ed25519_dalek::{PUBLIC_KEY_LENGTH, VerifyingKey};
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 use crate::actr_package::{
@@ -1030,8 +1032,7 @@ pub fn pin_realm_authority(
     let descriptor = AuthorityDiscoveryInfo {
         realms_href,
         keys_sequence: keys.sequence,
-        signing_keys_json: serde_json::to_string(&keys)
-            .map_err(|error| invalid(format!("cannot serialize signing keys: {error}")))?,
+        signing_keys_json: member.to_string(),
         signing_keys: keys
             .keys
             .iter()
@@ -1134,34 +1135,170 @@ fn realm_profile_info(profile: &RealmProfile) -> Result<RealmProfileInfo, CoreEr
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
-struct RealmProfileTrust {
+struct RealmProfileSnapshot {
     document: String,
-    digests: std::collections::BTreeMap<String, String>,
+    digests: BTreeMap<String, String>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct RealmProfileTrust {
+    #[serde(flatten)]
+    current: RealmProfileSnapshot,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    history: Vec<RealmProfileSnapshot>,
+}
+
+fn verify_profile_authority_pins(signing_keys_json: &str, pins: &KeyPins) -> Result<(), CoreError> {
+    let invalid = CoreError::AuthorityDescriptorInvalid;
+    let member = actr_protocol::signed_json::parse(signing_keys_json.as_bytes())
+        .map_err(|error| invalid(format!("malformed signing keys: {error}")))?;
+    let (_, outcome) = RealmSigningKeys::accept(&member, Some(pins))?;
+    if !matches!(outcome, KeyPinOutcome::Accepted(verified) if &verified == pins) {
+        return Err(invalid(
+            "the signing keys do not match the pinned Realm authority".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn trusted_realm_profile_snapshots(
+    saved: RealmProfileTrust,
+    realm_name: &str,
+    keys: &RealmSigningKeys,
+    pins: Option<&KeyPins>,
+    installed_profile_json: Option<String>,
+) -> Result<BTreeMap<String, (RealmProfile, RealmProfileSnapshot)>, CoreError> {
+    let invalid = CoreError::RealmProfileInvalid;
+    if saved.history.len() >= MAX_SIGNING_KEYS {
+        return Err(invalid("too many saved Realm Profile snapshots".into()));
+    }
+    let mut signers = BTreeSet::new();
+    let mut trusted = BTreeMap::new();
+    let mut current_was_revoked = false;
+    for (index, snapshot) in std::iter::once(saved.current)
+        .chain(saved.history)
+        .enumerate()
+    {
+        if snapshot.digests.values().any(|digest| {
+            digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        }) {
+            return Err(invalid(
+                "invalid package digest in a saved Realm Profile snapshot".into(),
+            ));
+        }
+        let document = snapshot.document.as_bytes();
+        let value = actr_protocol::signed_json::parse(document)
+            .map_err(|error| invalid(format!("invalid saved Realm Profile: {error}")))?;
+        let signer = value["signature"]["key_id"]
+            .as_str()
+            .ok_or_else(|| invalid("the saved Realm Profile has no signing key".into()))?;
+        if !signers.insert(signer.to_owned()) {
+            return Err(invalid(
+                "duplicate signer in saved Realm Profile history".into(),
+            ));
+        }
+        if let Some(pins) = pins {
+            let pinned = pins.keys.iter().find(|key| key.id == signer).ok_or_else(|| {
+                invalid("the accepted Realm Profile is no longer verifiable under the pinned authority".into())
+            })?;
+            if pinned.status == PinnedStatus::Removed {
+                RealmProfile::verify_revoked_snapshot(document, realm_name, pinned).map_err(
+                    |error| invalid(format!("invalid revoked Realm Profile snapshot: {error}")),
+                )?;
+                if index == 0 {
+                    current_was_revoked = true;
+                }
+                continue;
+            }
+        }
+        let profile = RealmProfile::verify(document, realm_name, keys).map_err(|error| {
+            invalid(format!(
+                "the accepted Realm Profile is no longer verifiable: {error}"
+            ))
+        })?;
+        trusted.insert(signer.to_owned(), (profile, snapshot));
+    }
+    // Older Hosts kept only the latest acceptance and the installed Profile.
+    // The installed snapshot is a usable fallback only under a still-trusted key.
+    if current_was_revoked
+        && let Some(document) = installed_profile_json
+        && let Ok(profile) = RealmProfile::verify(document.as_bytes(), realm_name, keys)
+        && pins.is_some_and(|pins| {
+            pins.keys.iter().any(|key| {
+                key.id == profile.signature.key_id && key.status != PinnedStatus::Removed
+            })
+        })
+        && trusted
+            .get(&profile.signature.key_id)
+            .is_none_or(|(accepted, _)| accepted.sequence < profile.sequence)
+    {
+        let digests = profile
+            .selection
+            .as_ref()
+            .into_iter()
+            .flat_map(|selection| selection.packages.values())
+            .map(|package| (package.r#type.clone(), package.sha256.clone()))
+            .collect();
+        trusted.insert(
+            profile.signature.key_id.clone(),
+            (profile, RealmProfileSnapshot { document, digests }),
+        );
+    }
+    Ok(trusted)
 }
 
 /// Accept a signed revision without changing the package currently running.
 /// The caller persists the returned state before attempting to load the Front.
+/// Revocation recovery requires the current confirmed pins from `pin_realm_authority`.
+/// A previously installed Profile can supply a fallback for older saved state.
 pub fn accept_realm_profile_update(
     body: String,
     realm_name: String,
     signing_keys_json: String,
     previous_state_json: Option<String>,
+    authority_pins_json: Option<String>,
+    installed_profile_json: Option<String>,
 ) -> Result<RealmProfileUpdateInfo, CoreError> {
     let invalid = CoreError::RealmProfileInvalid;
     let (candidate, keys) = verify_realm_profile(&body, &realm_name, &signing_keys_json)?;
-    let mut digests = std::collections::BTreeMap::new();
-    if let Some(saved) = previous_state_json {
+    let pins = decode_key_pins(authority_pins_json.as_deref())?;
+    if let Some(pins) = &pins {
+        verify_profile_authority_pins(&signing_keys_json, pins)?;
+        if !pins
+            .keys
+            .iter()
+            .any(|key| key.id == candidate.signature.key_id && key.status != PinnedStatus::Removed)
+        {
+            return Err(invalid(
+                "Realm Profile signer is not trusted by the pinned authority".into(),
+            ));
+        }
+    }
+    let mut snapshots = if let Some(saved) = previous_state_json {
         let previous: RealmProfileTrust = serde_json::from_str(&saved)
             .map_err(|e| invalid(format!("invalid saved Realm Profile: {e}")))?;
-        let baseline = RealmProfile::verify(previous.document.as_bytes(), &realm_name, &keys)
-            .map_err(|error| {
-                invalid(format!(
-                    "the accepted Realm Profile is no longer verifiable: {error}"
-                ))
-            })?;
+        trusted_realm_profile_snapshots(
+            previous,
+            &realm_name,
+            &keys,
+            pins.as_ref(),
+            installed_profile_json,
+        )?
+    } else {
+        BTreeMap::new()
+    };
+    let mut digests = if let Some((baseline, snapshot)) = snapshots
+        .values()
+        .max_by_key(|(profile, _)| profile.sequence)
+    {
         baseline.check_successor(&candidate)?;
-        digests = previous.digests;
-    }
+        snapshot.digests.clone()
+    } else {
+        BTreeMap::new()
+    };
     let (profile, service_selection_key, front_selection_key) =
         if candidate.realm.status == RealmStatus::Active {
             let selection = candidate
@@ -1187,9 +1324,16 @@ pub fn accept_realm_profile_update(
         } else {
             (None, String::new(), String::new())
         };
+    snapshots.remove(&candidate.signature.key_id);
     let state_json = serde_json::to_string(&RealmProfileTrust {
-        document: body,
-        digests,
+        current: RealmProfileSnapshot {
+            document: body,
+            digests,
+        },
+        history: snapshots
+            .into_values()
+            .map(|(_, snapshot)| snapshot)
+            .collect(),
     })
     .map_err(|e| invalid(e.to_string()))?;
     Ok(RealmProfileUpdateInfo {
@@ -5472,6 +5616,8 @@ mod tests {
                 realm.clone(),
                 keys.to_string(),
                 state,
+                None,
+                None,
             )
         };
         let old = accept(&first, None).unwrap();
@@ -5490,6 +5636,8 @@ mod tests {
             realm.clone(),
             replacement_keys.to_string(),
             Some(old.state_json.clone()),
+            None,
+            None,
         );
         assert!(
             matches!(result, Err(CoreError::RealmProfileInvalid(message)) if message.contains("no longer verifiable"))
@@ -5516,6 +5664,130 @@ mod tests {
         first["packages"]["ui"]["sha256"] = json!("ff".repeat(32));
         sign_document(&mut first, "realm-test", &key);
         assert!(accept(&first, Some(new.state_json)).is_err());
+    }
+
+    #[test]
+    fn realm_profile_recovers_only_revoked_snapshots_under_a_pinned_authority() {
+        use actr_protocol::realm_profile::sign_document;
+        use base64::Engine as _;
+        use serde_json::{Value, json};
+
+        let retained = ed25519_dalek::SigningKey::from_bytes(&[5; 32]);
+        let removed = ed25519_dalek::SigningKey::from_bytes(&[6; 32]);
+        let entry = |id: &str, key: &ed25519_dalek::SigningKey| {
+            let public =
+                base64::engine::general_purpose::STANDARD.encode(key.verifying_key().as_bytes());
+            json!({"id": id, "algorithm": "Ed25519", "status": "active", "public_key": public})
+        };
+        let mut original_keys = json!({"sequence": 1, "keys": [
+            entry("retained", &retained), entry("removed", &removed)
+        ]});
+        sign_document(&mut original_keys, "retained", &retained);
+        let (_, KeyPinOutcome::Accepted(original_pins)) =
+            RealmSigningKeys::accept(&original_keys, None).unwrap()
+        else {
+            panic!("the initial authority must be accepted")
+        };
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../../contracts/actr/test-vectors/realm-profile.json"
+        ))
+        .unwrap();
+        let mut profile = vectors["profiles"]["active"]["document"].clone();
+        let realm = profile["realm"]["name"].as_str().unwrap().to_owned();
+        let accept = |document: &Value, keys: &Value, pins: &KeyPins, state| {
+            accept_realm_profile_update(
+                document.to_string(),
+                realm.clone(),
+                keys.to_string(),
+                state,
+                Some(serde_json::to_string(pins).unwrap()),
+                None,
+            )
+        };
+        profile["sequence"] = json!(7);
+        sign_document(&mut profile, "retained", &retained);
+        let installed = profile.to_string();
+        let baseline = accept(&profile, &original_keys, &original_pins, None).unwrap();
+
+        profile["sequence"] = json!(99);
+        sign_document(&mut profile, "removed", &removed);
+        let latest = accept(
+            &profile,
+            &original_keys,
+            &original_pins,
+            Some(baseline.state_json),
+        )
+        .unwrap();
+        let mut rotated_keys = json!({"sequence": 2, "keys": [entry("retained", &retained)]});
+        sign_document(&mut rotated_keys, "retained", &retained);
+        let (_, KeyPinOutcome::Accepted(rotated_pins)) =
+            RealmSigningKeys::accept(&rotated_keys, Some(&original_pins)).unwrap()
+        else {
+            panic!("the retained authority must be accepted")
+        };
+
+        profile["sequence"] = json!(6);
+        sign_document(&mut profile, "retained", &retained);
+        assert!(
+            accept(
+                &profile,
+                &rotated_keys,
+                &rotated_pins,
+                Some(latest.state_json.clone())
+            )
+            .is_err()
+        );
+        let mut legacy_state: Value = serde_json::from_str(&latest.state_json).unwrap();
+        legacy_state.as_object_mut().unwrap().remove("history");
+        let first = accept(
+            &profile,
+            &rotated_keys,
+            &rotated_pins,
+            Some(legacy_state.to_string()),
+        )
+        .unwrap();
+        assert_eq!(first.profile.unwrap().sequence, 6);
+        assert!(
+            accept_realm_profile_update(
+                profile.to_string(),
+                realm.clone(),
+                rotated_keys.to_string(),
+                Some(legacy_state.to_string()),
+                Some(serde_json::to_string(&rotated_pins).unwrap()),
+                Some(installed),
+            )
+            .is_err()
+        );
+
+        profile["sequence"] = json!(8);
+        sign_document(&mut profile, "retained", &retained);
+        assert!(
+            accept(
+                &profile,
+                &rotated_keys,
+                &original_pins,
+                Some(latest.state_json.clone())
+            )
+            .is_err()
+        );
+        legacy_state["document"] = json!("{\"signature\":{\"key_id\":\"removed\"}}");
+        assert!(
+            accept(
+                &profile,
+                &rotated_keys,
+                &rotated_pins,
+                Some(legacy_state.to_string())
+            )
+            .is_err()
+        );
+        let restored = accept(
+            &profile,
+            &rotated_keys,
+            &rotated_pins,
+            Some(latest.state_json),
+        )
+        .unwrap();
+        assert_eq!(restored.profile.unwrap().sequence, 8);
     }
 
     #[test]
