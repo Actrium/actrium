@@ -93,7 +93,8 @@ pub fn build_self_contained_service_spec_from_files(
     let mut hashes = Vec::with_capacity(proto_files.len());
     let mut protobufs = Vec::with_capacity(proto_files.len());
     for proto in &proto_files {
-        let hash = if names.insert(proto.name.trim_end_matches(".proto")) {
+        // Discovery clients can cache these names on case-insensitive filesystems.
+        let hash = if names.insert(published_proto_name(&proto.name).to_lowercase()) {
             self_contained_proto_hash(&proto.content)
         } else {
             Err(anyhow::anyhow!(
@@ -147,9 +148,13 @@ pub fn validate_self_contained_rpc_proto(source: &str) -> Result<()> {
         .map_err(CompatibilityError::ProtoSignError)
 }
 
+fn published_proto_name(name: &str) -> &str {
+    name.trim_end_matches(".proto")
+}
+
 fn make_protobuf(proto: &ProtoFile, fingerprint: String) -> Protobuf {
     Protobuf {
-        package: proto.name.trim_end_matches(".proto").to_string(),
+        package: published_proto_name(&proto.name).to_string(),
         content: proto.content.clone(),
         fingerprint,
     }

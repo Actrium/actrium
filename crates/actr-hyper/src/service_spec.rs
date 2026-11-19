@@ -298,18 +298,22 @@ service Other { rpc Call(Request) returns (Request); }
 
     #[test]
     fn native_exports_with_conflicting_published_basenames_are_rejected() {
-        let (bytes, manifest) = signed_fixture(
-            NATIVE,
-            &[
-                ("contracts/first/echo.proto", CONTRACT.as_bytes()),
-                ("contracts/second/echo.proto", OTHER_CONTRACT.as_bytes()),
-            ],
-            |_| {},
-        );
-        let error = calculate_v2_service_spec(&bytes, &manifest, LIMIT).unwrap_err();
-        assert!(matches!(&error, HyperError::InvalidManifest(_)));
-        let error = error.to_string();
-        assert!(error.contains("echo.proto"), "{error}");
+        for first_path in ["contracts/first/echo.proto", "contracts/first/Echo.proto"] {
+            let (bytes, manifest) = signed_fixture(
+                NATIVE,
+                &[
+                    (first_path, CONTRACT.as_bytes()),
+                    ("contracts/second/echo.proto", OTHER_CONTRACT.as_bytes()),
+                ],
+                |_| {},
+            );
+            let error = calculate_v2_service_spec(&bytes, &manifest, LIMIT).unwrap_err();
+            assert!(matches!(&error, HyperError::InvalidManifest(_)));
+            assert!(
+                error.to_string().contains("duplicate published Proto name"),
+                "{error}"
+            );
+        }
     }
 
     #[test]

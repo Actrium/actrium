@@ -2111,7 +2111,10 @@ fn extract_dynclib_binary(bytes: &[u8], manifest: &PackageManifest) -> HyperResu
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
-fn write_dynclib_cache_file(cache_path: &Path, binary_bytes: &[u8]) -> HyperResult<()> {
+fn stage_dynclib_cache_file(
+    cache_path: &Path,
+    binary_bytes: &[u8],
+) -> HyperResult<tempfile::NamedTempFile> {
     let cache_dir = cache_path.parent().ok_or_else(|| {
         HyperError::Runtime("dynclib cache path has no parent directory".to_string())
     })?;
@@ -2144,8 +2147,12 @@ fn write_dynclib_cache_file(cache_path: &Path, binary_bytes: &[u8]) -> HyperResu
             temp_file.path().display()
         ))
     })?;
+    Ok(temp_file)
+}
 
-    match temp_file.persist_noclobber(cache_path) {
+#[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
+fn write_dynclib_cache_file(cache_path: &Path, binary_bytes: &[u8]) -> HyperResult<()> {
+    match stage_dynclib_cache_file(cache_path, binary_bytes)?.persist_noclobber(cache_path) {
         Ok(_) => Ok(()),
         Err(err) if err.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(err) => Err(HyperError::Runtime(format!(
@@ -2188,31 +2195,29 @@ fn v2_dynclib_cache_matches(path: &Path, binary: &[u8]) -> bool {
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
 fn ensure_v2_dynclib_cache_file(path: &Path, binary: &[u8]) -> HyperResult<()> {
-    match std::fs::symlink_metadata(path) {
-        Ok(_) if v2_dynclib_cache_matches(path, binary) => return Ok(()),
-        Ok(_) => match std::fs::remove_file(path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => {
-                return Err(HyperError::Runtime(format!(
-                    "failed to remove invalid native cache: {e}"
-                )));
-            }
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => {
-            return Err(HyperError::Runtime(format!(
-                "failed to inspect native cache: {e}"
-            )));
-        }
+    if v2_dynclib_cache_matches(path, binary) {
+        return Ok(());
     }
-    write_dynclib_cache_file(path, binary)?;
-    if !v2_dynclib_cache_matches(path, binary) {
-        return Err(HyperError::Runtime(
-            "native cache does not match the verified package".into(),
-        ));
+
+    // Replace the directory entry atomically so concurrent loaders can keep opening it.
+    let persisted = stage_dynclib_cache_file(path, binary)?
+        .into_temp_path()
+        .persist(path);
+    // A concurrent repair may already have published the verified bytes, even if
+    // replacement failed (for example, when Windows has the repaired library open).
+    if v2_dynclib_cache_matches(path, binary) {
+        return Ok(());
     }
-    Ok(())
+    persisted.map_err(|err| {
+        HyperError::Runtime(format!(
+            "failed to persist native cache file `{}`: {}",
+            path.display(),
+            err.error
+        ))
+    })?;
+    Err(HyperError::Runtime(
+        "native cache does not match the verified package".into(),
+    ))
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]

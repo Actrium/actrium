@@ -962,6 +962,37 @@ fn v2_dynclib_cache_replaces_corrupted_bytes() {
     ensure_v2_dynclib_cache_file(&path, b"signed bytes").unwrap();
 }
 
+#[cfg(feature = "dynclib-engine")]
+#[test]
+fn v2_dynclib_cache_stays_openable_during_concurrent_repairs() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("cached.so");
+    let binary = vec![0x5a; 4 * 1024 * 1024];
+    std::fs::write(&path, b"invalid data").unwrap();
+
+    let start = Barrier::new(5);
+    std::thread::scope(|scope| {
+        let repairs: Vec<_> = (0..4)
+            .map(|_| {
+                scope.spawn(|| {
+                    start.wait();
+                    ensure_v2_dynclib_cache_file(&path, &binary).unwrap();
+                    assert!(v2_dynclib_cache_matches(&path, &binary));
+                })
+            })
+            .collect();
+
+        start.wait();
+        loop {
+            std::fs::File::open(&path).expect("the cache path must remain openable during repair");
+            if repairs.iter().all(|repair| repair.is_finished()) {
+                break;
+            }
+            std::thread::yield_now();
+        }
+    });
+}
+
 #[cfg(all(feature = "dynclib-engine", unix))]
 #[test]
 fn v2_dynclib_cache_does_not_follow_a_symlink() {
