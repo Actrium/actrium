@@ -54,9 +54,12 @@ extension NSWindow {
 /// RN macOS multiline inputs wrap their `RCTUITextView` in a plain NSView
 /// (`RCTWrappedTextView`); when that wrapper is passed in, return the inner
 /// editable text view instead so AppKit treats it as the real first responder.
+/// Only the wrapper itself is unwrapped — an arbitrary container (e.g. the
+/// surface root during an explicit blur) must keep its own focus behavior.
 private func actrium_innerTextViewTarget(_ responder: NSResponder) -> NSResponder {
-    guard let view = responder as? NSView,
-          !(view is NSTextView), !(view is NSTextField)
+    guard let wrapperClass = NSClassFromString("RCTWrappedTextView"),
+          let view = responder as? NSView,
+          view.isKind(of: wrapperClass)
     else { return responder }
     var queue = [view]
     while !queue.isEmpty {
@@ -907,9 +910,14 @@ private final class RendererTabSurface {
     /// responder and forwards responder calls to the inner `RCTUITextView`.
     /// All text handling (edits, undo, key forwarding, focus reporting) must
     /// target that inner text view, so resolve it through the view hierarchy.
+    /// Only the wrapper is unwrapped; the surface container must keep its
+    /// plain-responder status so an unfocused surface reads as unfocused.
     private func resolvedTextView(_ responder: NSResponder?) -> NSTextView? {
         if let textView = responder as? NSTextView { return textView }
-        guard let view = responder as? NSView else { return nil }
+        guard let wrapperClass = NSClassFromString("RCTWrappedTextView"),
+              let view = responder as? NSView,
+              view.isKind(of: wrapperClass)
+        else { return nil }
         var queue = [view]
         while !queue.isEmpty {
             let next = queue.removeFirst()
