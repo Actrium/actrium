@@ -1709,10 +1709,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                                 comment: "Actr realm profile URL error"),
                             profilePath)])
                 }
-                let profileData: Data
-                let admission: RealmJoinService.VerifiedProfile
+                var admission: RealmJoinService.VerifiedProfile
                 do {
-                    let resolved = try await RealmJoinService.resolveProfile(
+                    admission = try await RealmJoinService.resolveProfile(
                         at: profileURL, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson,
                         preferences: realmPreferences,
                         fetch: {
@@ -1727,27 +1726,26 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                             guard currentTabIndex() != nil else { throw CancellationError() }
                         }
                     )
-                    profileData = resolved.body
-                    admission = resolved.admission
                 } catch CoreError.RealmRetired(let name) {
                     presentRealmLinkError(CoreError.RealmRetired(message: name))
                     return
                 }
-                let profile = admission.info
                 acceptedProfile = admission.accepted
-                logger.notice("📄 [navigateCurrentTab] Realm Profile accepted: \(profile.displayName) (\(profile.realmName)), sequence=\(profile.sequence), package=\(profile.packageHref)")
+                logger.notice("📄 [navigateCurrentTab] Realm Profile accepted: \(admission.info.displayName) (\(realmName)), sequence=\(admission.info.sequence), package=\(admission.info.packageHref)")
 
                 if let inviteCode {
-                    _ = try await redeemInvite(
+                    let result = try await redeemInvite(
                         code: inviteCode, realmName: realmName, tabId: replacingTabId, load: load,
                         admission: admission
                     )
+                    admission = result.admission
+                    acceptedProfile = admission.accepted
                 } else if admission.isOpen {
                     // The Issuer reuses the existing member after a successful invite.
                     await pendingRealmInvites.wait(for: realmName)
                     guard currentTabIndex() != nil else { return }
                     try await joinOpenRealm(admission)
-                } else if !redeemedRealms.contains(profile.realmName) {
+                } else if !redeemedRealms.contains(realmName) {
                     realmNavigations[replacingTabId] = .invite(
                         PendingInviteRedeem(tabId: replacingTabId, uri: address, domain: domain, realmName: realmName)
                     )
@@ -1755,7 +1753,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     return
                 }
                 guard let startingIndex = currentTabIndex() else { return }
-                if admission.isOpen, inviteCode == nil { markRedeemed(profile.realmName) }
+                if admission.isOpen, inviteCode == nil { markRedeemed(realmName) }
+                let profile = admission.info
+                let profileData = admission.body
                 // Keep an approved local Front running until its replacement is verified.
                 if localFrontApprovals[replacingTabId] == nil {
                     prepareRealmTab(startingIndex, address: address, title: title)

@@ -92,9 +92,27 @@ enum RealmProfileStore {
               saved["authorityFallback"] as? Bool == true,
               let keys = authorityState(realmName, preferences: preferences)?["signingKeys"] as? String
         else { return nil }
+        return try recoverSavedRealm(realmName, saved: saved, signingKeysJSON: keys)
+    }
+
+    /// Reverify the active snapshot already accepted by another navigation.
+    static func currentRealm(
+        _ realmName: String, preferences: UserDefaults
+    ) throws -> (body: Data, accepted: AcceptedRealm)? {
+        guard let saved = preferences.dictionary(forKey: realmKey(realmName)),
+              let keys = (authorityState(realmName, preferences: preferences)?["signingKeys"] as? String)
+                ?? (saved["signingKeys"] as? String),
+              let recovered = try recoverSavedRealm(realmName, saved: saved, signingKeysJSON: keys),
+              isCurrent(recovered.accepted, preferences: preferences) else { return nil }
+        return recovered
+    }
+
+    private static func recoverSavedRealm(
+        _ realmName: String, saved: [String: Any], signingKeysJSON: String
+    ) throws -> (body: Data, accepted: AcceptedRealm)? {
         let documents = try cachedDocuments(saved)
         guard let recovered = try ActriumCore.recoverRealmProfileBaseline(
-            realmName: realmName, signingKeysJson: keys, previousDocuments: documents
+            realmName: realmName, signingKeysJson: signingKeysJSON, previousDocuments: documents
         ) else { return nil }
         _ = try packageDigestPins(cached: saved, documents: documents, acceptance: recovered)
         guard let active = recovered.profile else { throw CoreError.RealmRetired(message: realmName) }

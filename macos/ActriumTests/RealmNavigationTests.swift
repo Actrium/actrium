@@ -308,6 +308,90 @@ final class RealmNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testQueuedInviteUsesTheNewlyAcceptedProfileBeforeOpenAdmission() async throws {
+        let preferences = try makePreferences()
+        let realmURL = try XCTUnwrap(URL(string: realmURI))
+        let blockerURL = try XCTUnwrap(URL(string: "actr://other.example/other"))
+        let invite = try makeInviteText()
+        let blockerInvite = try makeInviteText(for: "other@other.example", secretByte: 2)
+        let inviteLink = try linkCarryingInvite(invite, to: realmURL)
+        let blockerLink = try linkCarryingInvite(blockerInvite, to: blockerURL)
+        let signer = Curve25519.Signing.PrivateKey()
+        let original = try discoveryDocuments(membership: "open", signer: signer)
+        let updated = try profile(membership: "open", signer: signer, sequence: 2).0
+        let blockerDocuments = try discoveryDocuments(membership: "invite-only", for: blockerURL)
+        let blocker = NavigationGate()
+        let exchange = NavigationGate()
+        defer {
+            blocker.release()
+            exchange.release()
+        }
+        let earlyOpenJoin = expectation(description: "The queued invite must retain priority through redemption")
+        earlyOpenJoin.isInverted = true
+        var profileFetches = 0
+        var inviteSettled = false
+        var joinOrder: [String] = []
+        let view = BrowserViewModel(
+            realmPreferences: preferences,
+            pendingRealmInvites: PendingRealmInvites(),
+            fetchRealmDocument: { url, _ in
+                if url.host == "publisher.example" { throw CancellationError() }
+                if url.path == "/realm/echo" {
+                    profileFetches += 1
+                    if profileFetches > 1 { return updated }
+                }
+                return try XCTUnwrap(original[url.absoluteString] ?? blockerDocuments[url.absoluteString])
+            },
+            joinOpenRealm: { admission in
+                XCTAssertEqual(admission.info.realmName, self.realmName)
+                XCTAssertEqual(admission.info.sequence, 2)
+                if !inviteSettled { earlyOpenJoin.fulfill() }
+                joinOrder.append("open")
+            },
+            inviteMembershipExchange: { profile, code, _, _ in
+                if code == blockerInvite {
+                    joinOrder.append("blocker")
+                    await blocker.wait()
+                    return #"{"member_id":"blocker","role":"viewer","key_id":"key"}"#
+                }
+                XCTAssertEqual(code, invite)
+                XCTAssertEqual(profile.realmName, self.realmName)
+                XCTAssertEqual(profile.sequence, 2)
+                joinOrder.append("invite")
+                await exchange.wait()
+                inviteSettled = true
+                return #"{"member_id":"editor","role":"editor","key_id":"key"}"#
+            },
+            saveBrowserSession: { _, _ in }
+        )
+        func acceptedSequence() -> UInt64? {
+            try? RealmProfileStore.currentRealm(realmName, preferences: preferences)?.accepted.info.sequence
+        }
+
+        view.navigateCurrentTab(to: blockerLink.absoluteString)
+        try await waitUntil { blocker.waiting }
+        view.openURLInNewTab(inviteLink)
+        let invitedTab = try XCTUnwrap(view.currentTabId)
+        try await waitUntil { acceptedSequence() == 1 }
+        view.openURLInNewTab(realmURL)
+        let plainTab = try XCTUnwrap(view.currentTabId)
+        try await waitUntil { acceptedSequence() == 2 }
+        XCTAssertEqual(joinOrder, ["blocker"])
+
+        blocker.release()
+        try await waitUntil { exchange.waiting }
+        await fulfillment(of: [earlyOpenJoin], timeout: 0.25)
+        XCTAssertEqual(joinOrder, ["blocker", "invite"])
+
+        exchange.release()
+        try await waitUntil {
+            view.currentTab?.url == realmURL && view.tabs.first(where: { $0.id == invitedTab })?.url == realmURL
+        }
+        XCTAssertEqual(joinOrder, ["blocker", "invite", "open"])
+        XCTAssertEqual(view.currentTabId, plainTab)
+    }
+
+    @MainActor
     func testQueuedInviteDoesNotEnrollAfterNavigatingAway() async throws {
         try await assertOverlappingInvites(navigateAwayFromSecondTab: true)
     }
@@ -594,12 +678,15 @@ final class RealmNavigationTests: XCTestCase {
     }
 
     private func discoveryDocuments(
-        membership: String, frontDigest: String? = nil, for realmURL: URL? = nil
+        membership: String, frontDigest: String? = nil, for realmURL: URL? = nil,
+        signer: Curve25519.Signing.PrivateKey = Curve25519.Signing.PrivateKey()
     ) throws -> [String: Data] {
         let address = try realmURL ?? XCTUnwrap(URL(string: realmURI))
         let domain = try XCTUnwrap(address.host)
         let realmId = address.lastPathComponent
-        let (body, keys) = try profile(membership: membership, frontDigest: frontDigest, realmName: "\(realmId)@\(domain)")
+        let (body, keys) = try profile(
+            membership: membership, frontDigest: frontDigest, realmName: "\(realmId)@\(domain)", signer: signer
+        )
         let descriptor = try JSONSerialization.data(withJSONObject: [
             "version": 1,
             "authority": "actr://\(domain)",
@@ -614,8 +701,10 @@ final class RealmNavigationTests: XCTestCase {
         ]
     }
 
-    private func profile(membership: String, frontDigest: String? = nil, realmName: String? = nil) throws -> (Data, String) {
-        let signer = Curve25519.Signing.PrivateKey()
+    private func profile(
+        membership: String, frontDigest: String? = nil, realmName: String? = nil,
+        signer: Curve25519.Signing.PrivateKey, sequence: Int = 1
+    ) throws -> (Data, String) {
         let publicKey = signer.publicKey.rawRepresentation.base64EncodedString()
         let keys = try sign([
             "sequence": 1,
@@ -625,7 +714,7 @@ final class RealmNavigationTests: XCTestCase {
         if let frontDigest { front["sha256"] = frontDigest }
         let body = try sign([
             "schema": "actr.realm/v1",
-            "sequence": 1,
+            "sequence": sequence,
             "realm": ["name": realmName ?? self.realmName, "display_name": "Echo", "status": "active"],
             "primary_package": "service",
             "front_package": "front",

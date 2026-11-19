@@ -5,8 +5,9 @@ import ActrBindings
 
 /// The outcome of a successful invite redemption.
 struct RealmJoinResult {
+    let admission: RealmJoinService.VerifiedProfile
     /// Canonical Realm name `<realm_id>@<domain>`.
-    let realmName: String
+    var realmName: String { admission.info.realmName }
     let memberId: String
     let role: String
     let keyId: String
@@ -66,6 +67,7 @@ enum RealmJoinService {
     typealias InviteExchange = @MainActor (RealmProfileInfo, String, String, Bool) async throws -> String
 
     struct VerifiedProfile {
+        let body: Data
         let accepted: RealmProfileStore.AcceptedRealm
         var info: RealmProfileInfo { accepted.info }
         let isOpen: Bool
@@ -81,6 +83,7 @@ enum RealmJoinService {
         }
 
         init(body: Data, accepted: RealmProfileStore.AcceptedRealm) throws {
+            self.body = body
             self.accepted = accepted
             // Read the policy from the same bytes verified by the core.
             isOpen = try JSONDecoder().decode(AdmissionPolicy.self, from: body).policy.membership == "open"
@@ -109,14 +112,13 @@ enum RealmJoinService {
         preferences: UserDefaults,
         fetch: @MainActor (URL) async throws -> Data,
         checkCurrent: @MainActor () throws -> Void
-    ) async throws -> (body: Data, admission: VerifiedProfile) {
+    ) async throws -> VerifiedProfile {
         do {
             let body = try await fetch(url)
             try checkCurrent()
-            let verified = try VerifiedProfile(
+            return try VerifiedProfile(
                 body: body, realmName: realmName, signingKeysJSON: signingKeysJSON, preferences: preferences
             )
-            return (body, verified)
         } catch CoreError.RealmRetired(let name) {
             throw CoreError.RealmRetired(message: name)
         } catch {
@@ -126,7 +128,7 @@ enum RealmJoinService {
                 realmName, preferences: preferences
             ) else { throw error }
             AppLogger.viewModel.warning("Using the last trusted Realm Profile for \(realmName) after signing key revocation.")
-            return (fallback.body, try VerifiedProfile(body: fallback.body, accepted: fallback.accepted))
+            return try VerifiedProfile(body: fallback.body, accepted: fallback.accepted)
         }
     }
 
@@ -196,13 +198,13 @@ enum RealmJoinService {
             preferences: preferences, fetch: fetch, checkCurrent: checkCurrent
         )
         return try await redeemVerifiedInvite(
-            resolved.admission, inviteText: inviteText, label: label,
+            resolved, inviteText: inviteText, label: label,
             allowInsecureDevelopment: allowInsecureDevelopment, preferences: preferences,
             exchange: exchange, checkCurrent: checkCurrent, beforeExchange: beforeExchange
         )
     }
 
-    /// Uses the already verified Profile for the invite's Realm.
+    /// Uses the current verified Profile for the invite's Realm.
     static func redeemVerifiedInvite(
         _ admission: VerifiedProfile,
         inviteText: String,
@@ -214,10 +216,17 @@ enum RealmJoinService {
         beforeExchange: @MainActor () -> Void
     ) async throws -> RealmJoinResult {
         try checkCurrent()
-        guard RealmProfileStore.isCurrent(admission.accepted, preferences: preferences) else {
+        var current = admission
+        // Another tab can accept a newer Profile while this invite is queued.
+        // Refresh in the same exchange so its admission reservation stays held.
+        if !RealmProfileStore.isCurrent(current.accepted, preferences: preferences),
+           let updated = try RealmProfileStore.currentRealm(current.info.realmName, preferences: preferences) {
+            current = try VerifiedProfile(body: updated.body, accepted: updated.accepted)
+        }
+        guard RealmProfileStore.isCurrent(current.accepted, preferences: preferences) else {
             throw joinError("The verified Realm Profile changed before redemption.")
         }
-        let profile = admission.info
+        let profile = current.info
         let parts = profile.realmName.split(separator: "@", maxSplits: 1)
         guard parts.count == 2, let instanceURL = URL(string: "actr://\(parts[1])/\(parts[0])") else {
             throw joinError("The instance address could not be built.")
@@ -236,7 +245,7 @@ enum RealmJoinService {
             throw joinError("The join response could not be read.")
         }
         return RealmJoinResult(
-            realmName: profile.realmName,
+            admission: current,
             memberId: memberId,
             role: role,
             keyId: keyId,
