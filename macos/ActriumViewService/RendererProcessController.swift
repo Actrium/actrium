@@ -599,6 +599,7 @@ final class RendererSurfaceMountObserver: NSObject {
 /// One Tab root and its remotely hosted CoreAnimation context.
 @MainActor
 private final class RendererTabSurface {
+
     let tabId: String
     let entry: TabViewControllerEntry
     let container: ResizableContainerView
@@ -619,6 +620,10 @@ private final class RendererTabSurface {
     /// selections leave a stale anchor whose offset may coincidentally fall
     /// inside the new range but does not describe it.
     private var dragSelectionAnchorRange: NSRange?
+    /// The control the active drag belongs to. A programmatic focus change
+    /// mid-drag (e.g. an RN callback) must not apply this drag's anchor to
+    /// a different input.
+    private var dragOwner: AnyObject?
     /// Last text-input focus state reported to the Host. The Host mirrors
     /// IME composition for whichever surface owns the focused text input.
     private var lastReportedTextFocus = false
@@ -856,6 +861,16 @@ private final class RendererTabSurface {
                       let anchor = dragSelectionAnchor,
                       let editor = window.firstResponder as? NSTextView {
                 // Drive drag selection manually (see dragSelectionAnchor).
+                // The drag belongs to the control it started in; a focus
+                // change mid-drag ends it instead of selecting in the new
+                // control with a foreign anchor.
+                guard currentControl() === dragOwner else {
+                    textInputPresses.remove(input.button)
+                    dragOwner = nil
+                    dragSelectionAnchor = nil
+                    dragSelectionAnchorRange = nil
+                    return
+                }
                 let point = editor.convert(location, from: nil)
                 let index = editor.characterIndexForInsertion(at: point)
                 if index != NSNotFound {
@@ -863,6 +878,10 @@ private final class RendererTabSurface {
                         location: min(anchor, index),
                         length: abs(index - anchor)
                     )
+                    // Keep the stored selection in sync with what the drag
+                    // applies, so a later Shift+click still recognises the
+                    // anchor as the creator of the current selection.
+                    dragSelectionAnchorRange = range
                     if editor.selectedRange() != range {
                         editor.setSelectedRange(range)
                         editor.scrollRangeToVisible(range)
@@ -873,6 +892,7 @@ private final class RendererTabSurface {
                 return
             } else if input.type == .mouseUp {
                 if textInputPresses.remove(input.button) != nil {
+                    dragOwner = nil
                     return
                 }
                 if let recognizers = pressedRecognizers.removeValue(forKey: input.button) {
@@ -1096,6 +1116,7 @@ private final class RendererTabSurface {
         let editor = (view as? NSTextField)?.currentEditor() as? NSTextView ?? view as? NSTextView
         focusedEditor = focused ? editor : nil
         guard focused, let editor else { return }
+        dragOwner = currentControl()
         let point = editor.convert(location, from: nil)
         let index = editor.characterIndexForInsertion(at: point)
         guard index != NSNotFound, index <= (editor.string as NSString).length else { return }
