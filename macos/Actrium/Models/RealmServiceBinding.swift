@@ -127,8 +127,8 @@ final class RealmServiceBindings {
 
     /// Keep established Guest subscriptions when only the Realm connection changes.
     func replaceConnection(
-        _ active: RealmServiceBinding,
-        with replacement: RealmServiceBinding,
+        _ active: any RealmServiceBindingHandle,
+        with replacement: any RealmServiceBindingHandle,
         tabId: UUID,
         isCurrent: () throws -> Bool
     ) async throws -> Bool {

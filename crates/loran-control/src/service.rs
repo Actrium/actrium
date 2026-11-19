@@ -217,10 +217,18 @@ impl AdminApiService {
             .filter(|profiles| profiles.holds_key_for(realm))
     }
 
+    fn realm_package_signer(&self, realm: &str) -> GrpcResult<&RealmProfiles> {
+        self.signs_profiles_for(realm)
+            .map(Arc::as_ref)
+            .ok_or_else(|| {
+                Status::permission_denied(
+                    "only the Realm signing authority can update these packages",
+                )
+            })
+    }
+
     pub async fn realm_package_state(&self, realm: &str) -> GrpcResult<RealmPackageState> {
-        let profiles = self.signs_profiles_for(realm).ok_or_else(|| {
-            Status::permission_denied("only the Realm signing authority can update these packages")
-        })?;
+        let profiles = self.realm_package_signer(realm)?;
         if !self.load_realm(realm).await?.is_active() {
             return Err(Status::failed_precondition(
                 "only active Realms accept package releases",
@@ -249,6 +257,25 @@ impl AdminApiService {
         })
     }
 
+    /// Read a release receipt only for a Realm this authority manages.
+    pub async fn package_release_receipt(
+        &self,
+        realm: &str,
+        update: &FrontUpdate,
+        selection: &RealmPackageSelection,
+    ) -> GrpcResult<Option<JsonValue>> {
+        self.realm_package_signer(realm)?;
+        RealmPackageReleaseRecord::get(realm, update, selection)
+            .await
+            .map_err(|error| Status::aborted(error.to_string()))?
+            .map(|receipt| {
+                receipt
+                    .reply(realm, update)
+                    .map_err(|error| Status::internal(error.to_string()))
+            })
+            .transpose()
+    }
+
     /// Verify and publish a guarded package selection.
     pub async fn publish_packages(
         &self,
@@ -257,9 +284,7 @@ impl AdminApiService {
         update: FrontUpdate,
         kind: PackageSelectionChange,
     ) -> GrpcResult<JsonValue> {
-        let profiles = self.signs_profiles_for(realm).ok_or_else(|| {
-            Status::permission_denied("only the Realm signing authority can update these packages")
-        })?;
+        let profiles = self.realm_package_signer(realm)?;
         let mut change = ProfileChange {
             selection: Some(selection.clone()),
             ..Default::default()
@@ -268,22 +293,25 @@ impl AdminApiService {
             PackageSelectionChange::Front => change.front_update = Some(update.clone()),
             PackageSelectionChange::Service => change.service_update = Some(update.clone()),
         }
-        profiles
-            .issue(realm, change)
-            .await
-            .map_err(|error| match error {
-                ProfileError::Invalid(message) => Status::invalid_argument(message),
-                ProfileError::Realm(RealmError::Conflict(message)) => {
-                    Status::failed_precondition(message)
-                }
-                error => Status::unavailable(error.to_string()),
-            })?;
-        RealmPackageReleaseRecord::get(realm, &update, &selection)
-            .await
-            .map_err(|error| Status::internal(error.to_string()))?
-            .ok_or_else(|| Status::internal("package release receipt missing"))?
-            .reply(realm, &update)
-            .map_err(|error| Status::internal(error.to_string()))
+        let issued = profiles.issue(realm, change).await;
+        // A concurrent retry may see the new sequence before its verifier runs.
+        if matches!(
+            &issued,
+            Ok(_) | Err(ProfileError::Realm(RealmError::Conflict(_)))
+        ) && let Some(receipt) = self
+            .package_release_receipt(realm, &update, &selection)
+            .await?
+        {
+            return Ok(receipt);
+        }
+        issued.map_err(|error| match error {
+            ProfileError::Invalid(message) => Status::invalid_argument(message),
+            ProfileError::Realm(RealmError::Conflict(message)) => {
+                Status::failed_precondition(message)
+            }
+            error => Status::unavailable(error.to_string()),
+        })?;
+        Err(Status::internal("package release receipt missing"))
     }
 
     pub fn override_store(&self) -> Option<&Arc<ConfigOverrideStore>> {

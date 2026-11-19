@@ -580,9 +580,9 @@ struct WorkspaceMainView: View {
                 }  // end if !useNativeToolbar
             }
         .overlay(alignment: .topTrailing) {
-            if viewModel.actriumMode.isInFocusMode, let offer = viewModel.currentRealmUpdate {
+            if let offer = viewModel.currentRealmUpdate {
                 HStack(spacing: 12) {
-                    Text("New Realm package available")
+                    Text(offer.title)
                     Button("Later") { viewModel.deferRealmUpdate(offer) }
                     Button("Update") { viewModel.confirmRealmUpdate(offer) }
                         .buttonStyle(.borderedProminent)
@@ -801,7 +801,7 @@ struct WorkspaceMainView: View {
                 viewModel.actrUriNotice = nil
             }
         }
-        // Confirm and Cancel apply to the displayed request, even across tab changes.
+        // Show only the active tab's invite prompt. Other tabs keep their own requests.
         .sheet(item: Binding(get: { viewModel.pendingInviteRedeem }, set: { _ in })) { pending in
             InviteCodeRedeemSheet(
                 pending: pending,

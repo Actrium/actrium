@@ -321,7 +321,7 @@ where
     let probe = args.probe.probe();
     ensure!(
         args.probe_realm.is_some() == probe.is_some(),
-        "probe options require --probe-realm"
+        "readiness checks require --probe-realm, --probe-config and --probe-route together"
     );
     std::fs::create_dir_all(&args.output)?;
     let trust_dir = args.trust_dir.as_deref().unwrap_or(&args.output);

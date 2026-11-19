@@ -1153,16 +1153,13 @@ pub fn accept_realm_profile_update(
     if let Some(saved) = previous_state_json {
         let previous: RealmProfileTrust = serde_json::from_str(&saved)
             .map_err(|e| invalid(format!("invalid saved Realm Profile: {e}")))?;
-        let signed = actr_protocol::signed_json::parse(previous.document.as_bytes())
-            .map_err(|e| invalid(format!("invalid saved Realm Profile: {e}")))?;
-        if keys
-            .keys
-            .iter()
-            .any(|k| signed["signature"]["key_id"].as_str() == Some(k.id.as_str()))
-        {
-            let baseline = RealmProfile::verify(previous.document.as_bytes(), &realm_name, &keys)?;
-            baseline.check_successor(&candidate)?;
-        }
+        let baseline = RealmProfile::verify(previous.document.as_bytes(), &realm_name, &keys)
+            .map_err(|error| {
+                invalid(format!(
+                    "the accepted Realm Profile is no longer verifiable: {error}"
+                ))
+            })?;
+        baseline.check_successor(&candidate)?;
         digests = previous.digests;
     }
     let (profile, service_selection_key, front_selection_key) =
@@ -5478,6 +5475,26 @@ mod tests {
             )
         };
         let old = accept(&first, None).unwrap();
+        let replacement = ed25519_dalek::SigningKey::from_bytes(&[4; 32]);
+        let replacement_public = base64::engine::general_purpose::STANDARD
+            .encode(replacement.verifying_key().as_bytes());
+        let mut replacement_keys = json!({"sequence": 2, "keys": [{
+            "id": "replacement", "algorithm": "Ed25519", "status": "active", "public_key": replacement_public,
+        }]});
+        sign_document(&mut replacement_keys, "replacement", &replacement);
+        let mut rotated = first.clone();
+        rotated["sequence"] = json!(2);
+        sign_document(&mut rotated, "replacement", &replacement);
+        let result = accept_realm_profile_update(
+            rotated.to_string(),
+            realm.clone(),
+            replacement_keys.to_string(),
+            Some(old.state_json.clone()),
+        );
+        assert!(
+            matches!(result, Err(CoreError::RealmProfileInvalid(message)) if message.contains("no longer verifiable"))
+        );
+
         let mut second = first.clone();
         second["sequence"] = json!(2);
         second["packages"]["ui"]["type"] = json!("acme.com/notes-ui@2.0.0");

@@ -111,6 +111,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private var loadedRealmFronts: [UUID: LoadedRealmFront] = [:]
     private var realmRefreshes: [UUID: (id: UUID, task: Task<Void, Never>)] = [:]
+    private static var backgroundRealmDocuments: [URL: Task<Data, Error>] = [:]
     private var realmRefreshObservation: AnyCancellable?
     @Published private var realmUpdateOffers: [UUID: RealmFrontUpdateOffer] = [:]
     private var deferredRealmUpdates: [UUID: RealmFrontSelection] = [:]
@@ -1305,7 +1306,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private func openRealmAddress(_ input: String, tabIndex: Int, inviteText: String? = nil) {
         do {
-            let linkAddress = ActrLinkInvite.strippingInviteArgs(from: input)
+            guard let linkAddress = ActrLinkInvite.strippingInviteArgs(from: input) else {
+                throw RealmServiceError(message: "The Realm address is invalid.")
+            }
             let info = try ActriumCore.parseActrUri(
                 uri: linkAddress, installationId: InstallationIdProvider.getOrCreate()
             )
@@ -1320,7 +1323,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
     }
 
-    /// Handle a Realm link already resolved by `ActriumCore.parseActrUri`
+    /// Handle a sanitized Realm link already resolved by `ActriumCore.parseActrUri`
     /// (which delegates to `realm_link::open_realm_link` for ownership and
     /// dispatch). A local instance address focuses an open tab or recovers
     /// the instance through the instance store; a remote link kicks off
@@ -1328,17 +1331,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// resolved address.
     private func handleResolvedRealmLink(
         _ info: ActrUriInfo,
-        input: String,
+        input linkAddress: String,
         tabIndex: Int,
         inviteText: String? = nil
     ) {
         // The core parser guarantees a RealmId for every resolved link.
         guard let realmId = info.realmId else { return }
-        // A consumed invite must not survive in the tab address, the restored
-        // session, or history, so every resolution path stores the link with
-        // its `args` removed (09 §13: invites travel out of band).
-        let linkAddress = ActrLinkInvite.strippingInviteArgs(from: input)
-
         let realmDisplay: String
         if let serial = info.serial {
             realmDisplay = "\(serial).\(realmId)@\(info.domain)"
@@ -1469,8 +1467,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 if let candidateBinding { Task { await candidateBinding.stop() } }
             }
             do {
-                let data = try await Self.fetchBoundedDocument(
-                    from: url,
+                let data = try await Self.fetchRealmDocument(
+                    from: url, background: background,
                     insecureMessage: NSLocalizedString(
                         "The authority information was served over an insecure connection.",
                         comment: "Actr authority insecure transport error"))
@@ -1512,8 +1510,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                                 comment: "Actr realm profile URL error"),
                             profilePath)])
                 }
-                let currentProfileData = try await Self.fetchBoundedDocument(
-                    from: profileURL,
+                let currentProfileData = try await Self.fetchRealmDocument(
+                    from: profileURL, background: background,
                     insecureMessage: NSLocalizedString(
                         "The Realm Profile was served over an insecure connection.",
                         comment: "Actr realm profile insecure transport error"))
@@ -1594,16 +1592,19 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
                 let previous = loadedRealmFronts[replacingTabId]
                 let available = RealmFrontSelection(front: accepted.frontSelectionKey, service: accepted.serviceSelectionKey)
-                let installedBody = previous == nil ? try RealmFrontTrustStore.read(.installedProfile, name: installedProfileName) : nil
+                let installedBody = previous == nil ? (try? RealmFrontTrustStore.read(.installedProfile, name: installedProfileName)) : nil
                 let installed = installedBody.flatMap { body in
                     try? ActriumCore.acceptRealmProfileUpdate(
                         body: body, realmName: realmName, signingKeysJson: descriptor.signingKeysJson, previousStateJson: nil
                     )
                 }
+                let installedSelection: RealmFrontSelection? = installed.flatMap { snapshot in
+                    guard snapshot.profile != nil else { return nil }
+                    return RealmFrontSelection(front: snapshot.frontSelectionKey, service: snapshot.serviceSelectionKey)
+                }
                 let action = RealmFrontRefreshAction(
                     running: previous?.selection,
-                    installed: installed.map { RealmFrontSelection(front: $0.frontSelectionKey, service: $0.serviceSelectionKey) },
-                    hasInstalledProfile: installedBody != nil,
+                    installed: installedSelection,
                     available: available,
                     approved: approved
                 )
@@ -1642,9 +1643,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     )
                     try RealmFrontTrustStore.save(profileBody, .installedProfile, name: installedProfileName)
                     return
-                case .offerUpdate:
+                case .offerUpdate(let baseline):
                     let offer = RealmFrontUpdateOffer(
-                        tabId: replacingTabId, address: address, navigationNonce: navigationNonce, selection: available
+                        tabId: replacingTabId, address: address, navigationNonce: navigationNonce,
+                        previous: baseline, selection: available
                     )
                     if (!background || deferredRealmUpdates[replacingTabId] != available),
                        realmUpdateOffers[replacingTabId] != offer {
@@ -1657,7 +1659,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     profileData = Data(installedBody.utf8)
                     next = LoadedRealmFront(
                         address: address, signingKeyId: installed.signingKeyId,
-                        selection: RealmFrontSelection(front: installed.frontSelectionKey, service: installed.serviceSelectionKey)
+                        selection: baseline
                     )
                 case .loadAvailable:
                     profile = availableProfile
@@ -1840,7 +1842,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 } else if let offer = realmUpdateOffers[replacingTabId], let tab = tabs.first(where: { $0.id == replacingTabId }) {
                     // Import increments the tab's navigation nonce.
                     realmUpdateOffers[replacingTabId] = RealmFrontUpdateOffer(
-                        tabId: offer.tabId, address: offer.address, navigationNonce: tab.reloadNonce, selection: offer.selection
+                        tabId: offer.tabId, address: offer.address, navigationNonce: tab.reloadNonce,
+                        previous: offer.previous, selection: offer.selection
                     )
                 }
                 logger.notice("Realm \(realmName): activated Front \(profile.packageType), Profile sequence \(profile.sequence), digest \(digest)")
@@ -1877,6 +1880,18 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 domain: "ActrDiscovery", code: 21,
                 userInfo: [NSLocalizedDescriptionKey: insecureMessage])
         }
+    }
+
+    /// Coalesce background fetches without sharing a tab's trust or approval state.
+    private static func fetchRealmDocument(from url: URL, background: Bool, insecureMessage: String) async throws -> Data {
+        guard background else {
+            return try await fetchBoundedDocument(from: url, insecureMessage: insecureMessage)
+        }
+        if let request = backgroundRealmDocuments[url] { return try await request.value }
+        let request = Task { try await fetchBoundedDocument(from: url, insecureMessage: insecureMessage) }
+        backgroundRealmDocuments[url] = request
+        defer { backgroundRealmDocuments.removeValue(forKey: url) }
+        return try await request.value
     }
 
     /// Small bounded fetch for discovery documents (authority descriptor,
@@ -2538,19 +2553,21 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 restoredTabIds.append(tab.id)
                 tabId = tab.id
             case "actr":
+                guard let address = ActrLinkInvite.strippingInviteArgs(from: url.absoluteString),
+                      let realmURL = URL(string: address) else { continue }
                 if let info = try? ActriumCore.parseActrUri(
-                    uri: url.absoluteString, installationId: InstallationIdProvider.getOrCreate()
+                    uri: address, installationId: InstallationIdProvider.getOrCreate()
                 ), !info.isLocal, let realm = info.realmId,
                    redeemedRealms.contains("\(realm)@\(info.domain)") {
-                    let tab = Tab(title: sessionTab.title, id: sessionTab.id, url: url)
+                    let tab = Tab(title: sessionTab.title, id: sessionTab.id, url: realmURL)
                     tabs.append(tab)
                     tabSlotPositions[tab.id] = tabs.count - 1
                     restoredTabIds.append(tab.id)
                     tabId = tab.id
-                    handleResolvedRealmLink(info, input: url.absoluteString, tabIndex: tabs.count - 1)
+                    handleResolvedRealmLink(info, input: address, tabIndex: tabs.count - 1)
                 } else {
                     tabId = nil
-                    restoreInstanceTab(address: url, title: sessionTab.title, isActiveTab: index == session.activeTabIndex)
+                    restoreInstanceTab(address: realmURL, title: sessionTab.title, isActiveTab: index == session.activeTabIndex)
                 }
             case "actro":
                 // Package address: reuse the existing package load chain.

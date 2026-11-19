@@ -41,9 +41,16 @@ pub enum PackageRelease<'a> {
 }
 
 impl PackageRelease<'_> {
-    fn update(&self) -> &FrontUpdate {
+    pub fn update(&self) -> &FrontUpdate {
         match self {
             Self::Front(update) | Self::Service(update) => update,
+        }
+    }
+
+    pub fn kind(&self) -> PackageSelectionChange {
+        match self {
+            Self::Front(_) => PackageSelectionChange::Front,
+            Self::Service(_) => PackageSelectionChange::Service,
         }
     }
 }
@@ -298,11 +305,7 @@ impl RealmProfileRecord {
                 RealmError::Conflict("a package release needs a complete selection".into())
             })?;
             let change = old.release_change(new).map_err(RealmError::Conflict)?;
-            let expected = match release {
-                PackageRelease::Front(_) => PackageSelectionChange::Front,
-                PackageRelease::Service(_) => PackageSelectionChange::Service,
-            };
-            if change != Some(expected) {
+            if change != Some(release.kind()) {
                 return Err(RealmError::Conflict(
                     "package release does not match the selection change".into(),
                 ));

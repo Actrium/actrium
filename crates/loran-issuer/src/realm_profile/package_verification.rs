@@ -97,9 +97,10 @@ fn private_directory(path: &Path) -> io::Result<()> {
     }
     #[cfg(unix)]
     if metadata.permissions().mode() & 0o077 != 0 {
-        return Err(io::Error::other(
-            "Publisher trust directory must be private",
-        ));
+        return Err(io::Error::other(format!(
+            "Publisher trust directory {} must use mode 0700",
+            path.display()
+        )));
     }
     Ok(())
 }

@@ -5,7 +5,6 @@ use axum::{
     extract::{Path, State},
     response::{IntoResponse, Response},
 };
-use platform::realm::RealmPackageReleaseRecord;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -57,13 +56,12 @@ async fn release(
     } = request;
     operation.check().map_err(Status::invalid_argument)?;
     selection.check().map_err(Status::invalid_argument)?;
-    if let Some(receipt) = RealmPackageReleaseRecord::get(realm, &operation, &selection)
-        .await
-        .map_err(|error| Status::aborted(error.to_string()))?
+    if let Some(receipt) = state
+        .service
+        .package_release_receipt(realm, &operation, &selection)
+        .await?
     {
-        return receipt
-            .reply(realm, &operation)
-            .map_err(|error| Status::internal(error.to_string()));
+        return Ok(receipt);
     }
     let snapshot = state.service.realm_package_state(realm).await?;
     if snapshot.sequence != operation.expected_sequence {

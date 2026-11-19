@@ -27,7 +27,7 @@ use platform::realm::domain::member_from_descriptor;
 use platform::realm::membership::Signer;
 use platform::realm::{
     IssuerKeyState, PackageRelease, Realm, RealmDomain, RealmError, RealmIssuerKey,
-    RealmProfileRecord, RealmStatus,
+    RealmPackageReleaseRecord, RealmProfileRecord, RealmStatus,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -172,7 +172,7 @@ pub struct RealmProfiles {
     /// Longest Actor credential lifetime, which a retired issuer key
     /// outlives.
     credential_ttl_secs: u64,
-    /// Where the credential validator's key cache lives.
+    /// SQLite data directory for the credential key cache and Publisher trust records.
     sqlite_path: std::path::PathBuf,
     /// Signer key id and the self-signed `realm_signing_keys` member.
     member: OnceCell<(u32, RealmSigningKeys)>,
@@ -252,10 +252,43 @@ impl RealmProfiles {
             .map(PackageRelease::Front)
             .or_else(|| change.service_update.as_ref().map(PackageRelease::Service));
         if let Some(release) = release {
+            let update = release.update();
+            update.check().map_err(ProfileError::Invalid)?;
             let selection = change.selection.as_ref().ok_or_else(|| {
                 ProfileError::Invalid("a package release needs a complete selection".into())
             })?;
             selection.check().map_err(ProfileError::Invalid)?;
+            let baseline = RealmProfileRecord::get(realm)
+                .await?
+                .filter(|record| {
+                    u64::try_from(record.sequence).ok() == Some(update.expected_sequence)
+                })
+                .ok_or_else(|| RealmError::Conflict("package release baseline changed".into()))?
+                .verify_for_update(keys)?;
+            let current = baseline.selection.as_ref().ok_or_else(|| {
+                RealmError::Conflict("the baseline has no complete package selection".into())
+            })?;
+            if current
+                .release_change(selection)
+                .map_err(RealmError::Conflict)?
+                != Some(release.kind())
+            {
+                return Err(RealmError::Conflict(
+                    "package release does not match the selection change".into(),
+                )
+                .into());
+            }
+            if update.rollback
+                && RealmPackageReleaseRecord::rollback_selection(realm, current)
+                    .await?
+                    .as_ref()
+                    != Some(selection)
+            {
+                return Err(RealmError::Conflict(
+                    "the last package release is no longer available for rollback".into(),
+                )
+                .into());
+            }
             // Downloads run before taking the signing lock. The store below
             // still checks the expected sequence and the owner's authority.
             package_verification::verify(&self.sqlite_path, selection, release).await?;
