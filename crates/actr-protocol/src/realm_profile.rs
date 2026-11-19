@@ -316,7 +316,7 @@ fn parse_realm_name(name: &str) -> Result<ActrUri, String> {
 }
 
 /// Realm Profile URLs for `realm_name`, in document order (section 3): each
-/// `realms` link with protocol `actr-realm-profile/1`, a trailing `/` removed,
+/// `realms` or legacy `realm` link with protocol `actr-realm-profile/1`, a trailing `/` removed,
 /// followed by `/<realm_id>`. Links with a query or fragment are skipped.
 pub fn realm_profile_urls(
     descriptor: &AuthorityDescriptor,
@@ -328,7 +328,7 @@ pub fn realm_profile_urls(
         .services
         .iter()
         .filter(|link| {
-            link.rel == "realms"
+            matches!(link.rel.as_str(), "realms" | "realm")
                 && link.protocol.as_deref() == Some(REALM_PROFILE_PROTOCOL)
                 && link.href.starts_with("https://")
                 && !link.href.contains(['?', '#'])
@@ -1132,6 +1132,18 @@ mod tests {
                 "https://acme.com/double//k7m2q9xh",
                 "https://p.example:8443/r/k7m2q9xh"
             ]
+        );
+        descriptor.services = vec![
+            ServiceLink::new("realm", "https://acme.com/realm/")
+                .with_protocol(REALM_PROFILE_PROTOCOL),
+        ];
+        descriptor
+            .validate_for(&parse_realm_name(NAME).unwrap())
+            .unwrap();
+        assert_eq!(descriptor.require_service("realms").unwrap().rel, "realm");
+        assert_eq!(
+            realm_profile_urls(&descriptor, NAME).unwrap(),
+            vec!["https://acme.com/realm/k7m2q9xh"]
         );
         descriptor.services.clear();
         assert!(realm_profile_urls(&descriptor, NAME).unwrap().is_empty());
