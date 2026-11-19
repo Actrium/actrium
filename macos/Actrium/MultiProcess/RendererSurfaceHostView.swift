@@ -69,7 +69,7 @@ final class RendererSurfaceHostView: NSView {
     private var surfaceObserver: NSObjectProtocol?
     private var crashObserver: NSObjectProtocol?
     private var configureTask: Task<Void, Never>?
-    private var lastConfig: [String: Any]?
+    private(set) var lastConfig: [String: Any]?
     private var lastConfigData: Data?
     private var lastConfiguredFingerprint: String?
     private var lastSentSize: CGSize?

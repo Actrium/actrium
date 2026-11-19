@@ -143,8 +143,6 @@ private struct ContentAreaView: View {
         .onAppear {
             // Inject historyVM for ACTR app history recording
             viewModel.historyVM = historyVM
-            // Check for pending group transfer
-            checkPendingGroupTransfer()
             // Handle launch URL (only once)
             handleLaunchURLIfNeeded()
             // Apply debug configuration (only once)
@@ -226,67 +224,6 @@ private struct ContentAreaView: View {
         guard let currentTab = viewModel.currentTab, currentTab.systemTabType == page,
               let tabID = notification.userInfo?["tabId"] as? UUID else { return false }
         return tabID == currentTab.id
-    }
-
-    // MARK: - Pending Group Transfer
-
-    private func checkPendingGroupTransfer() {
-        guard let groupData = UserDefaults.standard.dictionary(forKey: "pendingGroupTransfer"),
-              let tabsData = groupData["tabs"] as? [[String: Any]],
-              !tabsData.isEmpty else {
-            return
-        }
-
-        // Clear the pending transfer immediately
-        UserDefaults.standard.removeObject(forKey: "pendingGroupTransfer")
-
-        let groupName = groupData["groupName"] as? String ?? ""
-        let colorRaw = groupData["groupColor"] as? String ?? "gray"
-        let color = TabGroupColor(rawValue: colorRaw) ?? .gray
-
-        // Create tabs from serialized data
-        var newTabIds: [UUID] = []
-        for tabData in tabsData {
-            let title = tabData["title"] as? String ?? "Untitled"
-            let urlString = tabData["urlString"] as? String
-            let url = urlString.flatMap { URL(string: $0) }
-            let systemTypeRaw = tabData["systemTabType"] as? String
-            let systemTabType = systemTypeRaw.flatMap { SystemTabType(rawValue: $0) }
-
-            let tab = Tab(
-                title: title,
-                url: url,
-                appId: tabData["appId"] as? String,
-                legacyActorBridge: tabData["legacyActorBridge"] as? Bool ?? false,
-                htmlContent: tabData["htmlContent"] as? String,
-                systemTabType: systemTabType,
-                guestScript: tabData["guestScript"] as? String,
-                leftPanelScript: tabData["leftPanelScript"] as? String,
-                rightPanelScript: tabData["rightPanelScript"] as? String,
-                unifiedScript: tabData["unifiedScript"] as? String,
-                guestExtractedPath: tabData["guestExtractedPath"] as? String,
-                guestEntry: tabData["guestEntry"] as? String,
-                capabilityManifestJSON: tabData["capabilityManifestJSON"] as? String,
-                contractName: tabData["contractName"] as? String,
-                contractVersion: tabData["contractVersion"] as? Int,
-                permissions: tabData["permissions"] as? [String] ?? [],
-                rightPanelDefaultVisible: tabData["rightPanelDefaultVisible"] as? Bool ?? false,
-                backgroundColor: tabData["backgroundColor"] as? String
-            )
-
-            viewModel.insertTabFromCrossWindow(tab, at: viewModel.tabs.count, groupId: nil, select: false)
-            newTabIds.append(tab.id)
-        }
-
-        // Set current tab to first imported tab
-        if let firstId = newTabIds.first {
-            viewModel.currentTabId = firstId
-        }
-
-        // Create group from imported tabs
-        if !newTabIds.isEmpty {
-            viewModel.createGroupFromTabs(newTabIds, name: groupName, color: color)
-        }
     }
 
     // MARK: - Launch URL Handling

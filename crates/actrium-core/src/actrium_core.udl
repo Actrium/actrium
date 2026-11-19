@@ -1685,6 +1685,25 @@ dictionary RuntimeSystemRootPropsInfo {
 };
 
 [Error]
+enum GuestLocalStorageError {
+    "InvalidKey",
+    "InvalidValue",
+    "QuotaExceeded",
+    "DatabaseFailure",
+};
+
+/// A profile database. Callers supply an origin from the authorized Host document.
+interface GuestLocalStorage {
+    constructor(string path);
+    [Throws=GuestLocalStorageError]
+    string? get_item(string origin, string key);
+    [Throws=GuestLocalStorageError]
+    void set_item(string origin, string key, string value);
+    [Throws=GuestLocalStorageError]
+    void remove_item(string origin, string key);
+};
+
+[Error]
 enum CoreError {
     "InvalidJson",
     "MissingField",

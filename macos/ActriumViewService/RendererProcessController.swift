@@ -162,6 +162,20 @@ final class RendererProcessController {
     private let arguments: Arguments
     private let connection: IPCHelperConnection
     private var serviceCalls: [UUID: (RealmServiceReply) -> Void] = [:]
+    private lazy var localStorage = GuestLocalStorageClient(connection: connection)
+
+    static func callLocalStorage(
+        _ call: GuestLocalStorageCall, tabId: String,
+        reply: @escaping (GuestLocalStorageReply) -> Void
+    ) {
+        guard let controller = RendererProcessLifetime.shared.controller,
+              controller.surfaces[tabId] != nil else {
+            reply(GuestLocalStorageReply(id: call.id, error: "The local storage tab is unavailable."))
+            return
+        }
+        controller.localStorage.send(call, tabId: tabId, reply: reply)
+    }
+
     private var serviceEventSubscriptions: [UUID: (RealmServiceEventReply) -> Void] = [:]
     private var serviceEventTabs: [UUID: String] = [:]
     private var cancelledServiceEventSubscriptions: Set<UUID> = []
@@ -486,6 +500,10 @@ final class RendererProcessController {
         }
         connection.onHostEvent = { [weak self] name, json, tabId in
             guard let self else { return }
+            if name == GuestLocalStorageCall.responseEvent {
+                localStorage.receive(json: json, tabId: tabId)
+                return
+            }
             if name == GuestFileImportCall.responseEvent {
                 receiveFileImport(json, tabId: tabId)
                 return

@@ -3,6 +3,8 @@ import type { HostModulesImplementation } from 'keel/contract';
 import type {
   ActriumContract,
   ClipboardWriteTextInput,
+  LocalStorageKeyInput,
+  LocalStorageSetInput,
   FileImportPickInput,
   FileImportPickOutput,
   ServiceCallInput,
@@ -16,6 +18,7 @@ import type {
   SpeechStateHandler,
 } from './contract';
 import type { FrontCapability } from './capabilities';
+import type { LocalStorageCall } from './local-storage';
 import type { ServiceEventSource } from './service-events';
 import type { AttachmentUploadManager } from './attachment-upload';
 
@@ -45,6 +48,7 @@ export type HostModules = HostModulesImplementation<ActriumContract>;
 export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
   'host:service': new Set(['call', 'on', 'uploadAttachment']),
   'host:clipboard': new Set(['writeText']),
+  'host:local-storage': new Set(['getItem', 'setItem', 'removeItem']),
   'host:speech': new Set(['recognize', 'onInterimResult', 'stop', 'onStateChange']),
   'host:file-import': new Set(['pick']),
 };
@@ -79,10 +83,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
  * against the contract at Engine construction time, so a missing capability
  * fails closed before the Guest bundle runs.
  *
- * Capabilities without an implementation expose placeholders that throw
- * `host:<name>.<method> is not implemented` instead of returning `undefined`,
- * so a call cannot be mistaken for success. Placeholder capabilities also stay
- * out of `HOST_SUPPORTED_CAPABILITIES`.
+ * Placeholder methods throw and stay out of the supported capability sets.
  */
 export function createHostModules(options: {
   hasServiceCapability: boolean;
@@ -97,6 +98,7 @@ export function createHostModules(options: {
   /** Track the complete Guest cleanup for engine reload/tab teardown. */
   trackServiceEventSubscription?: (cleanup: () => void) => () => void;
   writeClipboardText: (text: string) => Promise<void>;
+  localStorage?: LocalStorageCall;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
   recognizeSpeech?: (
     input: SpeechRecognizeInput, onInterim?: SpeechInterimHandler, onState?: SpeechStateHandler
@@ -109,6 +111,11 @@ export function createHostModules(options: {
   attachmentUploader?: AttachmentUploadManager;
 }): HostModules {
   let requestSequence = 0;
+  const localStorage: LocalStorageCall = async (operation, input) => {
+    await options.authorizeCapability(`host:local-storage.${operation}`);
+    if (!options.localStorage) throw new Error('The host local storage module is unavailable.');
+    return options.localStorage(operation, input);
+  };
   let cancelSpeechAuthorization: (() => void) | undefined;
   const speechListeners = new Set<SpeechInterimHandler>();
   const speechStateListeners = new Set<SpeechStateHandler>();
@@ -232,6 +239,15 @@ export function createHostModules(options: {
       writeText: async (input: ClipboardWriteTextInput) => {
         await options.authorizeCapability('host:clipboard.write');
         await options.writeClipboardText(input.text);
+      },
+    },
+    'host:local-storage': {
+      getItem: (input: LocalStorageKeyInput) => localStorage('getItem', input),
+      setItem: async (input: LocalStorageSetInput) => {
+        await localStorage('setItem', input);
+      },
+      removeItem: async (input: LocalStorageKeyInput) => {
+        await localStorage('removeItem', input);
       },
     },
     'host:notifications': {
