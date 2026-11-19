@@ -19,9 +19,13 @@ final class RendererLocalStorage {
 
     private var documents: [UUID: Document] = [:]
     private var database: GuestLocalStorage?
+    private let databaseQueue = DispatchQueue(label: "com.actrium.guest-local-storage", qos: .userInitiated)
+    private let pendingLimit: Int
+    private(set) var pendingOperationCount = 0
 
-    init(database: GuestLocalStorage? = nil) {
+    init(database: GuestLocalStorage? = nil, pendingLimit: Int = 128) {
         self.database = database
+        self.pendingLimit = pendingLimit
     }
 
     func prepare(tabId: UUID, config: [String: Any]) -> [String: Any] {
@@ -64,6 +68,12 @@ final class RendererLocalStorage {
               document.methods.contains(call.operation) else {
             return GuestLocalStorageReply(id: call.id, error: "Local storage access was denied.")
         }
+        guard pendingOperationCount < pendingLimit else {
+            return GuestLocalStorageReply(id: call.id, error: "Too many pending local storage operations.")
+        }
+        pendingOperationCount += 1
+        // Count queued and running work until the database operation actually finishes.
+        defer { pendingOperationCount -= 1 }
         do {
             // Accepted database operations may finish after revocation.
             // Reject subsequent calls and prevent replies from reaching a replaced document.
@@ -84,20 +94,28 @@ final class RendererLocalStorage {
 
     private func execute(_ call: GuestLocalStorageCall, origin: String) async throws -> String? {
         let store = try open()
-        return try await Task.detached { () throws -> String? in
-            switch call.operation {
-            case .getItem:
-                return try store.getItem(origin: origin, key: call.key)
-            case .setItem:
-                guard let value = call.value else {
-                    throw GuestLocalStorageError.InvalidValue(message: "Invalid local storage arguments.")
-                }
-                try store.setItem(origin: origin, key: call.key, value: value)
-            case .removeItem:
-                try store.removeItem(origin: origin, key: call.key)
+        return try await withCheckedThrowingContinuation { continuation in
+            databaseQueue.async {
+                continuation.resume(with: Result { try Self.executeSynchronously(call, origin: origin, store: store) })
             }
-            return nil
-        }.value
+        }
+    }
+
+    private nonisolated static func executeSynchronously(
+        _ call: GuestLocalStorageCall, origin: String, store: GuestLocalStorage
+    ) throws -> String? {
+        switch call.operation {
+        case .getItem:
+            return try store.getItem(origin: origin, key: call.key)
+        case .setItem:
+            guard let value = call.value else {
+                throw GuestLocalStorageError.InvalidValue(message: "Invalid local storage arguments.")
+            }
+            try store.setItem(origin: origin, key: call.key, value: value)
+        case .removeItem:
+            try store.removeItem(origin: origin, key: call.key)
+        }
+        return nil
     }
 
     private func open() throws -> GuestLocalStorage {
