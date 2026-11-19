@@ -100,6 +100,14 @@ fn cache_path(data_dir: &Path, binary_hash: &[u8; 32]) -> PathBuf {
         .join(format!("{}{}", hex::encode(binary_hash), dynclib_suffix()))
 }
 
+fn v2_cache_path(data_dir: &Path, binary_hash: &[u8; 32]) -> PathBuf {
+    data_dir.join("dynclib-cache").join("v2").join(format!(
+        "{}{}",
+        hex::encode(binary_hash),
+        dynclib_suffix()
+    ))
+}
+
 #[tokio::test]
 async fn dynclib_cache_is_created_on_first_load() {
     let signing_key = SigningKey::generate(&mut OsRng);
@@ -150,5 +158,52 @@ async fn dynclib_cache_rebuilds_after_corruption() {
 
     let loaded = inspect_workload_package(&hyper, &package).await.unwrap();
     assert_eq!(loaded.binary_kind, BinaryKind::DynClib);
+    assert_eq!(fs::read(&cache_file).unwrap(), dylib_bytes);
+}
+
+#[tokio::test]
+async fn v2_native_package_loads_with_default_config_and_repairs_cache() {
+    use actr_pack::{ActorPackOptions, ActorPackageManifest};
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeMap;
+
+    let signing_key = SigningKey::generate(&mut OsRng);
+    let dylib_bytes = fs::read(fixture_so_path()).unwrap();
+    let mut manifest = ActorPackageManifest::from_toml(include_str!(
+        "../../actr-pack/tests/fixtures/registration-v2.toml"
+    ))
+    .unwrap();
+    manifest.workload.profile = "actr.native/1".into();
+    manifest.workload.entry = format!("bin/actor{}", dynclib_suffix());
+    manifest.files[0].path = manifest.workload.entry.clone();
+    manifest.files[0].media_type = "application/octet-stream".into();
+    let package = WorkloadPackage::new(
+        actr_pack::pack_actor_package(&ActorPackOptions {
+            payloads: BTreeMap::from([(manifest.workload.entry.clone(), dylib_bytes.clone())]),
+            manifest,
+            signing_key: signing_key.clone(),
+        })
+        .unwrap(),
+    );
+    let dir = TempDir::new().unwrap();
+    let hyper = Hyper::new(dev_config_with_key(&dir, &signing_key.verifying_key()))
+        .await
+        .unwrap();
+    let binary_hash: [u8; 32] = Sha256::digest(&dylib_bytes).into();
+    let cache_file = v2_cache_path(dir.path(), &binary_hash);
+
+    // A same-length corrupt cache must never be passed to the native loader.
+    fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+    fs::write(&cache_file, vec![0; dylib_bytes.len()]).unwrap();
+    let loaded = inspect_workload_package(&hyper, &package).await.unwrap();
+    assert_eq!(loaded.binary_kind, BinaryKind::DynClib);
+    assert!(matches!(
+        loaded.manifest(),
+        actr_pack::RuntimePackageManifest::V2(_)
+    ));
+    assert_eq!(fs::read(&cache_file).unwrap(), dylib_bytes);
+
+    // A subsequent load may reuse the cache only while its bytes still match.
+    inspect_workload_package(&hyper, &package).await.unwrap();
     assert_eq!(fs::read(&cache_file).unwrap(), dylib_bytes);
 }

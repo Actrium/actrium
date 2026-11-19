@@ -51,6 +51,36 @@ async fn cache_proto_adds_dot_proto_extension_when_missing() {
 }
 
 #[tokio::test]
+async fn cache_proto_rejects_colliding_filenames_without_replacing_the_snapshot() {
+    let dir = TempDir::new().unwrap();
+    let mgr = DefaultCacheManager::with_project_root(dir.path().to_path_buf());
+    let existing = ProtoFile {
+        name: "echo.proto".into(),
+        path: PathBuf::new(),
+        content: "// existing".into(),
+        services: vec![],
+    };
+    mgr.cache_proto("echo", std::slice::from_ref(&existing))
+        .await
+        .unwrap();
+
+    let first = ProtoFile {
+        content: "// replacement".into(),
+        ..existing
+    };
+    let second = ProtoFile {
+        name: "echo".into(),
+        ..first.clone()
+    };
+    let error = mgr.cache_proto("echo", &[first, second]).await.unwrap_err();
+    assert!(error.to_string().contains("echo.proto"), "{error}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("protos/remote/echo/echo.proto")).unwrap(),
+        "// existing"
+    );
+}
+
+#[tokio::test]
 async fn cache_proto_prunes_stale_files_for_the_same_alias() {
     let tmp = tempfile::tempdir().unwrap();
     let mgr = DefaultCacheManager::with_project_root(tmp.path().to_path_buf());

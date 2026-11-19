@@ -28,7 +28,13 @@ extension NSWindow {
     /// real implementation runs, surfaces report text-input focus changes to
     /// the Host so it can route IME composition there.
     @objc func actrium_makeFirstResponder(_ responder: NSResponder?) -> Bool {
-        let accepted = actrium_makeFirstResponder(responder)
+        // JS focus() commands target RN's wrapper views (RCTWrappedTextView),
+        // which are plain NSViews forwarding responder calls to an inner
+        // RCTUITextView. AppKit only draws the caret and runs key handling
+        // when the text view itself is first responder, so redirect the
+        // focus to the inner text view — the same target click-to-focus uses.
+        let target = responder.map { actrium_innerTextViewTarget($0) } ?? responder
+        let accepted = actrium_makeFirstResponder(target)
         NotificationCenter.default.post(
             name: ActriumFirstResponderDidChangeNotification,
             object: self
@@ -42,6 +48,26 @@ extension NSWindow {
         guard let original, let swizzled else { return }
         method_exchangeImplementations(original, swizzled)
     }
+}
+
+/// Resolves the responder a `makeFirstResponder` call should really target.
+/// RN macOS multiline inputs wrap their `RCTUITextView` in a plain NSView
+/// (`RCTWrappedTextView`); when that wrapper is passed in, return the inner
+/// editable text view instead so AppKit treats it as the real first responder.
+/// Only the wrapper itself is unwrapped — an arbitrary container (e.g. the
+/// surface root during an explicit blur) must keep its own focus behavior.
+private func actrium_innerTextViewTarget(_ responder: NSResponder) -> NSResponder {
+    guard let wrapperClass = NSClassFromString("RCTWrappedTextView"),
+          let view = responder as? NSView,
+          view.isKind(of: wrapperClass)
+    else { return responder }
+    var queue = [view]
+    while !queue.isEmpty {
+        let next = queue.removeFirst()
+        if let textView = next as? NSTextView, textView.isEditable { return textView }
+        queue.append(contentsOf: next.subviews)
+    }
+    return responder
 }
 
 /// Entry-point and lifecycle owner for a manually spawned Renderer Helper.
@@ -816,6 +842,7 @@ final class RendererSurfaceMountObserver: NSObject {
 /// One Tab root and its remotely hosted CoreAnimation context.
 @MainActor
 private final class RendererTabSurface {
+
     let tabId: String
     let entry: TabViewControllerEntry
     let container: ResizableContainerView
@@ -827,6 +854,23 @@ private final class RendererTabSurface {
     private var accessibilityPublishWork: DispatchWorkItem?
     private var pressedRecognizers: [UInt32: [NSGestureRecognizer]] = [:]
     private var textInputPresses: Set<UInt32> = []
+    /// Character index where the current text drag started. AppKit's
+    /// mouse-tracking selection cannot run here (mouse events arrive
+    /// asynchronously over IPC), so drag selection is driven manually.
+    private var dragSelectionAnchor: Int?
+    /// The selection that created `dragSelectionAnchor`. An anchor is only
+    /// reused while this still equals the current selection; keyboard-built
+    /// selections leave a stale anchor whose offset may coincidentally fall
+    /// inside the new range but does not describe it.
+    private var dragSelectionAnchorRange: NSRange?
+    /// The control the active drag belongs to. A programmatic focus change
+    /// mid-drag (e.g. an RN callback) must not apply this drag's anchor to
+    /// a different input.
+    private var dragOwner: AnyObject?
+    /// The control the saved anchor/range pair belongs to. A range match in
+    /// another control (e.g. the same offsets re-selected with the keyboard)
+    /// must not reuse this anchor.
+    private weak var anchorOwner: AnyObject?
     /// Last text-input focus state reported to the Host. The Host mirrors
     /// IME composition for whichever surface owns the focused text input.
     private var lastReportedTextFocus = false
@@ -854,11 +898,33 @@ private final class RendererTabSurface {
     private let undoHistories = NSMapTable<AnyObject, UndoHistoryBox>.weakToStrongObjects()
 
     private func currentControl() -> AnyObject? {
-        guard let editor = window.firstResponder as? NSTextView else { return nil }
+        guard let editor = resolvedTextView(window.firstResponder) else { return nil }
         if editor.isFieldEditor {
             return editor.delegate.map { $0 as AnyObject }
         }
         return editor
+    }
+
+    /// Unwraps RN macOS's `RCTWrappedTextView` container: when JS issues a
+    /// `focus()` command AppKit makes the wrapper (a plain NSView) first
+    /// responder and forwards responder calls to the inner `RCTUITextView`.
+    /// All text handling (edits, undo, key forwarding, focus reporting) must
+    /// target that inner text view, so resolve it through the view hierarchy.
+    /// Only the wrapper is unwrapped; the surface container must keep its
+    /// plain-responder status so an unfocused surface reads as unfocused.
+    private func resolvedTextView(_ responder: NSResponder?) -> NSTextView? {
+        if let textView = responder as? NSTextView { return textView }
+        guard let wrapperClass = NSClassFromString("RCTWrappedTextView"),
+              let view = responder as? NSView,
+              view.isKind(of: wrapperClass)
+        else { return nil }
+        var queue = [view]
+        while !queue.isEmpty {
+            let next = queue.removeFirst()
+            if let textView = next as? NSTextView { return textView }
+            queue.append(contentsOf: next.subviews)
+        }
+        return nil
     }
 
     private func withHistory(_ body: (UndoHistoryBox) -> Void) {
@@ -1059,8 +1125,59 @@ private final class RendererTabSurface {
                 let recognizers = ancestors.flatMap(\.gestureRecognizers)
                 forwardMouse(event, to: recognizers)
                 pressedRecognizers[input.button] = recognizers
+            } else if input.type == .mouseMove, input.button == 0,
+                      textInputPresses.contains(0),
+                      let anchor = dragSelectionAnchor,
+                      let editor = resolvedTextView(window.firstResponder) {
+                // Drive drag selection manually (see dragSelectionAnchor).
+                // The drag belongs to the control it started in; a focus
+                // change mid-drag ends it instead of selecting in the new
+                // control with a foreign anchor.
+                guard currentControl() === dragOwner else {
+                    textInputPresses.remove(input.button)
+                    dragOwner = nil
+                    dragSelectionAnchor = nil
+                    dragSelectionAnchorRange = nil
+                    anchorOwner = nil
+                    return
+                }
+                // A controlled input may replace its value while the mouse
+                // is down (e.g. RN re-renders with a shorter string); an
+                // anchor past the new end must end the drag instead of
+                // feeding an out-of-bounds range to AppKit.
+                let textLength = (editor.string as NSString).length
+                guard anchor <= textLength else {
+                    textInputPresses.remove(input.button)
+                    dragOwner = nil
+                    dragSelectionAnchor = nil
+                    dragSelectionAnchorRange = nil
+                    anchorOwner = nil
+                    return
+                }
+                let point = editor.convert(location, from: nil)
+                let index = editor.characterIndexForInsertion(at: point)
+                if index != NSNotFound {
+                    let range = NSRange(
+                        location: min(anchor, index),
+                        length: abs(index - anchor)
+                    )
+                    // Keep the stored selection in sync with what the drag
+                    // applies, so a later Shift+click still recognises the
+                    // anchor as the creator of the current selection.
+                    dragSelectionAnchorRange = range
+                    if editor.selectedRange() != range {
+                        editor.setSelectedRange(range)
+                        editor.scrollRangeToVisible(range)
+                        publishCaret()
+                        commit()
+                    }
+                }
+                return
             } else if input.type == .mouseUp {
-                if textInputPresses.remove(input.button) != nil { return }
+                if textInputPresses.remove(input.button) != nil {
+                    dragOwner = nil
+                    return
+                }
                 if let recognizers = pressedRecognizers.removeValue(forKey: input.button) {
                     forwardMouse(event, to: recognizers)
                 }
@@ -1100,7 +1217,7 @@ private final class RendererTabSurface {
                 && (input.keyCode == 51 || input.keyCode == 117
                     || input.keyCode == 36 || input.keyCode == 48)
             if isDelete { beginUndoableEdit() }
-            if let textView = window.firstResponder as? NSTextView {
+            if let textView = resolvedTextView(window.firstResponder) {
                 if input.type == .keyDown { textView.keyDown(with: event) }
                 else { textView.keyUp(with: event) }
             } else {
@@ -1129,7 +1246,8 @@ private final class RendererTabSurface {
     /// text-input focus state and reports changes through `report`.
     func reportTextInputFocusIfChanged(_ report: (Bool) throws -> Void) {
         let responder = window.firstResponder
-        let focused = (responder as? NSTextView)?.isEditable == true
+        let textView = resolvedTextView(responder)
+        let focused = textView?.isEditable == true
             || (responder as? NSTextField)?.isEditable == true
         guard focused != lastReportedTextFocus else { return }
         lastReportedTextFocus = focused
@@ -1141,14 +1259,14 @@ private final class RendererTabSurface {
     /// reports even when the focus state itself did not change.
     func resetTextInputFocusDedupe() {
         let responder = window.firstResponder
-        let focused = (responder as? NSTextView)?.isEditable == true
+        let focused = resolvedTextView(responder)?.isEditable == true
             || (responder as? NSTextField)?.isEditable == true
         lastReportedTextFocus = !focused
     }
 
     /// Applies Host-mirrored IME marked text to the focused text input.
     func applyMarkedText(_ text: String, selectedRange: NSRange) {
-        guard let client = window.firstResponder as? NSTextInputClient else { return }
+        guard let client = resolvedTextView(window.firstResponder) as? NSTextInputClient else { return }
         client.setMarkedText(
             text,
             selectedRange: selectedRange,
@@ -1160,7 +1278,7 @@ private final class RendererTabSurface {
 
     /// Applies Host-mirrored committed IME text to the focused text input.
     func applyInsertText(_ text: String) {
-        guard let client = window.firstResponder as? NSTextInputClient else { return }
+        guard let client = resolvedTextView(window.firstResponder) as? NSTextInputClient else { return }
         beginUndoableEdit()
         client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         endUndoableEdit()
@@ -1172,7 +1290,7 @@ private final class RendererTabSurface {
     /// text plus the caret, both in unmarked-string coordinates. Marked text
     /// lives in the text storage but must not leak into undo snapshots.
     private func currentEditSnapshot() -> EditSnapshot? {
-        guard let editor = window.firstResponder as? NSTextView else { return nil }
+        guard let editor = resolvedTextView(window.firstResponder) else { return nil }
         let marked = editor.markedRange()
         let string = (marked.location != NSNotFound && marked.length > 0)
             ? (editor.string as NSString).replacingCharacters(in: marked, with: "")
@@ -1197,7 +1315,7 @@ private final class RendererTabSurface {
     }
 
     private func restoreSnapshot(_ snapshot: String, caret: Int) {
-        guard let editor = window.firstResponder as? NSTextView, editor.isEditable else { return }
+        guard let editor = resolvedTextView(window.firstResponder), editor.isEditable else { return }
         let current = editor.string
         guard current != snapshot else {
             editor.setSelectedRange(NSRange(location: caret, length: 0))
@@ -1213,7 +1331,7 @@ private final class RendererTabSurface {
     }
 
     private func undoTextEdit() {
-        guard window.firstResponder is NSTextView else { return }
+        guard resolvedTextView(window.firstResponder) != nil else { return }
         withHistory { box in
             guard box.undo.count > 1 else { return }
             let current = box.undo.removeLast()
@@ -1229,7 +1347,7 @@ private final class RendererTabSurface {
     }
 
     private func redoTextEdit() {
-        guard window.firstResponder is NSTextView else { return }
+        guard resolvedTextView(window.firstResponder) != nil else { return }
         withHistory { box in
             guard let snapshot = box.redo.popLast() else { return }
             if let current = currentEditSnapshot() {
@@ -1267,7 +1385,8 @@ private final class RendererTabSurface {
     /// The Host asked this text input to give up focus (its own IME client
     /// resigned first responder, e.g. the user focused the address bar).
     func resignTextInputFocus() {
-        if window.firstResponder is NSTextView || window.firstResponder is NSTextField {
+        if window.firstResponder is NSTextView || resolvedTextView(window.firstResponder) != nil
+            || window.firstResponder is NSTextField {
             window.makeFirstResponder(container)
         }
         focusedEditor = nil
@@ -1281,12 +1400,57 @@ private final class RendererTabSurface {
         let focused = window.makeFirstResponder(view)
         let editor = (view as? NSTextField)?.currentEditor() as? NSTextView ?? view as? NSTextView
         focusedEditor = focused ? editor : nil
-        guard focused, let editor, !modifiers.contains(.shift) else { return }
+        guard focused, let editor else { return }
+        dragOwner = currentControl()
         let point = editor.convert(location, from: nil)
         let index = editor.characterIndexForInsertion(at: point)
         guard index != NSNotFound, index <= (editor.string as NSString).length else { return }
-        editor.setSelectedRange(NSRange(location: index, length: 0))
-        publishCaret()
+        if modifiers.contains(.shift) {
+            // Shift+click/drag extends the selection; the mouse-down and
+            // mouse-up paths consume the event, so AppKit's own extension
+            // never runs. The base is the existing selection's anchor when a
+            // selection is live, and the caret otherwise — a stored anchor
+            // is only trusted while it still belongs to the current
+            // selection (the caret may have moved since, via keyboard or
+            // undo). The resolved base is stored back so the whole gesture
+            // (mouse-down, drag, and repeated Shift+clicks) uses one anchor.
+            let current = editor.selectedRange()
+            let base: Int
+            if current.length > 0,
+               let anchor = dragSelectionAnchor,
+               dragSelectionAnchorRange == current,
+               anchorOwner === currentControl() {
+                // The stored anchor still describes the current selection
+                // in this control.
+                base = anchor
+            } else if index >= current.upperBound {
+                // Untracked selection, click on the right: extend from the
+                // opposite (left) edge so the existing range stays selected.
+                base = current.location
+            } else if index <= current.location {
+                // Click on the left: extend from the right edge.
+                base = current.upperBound
+            } else {
+                // Click inside: keep the farther edge so neither side is
+                // dropped arbitrarily.
+                base = (index - current.location) > (current.upperBound - index)
+                    ? current.location
+                    : current.upperBound
+            }
+            dragSelectionAnchor = base
+            let range = NSRange(location: min(base, index), length: abs(index - base))
+            dragSelectionAnchorRange = range
+            anchorOwner = currentControl()
+            editor.setSelectedRange(range)
+            publishCaret()
+            commit()
+        } else {
+            dragSelectionAnchor = index
+            dragSelectionAnchorRange = NSRange(location: index, length: 0)
+            anchorOwner = currentControl()
+            editor.setSelectedRange(NSRange(location: index, length: 0))
+            publishCaret()
+        }
     }
 
     /// Publishes the caret rect to the Host so native IME UI (candidate
@@ -1303,8 +1467,8 @@ private final class RendererTabSurface {
         // responder: autoFocus / Tab / JS .focus() never pass through
         // `focusTextInput`, leaving `focusedEditor` nil even though a text
         // view owns first responder.
-        let editor = focusedEditor ?? (window.firstResponder as? NSTextView)
-        guard let editor, window.firstResponder === editor, editor.isEditable,
+        let editor = focusedEditor ?? resolvedTextView(window.firstResponder)
+        guard let editor, resolvedTextView(window.firstResponder) === editor, editor.isEditable,
               editor.selectedRange().length == 0 else {
             return nil
         }
