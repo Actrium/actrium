@@ -33,7 +33,16 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         $actriumMode.eraseToAnyPublisher()
     }
     @Published var tabs: [Tab] = []
-    @Published var currentTabId: UUID?
+    @Published var currentTabId: UUID? {
+        didSet {
+            guard currentTabId != oldValue else { return }
+            if let oldValue, transferredRealmLinks[oldValue] != nil {
+                realmLoads[oldValue] = nil
+                if pendingInviteRedeem?.tabId == oldValue { pendingInviteRedeem = nil }
+            }
+            openSelectedTransferredRealm()
+        }
+    }
     // Default that all tabs are left-side panel visible; overrides are recorded only when user switching
     @Published private var leftPanelVisibility: [UUID: Bool] = [:]
 
@@ -80,7 +89,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     @Published var actrUriNotice: ActrUriNotice?
 
     /// actr:// link awaiting invite-code redemption (temporary-flow sheet presented).
-    @Published var pendingInviteRedeem: PendingInviteRedeem?
+    @Published var pendingInviteRedeem: PendingInviteRedeem? {
+        didSet {
+            guard let dismissed = oldValue, pendingInviteRedeem == nil else { return }
+            if currentTabId == dismissed.tabId { transferredRealmLinks[dismissed.tabId] = nil }
+            openSelectedTransferredRealm()
+        }
+    }
 
     private let realmPreferences: UserDefaults
     private var realmTrustObserver: AnyCancellable?
@@ -116,6 +131,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private var localFrontApprovals: [UUID: LocalFrontApproval] = [:]
     private var realmLoads: [UUID: UUID] = [:]
+    // Transferred Realm tabs wait for selection before discovery can request consent.
+    private var transferredRealmLinks: [UUID: ActrUriInfo] = [:]
 
     // MARK: - Instance Creation (15-B B6)
     // Confirm → serviceCreate → URI replace (replace, not push; history keeps only the
@@ -302,7 +319,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private func releaseTabRuntime(_ id: UUID, preserveRealmLoad: Bool = false) {
         localFrontApprovals[id] = nil
-        if !preserveRealmLoad { realmLoads[id] = nil }
+        if !preserveRealmLoad {
+            realmLoads[id] = nil
+            transferredRealmLinks[id] = nil
+            if pendingInviteRedeem?.tabId == id { pendingInviteRedeem = nil }
+        }
         TabSnapshotCacheManager.shared.invalidate(tabId: id)
         WebViewHolderManager.shared.remove(tabId: id)
         ViewBridgeHostViewManager.shared.remove(tabId: id)
@@ -473,6 +494,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         if newTab.url?.scheme?.lowercased() == "actr", transferredLink?.isLocal != true {
             Self.clearRealmContent(&newTab)
         }
+        if let transferredLink, !transferredLink.isLocal {
+            transferredRealmLinks[newTab.id] = transferredLink
+        }
 
         let targetIndex = min(max(0, index), tabs.count)
         tabs.insert(newTab, at: targetIndex)
@@ -481,21 +505,26 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
         logger.notice(" Insert across Window Tab: \(newTab.title) To Location \(targetIndex), Group: \(groupId?.uuidString ?? "None")")
         persistBrowserPageSession()
-        if let transferredLink, !transferredLink.isLocal, let address = newTab.url {
-            handleResolvedRealmLink(transferredLink, input: address.absoluteString, tabIndex: targetIndex)
-        }
+    }
+
+    private func openSelectedTransferredRealm() {
+        guard let id = currentTabId, let link = transferredRealmLinks[id],
+              realmLoads[id] == nil, pendingInviteRedeem == nil,
+              let index = tabs.firstIndex(where: { $0.id == id }),
+              let address = tabs[index].url else { return }
+        handleResolvedRealmLink(link, input: address.absoluteString, tabIndex: index)
     }
 
     /// Remove a tab by ID (used for cross-window drag source cleanup)
     func removeTabById(_ tabId: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
-        localFrontApprovals[tabId] = nil
-        realmLoads[tabId] = nil
+        releaseTabRuntime(tabId)
         let tab = tabs[index]
         let oldGroupId = tab.groupId
 
         tabs.remove(at: index)
         tabSlotPositions.removeValue(forKey: tabId)
+        RendererLifecycleManager.shared.tabDidClose(tabId)
 
         // Update current tab if needed
         if currentTabId == tabId {
@@ -851,6 +880,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         if tabs[index].url != url {
             localFrontApprovals[tabId] = nil
             realmLoads[tabId] = nil
+            transferredRealmLinks[tabId] = nil
         }
         tabs[index].url = url
         logger.notice("🔗 [updateTabURL] Tab \(tabId) URL updated from \(oldURL) to \(url.absoluteString)")
@@ -897,6 +927,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         localFrontApprovals[currentTabId] = nil
         realmLoads[currentTabId] = nil
+        transferredRealmLinks[currentTabId] = nil
 
         // 0. actr:// Realm links — the core parser owns the decision
         // (case-insensitive scheme, format rules, local-Realm ownership).
@@ -1107,6 +1138,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     func invalidateRealmLoadsForWindowClose() {
         realmLoads.removeAll()
+        transferredRealmLinks.removeAll()
         pendingInviteRedeem = nil
     }
 
@@ -1544,8 +1576,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 }
             }
             defer {
-                if realmLoads[replacingTabId] == load { realmLoads[replacingTabId] = nil }
+                if realmLoads[replacingTabId] == load {
+                    realmLoads[replacingTabId] = nil
+                    if pendingInviteRedeem?.tabId != replacingTabId {
+                        transferredRealmLinks[replacingTabId] = nil
+                    }
+                }
             }
+            guard currentTabIndex() != nil else { return }
             do {
                 let data = try await fetchRealmDocument(
                     url,

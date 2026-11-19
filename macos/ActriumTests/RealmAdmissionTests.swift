@@ -1,3 +1,4 @@
+import ActrBindings
 import ActriumCore
 import CryptoKit
 import Foundation
@@ -264,6 +265,103 @@ final class RealmAdmissionTests: XCTestCase {
     }
 
     @MainActor
+    func testCrossWindowMoveStopsTheSourceRealmBinding() async throws {
+        let preferences = try makePreferences()
+        let source = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
+        let destination = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
+        let sourceId = try XCTUnwrap(source.currentTabId)
+        let link = try XCTUnwrap(URL(string: "actr://realm.example/echo"))
+        source.tabs[0].url = link
+        source.tabs[0].guestScript = "installed Front"
+        let document = try profile(membership: "invite-only")
+        let accepted = try accept(document, preferences: preferences)
+        let binding = try RealmServiceBinding(
+            profile: accepted.info,
+            verifiedProfileBody: document.0,
+            front: Data(),
+            serviceType: ActrBindings.ActrType(publisher: "publisher.example", name: "echo", version: "1.0.0"),
+            trustedFrontKey: Data(),
+            capabilitiesJSON: #"{"hostModules":{"service":{"rpc":["uploadAttachment"]}}}"#,
+            permissions: ["service.attachmentUpload"]
+        )
+        RealmServiceBindings.shared.attach(binding, to: sourceId)
+        defer { RealmServiceBindings.shared.remove(sourceId) }
+        let sourceWasBound = await RealmServiceBindings.shared.attachmentUploadAvailable(sourceId)
+        XCTAssertTrue(sourceWasBound)
+
+        let transfer = Tab(title: "Echo", url: link, guestScript: source.tabs[0].guestScript)
+        destination.insertTabFromCrossWindow(transfer, at: destination.tabs.count, groupId: nil, select: false)
+        source.removeTabById(sourceId)
+        XCTAssertFalse(source.tabs.contains { $0.id == sourceId })
+        XCTAssertNil(destination.tabs.last?.guestScript)
+        let sourceStillBound = await RealmServiceBindings.shared.attachmentUploadAvailable(sourceId)
+        XCTAssertFalse(sourceStillBound)
+
+        let deadline = ContinuousClock.now + .seconds(2)
+        while ContinuousClock.now < deadline {
+            if !(await binding.attachmentUploadAvailable) { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("The source Realm binding was not stopped")
+    }
+
+    @MainActor
+    func testTransferredRealmGroupOpensEachTabOnSelection() async throws {
+        let preferences = try makePreferences()
+        let signer = Curve25519.Signing.PrivateKey()
+        let descriptor = try authorityDescriptor(
+            sequence: 1, signer: signer, signerId: "realm-key", keys: ["realm-key": signer]
+        )
+        let secondProfile = try profile(membership: "invite-only", signer: signer, realm: "echo-second@realm.example")
+        let profiles = [
+            "/realm/echo": try profile(membership: "invite-only", signer: signer).0,
+            "/realm/echo-second": secondProfile.0
+        ]
+        var profileRequests: [String] = []
+        let destination = BrowserViewModel(
+            realmPreferences: preferences,
+            fetchRealmDocument: { url, _ in
+                if url.path == "/.well-known/actr" { return Data(descriptor.utf8) }
+                profileRequests.append(url.path)
+                return try XCTUnwrap(profiles[url.path])
+            },
+            saveBrowserSession: { _, _ in }
+        )
+        let first = Tab(title: "Echo", url: URL(string: "actr://realm.example/echo"), guestScript: "copied Front")
+        let second = Tab(
+            title: "Echo Second", url: URL(string: "actr://realm.example/echo-second"), guestScript: "copied Front"
+        )
+        for tab in [first, second] {
+            destination.insertTabFromCrossWindow(tab, at: destination.tabs.count, groupId: nil, select: false)
+        }
+        destination.createGroupFromTabs([first.id, second.id], name: "Echo")
+        XCTAssertTrue(destination.tabs.suffix(2).allSatisfy { $0.guestScript == nil })
+
+        @MainActor func waitForInvite() async throws {
+            let deadline = ContinuousClock.now + .seconds(2)
+            while destination.pendingInviteRedeem == nil && ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        destination.currentTabId = first.id
+        try await waitForInvite()
+        XCTAssertEqual(destination.pendingInviteRedeem?.tabId, first.id)
+        XCTAssertEqual(profileRequests, ["/realm/echo"])
+
+        destination.switchToTab(id: second.id)
+        try await waitForInvite()
+        XCTAssertEqual(destination.pendingInviteRedeem?.tabId, second.id)
+        XCTAssertEqual(profileRequests, ["/realm/echo", "/realm/echo-second"])
+        destination.cancelInviteRedeem()
+
+        destination.switchToTab(id: first.id)
+        try await waitForInvite()
+        XCTAssertEqual(destination.pendingInviteRedeem?.tabId, first.id)
+        XCTAssertEqual(profileRequests, ["/realm/echo", "/realm/echo-second", "/realm/echo"])
+        destination.cancelInviteRedeem()
+    }
+
+    @MainActor
     func testOnlyAcceptedRetirementClearsRunningFronts() async throws {
         let preferences = try makePreferences()
         let signer = Curve25519.Signing.PrivateKey()
@@ -461,7 +559,7 @@ final class RealmAdmissionTests: XCTestCase {
     private func profile(
         membership: String, sequence: Int = 1, status: String = "active",
         signer: Curve25519.Signing.PrivateKey = Curve25519.Signing.PrivateKey(),
-        keyId: String = "realm-key"
+        keyId: String = "realm-key", realm: String? = nil
     ) throws -> (Data, String) {
         let publicKey = signer.publicKey.rawRepresentation.base64EncodedString()
         let keys = try sign([
@@ -471,7 +569,7 @@ final class RealmAdmissionTests: XCTestCase {
         let body = try sign([
             "schema": "actr.realm/v1",
             "sequence": sequence,
-            "realm": ["name": realmName, "display_name": "Echo", "status": status],
+            "realm": ["name": realm ?? realmName, "display_name": "Echo", "status": status],
             "primary_package": "service",
             "front_package": "front",
             "packages": [
