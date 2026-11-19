@@ -60,6 +60,10 @@ final class RealmServiceBindings {
     static let shared = RealmServiceBindings()
     private var bindings: [UUID: RealmServiceBinding] = [:]
 
+    func binding(for tabId: UUID) -> RealmServiceBinding? {
+        bindings[tabId]
+    }
+
     func attach(_ binding: RealmServiceBinding, to tabId: UUID) {
         remove(tabId)
         bindings[tabId] = binding
@@ -163,6 +167,30 @@ actor RealmServiceBinding {
         let provider: Provider
     }
 
+    struct Connection: Equatable, Sendable {
+        let realm: String
+        let providerId: String
+        let issuerURL: String
+        let signalingURL: String
+        let stunURLs: [String]
+        let turnURLs: [String]
+
+        init(profile: RealmProfileInfo, verifiedProfileBody: Data) throws {
+            let provider = try JSONDecoder().decode(ProfileDocument.self, from: verifiedProfileBody).provider
+            guard let signaling = provider.signaling.sorted(by: { $0.priority < $1.priority }).first,
+                  URL(string: signaling.url)?.scheme?.lowercased() == "wss" else {
+                throw RealmServiceError(message: "The verified Realm profile has invalid signaling information.")
+            }
+            let iceURLs = provider.ice.flatMap(\.urls)
+            realm = profile.realmName
+            providerId = profile.providerId
+            issuerURL = profile.issuerUrl
+            signalingURL = signaling.url
+            stunURLs = iceURLs.filter { $0.hasPrefix("stun:") || $0.hasPrefix("stuns:") }
+            turnURLs = iceURLs.filter { $0.hasPrefix("turn:") || $0.hasPrefix("turns:") }
+        }
+    }
+
     private struct Capabilities: Decodable {
         struct Service: Decodable { let rpc: [String]? }
         let hostModules: [String: Service]
@@ -170,8 +198,9 @@ actor RealmServiceBinding {
 
     private let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("actrium-front-" + UUID().uuidString, isDirectory: true)
-    private let profile: RealmProfileInfo
+    nonisolated let connection: Connection
     private let front: Data
+    private let trustedFrontKey: Data
     private let configuration: String
     private let serviceType: ActrBindings.ActrType
     /// Business routes; internal for the attachment transport wiring tests.
@@ -197,49 +226,59 @@ actor RealmServiceBinding {
         capabilitiesJSON: String,
         permissions: [String]
     ) throws {
-        let document = try JSONDecoder().decode(ProfileDocument.self, from: verifiedProfileBody)
-        let provider = document.provider
-        guard let signaling = provider.signaling.sorted(by: { $0.priority < $1.priority }).first,
-              URL(string: signaling.url)?.scheme?.lowercased() == "wss" else {
-            throw RealmServiceError(message: "The verified Realm profile has invalid signaling information.")
-        }
+        let connection = try Connection(profile: profile, verifiedProfileBody: verifiedProfileBody)
         let capabilities = try JSONDecoder().decode(Capabilities.self, from: Data(capabilitiesJSON.utf8))
         let declaredRoutes = Set(capabilities.hostModules["service"]?.rpc ?? capabilities.hostModules["host:service"]?.rpc ?? [])
-        self.attachmentUploadAllowed = RealmServiceAttachmentUploadPolicy.isPermitted(
-            permissions: permissions,
-            declaredRoutes: declaredRoutes
+        try self.init(
+            connection: connection,
+            front: front,
+            serviceType: serviceType,
+            trustedFrontKey: trustedFrontKey,
+            routes: RealmServiceAttachmentUploadPolicy.businessRoutes(declaredRoutes),
+            attachmentUploadAllowed: RealmServiceAttachmentUploadPolicy.isPermitted(
+                permissions: permissions, declaredRoutes: declaredRoutes
+            )
         )
-        // The attachment transport is verified separately and must never be
-        // reachable through the generic RealmService.call business routes.
-        self.routes = RealmServiceAttachmentUploadPolicy.businessRoutes(declaredRoutes)
-        self.serviceType = serviceType
-        self.profile = profile
+    }
+
+    private init(
+        connection: Connection,
+        front: Data,
+        serviceType: ActrBindings.ActrType,
+        trustedFrontKey: Data,
+        routes: Set<String>,
+        attachmentUploadAllowed: Bool
+    ) throws {
+        self.connection = connection
         self.front = front
+        self.serviceType = serviceType
+        self.trustedFrontKey = trustedFrontKey
+        self.routes = routes
+        self.attachmentUploadAllowed = attachmentUploadAllowed
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
         func literal<T: Encodable>(_ value: T) throws -> String {
             try String(decoding: encoder.encode(value), as: UTF8.self)
         }
-        let iceURLs = provider.ice.flatMap(\.urls)
         self.configuration = try """
         edition = 1
         [signaling]
-        url = \(literal(signaling.url))
+        url = \(literal(connection.signalingURL))
         [issuer_endpoint]
-        url = \(literal(profile.issuerUrl))
+        url = \(literal(connection.issuerURL))
         [deployment]
-        realm = \(literal(profile.realmName))
+        realm = \(literal(connection.realm))
         [hyper]
         data_dir = \(literal(directory.path))
         [discovery]
         visible = false
         [webrtc]
-        stun_urls = \(literal(iceURLs.filter { $0.hasPrefix("stun:") || $0.hasPrefix("stuns:") }))
-        turn_urls = \(literal(iceURLs.filter { $0.hasPrefix("turn:") || $0.hasPrefix("turns:") }))
+        stun_urls = \(literal(connection.stunURLs))
+        turn_urls = \(literal(connection.turnURLs))
         [[acl.rules]]
         permission = "allow"
-        type = \(literal(profile.serviceType))
+        type = \(literal("\(serviceType.publisher)/\(serviceType.name)@\(serviceType.version)"))
         realm = "self"
         [[trust]]
         kind = "static"
@@ -247,13 +286,19 @@ actor RealmServiceBinding {
         """
     }
 
+    func replacingConnection(_ connection: Connection) throws -> RealmServiceBinding {
+        guard !stopped else { throw CancellationError() }
+        return try RealmServiceBinding(
+            connection: connection, front: front, serviceType: serviceType, trustedFrontKey: trustedFrontKey,
+            routes: routes, attachmentUploadAllowed: attachmentUploadAllowed
+        )
+    }
+
     /// Prepare a replacement binding without sending a business RPC.
     func prepareForSwitch() async throws {
         try Task.checkCancellation()
         let reference = try await connect()
-        guard try await reference.discover(targetType: serviceType, count: 1).first != nil else {
-            throw RealmServiceError(message: "The Realm's selected Service is not online.")
-        }
+        _ = try await reference.discoverService(targetType: serviceType)
         guard !stopped else { throw CancellationError() }
         try Task.checkCancellation()
     }
@@ -267,9 +312,7 @@ actor RealmServiceBinding {
         guard !stopped else { throw CancellationError() }
         // A Realm tab targets the selected Service type. A restarted Service
         // may register with a different ActorId while the Front stays running.
-        guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
-            throw RealmServiceError(message: "The Realm's selected Service is not online.")
-        }
+        let target = try await reference.discoverService(targetType: serviceType)
         guard !stopped else { throw CancellationError() }
         return try await reference.callPeer(
             target: target,
@@ -310,10 +353,7 @@ actor RealmServiceBinding {
                       await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
                     throw RealmServiceAttachmentUploadError.cancelled
                 }
-                guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
-                    throw RealmServiceAttachmentUploadError.unavailable(
-                        "The Realm's selected Service is not online.")
-                }
+                let target = try await reference.discoverService(targetType: serviceType)
                 guard !stopped,
                       await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
                     throw RealmServiceAttachmentUploadError.cancelled
@@ -564,7 +604,7 @@ actor RealmServiceBinding {
         let id = UUID()
         let task = Task {
             let membership = try RealmIdentityStore().membership(
-                realm: profile.realmName, providerId: profile.providerId, issuer: profile.issuerUrl
+                realm: connection.realm, providerId: connection.providerId, issuer: connection.issuerURL
             )
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             let configURL = directory.appendingPathComponent("actr.toml")

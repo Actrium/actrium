@@ -249,8 +249,8 @@ impl AdminApiService {
         })
     }
 
-    /// Publish a selection after the caller has verified its archives and RPC contract.
-    pub async fn publish_verified_packages(
+    /// Verify and publish a guarded package selection.
+    pub async fn publish_packages(
         &self,
         realm: &str,
         selection: RealmPackageSelection,

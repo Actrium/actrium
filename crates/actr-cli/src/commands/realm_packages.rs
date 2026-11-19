@@ -54,6 +54,9 @@ pub struct CheckArgs {
     /// Directory for verified archives and Publisher trust pins
     #[arg(long, value_name = "DIR")]
     pub output: PathBuf,
+    /// Durable directory for Publisher trust pins when the archive output is temporary.
+    #[arg(long, value_name = "DIR")]
+    pub trust_dir: Option<PathBuf>,
     /// Verify the current Realm Profile and probe the selected Service type.
     #[arg(long, value_name = "REALM", requires = "probe_config")]
     pub probe_realm: Option<String>,
@@ -321,17 +324,19 @@ where
         "probe options require --probe-realm"
     );
     std::fs::create_dir_all(&args.output)?;
+    let trust_dir = args.trust_dir.as_deref().unwrap_or(&args.output);
+    std::fs::create_dir_all(trust_dir)?;
     let lock = File::options()
         .write(true)
         .create(true)
         .truncate(false)
-        .open(args.output.join(".lock"))?;
+        .open(trust_dir.join(".lock"))?;
     let _lock = tokio::task::spawn_blocking(move || {
         lock.lock()?;
         std::io::Result::Ok(lock)
     })
     .await??;
-    let path = args.output.join("selection-state.json");
+    let path = trust_dir.join("selection-state.json");
     let mut cache: Cache = match std::fs::read(&path) {
         Ok(bytes) => serde_json::from_slice(&bytes)?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Cache::default(),

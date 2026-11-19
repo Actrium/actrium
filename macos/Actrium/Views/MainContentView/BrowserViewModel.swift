@@ -1593,6 +1593,26 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 case .keepRunning:
                     realmUpdateOffers.removeValue(forKey: replacingTabId)
                     deferredRealmUpdates.removeValue(forKey: replacingTabId)
+                    let bindings = RealmServiceBindings.shared
+                    if let activeBinding = bindings.binding(for: replacingTabId) {
+                        let connection = try RealmServiceBinding.Connection(
+                            profile: availableProfile, verifiedProfileBody: currentProfileData
+                        )
+                        if connection != activeBinding.connection {
+                            let replacement = try await activeBinding.replacingConnection(connection)
+                            candidateBinding = replacement
+                            try await replacement.prepareForSwitch()
+                            try Task.checkCancellation()
+                            guard tabIndex() != nil,
+                                  bindings.binding(for: replacingTabId) === activeBinding,
+                                  try RealmFrontTrustStore.read(.profile, name: realmName) == accepted.stateJson,
+                                  try RealmFrontTrustStore.read(.authority, name: domain) == authority.pinsJson
+                            else { return }
+                            bindings.attach(replacement, to: replacingTabId)
+                            candidateBinding = nil
+                            logger.notice("Realm \(realmName): refreshed Service connection at Profile sequence \(availableProfile.sequence)")
+                        }
+                    }
                     loadedRealmFronts[replacingTabId] = LoadedRealmFront(
                         address: address, signingKeyId: accepted.signingKeyId, selection: available
                     )

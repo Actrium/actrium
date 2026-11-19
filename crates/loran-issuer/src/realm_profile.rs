@@ -38,6 +38,8 @@ use tokio::sync::{Mutex, OnceCell};
 
 use crate::signer_client_wrapper::SignerClientWrapper;
 
+mod package_verification;
+
 /// Signer key name, and descriptor key id, of a domain's Realm signing key.
 pub fn realm_signing_key_id(domain: &str) -> String {
     format!("realm-signing:{domain}")
@@ -244,6 +246,20 @@ impl RealmProfiles {
                 "Realm signing key is not ready".to_string(),
             ));
         };
+        let release = change
+            .front_update
+            .as_ref()
+            .map(PackageRelease::Front)
+            .or_else(|| change.service_update.as_ref().map(PackageRelease::Service));
+        if let Some(release) = release {
+            let selection = change.selection.as_ref().ok_or_else(|| {
+                ProfileError::Invalid("a package release needs a complete selection".into())
+            })?;
+            selection.check().map_err(ProfileError::Invalid)?;
+            // Downloads run before taking the signing lock. The store below
+            // still checks the expected sequence and the owner's authority.
+            package_verification::verify(&self.sqlite_path, selection, release).await?;
+        }
         let _signing = self.signing.lock().await;
 
         let current = Realm::get(realm).await?.ok_or(RealmError::NotFound)?;
@@ -311,11 +327,6 @@ impl RealmProfiles {
             previous.check_successor(&profile)?;
         }
         let digest = record.as_ref().map(|record| record.digest.as_str());
-        let release = change
-            .front_update
-            .as_ref()
-            .map(PackageRelease::Front)
-            .or_else(|| change.service_update.as_ref().map(PackageRelease::Service));
         if let Some(release) = release {
             RealmProfileRecord::store_package_release(
                 &profile,

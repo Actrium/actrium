@@ -51,6 +51,30 @@ struct Request {
     service_actors: Option<[String; 2]>,
 }
 
+#[tokio::test]
+#[ignore = "invoked by the package-runtime-echo Loran verifier"]
+async fn realm_package_verifier_fixture() -> Result<()> {
+    let path = |name: &str| {
+        std::env::var_os(name)
+            .map(PathBuf::from)
+            .with_context(|| format!("{name} is missing"))
+    };
+    let output = path("ACTR_REALM_E2E_VERIFY_OUTPUT")?;
+    let args = CheckArgs {
+        selection: path("ACTR_REALM_E2E_VERIFY_SELECTION")?,
+        output: output.clone(),
+        trust_dir: Some(path("ACTR_REALM_E2E_VERIFY_TRUST")?),
+        probe_realm: None,
+        probe: ServiceProbeArgs::default(),
+    };
+    let verified = check_selection_with(&args, |url, limit| async move {
+        documents::fetch_https(&url, limit).await
+    })
+    .await?;
+    std::fs::write(output.join("report.json"), serde_json::to_vec(&verified)?)?;
+    Ok(())
+}
+
 /// Exercise the release CLI and native Front before publication and after
 /// both release and rollback against the live Service Actors.
 #[tokio::test]

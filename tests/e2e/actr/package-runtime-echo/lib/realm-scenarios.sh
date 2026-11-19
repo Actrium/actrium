@@ -89,6 +89,23 @@ PY
             sleep 0.1
         done
     fi
+    if [[ "${REALM_FRONT_RELEASE:-0}" == 1 || "${REALM_SERVICE_SWITCH:-0}" == 1 ]]; then
+        # Use the same selection verifier against the fixture's HTTPS transport.
+        export REALM_CLI_FIXTURE LORAN_PACKAGE_VERIFIER="$RUN_DIR/package-verifier"
+        cat >"$LORAN_PACKAGE_VERIFIER" <<'VERIFIER'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$#" == 8 && "$1" == realm && "$2" == check-selection &&
+   "$3" == --selection && "$5" == --output && "$7" == --trust-dir ]]
+mkdir -p "$6"
+ACTR_REALM_E2E_VERIFY_SELECTION="$4" ACTR_REALM_E2E_VERIFY_OUTPUT="$6" \
+    ACTR_REALM_E2E_VERIFY_TRUST="$8" "$REALM_CLI_FIXTURE" --ignored --nocapture \
+    --exact commands::realm_packages::tests::front_e2e::realm_package_verifier_fixture \
+    >"$6/fixture.log" 2>&1 || { cat "$6/fixture.log" >&2; exit 1; }
+cat "$6/report.json"
+VERIFIER
+        chmod 700 "$LORAN_PACKAGE_VERIFIER"
+    fi
 }
 
 post_realm_management() {

@@ -337,7 +337,9 @@ Realm 以 Realm 名寻址，`@` 编码为 `%40`：
   `selection`，以及 `operation.expected_sequence`、`operation.operation_id`。后台和当前签名 Profile 比较，
   相同配置返回 `changed: false`，变更包表时校验归档、依赖及 RPC 契约。回滚通过 `operation.rollback: true`
   提交上一份包表，走同样的校验。此入口用于 Loran 签名的 Realm。部署时将 `LORAN_PACKAGE_VERIFIER` 指向
-  `actr` 可执行文件。部署阶段可以独立使用 `actr realm check-selection --probe-realm` 检查 Service 是否就绪。
+  支持 `realm check-selection --trust-dir` 的 `actr` 可执行文件。Owner 和 Admin 的包发布共用该校验器，
+  Publisher 信任记录保存在 `sqlite_path/realm-package-trust`。部署时可用
+  `actr realm check-selection --probe-realm` 检查 Service 是否就绪。
 - `GET`/`PUT /admin/api/realms/{realm}`：读取；`PUT` 只收 `enabled` 与 `expires_at`，
   `enabled = false` 即停用、`true` 即恢复，Realm 名不可修改；
 - `POST /admin/api/realms/{realm}/issuer-key/rotate`：开始轮换该 `active` Realm 的 issuer key

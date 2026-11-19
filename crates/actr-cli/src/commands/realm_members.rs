@@ -142,7 +142,12 @@ impl Member {
     }
 
     pub(super) async fn send(&self, request: MembershipRequest) -> Result<Value> {
-        Ok(send(&self.file.issuer, &request.sign(&self.key)).await?)
+        let timeout = match request.op {
+            MembershipOp::UpdateFront | MembershipOp::SwitchService => PACKAGE_RELEASE_TIMEOUT,
+            _ => REQUEST_TIMEOUT,
+        };
+        let client = http_client_with_timeout(timeout)?;
+        Ok(send_with(&client, &self.file.issuer, &request.sign(&self.key)).await?)
     }
 }
 
@@ -184,14 +189,20 @@ impl From<SendError> for anyhow::Error {
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Timeout of a whole Realm request, reply included.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Allow the Issuer's two-minute package verification before it signs the Profile.
+const PACKAGE_RELEASE_TIMEOUT: Duration = Duration::from_secs(150);
 
 /// HTTP client for membership and realm-management requests: with
 /// timeouts, and without redirects, so a signed request (or an invite
 /// secret) goes nowhere but where it was sent.
 pub(super) fn http_client() -> Result<reqwest::Client> {
+    http_client_with_timeout(REQUEST_TIMEOUT)
+}
+
+fn http_client_with_timeout(timeout: Duration) -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
+        .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("Failed to create the HTTP client")
@@ -343,15 +354,6 @@ where
 }
 
 /// POST `document` to `<issuer>/membership`; the reply, or its error.
-async fn send(issuer: &str, document: &Value) -> std::result::Result<Value, SendError> {
-    send_with(
-        &http_client().map_err(SendError::Refused)?,
-        issuer,
-        document,
-    )
-    .await
-}
-
 async fn send_with(
     client: &reqwest::Client,
     issuer: &str,

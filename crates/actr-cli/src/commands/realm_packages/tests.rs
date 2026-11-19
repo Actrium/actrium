@@ -507,9 +507,11 @@ async fn previews_manual_selections_and_fetches_cyclic_dependency_closure() {
         )
     });
     std::fs::write(&selection_path, serde_json::to_vec(&selection).unwrap()).unwrap();
+    let trust_dir = dir.path().join("trust");
     let args = CheckArgs {
         selection: selection_path.clone(),
         output: dir.path().join("check"),
+        trust_dir: Some(trust_dir.clone()),
         probe_realm: None,
         probe: ServiceProbeArgs::default(),
     };
@@ -524,6 +526,8 @@ async fn previews_manual_selections_and_fetches_cyclic_dependency_closure() {
     let result = check_selection_with(&args, check).await.unwrap();
     assert_eq!(result["selection"], selection);
     assert_eq!(result["dependencies"].as_array().unwrap().len(), 2);
+    assert!(trust_dir.join("selection-state.json").is_file());
+    assert!(!args.output.join("selection-state.json").exists());
     selection["packages"]["svc"]["dependencies"] = json!({"not-declared":"view"});
     std::fs::write(&selection_path, serde_json::to_vec(&selection).unwrap()).unwrap();
     let error = check_selection_with(&args, check).await.unwrap_err();
