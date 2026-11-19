@@ -141,16 +141,24 @@ final class RealmAdmissionTests: XCTestCase {
 
         let otherWindow = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
         let trustedWindow = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
-        var profileFetchFailed = false
+        let invite = try inviteCode()
+        var failedProfileFetches = 0
+        var redeemedProfile: RealmProfileInfo?
         let refreshingWindow = BrowserViewModel(
             realmPreferences: preferences,
             fetchRealmDocument: { url, _ in
+                if url.host == "publisher.example" { throw CancellationError() }
                 if url.path == "/.well-known/actr" { return Data(updated.utf8) }
                 XCTAssertEqual(url.path, "/realm/echo")
                 XCTAssertNil(otherWindow.currentTab?.guestScript, "The other window must stop before the Profile fetch")
                 XCTAssertEqual(trustedWindow.currentTab?.guestScript, "installed Front")
-                profileFetchFailed = true
+                failedProfileFetches += 1
                 throw URLError(.resourceUnavailable)
+            },
+            inviteMembershipExchange: { profile, code, _, _ in
+                XCTAssertEqual(code, invite)
+                redeemedProfile = profile
+                return #"{"member_id":"test-member","role":"viewer","key_id":"test-client"}"#
             },
             saveBrowserSession: { _, _ in }
         )
@@ -164,14 +172,35 @@ final class RealmAdmissionTests: XCTestCase {
             window.tabs[0].realmProfileSigner = (realmName, signer)
         }
 
+        let movedWindow = BrowserViewModel(
+            realmPreferences: preferences,
+            fetchRealmDocument: { url, _ in
+                if url.path == "/.well-known/actr" { return Data(updated.utf8) }
+                throw URLError(.resourceUnavailable)
+            },
+            saveBrowserSession: { _, _ in }
+        )
+        let transfer = Tab(
+            title: "Echo", url: link, appId: "echo-front", serviceCallUrl: "actr://realm.example/service",
+            guestScript: "installed Front", guestExtractedPath: "/transfer/cache"
+        )
         refreshingWindow.reloadCurrentTab()
         let deadline = ContinuousClock.now + .seconds(2)
         while refreshingWindow.pendingInviteRedeem == nil && ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        XCTAssertTrue(profileFetchFailed)
+        XCTAssertGreaterThan(failedProfileFetches, 0)
         XCTAssertEqual(refreshingWindow.pendingInviteRedeem?.uri, link.absoluteString)
-        for window in [refreshingWindow, otherWindow] {
+
+        movedWindow.insertTabFromCrossWindow(transfer, at: movedWindow.tabs.count, groupId: nil)
+        XCTAssertNil(movedWindow.currentTab?.guestScript)
+        XCTAssertNil(movedWindow.currentTab?.guestExtractedPath)
+        let movedDeadline = ContinuousClock.now + .seconds(2)
+        while movedWindow.pendingInviteRedeem == nil && ContinuousClock.now < movedDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(movedWindow.pendingInviteRedeem?.uri, link.absoluteString)
+        for window in [refreshingWindow, otherWindow, movedWindow] {
             XCTAssertNil(window.currentTab?.appId)
             XCTAssertNil(window.currentTab?.guestScript)
             XCTAssertNil(window.currentTab?.serviceCallUrl)
@@ -182,6 +211,56 @@ final class RealmAdmissionTests: XCTestCase {
             try RealmProfileStore.fallbackRealm(realmName, preferences: preferences)?.accepted.info.sequence,
             3
         )
+
+        let fetchesBeforeRedeeming = failedProfileFetches
+        refreshingWindow.confirmInviteRedeem(code: invite)
+        let redeemedDeadline = ContinuousClock.now + .seconds(2)
+        func didRedeem() -> Bool {
+            preferences.stringArray(forKey: "actr.redeemedRealms")?.contains(realmName) == true
+        }
+        while !didRedeem() && ContinuousClock.now < redeemedDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(didRedeem())
+        XCTAssertGreaterThan(failedProfileFetches, fetchesBeforeRedeeming)
+        XCTAssertEqual(redeemedProfile?.realmName, realmName)
+        XCTAssertEqual(redeemedProfile?.sequence, 3)
+        refreshingWindow.invalidateRealmLoadsForWindowClose()
+        movedWindow.invalidateRealmLoadsForWindowClose()
+
+        let unexpectedExchange: RealmJoinService.InviteExchange = { _, _, _, _ in
+            XCTFail("Retired or cancelled discovery must not redeem an invite")
+            throw CancellationError()
+        }
+        do {
+            _ = try await RealmJoinService.joinWithInvite(
+                inviteText: invite, label: "Test", preferences: preferences,
+                fetchDocument: { url in
+                    if url.path == "/.well-known/actr" { return Data(updated.utf8) }
+                    throw URLError(.cancelled)
+                },
+                exchange: unexpectedExchange
+            )
+            XCTFail("Expected cancellation")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .cancelled)
+        }
+
+        let retired = try profile(
+            membership: "invite-only", sequence: 4, status: "retired", signer: remaining, keyId: "remaining"
+        )
+        do {
+            _ = try await RealmJoinService.joinWithInvite(
+                inviteText: invite, label: "Test", preferences: preferences,
+                fetchDocument: { url in
+                    url.path == "/.well-known/actr" ? Data(updated.utf8) : retired.0
+                },
+                exchange: unexpectedExchange
+            )
+            XCTFail("Expected retirement")
+        } catch CoreError.RealmRetired(let retiredRealm) {
+            XCTAssertEqual(retiredRealm, realmName)
+        }
     }
 
     @MainActor
@@ -330,6 +409,20 @@ final class RealmAdmissionTests: XCTestCase {
         let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
         return preferences
+    }
+
+    private func inviteCode() throws -> String {
+        func base64URL(_ bytes: Data) -> String {
+            bytes.base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+        }
+        let invite = try JSONSerialization.data(withJSONObject: [
+            "schema": "actr.realm-invite/v1", "realm": realmName,
+            "secret": base64URL(Data(repeating: 1, count: 32))
+        ])
+        return "ri_" + base64URL(invite)
     }
 
     private func packageKey(_ publicKey: Data, status: String) -> [String: String] {

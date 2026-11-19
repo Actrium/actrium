@@ -17,6 +17,8 @@ struct RealmJoinResult {
 
 /// Enroll this installation's device identity with a verified Realm.
 enum RealmJoinService {
+    typealias InviteExchange = @MainActor (RealmProfileInfo, String, String, Bool) async throws -> String
+
     struct VerifiedProfile {
         let accepted: RealmProfileStore.AcceptedRealm
         var info: RealmProfileInfo { accepted.info }
@@ -54,6 +56,34 @@ enum RealmJoinService {
         _ = try await join(profile.info, inviteText: "", label: label, allowInsecureDevelopment: false)
     }
 
+    static func resolveProfile(
+        at url: URL,
+        realmName: String,
+        signingKeysJSON: String,
+        preferences: UserDefaults,
+        fetch: @MainActor (URL) async throws -> Data,
+        checkCurrent: @MainActor () throws -> Void
+    ) async throws -> (body: Data, admission: VerifiedProfile) {
+        do {
+            let body = try await fetch(url)
+            try checkCurrent()
+            let verified = try VerifiedProfile(
+                body: body, realmName: realmName, signingKeysJSON: signingKeysJSON, preferences: preferences
+            )
+            return (body, verified)
+        } catch CoreError.RealmRetired(let name) {
+            throw CoreError.RealmRetired(message: name)
+        } catch {
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+            try checkCurrent()
+            guard let fallback = try RealmProfileStore.fallbackRealm(
+                realmName, preferences: preferences
+            ) else { throw error }
+            AppLogger.viewModel.warning("Using the last trusted Realm Profile for \(realmName) after signing key revocation.")
+            return (fallback.body, try VerifiedProfile(body: fallback.body, accepted: fallback.accepted))
+        }
+    }
+
     /// Redeem `inviteText` (an `ri_…` invite) and join as a new device.
     ///
     /// - Parameters:
@@ -69,8 +99,13 @@ enum RealmJoinService {
         inviteText: String,
         label: String,
         allowInsecureDevelopment: Bool = false,
-        preferences: UserDefaults = .standard
+        preferences: UserDefaults = .standard,
+        fetchDocument: (@MainActor (URL) async throws -> Data)? = nil,
+        exchange: InviteExchange? = nil,
+        checkCurrent: @MainActor () throws -> Void = { try Task.checkCancellation() }
     ) async throws -> RealmJoinResult {
+        try checkCurrent()
+        let fetch = fetchDocument ?? Self.fetchBoundedDocument
         // 1. Decode the invite locally: learn the Realm name. The secret
         //    stays inside the invite text; `join` consumes it in Rust.
         let invite = try ActriumCore.decodeActrInvite(inviteText: inviteText)
@@ -89,7 +124,8 @@ enum RealmJoinService {
         guard let discoveryURL = URL(string: "https://\(domain)/.well-known/actr") else {
             throw joinError("The Realm domain in the invite is invalid.")
         }
-        let descriptorBody = try await fetchBoundedDocument(discoveryURL)
+        let descriptorBody = try await fetch(discoveryURL)
+        try checkCurrent()
         guard let descriptorText = String(data: descriptorBody, encoding: .utf8) else {
             throw joinError("The authority information is not valid text.")
         }
@@ -108,17 +144,21 @@ enum RealmJoinService {
         guard let profileURL = URL(string: profilePath) else {
             throw joinError("The Realm Profile location is invalid.")
         }
-        let profileBody = try await fetchBoundedDocument(profileURL)
-        let profile = try VerifiedProfile(
-            body: profileBody, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson, preferences: preferences
-        ).info
+        let resolved = try await resolveProfile(
+            at: profileURL, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson,
+            preferences: preferences, fetch: fetch, checkCurrent: checkCurrent
+        )
+        try checkCurrent()
+        guard RealmProfileStore.isCurrent(resolved.admission.accepted, preferences: preferences) else {
+            throw joinError("The verified Realm Profile changed before redemption.")
+        }
+        let profile = resolved.admission.info
 
         // 4. Device identity (created and persisted on first use) and the
         //    invite exchange. The same signer later registers the Host.
-        let memberJSON = try await join(
-            profile, inviteText: inviteText, label: label,
-            allowInsecureDevelopment: allowInsecureDevelopment
-        )
+        let redeem = exchange ?? Self.join(_:inviteText:label:allowInsecureDevelopment:)
+        let memberJSON = try await redeem(profile, inviteText, label, allowInsecureDevelopment)
+        try checkCurrent()
 
         // 5. Surface the redemption result and the instance address.
         guard let member = try JSONSerialization.jsonObject(with: Data(memberJSON.utf8))

@@ -143,6 +143,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     private let saveBrowserSession: ([Tab], UUID?) -> Void
     private let chooseLocalFrontFile: (NSOpenPanel) -> URL?
     private let fetchRealmDocument: @MainActor (URL, String) async throws -> Data
+    private let inviteMembershipExchange: RealmJoinService.InviteExchange?
 
     var currentTab: Tab? {
         guard let currentTabId = currentTabId else { return nil }
@@ -155,6 +156,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         },
         realmPreferences: UserDefaults = .standard,
         fetchRealmDocument: (@MainActor (URL, String) async throws -> Data)? = nil,
+        inviteMembershipExchange: RealmJoinService.InviteExchange? = nil,
         saveBrowserSession: @escaping ([Tab], UUID?) -> Void = { tabs, currentTabId in
             BrowserDataRepository.shared.saveSession(tabs: tabs, currentTabId: currentTabId)
         }
@@ -162,6 +164,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         self.chooseLocalFrontFile = chooseLocalFrontFile
         self.realmPreferences = realmPreferences
         self.fetchRealmDocument = fetchRealmDocument ?? Self.fetchBoundedDocument(from:insecureMessage:)
+        self.inviteMembershipExchange = inviteMembershipExchange
         self.saveBrowserSession = saveBrowserSession
         // Initialize slot positions first
         initializeSlotPositions()
@@ -456,17 +459,31 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     /// Insert a tab received from another window (cross-window drag)
-    func insertTabFromCrossWindow(_ tab: Tab, at index: Int, groupId: UUID?) {
+    func insertTabFromCrossWindow(_ tab: Tab, at index: Int, groupId: UUID?, select: Bool = true) {
         var newTab = tab
         newTab.groupId = groupId
+        let transferredLink = newTab.url.flatMap { address -> ActrUriInfo? in
+            guard address.scheme?.lowercased() == "actr" else { return nil }
+            return try? ActriumCore.parseActrUri(
+                uri: address.absoluteString, installationId: InstallationIdProvider.getOrCreate()
+            )
+        }
+        // Transfer payloads contain serialized Guest content, so reopen Realm
+        // addresses through the signed discovery funnel in the destination.
+        if newTab.url?.scheme?.lowercased() == "actr", transferredLink?.isLocal != true {
+            Self.clearRealmContent(&newTab)
+        }
 
         let targetIndex = min(max(0, index), tabs.count)
         tabs.insert(newTab, at: targetIndex)
         tabSlotPositions[newTab.id] = tabs.count - 1
-        currentTabId = newTab.id
+        if select { currentTabId = newTab.id }
 
         logger.notice(" Insert across Window Tab: \(newTab.title) To Location \(targetIndex), Group: \(groupId?.uuidString ?? "None")")
         persistBrowserPageSession()
+        if let transferredLink, !transferredLink.isLocal, let address = newTab.url {
+            handleResolvedRealmLink(transferredLink, input: address.absoluteString, tabIndex: targetIndex)
+        }
     }
 
     /// Remove a tab by ID (used for cross-window drag source cleanup)
@@ -1088,6 +1105,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         pendingInviteRedeem = nil
     }
 
+    func invalidateRealmLoadsForWindowClose() {
+        realmLoads.removeAll()
+        pendingInviteRedeem = nil
+    }
+
     /// Redeem: run the full redemption flow through RealmJoinService (decode
     /// → verify → device identity → join); on success mark the Realm as
     /// redeemed and open the instance link automatically.
@@ -1095,10 +1117,20 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         guard let pending = pendingInviteRedeem else { return }
         pendingInviteRedeem = nil
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedCode.isEmpty else { return }
+        guard !trimmedCode.isEmpty, tabs.contains(where: { $0.id == pending.tabId }) else { return }
+        let load = UUID()
+        realmLoads[pending.tabId] = load
 
         Task { @MainActor in
+            defer {
+                if realmLoads[pending.tabId] == load { realmLoads[pending.tabId] = nil }
+            }
+            @MainActor func checkCurrent() throws {
+                try Task.checkCancellation()
+                guard realmLoads[pending.tabId] == load else { throw CancellationError() }
+            }
             do {
+                try checkCurrent()
                 // The invite must name the same Realm as the requested link:
                 // join sends this device's public key and the invite secret to
                 // the Realm's issuer, so a mismatched code would leak both to
@@ -1121,13 +1153,26 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 let result = try await RealmJoinService.joinWithInvite(
                     inviteText: trimmedCode,
                     label: Host.current().localizedName ?? "Mac",
-                    preferences: realmPreferences
+                    preferences: realmPreferences,
+                    fetchDocument: {
+                        try await self.fetchRealmDocument(
+                            $0, NSLocalizedString(
+                                "The Realm information was served over an insecure connection.",
+                                comment: "Actr join insecure transport error"))
+                    },
+                    exchange: inviteMembershipExchange,
+                    checkCurrent: checkCurrent
                 )
+                try checkCurrent()
+                guard let index = tabs.firstIndex(where: { $0.id == pending.tabId }) else { return }
                 markRedeemed(result.realmName)
                 logger.notice("🎟️ [InviteRedeem] joined \(result.realmName): member=\(result.memberId), role=\(result.role), key=\(result.keyId)")
-                // On a redeemed-realm hit the invite sheet is skipped and the link opens directly.
-                navigateCurrentTab(to: result.instanceURL.absoluteString)
+                let address = result.instanceURL.absoluteString
+                let link = try ActriumCore.parseActrUri(uri: address, installationId: InstallationIdProvider.getOrCreate())
+                handleResolvedRealmLink(link, input: address, tabIndex: index)
             } catch {
+                guard realmLoads[pending.tabId] == load, !(error is CancellationError),
+                      (error as? URLError)?.code != .cancelled else { return }
                 logger.warning("⚠️ [InviteRedeem] redemption failed: \(error)")
                 presentRealmLinkError(error)
             }
@@ -1404,29 +1449,29 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         RealmServiceBindings.shared.remove(tabs[tabIndex].id)
         tabs[tabIndex].title = title
         tabs[tabIndex].url = URL(string: address)
-        clearRealmContent(tabIndex)
+        Self.clearRealmContent(&tabs[tabIndex])
         objectWillChange.send()
         persistBrowserPageSession()
     }
 
-    private func clearRealmContent(_ tabIndex: Int) {
-        tabs[tabIndex].reloadNonce &+= 1
-        tabs[tabIndex].appId = nil
-        tabs[tabIndex].systemTabType = nil
-        tabs[tabIndex].htmlContent = nil
-        tabs[tabIndex].unifiedScript = nil
-        tabs[tabIndex].leftPanelScript = nil
-        tabs[tabIndex].rightPanelScript = nil
-        tabs[tabIndex].guestScript = nil
-        tabs[tabIndex].guestExtractedPath = nil
-        tabs[tabIndex].guestEntry = nil
-        tabs[tabIndex].contractName = nil
-        tabs[tabIndex].contractVersion = nil
-        tabs[tabIndex].capabilityManifestJSON = nil
-        tabs[tabIndex].permissions = []
-        tabs[tabIndex].serviceCallUrl = nil
-        tabs[tabIndex].legacyActorBridge = false
-        tabs[tabIndex].realmProfileSigner = nil
+    private static func clearRealmContent(_ tab: inout Tab) {
+        tab.reloadNonce &+= 1
+        tab.appId = nil
+        tab.systemTabType = nil
+        tab.htmlContent = nil
+        tab.unifiedScript = nil
+        tab.leftPanelScript = nil
+        tab.rightPanelScript = nil
+        tab.guestScript = nil
+        tab.guestExtractedPath = nil
+        tab.guestEntry = nil
+        tab.contractName = nil
+        tab.contractVersion = nil
+        tab.capabilityManifestJSON = nil
+        tab.permissions = []
+        tab.serviceCallUrl = nil
+        tab.legacyActorBridge = false
+        tab.realmProfileSigner = nil
     }
 
     private func stopRetiredRealm(_ realmName: String) {
@@ -1458,7 +1503,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             let tabId = tabs[index].id
             releaseTabRuntime(tabId, preserveRealmLoad: preserveRealmLoad)
             RendererLifecycleManager.shared.tabDidClose(tabId)
-            clearRealmContent(index)
+            Self.clearRealmContent(&tabs[index])
         }
         objectWillChange.send()
         persistBrowserPageSession()
@@ -1548,30 +1593,26 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 let profileData: Data
                 let admission: RealmJoinService.VerifiedProfile
                 do {
-                    let fetched = try await fetchRealmDocument(
-                        profileURL,
-                        NSLocalizedString(
-                            "The Realm Profile was served over an insecure connection.",
-                            comment: "Actr realm profile insecure transport error"))
-                    guard currentTabIndex() != nil else { return }
-                    admission = try RealmJoinService.VerifiedProfile(
-                        body: fetched,
-                        realmName: realmName,
-                        signingKeysJSON: descriptor.signingKeysJson,
-                        preferences: realmPreferences
+                    let resolved = try await RealmJoinService.resolveProfile(
+                        at: profileURL, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson,
+                        preferences: realmPreferences,
+                        fetch: {
+                            try await self.fetchRealmDocument(
+                                $0,
+                                NSLocalizedString(
+                                    "The Realm Profile was served over an insecure connection.",
+                                    comment: "Actr realm profile insecure transport error"))
+                        },
+                        checkCurrent: {
+                            try Task.checkCancellation()
+                            guard currentTabIndex() != nil else { throw CancellationError() }
+                        }
                     )
-                    profileData = fetched
+                    profileData = resolved.body
+                    admission = resolved.admission
                 } catch CoreError.RealmRetired(let name) {
                     presentRealmLinkError(CoreError.RealmRetired(message: name))
                     return
-                } catch {
-                    guard currentTabIndex() != nil, !(error is CancellationError) else { return }
-                    guard let fallback = try RealmProfileStore.fallbackRealm(
-                        realmName, preferences: realmPreferences
-                    ) else { throw error }
-                    admission = try RealmJoinService.VerifiedProfile(body: fallback.body, accepted: fallback.accepted)
-                    profileData = fallback.body
-                    logger.warning("Using the last trusted Realm Profile for \(realmName) after signing key revocation.")
                 }
                 let profile = admission.info
                 acceptedProfile = admission.accepted
@@ -1583,7 +1624,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     try await RealmJoinService.joinOpen(admission, label: "Mac")
                 } else if !redeemedRealms.contains(profile.realmName) {
                     if currentTabId == replacingTabId, pendingInviteRedeem == nil {
-                        pendingInviteRedeem = PendingInviteRedeem(uri: address, domain: domain)
+                        pendingInviteRedeem = PendingInviteRedeem(tabId: replacingTabId, uri: address, domain: domain)
                     }
                     return
                 }
