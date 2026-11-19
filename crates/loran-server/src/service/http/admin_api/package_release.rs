@@ -43,7 +43,7 @@ pub(super) async fn submit(
     }
     match release(&state, &realm, peer, request).await {
         Ok(result) => Json(result).into_response(),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
@@ -52,7 +52,7 @@ async fn release(
     realm: &str,
     peer: ConnectInfo<SocketAddr>,
     request: ReleaseRequest,
-) -> Result<serde_json::Value, Response> {
+) -> Result<serde_json::Value, Box<Response>> {
     let ReleaseRequest {
         operation,
         selection,
@@ -61,15 +61,15 @@ async fn release(
     let bad_request = |reason| grpc_status_to_response(Status::invalid_argument(reason));
     operation.check().map_err(bad_request)?;
     selection.check().map_err(bad_request)?;
-    let owner = app_members::package_release_owner(state, realm)
-        .await
-        .map_err(IntoResponse::into_response)?;
     if let Some(receipt) = state
         .service
         .package_release_receipt(realm, &operation, &selection)
         .await
         .map_err(grpc_status_to_response)?
     {
+        app_members::package_release_owner(state, realm)
+            .await
+            .map_err(IntoResponse::into_response)?;
         return Ok(receipt);
     }
     let snapshot = state
@@ -92,9 +92,12 @@ async fn release(
             .await
             .map_err(grpc_status_to_response)?
         {
+            app_members::package_release_owner(state, realm)
+                .await
+                .map_err(IntoResponse::into_response)?;
             return Ok(receipt);
         }
-        return Err(grpc_status_to_response(Status::aborted(message)));
+        return Err(grpc_status_to_response(Status::aborted(message)).into());
     }
     let kind = snapshot
         .selection
@@ -103,6 +106,9 @@ async fn release(
     let Some(kind) = kind else {
         return Ok(json!({"realm": realm, "sequence": snapshot.sequence, "changed": false}));
     };
+    let owner = app_members::package_release_owner(state, realm)
+        .await
+        .map_err(IntoResponse::into_response)?;
     if kind == PackageSelectionChange::Service {
         check_service_readiness(realm, &selection)
             .await

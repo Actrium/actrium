@@ -200,9 +200,12 @@ try {
   const probeInvite = actr(["realm", "invite", "--key", originalKey, "--role", "viewer", "--days", "1"]);
   joinRealm(probeInvite.invite, probeKey, "Independent readiness check");
   const activeRelease = apiPath(app, "/packages");
+  const unchanged = await http(activeRelease, "PUT", releaseBody(initial, baseline));
+  assert.equal(unchanged.changed, false);
+  assert.equal(unchanged.sequence, baseline.sequence);
   await http(activeRelease, "PUT", releaseBody(target, baseline), 409);
   assert.deepEqual(await profileOf(app), baseline);
-  pass("Package release requires an authorized Owner device");
+  pass("An Admin can submit an unchanged selection, but a release requires an authorized Owner device");
 
   const adminInvite = actr(["realm", "invite", "--key", originalKey, "--member", owner.member_id, "--days", "1"]);
   await http(apiPath(app, "/management-client"), "POST", { invite: adminInvite.invite });
