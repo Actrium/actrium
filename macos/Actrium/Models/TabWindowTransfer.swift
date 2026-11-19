@@ -59,6 +59,7 @@ enum TabWindowTransfer {
             rightPanelDefaultVisible: tab.rightPanelDefaultVisible,
             backgroundColor: tab.backgroundColor, appIcon: tab.appIcon
         )
+        result.realmProfileSigner = tab.realmProfileSigner
         result.historyPageIndex = tab.historyPageIndex
         return result
     }

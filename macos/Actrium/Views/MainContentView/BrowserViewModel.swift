@@ -525,13 +525,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let tab = tabs[index]
         let oldGroupId = tab.groupId
 
-        TabSnapshotCacheManager.shared.invalidate(tabId: tabId)
-        WebViewHolderManager.shared.remove(tabId: tabId)
-        ViewBridgeHostViewManager.shared.remove(tabId: tabId)
-        RealmServiceBindings.shared.remove(tabId)
-        CapabilityPermissionStore.shared.clearSessionGrants(tabId: tabId)
-        RendererLifecycleManager.shared.tabDidClose(tabId)
-
         tabs.remove(at: index)
         if let removedPosition = tabSlotPositions.removeValue(forKey: tabId) {
             for id in tabs.map(\.id) {
@@ -2054,7 +2047,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             title: manifest.name ?? front.href, url: sourceURL,
             appId: "actrium.local-front/\(profile.realmName)/\(digest)",
             groupId: tabs[index].groupId, unifiedScript: script, guestExtractedPath: root.path,
-            guestEntry: entry, capabilityManifestJSON: capabilities, contractName: manifest.contractName,
+            guestEntry: entry, capabilityManifestJSON: capabilities,
+            localStorageOrigin: manifest.storageOrigin(devDirectory: nil), contractName: manifest.contractName,
             contractVersion: manifest.contractVersion, permissions: manifest.permissions,
             leftPanelDefaultVisible: manifest.leftPanelDefaultVisible,
             rightPanelDefaultVisible: manifest.rightPanelDefaultVisible, backgroundColor: manifest.themeColor
@@ -3290,4 +3284,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         """
     }
 }
-extension BrowserViewModel: TabWindowTransferOwner {}
+extension BrowserViewModel: TabWindowTransferOwner {
+    func insertTabFromCrossWindow(_ tab: Tab, at index: Int, groupId: UUID?) {
+        insertTabFromCrossWindow(tab, at: index, groupId: groupId, select: true)
+    }
+}
