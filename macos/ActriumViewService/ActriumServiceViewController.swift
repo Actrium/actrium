@@ -1435,6 +1435,9 @@ final class ServiceReactNativeHost {
         if let serviceCallUrl = config["serviceCallUrl"] as? String {
             tabDict["serviceCallUrl"] = serviceCallUrl
         }
+        if let serviceEventsUrl = config["serviceEventsUrl"] as? String {
+            tabDict["serviceEventsUrl"] = serviceEventsUrl
+        }
         if config["legacyActorBridge"] as? Bool == true {
             tabDict["legacyActorBridge"] = true
         }
@@ -1981,6 +1984,9 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     if let appId = config["appId"] as? String { tabDict["appId"] = appId }
     if let serviceCallUrl = config["serviceCallUrl"] as? String {
         tabDict["serviceCallUrl"] = serviceCallUrl
+    }
+    if let serviceEventsUrl = config["serviceEventsUrl"] as? String {
+        tabDict["serviceEventsUrl"] = serviceEventsUrl
     }
     if config["legacyActorBridge"] as? Bool == true {
         tabDict["legacyActorBridge"] = true

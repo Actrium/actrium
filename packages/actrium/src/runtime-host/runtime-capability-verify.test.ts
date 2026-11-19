@@ -81,7 +81,7 @@ describe('runtime capability manifest verification', () => {
     expect(result.details.join('\n')).toContain('fs');
   });
 
-  test('rejects a service event without an implemented subscription', () => {
+  test('accepts a service event when service.on is declared', () => {
     const result = verifyRuntimeCapabilityManifestJSON(
       manifestJSON({
         hostModules: {
@@ -91,11 +91,26 @@ describe('runtime capability manifest verification', () => {
           },
         },
       }),
-      ['service']
+      ['service', 'service.on']
+    );
+    expect(result).toEqual({ ok: true, details: [] });
+  });
+
+  test('rejects a service event without the service.on capability', () => {
+    const result = verifyRuntimeCapabilityManifestJSON(
+      manifestJSON({
+        hostModules: {
+          service: {
+            rpc: ['counter.increment'],
+            events: ['counter.changed'],
+          },
+        },
+      }),
+      ['service.call']
     );
     expect(result.ok).toBe(false);
-    expect(result.code).toBe('unknown_capability');
-    expect(result.details.join('\n')).toContain('host:service.on');
+    expect(result.code).toBe('capability_mismatch');
+    expect(result.details.join('\n')).toContain('service.on');
   });
 
   test('rejects a component outside the host allowlist', () => {

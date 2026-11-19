@@ -103,11 +103,11 @@ final class RendererProcessPool: ObservableObject {
         return currentFingerprint == canonicalFingerprint(requestedFingerprint)
     }
 
-    /// A result may reach the renderer only while the tab is still on the
-    /// epoch captured when the upload was prepared. A tab that has never
-    /// released a renderer has no stored epoch, which is the same as epoch 0;
-    /// both reads must apply that default or the tab's first result is dropped.
-    nonisolated static func attachmentResultIsCurrent(
+    /// A captured renderer operation is valid only while the tab remains on
+    /// the same epoch. A tab that has never released a renderer has no stored
+    /// epoch, which is the same as epoch 0; both reads must apply that default
+    /// or the first attachment result or event subscription is dropped.
+    nonisolated static func rendererEpochIsCurrent(
         capturedEpoch: Int,
         currentEpoch: Int?
     ) -> Bool {
@@ -151,13 +151,26 @@ final class RendererProcessPool: ObservableObject {
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     private var consecutivePrewarmFailures = 0
     private var prewarmRetryWorkItem: DispatchWorkItem?
-    /// Per-tab epoch for attachment result delivery. Bumped whenever the
-    /// tab's renderer is released or replaced, so results produced by an
-    /// older session can never be delivered to a replacement renderer.
-    private var attachmentDeliveryEpoch: [UUID: Int] = [:]
+    /// Per-tab renderer ownership epoch. Bumped whenever the tab's renderer is
+    /// released or replaced, so late attachment results and queued Service
+    /// event subscriptions can never belong to a replacement renderer.
+    private var rendererEpoch: [UUID: Int] = [:]
 
     private init() {
+        RealmServiceBindings.shared.eventHandler = { tabId, event in
+            RendererProcessPool.shared.forwardServiceEvent(event, tabId: tabId)
+        }
         setupMemoryPressureHandling()
+    }
+
+    private func forwardServiceEvent(_ event: RealmServiceEvent, tabId: UUID) {
+        guard let worker = worker(for: tabId),
+              let data = try? JSONEncoder().encode(event) else { return }
+        try? worker.connection.sendHostEvent(
+            name: RealmServiceEventSubscription.eventEvent,
+            userInfoJSON: String(decoding: data, as: UTF8.self),
+            tabId: tabId.uuidString
+        )
     }
 
     // MARK: - Allocation
@@ -219,8 +232,9 @@ final class RendererProcessPool: ObservableObject {
         // The renderer is going away (close or fingerprint replacement):
         // invalidate late attachment results and cancel the tab's sessions
         // without touching any other tab.
-        attachmentDeliveryEpoch[tabId, default: 0] &+= 1
+        rendererEpoch[tabId, default: 0] &+= 1
         RealmServiceBindings.shared.cancelAttachmentUploads(tabId)
+        RealmServiceBindings.shared.retireSubscriptions(for: tabId)
         guard let workerId = tabWorkerMap.removeValue(forKey: tabId),
               let worker = workers[workerId] else {
             return
@@ -732,6 +746,55 @@ final class RendererProcessPool: ObservableObject {
                 }
                 return
             }
+            if name == RealmServiceEventSubscription.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let request = try? JSONDecoder().decode(
+                          RealmServiceEventSubscription.self, from: Data(userInfoJSON.utf8)
+                      ) else { return }
+                let requestEpoch = self.rendererEpoch[tabId] ?? 0
+                Task { [weak self, weak worker] in
+                    // The IPC ownership check happened before this task was
+                    // queued. Re-check both worker and epoch before creating
+                    // state; the same worker can later host a new renderer
+                    // generation for this tab.
+                    guard let self, let worker, self.worker(for: tabId) === worker,
+                          Self.rendererEpochIsCurrent(
+                              capturedEpoch: requestEpoch,
+                              currentEpoch: self.rendererEpoch[tabId]
+                          ) else { return }
+                    let reply: RealmServiceEventReply
+                    do {
+                        try await RealmServiceBindings.shared.subscribe(request, tabId: tabId)
+                        reply = RealmServiceEventReply(id: request.id)
+                    } catch {
+                        reply = RealmServiceEventReply(
+                            id: request.id, failure: RealmServiceFailure(serviceError: error)
+                        )
+                    }
+                    guard self.worker(for: tabId) === worker,
+                          Self.rendererEpochIsCurrent(
+                              capturedEpoch: requestEpoch,
+                              currentEpoch: self.rendererEpoch[tabId]
+                          ),
+                          let data = try? JSONEncoder().encode(reply) else { return }
+                    try? worker.connection.sendHostEvent(
+                        name: RealmServiceEventSubscription.responseEvent,
+                        userInfoJSON: String(decoding: data, as: UTF8.self),
+                        tabId: tab
+                    )
+                }
+                return
+            }
+            if name == RealmServiceEventSubscription.cancelEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker,
+                      let request = try? JSONDecoder().decode(
+                          RealmServiceEventSubscription.self, from: Data(userInfoJSON.utf8)
+                      ) else { return }
+                RealmServiceBindings.shared.unsubscribe(request.id, tabId: tabId)
+                return
+            }
             let localName: Notification.Name
             switch name {
             case "com.actro.openBookmark":
@@ -820,13 +883,13 @@ final class RendererProcessPool: ObservableObject {
     /// released or replaced, which stops in-flight or ghost results from
     /// reaching a renderer that no longer owns the upload session.
     private func makeAttachmentResultDeliver(tabId: UUID) -> @Sendable (RealmServiceAttachmentResultEvent) -> Void {
-        let epoch = attachmentDeliveryEpoch[tabId] ?? 0
+        let epoch = rendererEpoch[tabId] ?? 0
         return { [weak self] event in
             Task { @MainActor in
                 guard let self,
-                      Self.attachmentResultIsCurrent(
+                      Self.rendererEpochIsCurrent(
                           capturedEpoch: epoch,
-                          currentEpoch: self.attachmentDeliveryEpoch[tabId]
+                          currentEpoch: self.rendererEpoch[tabId]
                       ),
                       let worker = self.worker(for: tabId), worker.isReady,
                       let data = try? JSONEncoder().encode(event) else { return }
@@ -863,8 +926,9 @@ final class RendererProcessPool: ObservableObject {
         let affectedTabs = worker.tabs
         for tabId in affectedTabs {
             fileImport.cancel(tabId: tabId)
-            attachmentDeliveryEpoch[tabId, default: 0] &+= 1
+            rendererEpoch[tabId, default: 0] &+= 1
             RealmServiceBindings.shared.cancelAttachmentUploads(tabId)
+            RealmServiceBindings.shared.retireSubscriptions(for: tabId)
             tabWorkerMap.removeValue(forKey: tabId)
         }
         if let fingerprint = worker.fingerprint {

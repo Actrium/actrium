@@ -266,6 +266,58 @@ final class RealmAdmissionTests: XCTestCase {
     }
 
     @MainActor
+    func testInviteLinkRedeemsOnceAndSavesTheCleanAddress() async throws {
+        let preferences = try makePreferences()
+        let signer = Curve25519.Signing.PrivateKey()
+        let authority = try authorityDescriptor(
+            sequence: 1, signer: signer, signerId: "realm-key", keys: ["realm-key": signer]
+        )
+        let (body, _) = try profile(membership: "invite-only", signer: signer)
+        let invite = try inviteCode()
+        let realmAddress = "actr://realm.example/echo"
+        var link = try XCTUnwrap(URLComponents(string: realmAddress))
+        let arguments = try JSONEncoder().encode(["invite": invite])
+        link.queryItems = [URLQueryItem(name: "args", value: String(decoding: arguments, as: UTF8.self))]
+        let linkURL = try XCTUnwrap(link.url)
+        var exchanges = 0
+        var savedAddresses: [String] = []
+        let viewModel = BrowserViewModel(
+            realmPreferences: preferences,
+            fetchRealmDocument: { url, _ in
+                if url.host == "publisher.example" { throw CancellationError() }
+                return url.path == "/.well-known/actr" ? Data(authority.utf8) : body
+            },
+            inviteMembershipExchange: { profile, code, _, _ in
+                XCTAssertEqual(profile.realmName, self.realmName)
+                XCTAssertEqual(code, invite)
+                exchanges += 1
+                return #"{"member_id":"test-member","role":"viewer","key_id":"test-client"}"#
+            },
+            saveBrowserSession: { tabs, _ in
+                savedAddresses.append(contentsOf: tabs.compactMap { $0.url?.absoluteString })
+            }
+        )
+        defer { viewModel.invalidateRealmLoadsForWindowClose() }
+
+        viewModel.navigateCurrentTab(to: linkURL.absoluteString)
+        XCTAssertTrue(viewModel.inviteRedemptionInFlight)
+        viewModel.navigateCurrentTab(to: linkURL.absoluteString)
+        viewModel.openURLInNewTab(linkURL)
+
+        let deadline = ContinuousClock.now + .seconds(2)
+        while viewModel.currentTab?.url?.absoluteString != realmAddress && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(exchanges, 1)
+        XCTAssertFalse(viewModel.inviteRedemptionInFlight)
+        XCTAssertNil(viewModel.pendingInviteRedeem)
+        XCTAssertEqual(viewModel.tabs.count, 1)
+        XCTAssertEqual(viewModel.currentTab?.url?.absoluteString, realmAddress)
+        XCTAssertTrue(savedAddresses.contains(realmAddress))
+        XCTAssertTrue(savedAddresses.allSatisfy { !$0.contains("args=") })
+    }
+
+    @MainActor
     func testCrossWindowMoveStopsTheSourceRealmBinding() async throws {
         let preferences = try makePreferences()
         let source = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
