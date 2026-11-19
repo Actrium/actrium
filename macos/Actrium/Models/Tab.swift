@@ -133,6 +133,7 @@ struct Tab: Identifiable {
     /// Raw capability manifest from the verified package payload.
     var capabilityManifestJSON: String?
     var localStorageOrigin: String?
+    var localStoragePublisherIdentity: String?
 
     /// Incremented when the Native capability snapshot changes.
     var capabilityRevision: Int
@@ -177,6 +178,7 @@ struct Tab: Identifiable {
         guestEntry: String? = nil,
         capabilityManifestJSON: String? = nil,
         localStorageOrigin: String? = nil,
+        localStoragePublisherIdentity: String? = nil,
         capabilityRevision: Int = 0,
         contractName: String? = nil,
         contractVersion: Int? = nil,
@@ -203,6 +205,7 @@ struct Tab: Identifiable {
         self.guestEntry = guestEntry
         self.capabilityManifestJSON = capabilityManifestJSON
         self.localStorageOrigin = localStorageOrigin
+        self.localStoragePublisherIdentity = localStoragePublisherIdentity
         self.capabilityRevision = capabilityRevision
         self.contractName = contractName
         self.contractVersion = contractVersion

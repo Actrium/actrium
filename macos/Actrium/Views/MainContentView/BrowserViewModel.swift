@@ -1010,6 +1010,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 tabs[index].unifiedScript = nil
                 tabs[index].capabilityManifestJSON = nil
                 tabs[index].localStorageOrigin = nil
+                tabs[index].localStoragePublisherIdentity = nil
                 tabs[index].leftPanelScript = nil
                 tabs[index].rightPanelScript = nil
                 tabs[index].guestScript = nil
@@ -1076,6 +1077,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].unifiedScript = nil
             tabs[index].capabilityManifestJSON = nil
             tabs[index].localStorageOrigin = nil
+            tabs[index].localStoragePublisherIdentity = nil
             tabs[index].leftPanelScript = nil
             tabs[index].rightPanelScript = nil
             tabs[index].guestScript = nil
@@ -1442,6 +1444,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[tabIndex].localStorageOrigin = manifestInfo.storageOrigin(
                 devDirectory: isDirectory.boolValue ? resolvedURL : nil
             )
+            tabs[tabIndex].localStoragePublisherIdentity = nil
             tabs[tabIndex].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
             tabs[tabIndex].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
 
@@ -1536,6 +1539,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private static func clearRealmContent(_ tab: inout Tab) {
         tab.localStorageOrigin = nil
+        tab.localStoragePublisherIdentity = nil
         tab.reloadNonce &+= 1
         tab.appId = nil
         tab.systemTabType = nil
@@ -1724,7 +1728,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 }
 
                 let front = profile.packages.first { $0.reference == profile.frontPackage }
-                let publisher = try await realmPublisher(for: profile.packageType, verifySignature: front?.localPath != nil)
+                let publisher = try await realmPublisher(for: profile.packageType)
                 let publisherDomain = publisher.domain
                 let activePackageKeys = publisher.packageSigningKeys.filter { $0.status == "active" }
                 if let front, let localPath = front.localPath {
@@ -1771,23 +1775,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 // structural safety, per-file digests and the manifest
                 // Ed25519 signature, anchored on the publisher key the
                 // profile funnel authenticated.
-                guard let activeKey = activePackageKeys.first(where: { $0.status == "active" }),
-                      let trustedKey = Data(base64Encoded: activeKey.publicKeyBase64),
-                      trustedKey.count == 32 else {
-                    throw NSError(
-                        domain: "ActrDiscovery", code: 26,
-                        userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                            "No active publisher key is available to verify the package.",
-                            comment: "Actr publisher key missing error")])
-                }
                 let packageBytes = try Data(contentsOf: downloadedURL)
+                let trustedKey = try await PublisherPackageVerifier.verify(
+                    archive: packageBytes, profile: profile, publisher: publisher
+                )
                 let keyFingerprint = trustedKey.prefix(8).map { String(format: "%02x", $0) }.joined()
                 logger.notice("🔐 [navigateCurrentTab] actr-pack verify: archive=\(packageBytes.count)B, trusted key=\(keyFingerprint)…, profile sha256=\(profile.packageSha256.prefix(12))…")
-                _ = try ActriumCore.verifyRealmFrontPackage(
-                    archive: packageBytes,
-                    trustedPublicKey: trustedKey,
-                    profile: profile
-                )
                 let serviceType = try ActrBindings.verifyRealmFront(
                     frontArchive: packageBytes,
                     trustedPublicKey: trustedKey,
@@ -1846,6 +1839,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         permissions: manifest.permissions
                     )
                 }
+                guard let publisherIdentity = publisher.storageIdentity else {
+                    throw GuestLocalStorageError.InvalidPublisher(message: "Verified Publisher identity is missing.")
+                }
                 guard let tabIndex = currentTabIndex() else { return }
                 guard importACTRPackage(
                     from: cachedArchiveURL,
@@ -1853,6 +1849,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     presentInstanceCreation: false,
                     requireSignature: true,
                     additionalTrustedKeys: publisherKeys,
+                    publisherStorageIdentity: publisherIdentity,
                     replacingTabId: replacingTabId
                 ) != nil else { return }
                 tabs[tabIndex].url = URL(string: address)
@@ -1869,7 +1866,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
     }
 
-    private func realmPublisher(for actorType: String, verifySignature: Bool) async throws -> PublisherProfileInfo {
+    private func realmPublisher(for actorType: String) async throws -> PublisherProfileInfo {
         guard let domain = actorType.split(separator: "/").first.map(String.init),
               let url = URL(string: "https://\(domain)/.well-known/actr") else {
             throw RealmServiceError(message: "The package type does not name a Publisher domain.")
@@ -1883,10 +1880,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         guard let body = String(data: data, encoding: .utf8) else {
             throw RealmServiceError(message: "The Publisher information is not valid text.")
         }
-        if verifySignature {
-            return try RealmProfileStore.acceptPublisher(body: body, domain: domain, preferences: realmPreferences)
-        }
-        return try ActriumCore.acceptPublisherProfile(body: body, domain: domain)
+        return try await RealmProfileStore.acceptPublisher(
+            body: body, domain: domain, preferences: realmPreferences, database: .shared
+        )
     }
 
     private func loadLocalRealmFront(
@@ -1972,7 +1968,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         guard isCurrent() else { return }
 
         let servicePublisher = profile.serviceType.hasPrefix(publisher.domain + "/")
-            ? publisher : try await realmPublisher(for: profile.serviceType, verifySignature: true)
+            ? publisher : try await realmPublisher(for: profile.serviceType)
         let serviceKeys = servicePublisher.fixedArchiveVerificationKeys
         let staging = FileManager.default.temporaryDirectory
             .appendingPathComponent("realm-local-front-\(UUID().uuidString)", isDirectory: true)
@@ -2048,7 +2044,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             appId: "actrium.local-front/\(profile.realmName)/\(digest)",
             groupId: tabs[index].groupId, unifiedScript: script, guestExtractedPath: root.path,
             guestEntry: entry, capabilityManifestJSON: capabilities,
-            localStorageOrigin: manifest.storageOrigin(devDirectory: nil), contractName: manifest.contractName,
+            localStorageOrigin: manifest.storageOrigin(devDirectory: nil),
+            localStoragePublisherIdentity: publisher.storageIdentity, contractName: manifest.contractName,
             contractVersion: manifest.contractVersion, permissions: manifest.permissions,
             leftPanelDefaultVisible: manifest.leftPanelDefaultVisible,
             rightPanelDefaultVisible: manifest.rightPanelDefaultVisible, backgroundColor: manifest.themeColor
@@ -2119,6 +2116,22 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     private func presentRealmLinkError(_ error: Error) {
         let message: String
         switch error {
+        case GuestLocalStorageError.IdentityChanged:
+            message = NSLocalizedString(
+                "The Publisher's identity changed without a trusted connection to its previous identity. Saved app data has not been shared.",
+                comment: "Publisher identity change error")
+        case GuestLocalStorageError.InvalidPublisher:
+            message = NSLocalizedString(
+                "The Publisher information could not be verified. The application was not opened.",
+                comment: "Publisher verification error")
+        case GuestLocalStorageError.DatabaseFailure:
+            message = NSLocalizedString(
+                "Saved Publisher verification information could not be read or updated. Existing app data has been preserved.",
+                comment: "Publisher trust storage error")
+        case GuestStorageDatabaseError.busy:
+            message = NSLocalizedString(
+                "Storage is busy. Try opening the application again shortly.",
+                comment: "Publisher storage busy error")
         case CoreError.AuthorityDescriptorInvalid:
             message = NSLocalizedString(
                 "The authority information for this domain is invalid.",
@@ -2436,6 +2449,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         presentInstanceCreation: Bool = true,
         requireSignature: Bool = true,
         additionalTrustedKeys: [Data] = [],
+        publisherStorageIdentity: String? = nil,
         replacingTabId: UUID? = nil
     ) -> Tab? {
         let resolvedURL = fileURL.standardizedFileURL
@@ -2542,6 +2556,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     localStorageOrigin: manifestInfo.storageOrigin(
                         devDirectory: isDirectory.boolValue ? resolvedURL : nil
                     ),
+                    localStoragePublisherIdentity: publisherStorageIdentity,
                     leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                     rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                     themeColor: manifestInfo.themeColor,
@@ -3056,6 +3071,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         permissions: [String] = [],
         capabilityManifestJSON: String? = nil,
         localStorageOrigin: String? = nil,
+        localStoragePublisherIdentity: String? = nil,
         leftPanelDefaultVisible: Bool = true,
         rightPanelDefaultVisible: Bool = false,
         themeColor: String? = nil,
@@ -3087,6 +3103,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].permissions = permissions
             tabs[index].capabilityManifestJSON = capabilityManifestJSON
             tabs[index].localStorageOrigin = localStorageOrigin
+            tabs[index].localStoragePublisherIdentity = localStoragePublisherIdentity
             tabs[index].leftPanelDefaultVisible = leftPanelDefaultVisible
             tabs[index].rightPanelDefaultVisible = rightPanelDefaultVisible
             if let themeColor { tabs[index].backgroundColor = themeColor }
@@ -3118,6 +3135,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             guestEntry: guestEntry,
             capabilityManifestJSON: capabilityManifestJSON,
             localStorageOrigin: localStorageOrigin,
+            localStoragePublisherIdentity: localStoragePublisherIdentity,
             contractName: contractName,
             contractVersion: contractVersion,
             permissions: permissions,

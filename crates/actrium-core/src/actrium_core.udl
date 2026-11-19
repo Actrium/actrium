@@ -1140,6 +1140,7 @@ dictionary PublisherPackageKeyInfo {
 /// Verified Publisher Profile for a publisher domain.
 dictionary PublisherProfileInfo {
     string domain;
+    string? storage_identity;
     u64 profile_sequence;
     /// RFC 3339; past this point the profile must be re-fetched.
     string profile_expires_at;
@@ -1661,11 +1662,23 @@ enum GuestLocalStorageError {
     "InvalidValue",
     "QuotaExceeded",
     "DatabaseFailure",
+    "InvalidPublisher",
+    "IdentityChanged",
+    "MigrationRequired",
+    "MigrationConflict",
 };
 
 /// A profile database. Callers supply an origin from the authorized Host document.
 interface GuestLocalStorage {
     constructor(string path);
+    [Throws=GuestLocalStorageError]
+    PublisherProfileAcceptance accept_publisher_profile(string body, string domain, string? previous_pins_json);
+    [Throws=GuestLocalStorageError]
+    string resolve_signed_origin(string origin, string? publisher_identity, string? migration_approval);
+    [Throws=GuestLocalStorageError]
+    string? storage_migration_token(string origin, string publisher_identity);
+    [Throws=GuestLocalStorageError]
+    string keep_storage_separate(string origin, string publisher_identity);
     [Throws=GuestLocalStorageError]
     string? get_item(string origin, string key);
     [Throws=GuestLocalStorageError]

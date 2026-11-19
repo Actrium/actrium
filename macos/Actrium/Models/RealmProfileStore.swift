@@ -239,6 +239,21 @@ enum RealmProfileStore {
         }
     }
 
+    /// Keep main's verification snapshot while the shared database owns storage identity/history.
+    static func acceptPublisher(
+        body: String, domain: String, preferences: UserDefaults, database: GuestStorageDatabase
+    ) async throws -> PublisherProfileInfo {
+        let key = publisherKey(domain)
+        let saved = preferences.dictionary(forKey: key)
+        let pins = saved?["pins"] as? String ?? preferences.string(forKey: key)
+        if preferences.object(forKey: key) != nil && pins == nil {
+            throw CoreError.AuthorityDescriptorInvalid(message: "Saved Publisher trust could not be read; it was not reset.")
+        }
+        let accepted = try await database.acceptPublisherProfile(body: body, domain: domain, previousPins: pins)
+        preferences.set(["body": body, "pins": accepted.pinsJson], forKey: key)
+        return accepted.profile
+    }
+
     private static func authorityState(_ realmName: String, preferences: UserDefaults) -> [String: Any]? {
         guard let separator = realmName.firstIndex(of: "@") else { return nil }
         let domain = String(realmName[realmName.index(after: separator)...])

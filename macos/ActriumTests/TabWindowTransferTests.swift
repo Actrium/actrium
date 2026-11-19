@@ -82,7 +82,7 @@ struct TabWindowTransferTests {
             title: "Counter", appId: "example/counter@1.0.0", groupId: groupId,
             unifiedScript: "verified script", guestExtractedPath: "/verified/package",
             guestEntry: "workload/guest.js", capabilityManifestJSON: Self.manifest,
-            localStorageOrigin: origin, capabilityRevision: 3,
+            localStorageOrigin: origin, localStoragePublisherIdentity: "host-publisher-context", capabilityRevision: 3,
             contractName: "counter", contractVersion: 1,
             permissions: ["host:local-storage.getItem", "host:local-storage.setItem"], reloadNonce: 2
         )
@@ -93,6 +93,7 @@ struct TabWindowTransferTests {
     private func verifyStorage(original: Tab, moved: Tab) async throws {
         #expect(moved.id != original.id)
         #expect(moved.localStorageOrigin == original.localStorageOrigin)
+        #expect(moved.localStoragePublisherIdentity == original.localStoragePublisherIdentity)
         #expect(moved.appId == original.appId)
         #expect(moved.realmProfileSigner?.realmName == original.realmProfileSigner?.realmName)
         #expect(moved.realmProfileSigner?.keyId == original.realmProfileSigner?.keyId)

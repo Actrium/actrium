@@ -1,11 +1,11 @@
 import ActriumCore
 import ActriumIPC
+import AppKit
 import Foundation
 
 /// Binds storage to the Host's current document, before sending the renderer config.
 @MainActor
 final class RendererLocalStorage {
-    private enum ExecutionError: Error { case expiredBeforeStart }
     private struct Manifest: Decodable {
         struct Module: Decodable { let rpc: [String]? }
         let hostModules: [String: Module]
@@ -14,24 +14,45 @@ final class RendererLocalStorage {
     private struct Document {
         let id = UUID()
         let origin: String
+        let principal: String
+        let publisherIdentity: String?
         let reloadKey: Int
         let methods: Set<GuestLocalStorageCall.Operation>
     }
 
     private var documents: [UUID: Document] = [:]
-    private var database: GuestLocalStorage?
-    private let databaseQueue = DispatchQueue(label: "com.actrium.guest-local-storage", qos: .userInitiated)
-    private let pendingLimit: Int
-    private(set) var pendingOperationCount = 0
+    private let databaseAccess: GuestStorageDatabase
+    private let migrationConsent = StorageMigrationConsent()
+    var pendingOperationCount: Int { databaseAccess.pendingOperationCount }
 
     init(database: GuestLocalStorage? = nil, pendingLimit: Int = 128) {
-        self.database = database
-        self.pendingLimit = pendingLimit
+        databaseAccess = GuestStorageDatabase(database: database, pendingLimit: pendingLimit)
+    }
+
+    init(access: GuestStorageDatabase) {
+        databaseAccess = access
+    }
+
+    func resolveOrigin(config: [String: Any], window: NSWindow? = nil) async throws -> [String: Any] {
+        guard let origin = config["localStorageOrigin"] as? String,
+              let manifest = config["capabilityManifestJSON"] as? String,
+              let permissions = config["permissions"] as? [String],
+              let methods = Self.allowedMethods(manifest: manifest, permissions: permissions),
+              !methods.isEmpty else { return config }
+        var resolved = config
+        resolved["localStoragePrincipal"] = origin
+        resolved["localStorageOrigin"] = try await migrationConsent.resolve(
+            origin: origin, publisherIdentity: config["localStoragePublisherIdentity"] as? String,
+            database: databaseAccess, window: window
+        )
+        return resolved
     }
 
     func prepare(tabId: UUID, config: [String: Any]) -> [String: Any] {
         var config = config
         let origin = config.removeValue(forKey: "localStorageOrigin") as? String
+        let principal = config.removeValue(forKey: "localStoragePrincipal") as? String ?? origin
+        let publisherIdentity = config.removeValue(forKey: "localStoragePublisherIdentity") as? String
         guard let origin, let manifest = config["capabilityManifestJSON"] as? String,
               let permissions = config["permissions"] as? [String],
               let methods = Self.allowedMethods(manifest: manifest, permissions: permissions),
@@ -42,8 +63,8 @@ final class RendererLocalStorage {
 
         let reloadKey = config["reloadKey"] as? Int ?? 0
         let current = documents[tabId]
-        if current?.origin != origin || current?.reloadKey != reloadKey || current?.methods != methods {
-            documents[tabId] = Document(origin: origin, reloadKey: reloadKey, methods: methods)
+        if current?.origin != origin || current?.principal != principal || current?.publisherIdentity != publisherIdentity || current?.reloadKey != reloadKey || current?.methods != methods {
+            documents[tabId] = Document(origin: origin, principal: principal ?? origin, publisherIdentity: publisherIdentity, reloadKey: reloadKey, methods: methods)
         }
         config["localStorageDocumentId"] = documents[tabId]?.id.uuidString
         return config
@@ -70,32 +91,22 @@ final class RendererLocalStorage {
             return GuestLocalStorageReply(id: call.id, error: "Local storage access was denied.")
         }
         let now = DispatchTime.now()
-        let deadline = min(
-            call.deadlineUptimeNanoseconds,
-            (now + .seconds(GuestLocalStorageCall.timeoutSeconds)).uptimeNanoseconds
-        )
-        guard now.uptimeNanoseconds < deadline else {
-            return .expiredBeforeStart(id: call.id)
-        }
-        guard pendingOperationCount < pendingLimit else {
-            return GuestLocalStorageReply(id: call.id, error: "Too many pending local storage operations.")
-        }
-        pendingOperationCount += 1
-        // Count queued and running work until the database operation actually finishes.
-        defer { pendingOperationCount -= 1 }
+        let deadline = min(call.deadlineUptimeNanoseconds, (now + .seconds(GuestLocalStorageCall.timeoutSeconds)).uptimeNanoseconds)
+        guard now.uptimeNanoseconds < deadline else { return .expiredBeforeStart(id: call.id) }
         do {
             // Accepted database operations may finish after revocation.
             // Reject subsequent calls and prevent replies from reaching a replaced document.
-            let value = try await execute(call, origin: document.origin, deadline: deadline)
+            let value = try await execute(call, origin: document.origin, principal: document.principal, publisherIdentity: document.publisherIdentity, deadline: deadline)
             guard documents[tabId]?.id == document.id else {
-                return GuestLocalStorageReply(
-                    id: call.id, error: "The local storage document changed.",
-                    errorCode: call.operation == .getItem ? nil : .outcomeUnknown
-                )
+                return GuestLocalStorageReply(id: call.id, error: "The local storage document changed.", errorCode: call.operation == .getItem ? nil : .outcomeUnknown)
             }
             return GuestLocalStorageReply(id: call.id, value: value)
-        } catch ExecutionError.expiredBeforeStart {
+        } catch GuestStorageDatabaseError.expiredBeforeStart {
             return .expiredBeforeStart(id: call.id)
+        } catch GuestStorageDatabaseError.busy {
+            return GuestLocalStorageReply(id: call.id, error: "Too many pending local storage operations.")
+        } catch GuestLocalStorageError.InvalidPublisher, GuestLocalStorageError.IdentityChanged {
+            return GuestLocalStorageReply(id: call.id, error: "Local storage access was denied.")
         } catch GuestLocalStorageError.InvalidKey(let message),
                 GuestLocalStorageError.InvalidValue(let message),
                 GuestLocalStorageError.QuotaExceeded(let message) {
@@ -106,17 +117,14 @@ final class RendererLocalStorage {
         }
     }
 
-    private func execute(_ call: GuestLocalStorageCall, origin: String, deadline: UInt64) async throws -> String? {
-        let store = try open()
-        return try await withCheckedThrowingContinuation { continuation in
-            databaseQueue.async {
-                continuation.resume(with: Result {
-                    guard DispatchTime.now().uptimeNanoseconds < deadline else {
-                        throw ExecutionError.expiredBeforeStart
-                    }
-                    return try Self.executeSynchronously(call, origin: origin, store: store)
-                })
+    private func execute(_ call: GuestLocalStorageCall, origin: String, principal: String, publisherIdentity: String?, deadline: UInt64) async throws -> String? {
+        try await databaseAccess.run(deadline: deadline) { store in
+            let current = try store.resolveSignedOrigin(origin: principal, publisherIdentity: publisherIdentity, migrationApproval: nil)
+            guard current == origin else {
+                throw GuestLocalStorageError.InvalidPublisher(message: "The storage identity changed.")
             }
+            guard DispatchTime.now().uptimeNanoseconds < deadline else { throw GuestStorageDatabaseError.expiredBeforeStart }
+            return try Self.executeSynchronously(call, origin: origin, store: store)
         }
     }
 
@@ -135,18 +143,6 @@ final class RendererLocalStorage {
             try store.removeItem(origin: origin, key: call.key)
         }
         return nil
-    }
-
-    private func open() throws -> GuestLocalStorage {
-        if let database { return database }
-        let support = try FileManager.default.url(
-            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
-        )
-        let folder = DatabaseManager.appDataDirectory(in: support)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let store = GuestLocalStorage(path: folder.appendingPathComponent("guest-local-storage.sqlite").path)
-        database = store
-        return store
     }
 
     private static func allowedMethods(

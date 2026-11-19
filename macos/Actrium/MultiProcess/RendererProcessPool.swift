@@ -71,7 +71,7 @@ struct RendererProcessPoolSnapshot: Sendable, Equatable {
 /// host multiple Tab roots while keeping different fingerprints process-isolated.
 @MainActor
 final class RendererProcessPool: ObservableObject {
-    static let shared = RendererProcessPool(localStorage: RendererLocalStorage())
+    static let shared = RendererProcessPool(localStorage: RendererLocalStorage(access: .shared))
 
     nonisolated static let systemFingerprintPrefix = "system."
 
@@ -284,6 +284,12 @@ final class RendererProcessPool: ObservableObject {
             throw RendererProcessPoolError.rendererExited("Tab has no allocated renderer")
         }
         try await waitUntilReady(worker)
+        try Task.checkCancellation()
+        guard self.worker(for: tabId) === worker else {
+            throw RendererProcessPoolError.rendererExited("Tab changed renderer")
+        }
+        let window = fileImportWindow?(tabId, config["reloadKey"] as? Int ?? 0)
+        let config = try await localStorage.resolveOrigin(config: config, window: window)
         try Task.checkCancellation()
         guard self.worker(for: tabId) === worker else {
             throw RendererProcessPoolError.rendererExited("Tab changed renderer")
