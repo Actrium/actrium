@@ -15,3 +15,8 @@ xcrun swiftc -swift-version 5 -framework AppKit -framework QuartzCore \
   "${PROJECT_ROOT}/Tests/RendererLayerHostingRegression.swift" \
   -o "${TEST_DIR}/renderer-layer-hosting"
 "${TEST_DIR}/renderer-layer-hosting"
+xcrun swiftc -swift-version 5 -framework AppKit \
+  "${PROJECT_ROOT}/ActriumViewService/RendererMouseTracking.swift" \
+  "${PROJECT_ROOT}/Tests/RendererMouseTrackingRegression.swift" \
+  -o "${TEST_DIR}/renderer-mouse-tracking"
+"${TEST_DIR}/renderer-mouse-tracking"

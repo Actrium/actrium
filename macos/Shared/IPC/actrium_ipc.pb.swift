@@ -359,6 +359,7 @@ public struct Actrium_Ipc_InputEvent: Sendable {
     case scroll // = 5
     case keyDown // = 6
     case keyUp // = 7
+    case mouseDragged // = 8
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -375,6 +376,7 @@ public struct Actrium_Ipc_InputEvent: Sendable {
       case 5: self = .scroll
       case 6: self = .keyDown
       case 7: self = .keyUp
+      case 8: self = .mouseDragged
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -389,6 +391,7 @@ public struct Actrium_Ipc_InputEvent: Sendable {
       case .scroll: return 5
       case .keyDown: return 6
       case .keyUp: return 7
+      case .mouseDragged: return 8
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -403,6 +406,7 @@ public struct Actrium_Ipc_InputEvent: Sendable {
       .scroll,
       .keyDown,
       .keyUp,
+      .mouseDragged,
     ]
 
   }
@@ -1695,7 +1699,7 @@ extension Actrium_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageI
 }
 
 extension Actrium_Ipc_InputEvent.EventType: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MOUSE_MOVE\0\u{1}MOUSE_DOWN\0\u{1}MOUSE_UP\0\u{1}MOUSE_ENTERED\0\u{1}MOUSE_EXITED\0\u{1}SCROLL\0\u{1}KEY_DOWN\0\u{1}KEY_UP\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MOUSE_MOVE\0\u{1}MOUSE_DOWN\0\u{1}MOUSE_UP\0\u{1}MOUSE_ENTERED\0\u{1}MOUSE_EXITED\0\u{1}SCROLL\0\u{1}KEY_DOWN\0\u{1}KEY_UP\0\u{1}MOUSE_DRAGGED\0")
 }
 
 extension Actrium_Ipc_ExecuteJSRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

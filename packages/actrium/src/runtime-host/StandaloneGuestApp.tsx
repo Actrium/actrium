@@ -34,6 +34,7 @@ import {
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
 import { Supramark } from './guest-markdown-renderer';
+import { DocumentSelectionSurface } from './DocumentSelectionSurface';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
 import { callHttpService, callNativeService } from './service-call';
 import { bindV1HostModules, verifyV1RuntimeGuest } from './v1-guest';
@@ -122,7 +123,7 @@ const logToNative = (message: string) => {
  * RN's Clipboard JS wrapper is deprecated; call the native module directly.
  * RCTClipboard is part of react-native-macos and exports `setString`.
  */
-const writeClipboardText = async (text: string): Promise<void> => {
+const setClipboardText = (text: string): void => {
   const clipboard = NativeModules.Clipboard as
     | { setString?: (value: string) => void }
     | undefined;
@@ -131,6 +132,8 @@ const writeClipboardText = async (text: string): Promise<void> => {
   }
   clipboard.setString(text);
 };
+
+const writeClipboardText = async (text: string): Promise<void> => setClipboardText(text);
 
 type CapabilityPermissionBridge = {
   requestGrant?: (tabId: string, capability: string) => void;
@@ -484,8 +487,8 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     );
   }
 
-  return (
-    <NativeView collapsable={false} style={{ flex: 1 }}>
+  const body = (
+    <>
       {speechActive && (
         <NativeView style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 8 }}>
           <NativeText accessibilityLiveRegion='polite'>Speech recognition in progress</NativeText>
@@ -504,6 +507,11 @@ export const StandaloneGuestApp: React.FC<Props> = ({
           <NativeActivityIndicator color='#60a5fa' />
         </NativeView>
       )}
-    </NativeView>
+    </>
   );
+  return Supramark ? (
+    <DocumentSelectionSurface key={tab.id} tabId={tab.id} writeText={setClipboardText}>
+      {body}
+    </DocumentSelectionSurface>
+  ) : <NativeView collapsable={false} style={{ flex: 1 }}>{body}</NativeView>;
 };

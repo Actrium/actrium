@@ -29,6 +29,10 @@ void RCTHostCallFunction(id host, NSString *module, NSString *method, NSArray *a
 
 // MARK: - Capability Permission
 
+@interface RCT_EXTERN_MODULE(DocumentSelection, NSObject)
+RCT_EXTERN_METHOD(setAvailable:(NSString *)tabId active:(BOOL)active)
+@end
+
 @interface RCT_EXTERN_MODULE(RealmService, NSObject)
 
 RCT_EXTERN_METHOD(call:(NSString *)tabId

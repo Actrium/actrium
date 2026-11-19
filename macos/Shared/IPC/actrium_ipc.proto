@@ -96,6 +96,7 @@ message InputEvent {
         SCROLL = 5;
         KEY_DOWN = 6;
         KEY_UP = 7;
+        MOUSE_DRAGGED = 8;
     }
 }
 
