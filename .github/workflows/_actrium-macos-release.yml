@@ -134,16 +134,22 @@ jobs:
           fi
           git push origin "refs/tags/$TAG:refs/tags/$TAG"
           notes="$RUNNER_TEMP/release-notes.md"
+          asset="macos/dist/Actrium_${TAG}_macos-arm64_unsigned.dmg"
           if release=$(gh release view "$TAG" --json isPrerelease,isDraft,body); then
-            jq -e '.isPrerelease and (.isDraft | not)' <<< "$release" >/dev/null
+            jq -e '.isPrerelease and (if .isDraft then (.body // "" | contains("<!-- actrium-macos-build:start -->")) else true end)' <<< "$release" >/dev/null
+            draft=$(jq -r '.isDraft' <<< "$release")
             printf '%s' "$release" | python3 ../automation/.github/scripts/macos_snapshot_notes.py "$SOURCE_SHA" > "$notes"
           else
+            draft=true
             printf '{"body":""}' | python3 ../automation/.github/scripts/macos_snapshot_notes.py "$SOURCE_SHA" > "$notes"
-            gh release create "$TAG" --verify-tag --prerelease --latest=false --title "$TAG" --notes-file "$notes"
+            gh release create "$TAG" --verify-tag --draft --prerelease --latest=false --title "$TAG" --notes-file "$notes"
           fi
-          asset="macos/dist/Actrium_${TAG}_macos-arm64_unsigned.dmg"
           gh release upload "$TAG" "$asset" "$asset.sha256" --clobber
-          gh release edit "$TAG" --latest=false --notes-file "$notes"
+          edit_args=(--latest=false --notes-file "$notes")
+          if [[ "$draft" == true ]]; then
+            edit_args+=(--draft=false)
+          fi
+          gh release edit "$TAG" "${edit_args[@]}"
           gh release view "$TAG" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Attach assets to the official Release

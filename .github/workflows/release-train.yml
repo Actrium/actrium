@@ -891,6 +891,8 @@ jobs:
           echo "value=${ver}" >> "$GITHUB_OUTPUT"
 
       - name: Run report stage
+        env:
+          MACOS_RELEASE_JOB_RESULT: ${{ needs.context.outputs.target_branch == 'main' && needs.context.outputs.pre_release == 'false' && needs.publish-actrium-macos.result || '' }}
         run: |
           args=(--stage report --branch "${{ needs.context.outputs.target_branch }}" --version "${{ needs.context.outputs.version }}")
           if [[ "${{ needs.context.outputs.skip_python }}" == "true" ]]; then

@@ -80,6 +80,8 @@ Each new commit gets the next numeric suffix for that version. Rebuilding a
 previously tagged commit reuses its tag and replaces only its two assets.
 Snapshots are prereleases and never marked Latest. On failure, rerun all jobs.
 Build metadata is updated in a marked block in the snapshot release notes.
+New snapshots stay in draft until both assets are uploaded. Rerunning a failed
+upload resumes the snapshot draft.
 
 For stable releases from `main`, Release Train automatically builds the same
 unsigned DMG from the release tag and attaches it and its SHA-256 file to the
