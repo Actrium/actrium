@@ -298,21 +298,31 @@ service Other { rpc Call(Request) returns (Request); }
 
     #[test]
     fn native_exports_with_conflicting_published_basenames_are_rejected() {
-        for first_path in ["contracts/first/echo.proto", "contracts/first/Echo.proto"] {
+        for [first, second] in [
+            ["echo.proto", "echo.proto"],
+            ["echo.proto", "Echo.proto"],
+            ["echo.proto", "ECHO.proto"],
+            ["echo.proto", "echo.proto.proto"],
+            ["écho.proto", "e\u{301}cho.proto"],
+            ["Écho.proto.proto", "e\u{301}cho.proto"],
+            ["Σ.proto", "ς.proto"],
+            ["Straße.proto", "STRASSE.proto"],
+        ] {
+            let first_path = format!("contracts/first/{first}");
+            let second_path = format!("contracts/second/{second}");
             let (bytes, manifest) = signed_fixture(
                 NATIVE,
                 &[
-                    (first_path, CONTRACT.as_bytes()),
-                    ("contracts/second/echo.proto", OTHER_CONTRACT.as_bytes()),
+                    (&first_path, CONTRACT.as_bytes()),
+                    (&second_path, OTHER_CONTRACT.as_bytes()),
                 ],
                 |_| {},
             );
             let error = calculate_v2_service_spec(&bytes, &manifest, LIMIT).unwrap_err();
             assert!(matches!(&error, HyperError::InvalidManifest(_)));
-            assert!(
-                error.to_string().contains("duplicate published Proto name"),
-                "{error}"
-            );
+            let error = error.to_string();
+            assert!(error.contains(second), "{error}");
+            assert!(error.contains("duplicate published Proto name"), "{error}");
         }
     }
 

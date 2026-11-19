@@ -24,6 +24,8 @@ actr-protocol.workspace = true
 proto-fingerprint.workspace = true
 protobuf-parse = "3.7"
 tempfile.workspace = true
+unicase = "2"
+unicode-normalization = "0.1"
 
 # Serialization support
 serde = { version = "1.0", features = ["derive"] }
