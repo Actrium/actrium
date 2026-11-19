@@ -58,6 +58,8 @@ namespace actrium_core {
     RealmProfileInfo accept_realm_profile(string body, string realm_name, string signing_keys_json);
     [Throws=CoreError]
     RealmProfileAcceptance accept_realm_profile_successor(string body, string realm_name, string signing_keys_json, sequence<string> previous_documents);
+    [Throws=CoreError]
+    RealmProfileAcceptance? recover_realm_profile_baseline(string realm_name, string signing_keys_json, sequence<string> previous_documents);
 
     /// Validate the descriptor served by a publisher domain and verify its
     /// inline Publisher Profile; extract the package signing keys that
@@ -1114,6 +1116,7 @@ dictionary RealmAuthorityAcceptance {
 
 dictionary RealmProfileAcceptance {
     RealmProfileInfo? profile;
+    string body;
     string signing_key_id;
     sequence<string> baseline_documents;
 };

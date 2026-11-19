@@ -1126,6 +1126,7 @@ pub fn accept_realm_profile(
 pub struct RealmProfileAcceptance {
     /// A valid retired Profile has no package selection to load.
     pub profile: Option<RealmProfileInfo>,
+    pub body: String,
     pub signing_key_id: String,
     /// The newest accepted document for each still-trusted signer.
     pub baseline_documents: Vec<String>,
@@ -1143,14 +1144,53 @@ pub fn accept_realm_profile_successor(
     let invalid = |error: serde_json::Error| CoreError::RealmProfileInvalid(error.to_string());
     let keys: RealmSigningKeys = serde_json::from_str(&signing_keys_json).map_err(invalid)?;
     let profile = RealmProfile::verify(body.as_bytes(), &realm_name, &keys)?;
-    let mut verified = std::collections::BTreeMap::<String, (RealmProfile, String)>::new();
+    let mut verified = trusted_realm_baselines(previous_documents, &realm_name, &keys)?;
+    if let Some((previous, _)) = verified.values().max_by_key(|(doc, _)| doc.sequence) {
+        previous.check_successor(&profile)?;
+    }
+    verified.insert(
+        profile.signature.key_id.clone(),
+        (profile.clone(), body.clone()),
+    );
+    realm_profile_acceptance(&profile, body, verified)
+}
+
+/// Reconcile cached Profiles immediately after a pinned authority update.
+/// A revoked signer is discarded even when no replacement Profile is available.
+pub fn recover_realm_profile_baseline(
+    realm_name: String,
+    signing_keys_json: String,
+    previous_documents: Vec<String>,
+) -> Result<Option<RealmProfileAcceptance>, CoreError> {
+    let keys: RealmSigningKeys = serde_json::from_str(&signing_keys_json)
+        .map_err(|error| CoreError::RealmProfileInvalid(error.to_string()))?;
+    let verified = trusted_realm_baselines(previous_documents, &realm_name, &keys)?;
+    let Some((profile, body)) = verified
+        .values()
+        .max_by_key(|(doc, _)| doc.sequence)
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    realm_profile_acceptance(&profile, body, verified).map(Some)
+}
+
+type RealmBaselines = std::collections::BTreeMap<String, (RealmProfile, String)>;
+
+fn trusted_realm_baselines(
+    previous_documents: Vec<String>,
+    realm_name: &str,
+    keys: &RealmSigningKeys,
+) -> Result<RealmBaselines, CoreError> {
+    let invalid = |error: serde_json::Error| CoreError::RealmProfileInvalid(error.to_string());
+    let mut verified = RealmBaselines::new();
     for document in previous_documents {
         let value = actr_protocol::signed_json::parse(document.as_bytes()).map_err(invalid)?;
         let signer = value["signature"]["key_id"]
             .as_str()
             .ok_or_else(|| CoreError::RealmProfileInvalid("missing saved Profile signer".into()))?;
         if keys.keys.iter().any(|key| key.id == signer) {
-            let accepted = RealmProfile::verify(document.as_bytes(), &realm_name, &keys)?;
+            let accepted = RealmProfile::verify(document.as_bytes(), realm_name, keys)?;
             if verified
                 .get(signer)
                 .is_none_or(|(saved, _)| accepted.sequence > saved.sequence)
@@ -1159,17 +1199,21 @@ pub fn accept_realm_profile_successor(
             }
         }
     }
-    if let Some((previous, _)) = verified.values().max_by_key(|(doc, _)| doc.sequence) {
-        previous.check_successor(&profile)?;
-    }
+    Ok(verified)
+}
+
+fn realm_profile_acceptance(
+    profile: &RealmProfile,
+    body: String,
+    verified: RealmBaselines,
+) -> Result<RealmProfileAcceptance, CoreError> {
     let info = (profile.realm.status == RealmStatus::Active)
-        .then(|| realm_profile_info(&profile))
+        .then(|| realm_profile_info(profile))
         .transpose()?;
-    let signing_key_id = profile.signature.key_id.clone();
-    verified.insert(signing_key_id.clone(), (profile, body));
     Ok(RealmProfileAcceptance {
         profile: info,
-        signing_key_id,
+        body,
+        signing_key_id: profile.signature.key_id.clone(),
         baseline_documents: verified
             .into_values()
             .map(|(_, document)| document)

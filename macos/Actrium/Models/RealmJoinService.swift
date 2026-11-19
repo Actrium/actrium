@@ -26,11 +26,16 @@ enum RealmJoinService {
             guard let text = String(data: body, encoding: .utf8) else {
                 throw RealmJoinService.joinError("The Realm Profile is not valid text.")
             }
-            accepted = try RealmProfileStore.acceptRealm(
+            let accepted = try RealmProfileStore.acceptRealm(
                 body: text, realmName: realmName, signingKeysJSON: signingKeysJSON, preferences: preferences
             )
+            try self.init(body: Data(text.utf8), accepted: accepted)
+        }
+
+        init(body: Data, accepted: RealmProfileStore.AcceptedRealm) throws {
+            self.accepted = accepted
             // Read the policy from the same bytes verified by the core.
-            isOpen = try JSONDecoder().decode(AdmissionPolicy.self, from: Data(text.utf8)).policy.membership == "open"
+            isOpen = try JSONDecoder().decode(AdmissionPolicy.self, from: body).policy.membership == "open"
         }
     }
 

@@ -94,6 +94,10 @@ final class RealmAdmissionTests: XCTestCase {
 
         let current = try acceptAuthority(updated, preferences: preferences)
         XCTAssertEqual(current.signingKeys.map(\.id), ["remaining"])
+        XCTAssertEqual(
+            try RealmProfileStore.fallbackRealm(realmName, preferences: preferences)?.accepted.info.sequence,
+            4
+        )
         XCTAssertThrowsError(try acceptAuthority(initial, preferences: preferences))
         // A Profile fetched against the earlier descriptor cannot reuse its revoked signer.
         XCTAssertThrowsError(try accept((retired.0, firstKeys.signingKeysJson), preferences: preferences))
@@ -111,6 +115,71 @@ final class RealmAdmissionTests: XCTestCase {
         let migrated = try acceptAuthority(updated, preferences: legacy)
         XCTAssertEqual(
             try accept((rollback.0, migrated.signingKeysJson), preferences: legacy).info.sequence,
+            3
+        )
+    }
+
+    @MainActor
+    func testFailedProfileFetchAfterRevocationStopsRunningFrontsAndUsesFallback() async throws {
+        let preferences = try makePreferences()
+        let removed = Curve25519.Signing.PrivateKey()
+        let remaining = Curve25519.Signing.PrivateKey()
+        let initial = try authorityDescriptor(
+            sequence: 1, signer: removed, signerId: "removed",
+            keys: ["removed": removed, "remaining": remaining]
+        )
+        let updated = try authorityDescriptor(
+            sequence: 2, signer: remaining, signerId: "remaining", keys: ["remaining": remaining]
+        )
+        let authority = try RealmProfileStore.acceptAuthority(
+            body: initial, domain: "realm.example", realmName: realmName, preferences: preferences
+        )
+        let running = try profile(membership: "open", sequence: 2, signer: removed, keyId: "removed")
+        _ = try accept((running.0, authority.signingKeysJson), preferences: preferences)
+        let fallback = try profile(membership: "invite-only", sequence: 3, signer: remaining, keyId: "remaining")
+        _ = try accept((fallback.0, authority.signingKeysJson), preferences: preferences)
+
+        let otherWindow = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
+        let trustedWindow = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
+        var profileFetchFailed = false
+        let refreshingWindow = BrowserViewModel(
+            realmPreferences: preferences,
+            fetchRealmDocument: { url, _ in
+                if url.path == "/.well-known/actr" { return Data(updated.utf8) }
+                XCTAssertEqual(url.path, "/realm/echo")
+                XCTAssertNil(otherWindow.currentTab?.guestScript, "The other window must stop before the Profile fetch")
+                XCTAssertEqual(trustedWindow.currentTab?.guestScript, "installed Front")
+                profileFetchFailed = true
+                throw URLError(.resourceUnavailable)
+            },
+            saveBrowserSession: { _, _ in }
+        )
+        let link = try XCTUnwrap(URL(string: "actr://realm.example/echo"))
+        for (window, signer) in [(refreshingWindow, "removed"), (otherWindow, "removed"), (trustedWindow, "remaining")] {
+            window.tabs[0].url = link
+            window.tabs[0].systemTabType = nil
+            window.tabs[0].appId = "echo-front"
+            window.tabs[0].guestScript = "installed Front"
+            window.tabs[0].serviceCallUrl = "actr://realm.example/service"
+            window.tabs[0].realmProfileSigner = (realmName, signer)
+        }
+
+        refreshingWindow.reloadCurrentTab()
+        let deadline = ContinuousClock.now + .seconds(2)
+        while refreshingWindow.pendingInviteRedeem == nil && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(profileFetchFailed)
+        XCTAssertEqual(refreshingWindow.pendingInviteRedeem?.uri, link.absoluteString)
+        for window in [refreshingWindow, otherWindow] {
+            XCTAssertNil(window.currentTab?.appId)
+            XCTAssertNil(window.currentTab?.guestScript)
+            XCTAssertNil(window.currentTab?.serviceCallUrl)
+            XCTAssertNil(window.currentTab?.realmProfileSigner)
+        }
+        XCTAssertEqual(trustedWindow.currentTab?.realmProfileSigner?.keyId, "remaining")
+        XCTAssertEqual(
+            try RealmProfileStore.fallbackRealm(realmName, preferences: preferences)?.accepted.info.sequence,
             3
         )
     }

@@ -5564,13 +5564,15 @@ public func FfiConverterTypeRealmPackageInfo_lower(_ value: RealmPackageInfo) ->
 
 public struct RealmProfileAcceptance {
     public var profile: RealmProfileInfo?
+    public var body: String
     public var signingKeyId: String
     public var baselineDocuments: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(profile: RealmProfileInfo?, signingKeyId: String, baselineDocuments: [String]) {
+    public init(profile: RealmProfileInfo?, body: String, signingKeyId: String, baselineDocuments: [String]) {
         self.profile = profile
+        self.body = body
         self.signingKeyId = signingKeyId
         self.baselineDocuments = baselineDocuments
     }
@@ -5586,6 +5588,9 @@ extension RealmProfileAcceptance: Equatable, Hashable {
         if lhs.profile != rhs.profile {
             return false
         }
+        if lhs.body != rhs.body {
+            return false
+        }
         if lhs.signingKeyId != rhs.signingKeyId {
             return false
         }
@@ -5597,6 +5602,7 @@ extension RealmProfileAcceptance: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(profile)
+        hasher.combine(body)
         hasher.combine(signingKeyId)
         hasher.combine(baselineDocuments)
     }
@@ -5612,6 +5618,7 @@ public struct FfiConverterTypeRealmProfileAcceptance: FfiConverterRustBuffer {
         return
             try RealmProfileAcceptance(
                 profile: FfiConverterOptionTypeRealmProfileInfo.read(from: &buf),
+                body: FfiConverterString.read(from: &buf),
                 signingKeyId: FfiConverterString.read(from: &buf),
                 baselineDocuments: FfiConverterSequenceString.read(from: &buf)
         )
@@ -5619,6 +5626,7 @@ public struct FfiConverterTypeRealmProfileAcceptance: FfiConverterRustBuffer {
 
     public static func write(_ value: RealmProfileAcceptance, into buf: inout [UInt8]) {
         FfiConverterOptionTypeRealmProfileInfo.write(value.profile, into: &buf)
+        FfiConverterString.write(value.body, into: &buf)
         FfiConverterString.write(value.signingKeyId, into: &buf)
         FfiConverterSequenceString.write(value.baselineDocuments, into: &buf)
     }
@@ -7930,6 +7938,30 @@ fileprivate struct FfiConverterOptionTypePackageIntegrityPlanInfo: FfiConverterR
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypePackageIntegrityPlanInfo.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRealmProfileAcceptance: FfiConverterRustBuffer {
+    typealias SwiftType = RealmProfileAcceptance?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRealmProfileAcceptance.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRealmProfileAcceptance.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -10410,6 +10442,15 @@ public func postProcessZhAsrSegments(text: String, segments: [AsrSegmentInfo]) -
     )
 })
 }
+public func recoverRealmProfileBaseline(realmName: String, signingKeysJson: String, previousDocuments: [String])throws  -> RealmProfileAcceptance?  {
+    return try  FfiConverterOptionTypeRealmProfileAcceptance.lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actrium_core_fn_func_recover_realm_profile_baseline(
+        FfiConverterString.lower(realmName),
+        FfiConverterString.lower(signingKeysJson),
+        FfiConverterSequenceString.lower(previousDocuments),$0
+    )
+})
+}
 /**
  * Return a normalized relative path from `base_dir` to `absolute_path`.
  */
@@ -11565,6 +11606,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_func_post_process_zh_asr_segments() != 19640) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_func_recover_realm_profile_baseline() != 29223) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_func_relative_path_from() != 43173) {

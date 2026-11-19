@@ -5,6 +5,8 @@ import Foundation
 @MainActor
 enum RealmProfileStore {
     static let didRetire = Notification.Name("ActriumRealmDidRetire")
+    static let didUpdateAuthorityKeys = Notification.Name("ActriumRealmAuthorityKeysUpdated")
+    private static let realmKeyPrefix = "actr.acceptedRealmProfile."
 
     struct AcceptedRealm {
         let info: RealmProfileInfo
@@ -21,11 +23,20 @@ enum RealmProfileStore {
             body: body, domain: domain, previousPinsJson: previous?["pins"] as? String,
             legacySigningKeysJson: legacy
         )
+        let keyIds = accepted.descriptor.signingKeys.map(\.id)
         preferences.set([
             "pins": accepted.pinsJson,
             "signingKeys": accepted.descriptor.signingKeysJson,
-            "signingKeyIds": accepted.descriptor.signingKeys.map(\.id)
+            "signingKeyIds": keyIds
         ], forKey: key)
+        let previousIds = previous?["signingKeyIds"] as? [String]
+        if previousIds == nil || (previousIds ?? []).contains(where: { !keyIds.contains($0) }) {
+            NotificationCenter.default.post(
+                name: didUpdateAuthorityKeys, object: preferences,
+                userInfo: ["domain": domain, "signingKeyIds": keyIds]
+            )
+            reconcileRevokedSigners(domain: domain, authority: accepted.descriptor, preferences: preferences)
+        }
         return accepted.descriptor
     }
 
@@ -33,28 +44,80 @@ enum RealmProfileStore {
         body: String, realmName: String, signingKeysJSON: String, preferences: UserDefaults
     ) throws -> AcceptedRealm {
         let key = realmKey(realmName)
-        let documents = try preferences.dictionary(forKey: key).map { saved -> [String] in
-            if let documents = saved["documents"] as? [String] { return documents }
-            if let legacy = saved["body"] as? String { return [legacy] }
-            throw CoreError.RealmProfileInvalid(message: "The accepted Realm Profile could not be read.")
-        } ?? []
+        let documents = try preferences.dictionary(forKey: key).map(cachedDocuments) ?? []
         // Authority discovery can advance in another Tab while this Profile is being fetched.
         let authority = authorityState(realmName, preferences: preferences)
         let currentKeys = authority?["signingKeys"] as? String ?? signingKeysJSON
         let acceptance = try ActriumCore.acceptRealmProfileSuccessor(
             body: body, realmName: realmName, signingKeysJson: currentKeys, previousDocuments: documents
         )
-        var saved: [String: Any] = ["documents": acceptance.baselineDocuments, "signingKeys": currentKeys]
-        if let profile = acceptance.profile {
-            saved["sequence"] = String(profile.sequence)
-        }
-        preferences.set(saved, forKey: key)
+        save(acceptance, signingKeysJSON: currentKeys, key: key, fallback: false, preferences: preferences)
 
         guard let active = acceptance.profile else {
             NotificationCenter.default.post(name: didRetire, object: preferences, userInfo: ["realm": realmName])
             throw CoreError.RealmRetired(message: realmName)
         }
         return AcceptedRealm(info: active, signingKeyId: acceptance.signingKeyId)
+    }
+
+    static func fallbackRealm(
+        _ realmName: String, preferences: UserDefaults
+    ) throws -> (body: Data, accepted: AcceptedRealm)? {
+        guard let saved = preferences.dictionary(forKey: realmKey(realmName)),
+              saved["authorityFallback"] as? Bool == true,
+              let keys = authorityState(realmName, preferences: preferences)?["signingKeys"] as? String,
+              let recovered = try ActriumCore.recoverRealmProfileBaseline(
+                  realmName: realmName, signingKeysJson: keys, previousDocuments: cachedDocuments(saved)
+              ) else { return nil }
+        guard let active = recovered.profile else { throw CoreError.RealmRetired(message: realmName) }
+        return (Data(recovered.body.utf8), AcceptedRealm(info: active, signingKeyId: recovered.signingKeyId))
+    }
+
+    private static func reconcileRevokedSigners(
+        domain: String, authority: AuthorityDiscoveryInfo, preferences: UserDefaults
+    ) {
+        let suffix = "@\(domain)"
+        let keys = authority.signingKeysJson
+        for key in preferences.dictionaryRepresentation().keys where key.hasPrefix(realmKeyPrefix) && key.hasSuffix(suffix) {
+            guard let saved = preferences.dictionary(forKey: key) else { continue }
+            let realmName = String(key.dropFirst(realmKeyPrefix.count))
+            do {
+                let documents = try cachedDocuments(saved)
+                guard let recovered = try ActriumCore.recoverRealmProfileBaseline(
+                    realmName: realmName, signingKeysJson: keys, previousDocuments: documents
+                ) else {
+                    preferences.removeObject(forKey: key)
+                    continue
+                }
+                // A window can still be running an older accepted Profile.
+                let signerRemoved = recovered.baselineDocuments.count < documents.count
+                let fallback = signerRemoved || saved["authorityFallback"] as? Bool == true
+                save(recovered, signingKeysJSON: keys, key: key, fallback: fallback, preferences: preferences)
+            } catch {
+                AppLogger.viewModel.warning("Could not reconcile the cached Realm Profile for \(realmName)")
+            }
+        }
+    }
+
+    private static func save(
+        _ acceptance: RealmProfileAcceptance, signingKeysJSON: String, key: String,
+        fallback: Bool, preferences: UserDefaults
+    ) {
+        var saved: [String: Any] = [
+            "documents": acceptance.baselineDocuments,
+            "signingKeys": signingKeysJSON,
+            "authorityFallback": fallback
+        ]
+        if let profile = acceptance.profile {
+            saved["sequence"] = String(profile.sequence)
+        }
+        preferences.set(saved, forKey: key)
+    }
+
+    private static func cachedDocuments(_ saved: [String: Any]) throws -> [String] {
+        if let documents = saved["documents"] as? [String] { return documents }
+        if let legacy = saved["body"] as? String { return [legacy] }
+        throw CoreError.RealmProfileInvalid(message: "The accepted Realm Profile could not be read.")
     }
 
     static func isCurrent(_ accepted: AcceptedRealm, preferences: UserDefaults) -> Bool {
@@ -113,7 +176,7 @@ enum RealmProfileStore {
     }
 
     private static func realmKey(_ realmName: String) -> String {
-        "actr.acceptedRealmProfile.\(realmName)"
+        realmKeyPrefix + realmName
     }
 }
 

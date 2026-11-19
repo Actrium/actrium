@@ -86,6 +86,8 @@ struct Tab: Identifiable {
     var title: String
     var url: URL?
     var appId: String?
+    /// The signed Realm Profile authorizing the installed runtime.
+    var realmProfileSigner: (realmName: String, keyId: String)?
     /// Per-tab Service actor endpoint supplied after Attach.
     var serviceCallUrl: String?
     /// Host-designated permission to use the legacy ACTR_CALL bridge.

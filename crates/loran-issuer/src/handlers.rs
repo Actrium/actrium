@@ -350,9 +350,10 @@ async fn check_realm_registration<'e>(
     request: &RegisterRequest,
     signer: &Signer,
 ) -> Result<(), ErrorResponse> {
-    let Some(selection) = realm_package_selection(db, &request.realm).await? else {
+    let Some(document) = realm_profile_document(db, &request.realm).await? else {
         return Ok(());
     };
+    let selection = realm_package_selection(document)?;
     let invalid = |message: String| membership_error("realm_unavailable", message);
     let (service, front) = selection.selected().map_err(invalid)?;
     let service = service.actr_type().map_err(invalid)?;
@@ -368,40 +369,67 @@ async fn check_realm_registration<'e>(
     check_front_manifest_pin(front, request)
 }
 
-async fn realm_package_selection<'e>(
+async fn realm_profile_document<'e>(
     db: impl sqlx::SqliteExecutor<'e>,
     realm: &str,
-) -> Result<Option<actr_protocol::realm_profile::RealmPackageSelection>, ErrorResponse> {
+) -> Result<Option<serde_json::Value>, ErrorResponse> {
     let document: Option<String> =
         sqlx::query_scalar("SELECT document FROM realm_profile WHERE realm = ?")
             .bind(realm)
             .fetch_optional(db)
             .await
             .map_err(|error| membership_error("unavailable", error))?;
-    // Realms without a Profile have no selected packages.
-    let Some(document) = document else {
-        return Ok(None);
-    };
+    document
+        .map(|document| {
+            actr_protocol::signed_json::parse(document.as_bytes())
+                .map_err(|error| membership_error("realm_unavailable", error))
+        })
+        .transpose()
+}
+
+fn realm_package_selection(
+    document: serde_json::Value,
+) -> Result<actr_protocol::realm_profile::RealmPackageSelection, ErrorResponse> {
     let invalid = |message: String| membership_error("realm_unavailable", message);
     let selection: actr_protocol::realm_profile::RealmPackageSelection =
-        actr_protocol::signed_json::parse(document.as_bytes())
-            .and_then(serde_json::from_value)
+        serde_json::from_value(document)
             .map_err(|e| invalid(format!("invalid stored Realm selection: {e}")))?;
     selection.check().map_err(invalid)?;
-    Ok(Some(selection))
+    Ok(selection)
 }
 
 pub(crate) async fn check_realm_front_pin<'e>(
     db: impl sqlx::SqliteExecutor<'e>,
     request: &RegisterRequest,
 ) -> Result<(), ErrorResponse> {
-    if let Some(selection) = realm_package_selection(db, &request.realm).await? {
-        let (_, front) = selection
-            .selected()
-            .map_err(|error| membership_error("realm_unavailable", error))?;
-        check_front_manifest_pin(front, request)?;
+    let Some(document) = realm_profile_document(db, &request.realm).await? else {
+        return Ok(());
+    };
+    // The v10 migration retains the old signed single-package document.
+    // Only that shape can omit the Front selection during credential reissue.
+    if let Some(legacy) = document.get("package")
+        && ["primary_package", "front_package", "packages"]
+            .iter()
+            .all(|field| document.get(*field).is_none())
+    {
+        let package: actr_protocol::realm_profile::RealmPackage =
+            serde_json::from_value(legacy.clone())
+                .map_err(|error| membership_error("realm_unavailable", error))?;
+        if package.local_path.is_some() {
+            return Err(membership_error(
+                "realm_unavailable",
+                "a legacy primary package must be downloadable",
+            ));
+        }
+        return package
+            .check()
+            .map_err(|error| membership_error("realm_unavailable", error));
     }
-    Ok(())
+    let selection = realm_package_selection(document)?;
+    let (_, front) = selection
+        .selected()
+        .map_err(|error| membership_error("realm_unavailable", error))?;
+    check_front_manifest_pin(front, request)
 }
 
 fn check_front_manifest_pin(
