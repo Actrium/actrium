@@ -3271,3 +3271,4 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         """
     }
 }
+extension BrowserViewModel: TabWindowTransferOwner {}
