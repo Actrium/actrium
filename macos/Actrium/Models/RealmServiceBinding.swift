@@ -304,6 +304,8 @@ actor RealmServiceEventPeerController {
     private var generation: UInt64 = 0
     private var reference: (any RealmServiceEventReference)?
     private(set) var peer: ActrBindings.ActrId?
+    private var discoverySequence: UInt64 = 0
+    private var committedDiscoverySequence: UInt64 = 0
 
     func select(
         generation: UInt64,
@@ -329,30 +331,41 @@ actor RealmServiceEventPeerController {
 
     /// Strictly rediscover the Service for an RPC and, when this generation's
     /// subscription is still active, move its event peer to the same ActorId.
+    /// Discovery commits are sequenced within the generation: a slow response
+    /// for a retired Service cannot undo a newer RPC's committed selection.
     func resolve(
         ifGeneration generation: UInt64?,
         reference: any RealmServiceEventReference,
         serviceType: ActrBindings.ActrType
     ) async throws -> ActrBindings.ActrId {
+        discoverySequence &+= 1
+        let sequence = discoverySequence
         let target = try await reference.discoverService(serviceType: serviceType)
         if let generation {
-            refresh(ifGeneration: generation, reference: reference, target: target)
+            refresh(
+                ifGeneration: generation, reference: reference, target: target,
+                sequence: sequence
+            )
         }
         return target
     }
 
-    /// Follow Service rediscovery without reviving a cleared subscription or
-    /// overwriting a newer generation. Event-routing failure must not fail RPC.
-    func refresh(
+    /// Follow Service rediscovery without reviving a cleared subscription,
+    /// overwriting a newer generation, or committing an older discovery result.
+    /// Event-routing failure must not fail RPC.
+    private func refresh(
         ifGeneration generation: UInt64,
         reference: any RealmServiceEventReference,
-        target: ActrBindings.ActrId
+        target: ActrBindings.ActrId,
+        sequence: UInt64
     ) {
-        guard self.generation == generation, self.reference != nil else { return }
+        guard self.generation == generation, self.reference != nil,
+              sequence >= committedDiscoverySequence else { return }
         do {
             try reference.setServiceEventPeer(peer: target)
             self.reference = reference
             peer = target
+            committedDiscoverySequence = sequence
         } catch {
             return
         }

@@ -462,12 +462,61 @@ struct RealmServiceBindingLifecycleTests {
         let selectedPeer = await controller.peer
         #expect(selectedPeer == restartedTarget)
 
-        // A delayed refresh from before the last unsubscribe must not revive it.
+        // A delayed rediscovery from before the last unsubscribe must not
+        // revive the peer, even though it still returns its RPC target.
         await controller.suspend(ifGeneration: 1)
-        await controller.refresh(
-            ifGeneration: 1, reference: reference, target: restartedTarget
-        )
+        let staleRefresh = Task {
+            try await controller.resolve(
+                ifGeneration: generation, reference: reference, serviceType: serviceType
+            )
+        }
+        await reference.waitForDiscovery(expected: 3)
+        reference.completeDiscovery()
+        _ = try await staleRefresh.value
         #expect(reference.peer == nil)
+    }
+
+    @Test func olderRpcDiscoveryCannotRestoreARetiredServicePeer() async throws {
+        let controller = RealmServiceEventPeerController()
+        let oldTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 1)
+        let newTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 2)
+        let oldReference = ControlledEventReference(target: oldTarget)
+        let newReference = ControlledEventReference(target: newTarget)
+        let serviceType = ActrBindings.ActrType(publisher: "pub", name: "svc", version: "1.0.0")
+        let selection = Task {
+            try await controller.select(generation: 1, reference: oldReference, serviceType: serviceType)
+        }
+        await oldReference.waitForDiscovery()
+        oldReference.completeDiscovery()
+        try await selection.value
+        let activeGeneration = await controller.activeGeneration()
+        let generation = try #require(activeGeneration)
+
+        let oldResolution = Task {
+            try await controller.resolve(
+                ifGeneration: generation, reference: oldReference, serviceType: serviceType
+            )
+        }
+        await oldReference.waitForDiscovery(expected: 2)
+        let newResolution = Task {
+            try await controller.resolve(
+                ifGeneration: generation, reference: newReference, serviceType: serviceType
+            )
+        }
+        await newReference.waitForDiscovery()
+
+        // The replacement Service is discovered first. When the older RPC
+        // later returns the retired ID, it must not undo that committed peer.
+        newReference.completeDiscovery()
+        let resolvedNewTarget = try await newResolution.value
+        #expect(resolvedNewTarget == newTarget)
+        oldReference.completeDiscovery()
+        let resolvedOldTarget = try await oldResolution.value
+        #expect(resolvedOldTarget == oldTarget)
+        #expect(oldReference.peer == oldTarget)
+        #expect(newReference.peer == newTarget)
+        let selectedPeer = await controller.peer
+        #expect(selectedPeer == newTarget)
     }
 
     @Test func ambiguousServiceDiscoveryDoesNotSelectOrReplaceAnEventPeer() async throws {
