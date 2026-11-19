@@ -522,6 +522,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let tab = tabs[index]
         let oldGroupId = tab.groupId
 
+        TabSnapshotCacheManager.shared.invalidate(tabId: tabId)
+        WebViewHolderManager.shared.remove(tabId: tabId)
+        ViewBridgeHostViewManager.shared.remove(tabId: tabId)
+        RealmServiceBindings.shared.remove(tabId)
+        CapabilityPermissionStore.shared.clearSessionGrants(tabId: tabId)
+        RendererLifecycleManager.shared.tabDidClose(tabId)
+
         tabs.remove(at: index)
         tabSlotPositions.removeValue(forKey: tabId)
 
