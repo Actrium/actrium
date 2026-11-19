@@ -1,5 +1,6 @@
 import ActriumCore
 import ActriumIPC
+import AppKit
 import Foundation
 import Testing
 @testable import Actrium

@@ -501,7 +501,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let targetIndex = min(max(0, index), tabs.count)
         tabs.insert(newTab, at: targetIndex)
         tabSlotPositions[newTab.id] = tabs.count - 1
-        if select { currentTabId = newTab.id }
+        if select {
+            currentTabId = newTab.id
+            if actriumMode.isInFocusMode { actriumMode = .focus(tabId: newTab.id) }
+        }
 
         logger.notice(" Insert across Window Tab: \(newTab.title) To Location \(targetIndex), Group: \(groupId?.uuidString ?? "None")")
         persistBrowserPageSession()
@@ -530,11 +533,20 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         RendererLifecycleManager.shared.tabDidClose(tabId)
 
         tabs.remove(at: index)
-        tabSlotPositions.removeValue(forKey: tabId)
+        if let removedPosition = tabSlotPositions.removeValue(forKey: tabId) {
+            for id in tabs.map(\.id) {
+                if let position = tabSlotPositions[id], position > removedPosition {
+                    tabSlotPositions[id] = position - 1
+                }
+            }
+        }
 
         // Update current tab if needed
         if currentTabId == tabId {
-            currentTabId = tabs.first?.id
+            currentTabId = tabs.isEmpty ? nil : tabs[max(0, index - 1)].id
+        }
+        if case .focus(let focusedId) = actriumMode, focusedId == tabId {
+            actriumMode = currentTabId.map { .focus(tabId: $0) } ?? .overview
         }
 
         // Clean up empty group
