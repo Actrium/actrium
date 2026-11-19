@@ -256,7 +256,13 @@ export const api = {
     display_name?: string;
     primary_package?: string;
     front_package?: string;
-    packages?: Record<string, { href: string; sha256: string; type: string }>;
+    packages?: Record<string, {
+      href: string;
+      sha256?: string;
+      type: string;
+      dependencies?: Record<string, string>;
+      local_path?: { signing_key_id: string; allow_rebuild: boolean };
+    }>;
   }) =>
     request<RealmMutationResponse>("/realms", {
       method: "POST",

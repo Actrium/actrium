@@ -597,6 +597,19 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         )
     }
 
+    func prepareLocalFront() async throws {
+        // connect() discovers the selected local Service and establishes its
+        // authenticated Attach session before the renderer is installed.
+        _ = try await connect()
+    }
+
+    private func findService(using reference: ActrRefWrapper) async throws -> ActrBindings.ActrId? {
+        if profile.packages.contains(where: { $0.reference == profile.frontPackage && $0.localPath != nil }) {
+            return try await reference.discoverService(serviceType: serviceType)
+        }
+        return try await reference.discover(targetType: serviceType, count: 1).first
+    }
+
     func subscribe(events requestedEvents: [String], generation: UInt64) async throws {
         let requested = Set(requestedEvents)
         guard !stopped, !requested.isEmpty, requested.isSubset(of: events) else {
@@ -1079,8 +1092,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             try Task.checkCancellation()
             guard !stopped else { throw CancellationError() }
             do {
-                let targets = try await reference.discover(targetType: serviceType, count: 1)
-                if let target = targets.first {
+                if let target = try await findService(using: reference) {
                     let session = try await reference.attachActrium(service: target, params: attachParams)
                     return (target, session)
                 }

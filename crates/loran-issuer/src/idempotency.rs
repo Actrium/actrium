@@ -11,7 +11,7 @@
 //! passwords. The journal therefore encrypts response bytes with an AES-256-GCM
 //! key derived from the configured renewal-token secret before writing SQLite.
 
-use actr_protocol::{ActrId, RegisterResponse, register_response};
+use actr_protocol::{ActrId, RegisterRequest, RegisterResponse, register_response};
 use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{Aead, KeyInit, Payload},
@@ -495,6 +495,7 @@ impl ControlAttemptStore {
         &self,
         lease: &AttemptLease,
         actor_id: &ActrId,
+        registration: &RegisterRequest,
         mut prepared: PreparedReissue,
     ) -> Result<CachedResponse, AttemptError> {
         let now = crate::renewal::now_secs();
@@ -505,6 +506,14 @@ impl ControlAttemptStore {
             .await
             .map_err(|error| AttemptError::Store(format!("begin immediate failed: {error}")))?;
         self.ensure_lease(&mut tx, lease).await?;
+
+        // Use the current Realm Profile in the credential commit transaction.
+        crate::handlers::check_realm_front_pin(&mut *tx, registration)
+            .await
+            .map_err(|error| match error.code {
+                403 => AttemptError::Refused(platform::aid::AidError::Membership(error.message)),
+                _ => AttemptError::Store(error.message),
+            })?;
 
         let binding_expires_at: Option<i64> = sqlx::query_scalar(
             "SELECT expires_at FROM issuer_renewal_token
@@ -902,7 +911,17 @@ pub(crate) mod tests {
             Err(AttemptError::LeaseLost)
         ));
         assert!(matches!(
-            store.complete_reissue(&reissue, &actor, prepared).await,
+            store
+                .complete_reissue(
+                    &reissue,
+                    &actor,
+                    &RegisterRequest {
+                        realm: actor.realm.clone(),
+                        ..Default::default()
+                    },
+                    prepared,
+                )
+                .await,
             Err(AttemptError::LeaseLost)
         ));
     }
@@ -1114,7 +1133,17 @@ pub(crate) mod tests {
                 Err(AttemptError::Refused(_))
             ));
             assert!(matches!(
-                store.complete_reissue(&reissue, &actor, prepared).await,
+                store
+                    .complete_reissue(
+                        &reissue,
+                        &actor,
+                        &RegisterRequest {
+                            realm: actor.realm.clone(),
+                            ..Default::default()
+                        },
+                        prepared,
+                    )
+                    .await,
                 Err(AttemptError::Refused(_))
             ));
         }

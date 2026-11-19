@@ -1,6 +1,8 @@
 import Foundation
 import AppKit // Import AppKit for NSImage
 import Combine
+import CryptoKit
+import UniformTypeIdentifiers
 import ActrBindings
 import ActriumCore  // AppleActrPackageSignatureError (15-B B8 error pages)
 
@@ -31,7 +33,16 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         $actriumMode.eraseToAnyPublisher()
     }
     @Published var tabs: [Tab] = []
-    @Published var currentTabId: UUID?
+    @Published var currentTabId: UUID? {
+        didSet {
+            guard currentTabId != oldValue else { return }
+            if let oldValue, deferredRealmLinks[oldValue] != nil {
+                realmLoads[oldValue] = nil
+                if pendingInviteRedeem?.tabId == oldValue { pendingInviteRedeem = nil }
+            }
+            openSelectedDeferredRealm()
+        }
+    }
     // Default that all tabs are left-side panel visible; overrides are recorded only when user switching
     @Published private var leftPanelVisibility: [UUID: Bool] = [:]
 
@@ -78,21 +89,25 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     @Published var actrUriNotice: ActrUriNotice?
 
     /// actr:// link awaiting invite-code redemption (temporary-flow sheet presented).
-    @Published var pendingInviteRedeem: PendingInviteRedeem?
+    @Published var pendingInviteRedeem: PendingInviteRedeem? {
+        didSet {
+            guard let dismissed = oldValue, pendingInviteRedeem == nil else { return }
+            if currentTabId == dismissed.tabId { deferredRealmLinks[dismissed.tabId] = nil }
+            openSelectedDeferredRealm()
+        }
+    }
 
-    /// Invite currently being redeemed, from the sheet or from a link's
-    /// `args`. Further actr:// deliveries are ignored while it is set: the
-    /// invite is single-use, so a duplicate delivery (double Enter, a
-    /// replayed Start Page notification) would race a second join and flare
-    /// `invite_used` right after the winner opened the instance.
+    /// A sheet or link is redeeming an invite. Ignore duplicate link deliveries
+    /// while the single-use invite is being consumed.
     @Published private(set) var inviteRedemptionInFlight = false
 
-    /// Realms this installation has already redeemed an invite for. Opening
-    /// their actr:// links skips the invite sheet (re-asking would dead-end
-    /// in `invite_used`). Persisted across launches.
+    private let realmPreferences: UserDefaults
+    private var realmTrustObserver: AnyCancellable?
+    /// Successfully joined Realms for session restore and invite prompts.
+    /// Open admission still checks the current device key with the Issuer.
     private var redeemedRealms: Set<String> {
-        get { Set(UserDefaults.standard.stringArray(forKey: "actr.redeemedRealms") ?? []) }
-        set { UserDefaults.standard.set(Array(newValue), forKey: "actr.redeemedRealms") }
+        get { Set(realmPreferences.stringArray(forKey: "actr.redeemedRealms") ?? []) }
+        set { realmPreferences.set(Array(newValue), forKey: "actr.redeemedRealms") }
     }
 
     private func markRedeemed(_ realmName: String) {
@@ -103,6 +118,25 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     /// Current download task handle, kept for cancellation.
     private var packageDownloadTask: Task<Void, Never>?
+
+    private struct LocalFrontScope: Equatable {
+        let realm: String
+        let provider: String
+        let issuer: String
+        let front: RealmPackageInfo
+        let service: RealmPackageInfo
+        let publicKey: Data
+    }
+
+    private struct LocalFrontApproval {
+        let scope: LocalFrontScope
+        let file: LocalRealmFrontFile
+    }
+
+    private var localFrontApprovals: [UUID: LocalFrontApproval] = [:]
+    private var realmLoads: [UUID: UUID] = [:]
+    // Transferred and restored Realm tabs wait for selection before requesting consent.
+    private var deferredRealmLinks: [UUID: ActrUriInfo] = [:]
 
     // MARK: - Instance Creation (15-B B6)
     // Confirm → serviceCreate → URI replace (replace, not push; history keeps only the
@@ -126,17 +160,31 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     /// History view model reference for recording ACTR app visits
     weak var historyVM: HistoryViewModel?
-    private let browserDataRepository = BrowserDataRepository.shared
     private let saveBrowserSession: ([Tab], UUID?) -> Void
+    private let chooseLocalFrontFile: (NSOpenPanel) -> URL?
+    private let fetchRealmDocument: @MainActor (URL, String) async throws -> Data
+    private let inviteMembershipExchange: RealmJoinService.InviteExchange?
 
     var currentTab: Tab? {
         guard let currentTabId = currentTabId else { return nil }
         return tabs.first(where: { $0.id == currentTabId })
     }
 
-    init(saveBrowserSession: @escaping ([Tab], UUID?) -> Void = { tabs, currentTabId in
-        BrowserDataRepository.shared.saveSession(tabs: tabs, currentTabId: currentTabId)
-    }) {
+    init(
+        chooseLocalFrontFile: @escaping (NSOpenPanel) -> URL? = { panel in
+            panel.runModal() == .OK ? panel.url : nil
+        },
+        realmPreferences: UserDefaults = .standard,
+        fetchRealmDocument: (@MainActor (URL, String) async throws -> Data)? = nil,
+        inviteMembershipExchange: RealmJoinService.InviteExchange? = nil,
+        saveBrowserSession: @escaping ([Tab], UUID?) -> Void = { tabs, currentTabId in
+            BrowserDataRepository.shared.saveSession(tabs: tabs, currentTabId: currentTabId)
+        }
+    ) {
+        self.chooseLocalFrontFile = chooseLocalFrontFile
+        self.realmPreferences = realmPreferences
+        self.fetchRealmDocument = fetchRealmDocument ?? Self.fetchBoundedDocument(from:insecureMessage:)
+        self.inviteMembershipExchange = inviteMembershipExchange
         self.saveBrowserSession = saveBrowserSession
         // Initialize slot positions first
         initializeSlotPositions()
@@ -151,7 +199,23 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         currentTabId = startTab.id
         tabSlotPositions[startTab.id] = 0
         actriumMode = .focus(tabId: startTab.id)
+        realmTrustObserver = NotificationCenter.default
+            .publisher(for: RealmProfileStore.didRetire, object: realmPreferences)
+            .merge(with: NotificationCenter.default.publisher(
+                for: RealmProfileStore.didUpdateAuthorityKeys, object: realmPreferences
+            ))
+            .sink { [weak self] notice in
+                if let realm = notice.userInfo?["realm"] as? String {
+                    self?.stopRetiredRealm(realm)
+                } else if let domain = notice.userInfo?["domain"] as? String,
+                          let keyIds = notice.userInfo?["signingKeyIds"] as? [String] {
+                    self?.stopRevokedRealmRuntimes(domain: domain, trustedKeys: Set(keyIds))
+                }
+            }
     }
+
+    // Tab runtime cleanup is explicit on the main actor.
+    nonisolated deinit {}
 
     private func persistBrowserPageSession() {
         saveBrowserSession(tabs, currentTabId)
@@ -256,12 +320,23 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         persistBrowserPageSession()
     }
 
-    func closeTab(id: UUID) {
+    private func releaseTabRuntime(_ id: UUID, preserveRealmLoad: Bool = false) {
+        localFrontApprovals[id] = nil
+        if !preserveRealmLoad {
+            realmLoads[id] = nil
+            deferredRealmLinks[id] = nil
+            if pendingInviteRedeem?.tabId == id { pendingInviteRedeem = nil }
+        }
         TabSnapshotCacheManager.shared.invalidate(tabId: id)
         WebViewHolderManager.shared.remove(tabId: id)
         ViewBridgeHostViewManager.shared.remove(tabId: id)
         RealmServiceBindings.shared.remove(id)
+        RendererLifecycleManager.shared.tabDidClose(id)
         CapabilityPermissionStore.shared.clearSessionGrants(tabId: id)
+    }
+
+    func closeTab(id: UUID) {
+        releaseTabRuntime(id)
         // Get the slot position of the tab being closed
         guard let closedPosition = tabSlotPositions[id] else {
             logger.warning(" Cannot find tab slot position")
@@ -301,9 +376,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
         // Remove the location map of this tab
         tabSlotPositions.removeValue(forKey: id)
-
-        // Disable the window of the life cycle when you close the tab
-        RendererLifecycleManager.shared.tabDidClose(id)
 
         // Reorganization position: reduce all positions larger than the deleted position1
         for tabId in tabs.map({ $0.id }) {
@@ -409,22 +481,44 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     /// Insert a tab received from another window (cross-window drag)
-    func insertTabFromCrossWindow(_ tab: Tab, at index: Int, groupId: UUID?) {
+    func insertTabFromCrossWindow(_ tab: Tab, at index: Int, groupId: UUID?, select: Bool = true) {
         var newTab = tab
         newTab.groupId = groupId
+        if let address = newTab.url, address.scheme?.lowercased() == "actr" {
+            let linkAddress = ActrLinkInvite.strippingInviteArgs(from: address.absoluteString)
+            newTab.url = URL(string: linkAddress)
+            let link = try? ActriumCore.parseActrUri(
+                uri: linkAddress, installationId: InstallationIdProvider.getOrCreate()
+            )
+            // Transfer payloads contain serialized Guest content, so reopen remote
+            // Realm addresses through signed discovery in the destination.
+            if link?.isLocal != true {
+                Self.clearRealmContent(&newTab)
+                deferredRealmLinks[newTab.id] = link
+            }
+        }
 
         let targetIndex = min(max(0, index), tabs.count)
         tabs.insert(newTab, at: targetIndex)
         tabSlotPositions[newTab.id] = tabs.count - 1
-        currentTabId = newTab.id
+        if select { currentTabId = newTab.id }
 
         logger.notice(" Insert across Window Tab: \(newTab.title) To Location \(targetIndex), Group: \(groupId?.uuidString ?? "None")")
         persistBrowserPageSession()
     }
 
+    private func openSelectedDeferredRealm() {
+        guard !inviteRedemptionInFlight, let id = currentTabId, let link = deferredRealmLinks[id],
+              realmLoads[id] == nil, pendingInviteRedeem == nil,
+              let index = tabs.firstIndex(where: { $0.id == id }),
+              let address = tabs[index].url else { return }
+        handleResolvedRealmLink(link, input: address.absoluteString, tabIndex: index)
+    }
+
     /// Remove a tab by ID (used for cross-window drag source cleanup)
     func removeTabById(_ tabId: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        releaseTabRuntime(tabId)
         let tab = tabs[index]
         let oldGroupId = tab.groupId
 
@@ -782,6 +876,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             return
         }
         let oldURL = tabs[index].url?.absoluteString ?? "nil"
+        if tabs[index].url != url {
+            localFrontApprovals[tabId] = nil
+            realmLoads[tabId] = nil
+            deferredRealmLinks[tabId] = nil
+        }
         tabs[index].url = url
         logger.notice("🔗 [updateTabURL] Tab \(tabId) URL updated from \(oldURL) to \(url.absoluteString)")
         persistBrowserPageSession()
@@ -817,6 +916,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// - Load if input is a local file path ACTR Apply
     /// - Otherwise, as app id Process
     func navigateCurrentTab(to input: String) {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isRealmLink = trimmed.lowercased().hasPrefix("actr://")
+        // A duplicate link must leave the original tab's redemption load intact.
+        if isRealmLink, inviteRedemptionInFlight { return }
+
         // Address-bar navigation must always land somewhere: create a tab
         // when the window has none (e.g. right after a relaunch).
         if currentTabId == nil || tabs.firstIndex(where: { $0.id == currentTabId }) == nil {
@@ -828,51 +932,30 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             return
         }
 
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        localFrontApprovals[currentTabId] = nil
+        realmLoads[currentTabId] = nil
+        deferredRealmLinks[currentTabId] = nil
 
         // 0. actr:// Realm links — the core parser owns the decision
         // (case-insensitive scheme, format rules, local-Realm ownership).
         // Only actr-scheme input enters this branch; every other input falls
         // through to the existing navigation handlers below (local paths,
         // about:, web, package direct links).
-        if trimmed.lowercased().hasPrefix("actr://") {
-            // One redemption at a time. A duplicate delivery of the same link
-            // must not start a second join for a single-use invite; the
-            // spinner in the address bar marks the blocked window.
-            guard !inviteRedemptionInFlight else { return }
+        if isRealmLink {
             do {
                 let info = try ActriumCore.parseActrUri(
                     uri: trimmed,
                     installationId: InstallationIdProvider.getOrCreate()
                 )
-                // The invite secret is consumed here and must not reach the
-                // tab address, restored session, or history (09 §13).
-                let linkAddress = ActrLinkInvite.strippingInviteArgs(from: trimmed)
-                // Local instance links skip the invite gate: there is no remote
-                // issuer to redeem with for a local Realm, and the parser has
-                // already validated that the address belongs to this
-                // installation (UriLocalRealmForeign otherwise).
-                if info.isLocal {
-                    handleResolvedRealmLink(info, input: linkAddress, tabIndex: index)
+                guard info.isLocal || pendingInviteRedeem == nil else { return }
+                if !info.isLocal, let realmId = info.realmId,
+                   !redeemedRealms.contains("\(realmId)@\(info.domain)"),
+                   let invite = ActrLinkInvite.invite(from: trimmed) {
+                    let address = ActrLinkInvite.strippingInviteArgs(from: trimmed)
+                    redeemInvite(code: invite, uri: address, tabId: currentTabId)
                     return
                 }
-                // Temporary flow: opening a remote actr:// link first requires
-                // an invite code; a Realm already redeemed goes straight
-                // through (its RealmMembership identity is in the Keychain).
-                let realmName = [info.realmId, info.domain].compactMap { $0 }.joined(separator: "@")
-                guard pendingInviteRedeem == nil else { return }
-                guard !redeemedRealms.contains(realmName) else {
-                    handleResolvedRealmLink(info, input: linkAddress, tabIndex: index)
-                    return
-                }
-                // URI-carried invite (`?args={"invite":"ri_…"}`): skip the
-                // sheet and redeem directly; redemption failures surface the
-                // same error page as manual entry.
-                if let invite = ActrLinkInvite.invite(from: trimmed) {
-                    redeemInvite(code: invite, uri: trimmed)
-                    return
-                }
-                pendingInviteRedeem = PendingInviteRedeem(uri: trimmed, domain: info.domain)
+                handleResolvedRealmLink(info, input: trimmed, tabIndex: index)
                 return
             } catch {
                 logger.warning("⚠️ [navigateCurrentTab] actr:// input rejected: \(error)")
@@ -1061,10 +1144,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     // MARK: - Invite Code Redemption (temporary flow)
-    // Address-bar actr:// links are gated behind an invite-code sheet; redeem
-    // hands over to the Rust-provided method for the follow-up flow.
+    // The verified Realm Profile decides if an invite is required.
 
     func cancelInviteRedeem() {
+        pendingInviteRedeem = nil
+    }
+
+    func invalidateRealmLoadsForWindowClose() {
+        realmLoads.removeAll()
+        deferredRealmLinks.removeAll()
         pendingInviteRedeem = nil
     }
 
@@ -1072,25 +1160,35 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// → verify → device identity → join); on success mark the Realm as
     /// redeemed and open the instance link automatically.
     func confirmInviteRedeem(code: String) {
-        guard let pending = pendingInviteRedeem else { return }
-        pendingInviteRedeem = nil
+        guard !inviteRedemptionInFlight, let pending = pendingInviteRedeem else { return }
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedCode.isEmpty else { return }
-        redeemInvite(code: trimmedCode, uri: pending.uri)
+        guard !trimmedCode.isEmpty else {
+            cancelInviteRedeem()
+            return
+        }
+        redeemInvite(code: trimmedCode, uri: pending.uri, tabId: pending.tabId)
     }
 
-    /// Shared redemption body for the invite sheet and URI-carried invites:
-    /// the invite must name the same Realm as the requested link, then join
-    /// hands over to the Rust-provided method for the follow-up flow.
-    ///
-    /// Callers guard `inviteRedemptionInFlight`; this re-checks so a second
-    /// entry can never start a concurrent join for the same single-use invite.
-    private func redeemInvite(code: String, uri: String) {
-        guard !inviteRedemptionInFlight else { return }
+    /// Redeem an invite from the sheet or a link for its originating tab.
+    private func redeemInvite(code: String, uri: String, tabId: UUID) {
+        guard !inviteRedemptionInFlight, tabs.contains(where: { $0.id == tabId }) else { return }
         inviteRedemptionInFlight = true
+        pendingInviteRedeem = nil
+        let load = UUID()
+        realmLoads[tabId] = load
+
         Task { @MainActor in
-            defer { inviteRedemptionInFlight = false }
+            defer {
+                if realmLoads[tabId] == load { realmLoads[tabId] = nil }
+                inviteRedemptionInFlight = false
+                openSelectedDeferredRealm()
+            }
+            @MainActor func checkCurrent() throws {
+                try Task.checkCancellation()
+                guard realmLoads[tabId] == load else { throw CancellationError() }
+            }
             do {
+                try checkCurrent()
                 // The invite must name the same Realm as the requested link:
                 // join sends this device's public key and the invite secret to
                 // the Realm's issuer, so a mismatched code would leak both to
@@ -1112,16 +1210,27 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
                 let result = try await RealmJoinService.joinWithInvite(
                     inviteText: code,
-                    label: Host.current().localizedName ?? "Mac"
+                    label: Host.current().localizedName ?? "Mac",
+                    preferences: realmPreferences,
+                    fetchDocument: {
+                        try await self.fetchRealmDocument(
+                            $0, NSLocalizedString(
+                                "The Realm information was served over an insecure connection.",
+                                comment: "Actr join insecure transport error"))
+                    },
+                    exchange: inviteMembershipExchange,
+                    checkCurrent: checkCurrent
                 )
+                try checkCurrent()
+                guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
                 markRedeemed(result.realmName)
                 logger.notice("🎟️ [InviteRedeem] joined \(result.realmName): member=\(result.memberId), role=\(result.role), key=\(result.keyId)")
-                // Release the in-flight guard before navigating: the instance
-                // link is now a redeemed-Realm link and the navigation entry
-                // refuses actr:// input while a redemption is in flight.
-                inviteRedemptionInFlight = false
-                navigateCurrentTab(to: result.instanceURL.absoluteString)
+                let address = result.instanceURL.absoluteString
+                let link = try ActriumCore.parseActrUri(uri: address, installationId: InstallationIdProvider.getOrCreate())
+                handleResolvedRealmLink(link, input: address, tabIndex: index)
             } catch {
+                guard realmLoads[tabId] == load, !(error is CancellationError),
+                      (error as? URLError)?.code != .cancelled else { return }
                 logger.warning("⚠️ [InviteRedeem] redemption failed: \(error)")
                 presentRealmLinkError(error)
             }
@@ -1386,31 +1495,77 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             return
         }
 
-        RealmServiceBindings.shared.remove(tabs[tabIndex].id)
-        tabs[tabIndex].reloadNonce &+= 1
         if let discoveryURL = info.discoveryUrl, let url = URL(string: discoveryURL) {
             discoverAuthority(
                 url: url,
                 domain: info.domain,
                 realmId: realmId,
                 address: linkAddress,
-                replacingTabId: tabs[tabIndex].id,
-                navigationNonce: tabs[tabIndex].reloadNonce
+                title: realmDisplay,
+                replacing: tabs[tabIndex]
             )
         }
+    }
 
-        tabs[tabIndex].title = realmDisplay
-        tabs[tabIndex].url = URL(string: linkAddress)
-        tabs[tabIndex].appId = nil
-        tabs[tabIndex].systemTabType = nil
-        tabs[tabIndex].htmlContent = nil
-        tabs[tabIndex].unifiedScript = nil
-        tabs[tabIndex].leftPanelScript = nil
-        tabs[tabIndex].rightPanelScript = nil
-        tabs[tabIndex].guestScript = nil
-        tabs[tabIndex].guestExtractedPath = nil
-        tabs[tabIndex].guestEntry = nil
-        tabs[tabIndex].contractName = nil
+    private func prepareRealmTab(_ tabIndex: Int, address: String, title: String) {
+        RealmServiceBindings.shared.remove(tabs[tabIndex].id)
+        tabs[tabIndex].title = title
+        tabs[tabIndex].url = URL(string: address)
+        Self.clearRealmContent(&tabs[tabIndex])
+        objectWillChange.send()
+        persistBrowserPageSession()
+    }
+
+    private static func clearRealmContent(_ tab: inout Tab) {
+        tab.reloadNonce &+= 1
+        tab.appId = nil
+        tab.systemTabType = nil
+        tab.htmlContent = nil
+        tab.unifiedScript = nil
+        tab.leftPanelScript = nil
+        tab.rightPanelScript = nil
+        tab.guestScript = nil
+        tab.guestExtractedPath = nil
+        tab.guestEntry = nil
+        tab.contractName = nil
+        tab.contractVersion = nil
+        tab.capabilityManifestJSON = nil
+        tab.permissions = []
+        tab.serviceCallUrl = nil
+        tab.legacyActorBridge = false
+        tab.realmProfileSigner = nil
+    }
+
+    private func stopRetiredRealm(_ realmName: String) {
+        redeemedRealms.remove(realmName)
+        let installation = InstallationIdProvider.getOrCreate()
+        let affected = tabs.indices.filter { index in
+            guard let address = tabs[index].url, address.scheme?.lowercased() == "actr",
+                  let link = try? ActriumCore.parseActrUri(
+                    uri: address.absoluteString, installationId: installation
+                  ), !link.isLocal, let realmId = link.realmId else { return false }
+            return "\(realmId)@\(link.domain)" == realmName
+        }
+        stopRealmRuntimes(affected)
+    }
+
+    private func stopRevokedRealmRuntimes(domain: String, trustedKeys: Set<String>) {
+        let suffix = "@\(domain)"
+        let affected = tabs.indices.filter { index in
+            guard tabs[index].url?.scheme?.lowercased() == "actr",
+                  let signer = tabs[index].realmProfileSigner else { return false }
+            return signer.realmName.hasSuffix(suffix) && !trustedKeys.contains(signer.keyId)
+        }
+        stopRealmRuntimes(affected, preserveRealmLoad: true)
+    }
+
+    private func stopRealmRuntimes(_ affected: [Int], preserveRealmLoad: Bool = false) {
+        guard !affected.isEmpty else { return }
+        for index in affected {
+            let tabId = tabs[index].id
+            releaseTabRuntime(tabId, preserveRealmLoad: preserveRealmLoad)
+            Self.clearRealmContent(&tabs[index])
+        }
         objectWillChange.send()
         persistBrowserPageSession()
     }
@@ -1429,14 +1584,39 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         domain: String,
         realmId: String,
         address: String,
-        replacingTabId: UUID,
-        navigationNonce: Int
+        title: String,
+        replacing tab: Tab
     ) {
+        let replacingTabId = tab.id
+        let load = UUID()
+        realmLoads[replacingTabId] = load
         Task { @MainActor in
+            var expectedURL = tab.url
+            var expectedNonce = tab.reloadNonce
+            var acceptedProfile: RealmProfileStore.AcceptedRealm?
+            @MainActor func currentTabIndex() -> Int? {
+                guard realmLoads[replacingTabId] == load else { return nil }
+                if let acceptedProfile,
+                   !RealmProfileStore.isCurrent(acceptedProfile, preferences: realmPreferences) {
+                    return nil
+                }
+                return tabs.firstIndex {
+                    $0.id == replacingTabId && $0.url == expectedURL && $0.reloadNonce == expectedNonce
+                }
+            }
+            defer {
+                if realmLoads[replacingTabId] == load {
+                    realmLoads[replacingTabId] = nil
+                    if pendingInviteRedeem?.tabId != replacingTabId {
+                        deferredRealmLinks[replacingTabId] = nil
+                    }
+                }
+            }
+            guard currentTabIndex() != nil else { return }
             do {
-                let data = try await Self.fetchBoundedDocument(
-                    from: url,
-                    insecureMessage: NSLocalizedString(
+                let data = try await fetchRealmDocument(
+                    url,
+                    NSLocalizedString(
                         "The authority information was served over an insecure connection.",
                         comment: "Actr authority insecure transport error"))
                 guard let body = String(data: data, encoding: .utf8) else {
@@ -1447,10 +1627,20 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                             comment: "Actr authority encoding error")])
                 }
 
-                let descriptor = try ActriumCore.acceptAuthorityDescriptor(
+                guard currentTabIndex() != nil else { return }
+                let realmName = "\(realmId)@\(domain)"
+                let descriptor = try RealmProfileStore.acceptAuthority(
                     body: body,
-                    domain: domain
+                    domain: domain,
+                    realmName: realmName,
+                    preferences: realmPreferences
                 )
+                // A revocation invalidates the old runtime and advances its
+                // nonce. This discovery owns the current load through that update.
+                guard realmLoads[replacingTabId] == load,
+                      let refreshed = tabs.first(where: { $0.id == replacingTabId && $0.url == expectedURL })
+                else { return }
+                expectedNonce = refreshed.reloadNonce
                 let activeKeys = descriptor.signingKeys.filter { $0.status == "active" }
                 logger.notice("🌐 [navigateCurrentTab] Authority accepted for \(domain): realms=\(descriptor.realmsHref), keys sequence=\(descriptor.keysSequence), active keys=\(activeKeys.count)")
 
@@ -1467,60 +1657,69 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                                 comment: "Actr realm profile URL error"),
                             profilePath)])
                 }
-                let profileData = try await Self.fetchBoundedDocument(
-                    from: profileURL,
-                    insecureMessage: NSLocalizedString(
-                        "The Realm Profile was served over an insecure connection.",
-                        comment: "Actr realm profile insecure transport error"))
-                guard let profileBody = String(data: profileData, encoding: .utf8) else {
-                    throw NSError(
-                        domain: "ActrDiscovery", code: 7,
-                        userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                            "The Realm Profile is not valid text.",
-                            comment: "Actr realm profile encoding error")])
+                let profileData: Data
+                let admission: RealmJoinService.VerifiedProfile
+                do {
+                    let resolved = try await RealmJoinService.resolveProfile(
+                        at: profileURL, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson,
+                        preferences: realmPreferences,
+                        fetch: {
+                            try await self.fetchRealmDocument(
+                                $0,
+                                NSLocalizedString(
+                                    "The Realm Profile was served over an insecure connection.",
+                                    comment: "Actr realm profile insecure transport error"))
+                        },
+                        checkCurrent: {
+                            try Task.checkCancellation()
+                            guard currentTabIndex() != nil else { throw CancellationError() }
+                        }
+                    )
+                    profileData = resolved.body
+                    admission = resolved.admission
+                } catch CoreError.RealmRetired(let name) {
+                    presentRealmLinkError(CoreError.RealmRetired(message: name))
+                    return
                 }
-
-                let profile = try ActriumCore.acceptRealmProfile(
-                    body: profileBody,
-                    realmName: "\(realmId)@\(domain)",
-                    signingKeysJson: descriptor.signingKeysJson
-                )
+                let profile = admission.info
+                acceptedProfile = admission.accepted
                 logger.notice("📄 [navigateCurrentTab] Realm Profile accepted: \(profile.displayName) (\(profile.realmName)), sequence=\(profile.sequence), package=\(profile.packageHref)")
 
-                // Package acquisition: the publisher identity is the domain
-                // prefix of the actor type; fetch its signing keys, then the
-                // package itself. Verification is the next funnel step.
-                let publisherDomain = profile.packageType
-                    .split(separator: "/").first.map(String.init) ?? ""
-                guard !publisherDomain.isEmpty,
-                      let publisherURL = URL(string: "https://\(publisherDomain)/.well-known/actr") else {
-                    throw NSError(
-                        domain: "ActrDiscovery", code: 8,
-                        userInfo: [NSLocalizedDescriptionKey: String(
-                            format: NSLocalizedString(
-                                "The package type '%@' does not name a publisher domain.",
-                                comment: "Actr publisher domain error"),
-                            profile.packageType)])
+                if admission.isOpen {
+                    // Check membership for the current device key on every
+                    // load. Automatic admission uses a generic client label.
+                    try await RealmJoinService.joinOpen(admission, label: "Mac")
+                } else if !redeemedRealms.contains(profile.realmName) {
+                    if currentTabId == replacingTabId, pendingInviteRedeem == nil {
+                        pendingInviteRedeem = PendingInviteRedeem(tabId: replacingTabId, uri: address, domain: domain)
+                    }
+                    return
                 }
-                let publisherData = try await Self.fetchBoundedDocument(
-                    from: publisherURL,
-                    insecureMessage: NSLocalizedString(
-                        "The publisher information was served over an insecure connection.",
-                        comment: "Actr publisher insecure transport error"))
-                guard let publisherBody = String(data: publisherData, encoding: .utf8) else {
-                    throw NSError(
-                        domain: "ActrDiscovery", code: 9,
-                        userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                            "The publisher information is not valid text.",
-                            comment: "Actr publisher encoding error")])
+                guard let startingIndex = currentTabIndex() else { return }
+                if admission.isOpen { markRedeemed(profile.realmName) }
+                // Keep an approved local Front running until its replacement is verified.
+                if localFrontApprovals[replacingTabId] == nil {
+                    prepareRealmTab(startingIndex, address: address, title: title)
+                    expectedURL = tabs[startingIndex].url
+                    expectedNonce = tabs[startingIndex].reloadNonce
                 }
-                let publisher = try ActriumCore.acceptPublisherProfile(
-                    body: publisherBody,
-                    domain: publisherDomain
-                )
-                let activePackageKeys = publisher.packageSigningKeys
-                    .filter { $0.status == "active" }
-                logger.notice("🔑 [navigateCurrentTab] Publisher accepted for \(publisherDomain): profile sequence=\(publisher.profileSequence), active package keys=\(activePackageKeys.count)")
+
+                let front = profile.packages.first { $0.reference == profile.frontPackage }
+                let publisher = try await realmPublisher(for: profile.packageType, verifySignature: front?.localPath != nil)
+                let publisherDomain = publisher.domain
+                let activePackageKeys = publisher.packageSigningKeys.filter { $0.status == "active" }
+                if let front, let localPath = front.localPath {
+                    guard currentTabIndex() != nil else { return }
+                    try await loadLocalRealmFront(
+                        front, policy: localPath, accepted: admission.accepted, profileData: profileData,
+                        publisher: publisher, address: address, tabId: replacingTabId,
+                        isCurrent: { currentTabIndex() != nil }
+                    )
+                    return
+                }
+                if localFrontApprovals[replacingTabId] != nil {
+                    throw RealmServiceError(message: "The Realm changed the Front source. Open its Realm address again.")
+                }
 
                 guard let packageURL = URL(string: profile.packageHref),
                       packageURL.scheme?.lowercased() == "https" else {
@@ -1627,18 +1826,17 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 logger.notice("🔐 [navigateCurrentTab] Package verified: digest matches the Realm Profile, manifest signature verified with \(publisherKeys.count) publisher key(s)")
 
                 let manifest = try readPackageManifest(fromRoot: frontDirectory)
-                guard let capabilitiesJSON = manifest.capabilityManifestJSON else {
-                    throw RealmServiceError(message: "The verified Front package has no capability manifest.")
+                let binding = try manifest.capabilityManifestJSON.map { capabilitiesJSON in
+                    try RealmServiceBinding(
+                        profile: profile,
+                        verifiedProfileBody: profileData,
+                        front: packageBytes,
+                        metadata: sessionMetadata,
+                        trustedFrontKey: trustedKey,
+                        capabilitiesJSON: capabilitiesJSON,
+                        permissions: manifest.permissions
+                    )
                 }
-                let binding = try RealmServiceBinding(
-                    profile: profile,
-                    verifiedProfileBody: profileData,
-                    front: packageBytes,
-                    metadata: sessionMetadata,
-                    trustedFrontKey: trustedKey,
-                    capabilitiesJSON: capabilitiesJSON,
-                    permissions: manifest.permissions
-                )
                 guard let tabIndex = tabs.firstIndex(where: {
                     $0.id == replacingTabId && $0.url == URL(string: address)
                         && $0.reloadNonce == navigationNonce
@@ -1652,12 +1850,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     replacingTabId: replacingTabId
                 ) != nil else { return }
                 tabs[tabIndex].url = URL(string: address)
-                RealmServiceBindings.shared.attach(binding, to: replacingTabId)
+                tabs[tabIndex].realmProfileSigner = (profile.realmName, admission.accepted.signingKeyId)
+                if let binding { RealmServiceBindings.shared.attach(binding, to: replacingTabId) }
                 objectWillChange.send()
                 persistBrowserPageSession()
                 schedulePackageCacheEviction()
             } catch {
-                guard tabs.contains(where: {
+                guard !(error is CancellationError), tabs.contains(where: {
                     $0.id == replacingTabId && $0.url == URL(string: address)
                         && $0.reloadNonce == navigationNonce
                 }) else { return }
@@ -1665,6 +1864,217 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 presentRealmLinkError(error)
             }
         }
+    }
+
+    private func realmPublisher(for actorType: String, verifySignature: Bool) async throws -> PublisherProfileInfo {
+        guard let domain = actorType.split(separator: "/").first.map(String.init),
+              let url = URL(string: "https://\(domain)/.well-known/actr") else {
+            throw RealmServiceError(message: "The package type does not name a Publisher domain.")
+        }
+        let data = try await fetchRealmDocument(
+            url,
+            NSLocalizedString(
+                "The publisher information was served over an insecure connection.",
+                comment: "Actr publisher insecure transport error")
+        )
+        guard let body = String(data: data, encoding: .utf8) else {
+            throw RealmServiceError(message: "The Publisher information is not valid text.")
+        }
+        if verifySignature {
+            return try RealmProfileStore.acceptPublisher(body: body, domain: domain, preferences: realmPreferences)
+        }
+        return try ActriumCore.acceptPublisherProfile(body: body, domain: domain)
+    }
+
+    private func loadLocalRealmFront(
+        _ front: RealmPackageInfo,
+        policy: LocalRealmFront,
+        accepted: RealmProfileStore.AcceptedRealm,
+        profileData: Data,
+        publisher: PublisherProfileInfo,
+        address: String,
+        tabId: UUID,
+        isCurrent: @MainActor () -> Bool
+    ) async throws {
+        let profile = accepted.info
+        guard let trustedKey = publisher.verificationKey(for: policy) else {
+            throw RealmServiceError(message: "The local Front signing key is no longer trusted for this package.")
+        }
+        guard let service = profile.packages.first(where: { $0.reference == profile.primaryPackage }),
+              let sourceURL = URL(string: address) else {
+            throw RealmServiceError(message: "The local Front needs a selected Service.")
+        }
+        let existing = localFrontApprovals[tabId]
+        let scope = LocalFrontScope(
+            realm: profile.realmName, provider: profile.providerId, issuer: profile.issuerUrl,
+            front: front, service: service, publicKey: trustedKey
+        )
+        let file: LocalRealmFrontFile
+        let archive: Data
+        do {
+            if let existing, existing.scope == scope {
+                file = existing.file
+            } else {
+                guard isCurrent(), currentTabId == tabId else { throw CancellationError() }
+                let rebuild = policy.allowRebuild
+                    ? "Refresh can load new builds signed by this key from the approved file."
+                    : "The archive must match the digest in the Realm Profile."
+                let message = """
+                    \(profile.realmName) requests the local Front \(front.href).
+                    \(profile.packageType) · \(policy.signingKeyId)
+                    \(rebuild)
+                    """
+                if front.href.hasPrefix("/") {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = "Open this local Realm Front?"
+                    alert.informativeText = message
+                    alert.addButton(withTitle: "Allow and Open")
+                    alert.addButton(withTitle: "Cancel")
+                    guard alert.runModal() == .alertFirstButtonReturn, isCurrent() else {
+                        throw CancellationError()
+                    }
+                    let approvedPath = front.href
+                    file = try await Task.detached {
+                        try LocalRealmFrontFile(approvedAbsolutePath: approvedPath)
+                    }.value
+                } else {
+                    guard let packageType = UTType(filenameExtension: "actr") else {
+                        throw RealmServiceError(message: "The local Front file type is unavailable.")
+                    }
+                    let panel = NSOpenPanel()
+                    panel.title = "Choose the local Realm Front"
+                    panel.message = message
+                    panel.prompt = "Allow and Open"
+                    panel.canChooseDirectories = false
+                    panel.allowedContentTypes = [packageType]
+                    guard let selectedURL = chooseLocalFrontFile(panel), isCurrent() else {
+                        throw CancellationError()
+                    }
+                    file = try LocalRealmFrontFile(selectedURL: selectedURL)
+                }
+            }
+            guard isCurrent() else { return }
+            archive = try await Task.detached { try file.readArchive() }.value
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            let message = front.href.hasPrefix("/")
+                ? "The local Front file was not found at \(front.href)."
+                : "The selected local Front file was not found."
+            throw RealmServiceError(message: message)
+        } catch let error as CocoaError where error.code == .fileReadUnsupportedScheme {
+            throw RealmServiceError(message: "Choose a regular local .actr file on a local volume without symbolic links.")
+        } catch let error as CocoaError where error.code == .fileReadCorruptFile {
+            throw RealmServiceError(message: "The local Front must be a nonempty regular .actr file of at most 64 MiB.")
+        }
+        guard isCurrent() else { return }
+
+        let servicePublisher = profile.serviceType.hasPrefix(publisher.domain + "/")
+            ? publisher : try await realmPublisher(for: profile.serviceType, verifySignature: true)
+        let serviceKeys = servicePublisher.fixedArchiveVerificationKeys
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("realm-local-front-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        let serviceCache = ActrPackageCache.archiveURL(forDigest: service.sha256)
+        let cachedService = try? LocalRealmFrontFile(selectedURL: serviceCache).readArchive()
+        let download: URL?
+        let serviceBytes: Data
+        if let cachedService, Self.realmArchiveDigest(cachedService) == service.sha256 {
+            download = nil
+            serviceBytes = cachedService
+        } else {
+            guard let href = URL(string: service.href) else {
+                throw RealmServiceError(message: "The Service package location is invalid.")
+            }
+            let url = try await ActrPackageDownloadService.download(from: href, in: staging)
+            download = url
+            serviceBytes = try Data(contentsOf: url)
+        }
+        guard isCurrent() else { return }
+        let snapshot = try await Task.detached {
+            let info = try ActriumCore.verifyLocalRealmFrontPackage(
+                archive: archive, trustedPublicKey: trustedKey, profile: profile,
+                serviceArchive: serviceBytes, servicePublicKeys: serviceKeys
+            )
+            return (info, Self.realmArchiveDigest(archive))
+        }.value
+        guard isCurrent() else { return }
+        if let download { _ = try ActrPackageCache.installArchive(at: download, digest: service.sha256) }
+
+        let (verified, digest) = snapshot
+        let guest = verified.front.workloadBytes
+        let stage = staging.appendingPathComponent("front.actr")
+        try archive.write(to: stage, options: .atomic)
+        let cached = try ActrPackageCache.installArchive(at: stage, digest: digest)
+        let root = try ActrPackageCache.extractArchiveIfNeeded(cached, digest: digest) {
+            try self.validateExtractedPackage(at: $0, requireSignature: true, additionalTrustedKeys: [trustedKey])
+        }
+        let manifest = try readPackageManifest(fromRoot: root, requireSignature: true, additionalTrustedKeys: [trustedKey])
+        guard let entry = manifest.unifiedScript, let script = String(data: guest, encoding: .utf8),
+              let capabilities = manifest.capabilityManifestJSON else {
+            throw RealmServiceError(message: "The local Front needs a Keel Guest and capability manifest.")
+        }
+        let serviceType = try ActrBindings.verifyRealmFront(
+            frontArchive: archive, trustedPublicKey: trustedKey,
+            frontType: profile.packageType, serviceType: profile.serviceType
+        )
+        let sessionMetadata = try ActrBindings.actriumSessionMetadataForFront(
+            frontArchive: archive,
+            trustedFrontKey: trustedKey,
+            serviceType: serviceType,
+            servicePackageDigestHex: service.sha256
+        )
+        let binding = try RealmServiceBinding(
+            profile: profile, verifiedProfileBody: profileData, front: archive,
+            metadata: sessionMetadata, trustedFrontKey: trustedKey, capabilitiesJSON: capabilities,
+            permissions: manifest.permissions
+        )
+        var installed = false
+        defer { if !installed { Task { await binding.stop() } } }
+        func requireCurrentPublisherKeys() throws {
+            try RealmProfileStore.requirePublisherKey(
+                trustedKey, domain: publisher.domain, localFront: policy, preferences: realmPreferences
+            )
+            try RealmProfileStore.requirePublisherKey(
+                verified.servicePublicKey, domain: servicePublisher.domain, preferences: realmPreferences
+            )
+        }
+        try requireCurrentPublisherKeys()
+        try await binding.prepareLocalFront()
+        guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        try requireCurrentPublisherKeys()
+
+        // New renderer identity prevents late messages from the old Guest
+        // from using the new binding or inheriting its approvals.
+        var tab = Tab(
+            title: manifest.name ?? front.href, url: sourceURL,
+            appId: "actrium.local-front/\(profile.realmName)/\(digest)",
+            groupId: tabs[index].groupId, unifiedScript: script, guestExtractedPath: root.path,
+            guestEntry: entry, capabilityManifestJSON: capabilities, contractName: manifest.contractName,
+            contractVersion: manifest.contractVersion, permissions: manifest.permissions,
+            leftPanelDefaultVisible: manifest.leftPanelDefaultVisible,
+            rightPanelDefaultVisible: manifest.rightPanelDefaultVisible, backgroundColor: manifest.themeColor
+        )
+        tab.realmProfileSigner = (profile.realmName, accepted.signingKeyId)
+        let position = tabSlotPositions.removeValue(forKey: tabId) ?? index
+        releaseTabRuntime(tabId)
+        leftPanelVisibility[tabId] = nil
+        RealmServiceBindings.shared.attach(binding, to: tab.id)
+        localFrontApprovals[tab.id] = LocalFrontApproval(scope: scope, file: file)
+        tabSlotPositions[tab.id] = position
+        leftPanelVisibility[tab.id] = manifest.leftPanelDefaultVisible
+        tabs[index] = tab
+        if currentTabId == tabId {
+            currentTabId = tab.id
+            if actriumMode.isInFocusMode { actriumMode = .focus(tabId: tab.id) }
+        }
+        installed = true
+        persistBrowserPageSession()
+        schedulePackageCacheEviction()
+    }
+
+    nonisolated private static func realmArchiveDigest(_ bytes: Data) -> String {
+        SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Transport checks shared by every discovery fetch.
@@ -1753,6 +2163,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             message = NSLocalizedString(
                 "This local Realm belongs to a different installation.",
                 comment: "Actr URI foreign local Realm error")
+        case let error as RealmServiceError:
+            message = error.localizedDescription
         default:
             message = "\(error)"
         }
@@ -1878,7 +2290,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
            let info = try? ActriumCore.parseActrUri(
                uri: sourceURL.absoluteString, installationId: InstallationIdProvider.getOrCreate()
            ), !info.isLocal {
-            navigateCurrentTab(to: sourceURL.absoluteString)
+            if localFrontApprovals[id] != nil {
+                handleResolvedRealmLink(info, input: sourceURL.absoluteString, tabIndex: index)
+            } else {
+                navigateCurrentTab(to: sourceURL.absoluteString)
+            }
             return
         }
 
@@ -2314,10 +2730,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     private var didRestoreSession = false
 
     /// One-shot launch restore; called from AppDelegate after startup.
-    func restoreSessionIfNeeded() {
+    func restoreSessionIfNeeded(
+        loadSession: @MainActor () -> BrowserDataRepository.RestoredSession? = {
+            BrowserDataRepository.shared.restoreSession()
+        }
+    ) {
         guard !didRestoreSession else { return }
         didRestoreSession = true
-        guard let session = browserDataRepository.restoreSession(), !session.tabs.isEmpty else { return }
+        guard let session = loadSession(), !session.tabs.isEmpty else { return }
         logger.notice("🔄 [RestoreSession] restoring \(session.tabs.count) session tab(s)")
 
         // The persisted session is the source of truth on launch: drop the
@@ -2345,19 +2765,24 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 restoredTabIds.append(tab.id)
                 tabId = tab.id
             case "actr":
+                guard let address = URL(string: ActrLinkInvite.strippingInviteArgs(from: url.absoluteString)) else {
+                    continue
+                }
                 if let info = try? ActriumCore.parseActrUri(
-                    uri: url.absoluteString, installationId: InstallationIdProvider.getOrCreate()
+                    uri: address.absoluteString, installationId: InstallationIdProvider.getOrCreate()
                 ), !info.isLocal, let realm = info.realmId,
                    redeemedRealms.contains("\(realm)@\(info.domain)") {
-                    let tab = Tab(title: sessionTab.title, url: url)
+                    let tab = Tab(title: sessionTab.title, url: address)
                     tabs.append(tab)
                     tabSlotPositions[tab.id] = tabs.count - 1
                     restoredTabIds.append(tab.id)
                     tabId = tab.id
-                    handleResolvedRealmLink(info, input: url.absoluteString, tabIndex: tabs.count - 1)
+                    deferredRealmLinks[tab.id] = info
                 } else {
                     tabId = nil
-                    restoreInstanceTab(address: url, title: sessionTab.title, isActiveTab: index == session.activeTabIndex)
+                    restoreInstanceTab(
+                        address: address, title: sessionTab.title, isActiveTab: index == session.activeTabIndex
+                    )
                 }
             case "actro":
                 // Package address: reuse the existing package load chain.
