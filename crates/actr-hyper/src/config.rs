@@ -54,6 +54,12 @@ impl WasiDataDir {
 }
 
 /// Hyper initialization configuration.
+///
+/// The `dynclib-engine` Cargo feature enables native workload loading, including
+/// signed `actr-package/2` packages with the `actr.native/1` profile; there is no
+/// additional runtime opt-in. Native workloads run with the host process's
+/// privileges, not in a sandbox. Package trust, Host API requirements, and
+/// verified cache contents are still checked before loading.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 pub struct HyperConfig {
