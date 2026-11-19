@@ -12,7 +12,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde_json::json;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{ffi::OsStr, net::SocketAddr, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 use tokio::{process::Command, sync::Semaphore};
 use tower_service::Service;
 use uuid::Uuid;
@@ -74,6 +74,29 @@ pub(super) async fn submit_signed(
 
 static CHECKS: Semaphore = Semaphore::const_new(1);
 
+/// This is optional on Loran-only installs. Check the exact subcommand without
+/// starting a download. A config reload rebuilds the Admin state and probes again.
+pub(super) async fn package_verifier(state: &AdminApiState) -> Option<&OsStr> {
+    state
+        .package_verifier
+        .get_or_init(|| async {
+            let binary = std::env::var_os("LORAN_ADMIN_ACTR_BIN").unwrap_or_else(|| "actr".into());
+            let mut command = Command::new(&binary);
+            command
+                .args(["realm", "check-selection", "--help"])
+                .kill_on_drop(true)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            match tokio::time::timeout(Duration::from_secs(3), command.status()).await {
+                Ok(Ok(status)) if status.success() => Some(binary),
+                _ => None,
+            }
+        })
+        .await
+        .as_deref()
+}
+
 struct SelectionDirectory(PathBuf);
 impl Drop for SelectionDirectory {
     fn drop(&mut self) {
@@ -91,6 +114,12 @@ pub(super) async fn check_selection(
     if let Err(reason) = selection.check() {
         return message(StatusCode::BAD_REQUEST, &reason);
     }
+    let Some(binary) = package_verifier(&state).await else {
+        return message(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Install actr with realm check-selection on this node, or set LORAN_ADMIN_ACTR_BIN and restart Loran",
+        );
+    };
     let Ok(_slot) = CHECKS.try_acquire() else {
         return message(
             StatusCode::TOO_MANY_REQUESTS,
@@ -124,14 +153,13 @@ pub(super) async fn check_selection(
             "Could not prepare package verification",
         );
     }
-    let binary = std::env::var_os("LORAN_ADMIN_ACTR_BIN").unwrap_or_else(|| "actr".into());
     let mut cmd = Command::new(binary);
     cmd.args(["realm", "check-selection", "--selection"])
         .arg(selection_file)
         .arg("--output")
         .arg(&directory.0)
         .kill_on_drop(true)
-        .stdin(std::process::Stdio::null());
+        .stdin(Stdio::null());
     let output = match tokio::time::timeout(Duration::from_secs(90), cmd.output()).await {
         Err(_) => {
             return message(

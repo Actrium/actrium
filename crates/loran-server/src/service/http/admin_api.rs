@@ -41,6 +41,7 @@ pub struct AdminApiState {
     pub(super) relay: Value,
     pub(super) access: Value,
     pub(super) provider: Option<String>,
+    pub(super) package_verifier: tokio::sync::OnceCell<Option<std::ffi::OsString>>,
 }
 
 // ── JWT ────────────────────────────────────────────────────────
@@ -233,6 +234,8 @@ async fn get_node_services(State(state): State<Arc<AdminApiState>>) -> impl Into
 }
 
 async fn get_admin_capabilities(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
+    let package_verifier_available =
+        state.realm_writes_enabled && app_profiles::package_verifier(&state).await.is_some();
     (
         StatusCode::OK,
         Json(json!({
@@ -240,6 +243,7 @@ async fn get_admin_capabilities(State(state): State<Arc<AdminApiState>>) -> impl
             "max_members_per_realm": state.service.platform_member_limit(),
             "superv_managed": !state.realm_writes_enabled,
             "provider_id":state.provider,
+            "package_verifier_available":package_verifier_available,
         })),
     )
         .into_response()

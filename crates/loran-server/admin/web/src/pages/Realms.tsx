@@ -54,6 +54,7 @@ export function Realms() {
         <RealmForm
           provider={caps.provider_id}
           limit={caps.max_members_per_realm}
+          packageVerifierAvailable={caps.package_verifier_available}
           onSubmit={async (data) => {
             const response = await api.createRealm(data);
             void refresh().catch((e) => setError(e.message));

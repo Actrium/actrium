@@ -29,6 +29,22 @@ interface Details {
   device: ManagementClient;
   capabilities: AdminCapabilities;
 }
+type InviteAction = Extract<MemberAction, { action: "invite_member" | "invite_owner_device" }>;
+type PendingInvite = { requestId: string; action?: InviteAction };
+
+function readPendingInvite(key: string): PendingInvite | null {
+  const saved = sessionStorage.getItem(key);
+  if (!saved) return null;
+  // Older Admin builds stored only the request ID.
+  if (!saved.startsWith("{")) return { requestId: saved };
+  try {
+    const request = JSON.parse(saved) as PendingInvite;
+    return typeof request.requestId === "string" ? request : null;
+  } catch {
+    return null;
+  }
+}
+
 interface Confirmation {
   label: string;
   message: string;
@@ -53,7 +69,7 @@ function DetailsPage({ id }: { id: string }) {
   const [confirm, setConfirm] = useState<Confirmation | null>(null);
   const [editingAdmission, setEditingAdmission] = useState(false);
   const receiptKey = "loran-admin:invite:" + id;
-  const [lastRequest, setLastRequest] = useState(() => sessionStorage.getItem(receiptKey));
+  const [pendingInvite, setPendingInvite] = useState(() => readPendingInvite(receiptKey));
   const refresh = useCallback(async () => {
     const [app, profile, members, device, capabilities] = await Promise.all([
       api.getRealm(id),
@@ -96,12 +112,20 @@ function DetailsPage({ id }: { id: string }) {
     const key = operationId();
     const issuing = action.action === "invite_member" || action.action === "invite_owner_device";
     if (issuing) {
-      sessionStorage.setItem(receiptKey, key);
-      setLastRequest(key);
+      if (pendingInvite) return;
+      const pending = { requestId: key, action };
+      sessionStorage.setItem(receiptKey, JSON.stringify(pending));
+      setPendingInvite(pending);
       setIssued(null);
     }
     const result = await api.memberAction(id, key, action);
     if (issuing) setIssued(result);
+  }
+  async function finishInvite() {
+    if (pendingInvite) await api.dismissInvitation(id, pendingInvite.requestId);
+    setIssued(null);
+    sessionStorage.removeItem(receiptKey);
+    setPendingInvite(null);
   }
   function ask(label: string, message: string, execute: () => Promise<void>) {
     setConfirm({ label, message, execute });
@@ -110,6 +134,7 @@ function DetailsPage({ id }: { id: string }) {
   const active = data?.app.enabled && data?.app.status === "active";
   const manage = Boolean(writable && active && data?.device.connected);
   const ownDomain = data && id.split("@")[1] === data.capabilities.provider_id;
+  const canManageLifecycle = Boolean(data && (ownDomain || data.profile === null));
   return (
     <ServicePageLayout
       title={data?.profile?.realm.display_name || id}
@@ -270,21 +295,36 @@ function DetailsPage({ id }: { id: string }) {
                   onChange={(e) => setDays(Number(e.target.value))}
                 />
               </label>
-              <button disabled={!manage} className={button}>
+              <button disabled={!manage || !!pendingInvite} className={button}>
                 Generate invite
               </button>
             </form>
-            {lastRequest && !issued?.invite && manage && (
-              <button
-                className={button}
-                onClick={() =>
-                  void run(async () => {
-                    setIssued(await api.revealInvitation(id, lastRequest));
-                  })
-                }
-              >
-                Retrieve last invite
-              </button>
+            {pendingInvite && !issued?.invite && manage && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className={button}
+                  onClick={() =>
+                    void run(async () => {
+                      const { requestId, action } = pendingInvite;
+                      setIssued(action
+                        ? await api.memberAction(id, requestId, action)
+                        : await api.revealInvitation(id, requestId));
+                    })
+                  }
+                >
+                  Retrieve last invite
+                </button>
+                <button
+                  className={button}
+                  onClick={() => ask(
+                    "Clear pending invite",
+                    "This clears invite recovery. If an invitation was issued, it stays valid and can be revoked below.",
+                    finishInvite,
+                  )}
+                >
+                  Clear pending invite
+                </button>
+              </div>
             )}
             {issued?.invite && (
               <div className="space-y-2 rounded-lg bg-blue-50 p-3">
@@ -306,14 +346,7 @@ function DetailsPage({ id }: { id: string }) {
                   <button
                     className={button}
                     disabled={busy}
-                    onClick={() =>
-                      void run(async () => {
-                        if (lastRequest) await api.dismissInvitation(id, lastRequest);
-                        setIssued(null);
-                        sessionStorage.removeItem(receiptKey);
-                        setLastRequest(null);
-                      })
-                    }
+                    onClick={() => void run(finishInvite)}
                   >
                     Done
                   </button>
@@ -480,6 +513,7 @@ function DetailsPage({ id }: { id: string }) {
                     key={data.profile.sequence}
                     profile={data.profile}
                     disabled={!manage}
+                    packageVerifierAvailable={data.capabilities.package_verifier_available}
                     onSave={(change) => run(() => memberAction(change))}
                   />
                 )}
@@ -488,7 +522,7 @@ function DetailsPage({ id }: { id: string }) {
               <p className="text-sm">This app has no signed Realm Profile.</p>
             )}
           </section>
-          {!ownDomain && (
+          {!ownDomain && data.capabilities.provider_id && (
             <SignedAppRequest
               appId={id}
               disabled={!writable}
@@ -498,7 +532,7 @@ function DetailsPage({ id }: { id: string }) {
           {data.app.status !== "retired" && (
             <section className={section}>
               <h2 className="font-semibold text-red-800">Recovery and retirement</h2>
-              {ownDomain ? (
+              {canManageLifecycle ? (
                 <div className="flex gap-2">
                   <button
                     className={button}

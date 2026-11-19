@@ -43,6 +43,7 @@ export interface PublicNodeNameResponse {
 export interface AdminCapabilities {
   max_members_per_realm: number;
   realm_writes_enabled: boolean;
+  package_verifier_available: boolean;
   superv_managed: boolean;
   provider_id: string | null;
 }

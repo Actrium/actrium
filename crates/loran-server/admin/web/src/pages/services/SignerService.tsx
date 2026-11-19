@@ -105,8 +105,9 @@ export function SignerService() {
           </li>
           <li>
             <strong className="text-gray-600">Admin device.</strong> An App Owner can authorize an AFP Admin
-            device through a device invitation. AFP’s backend uses Signer to sign <code>/issuer/membership</code>
-            {" "}requests with that device’s own key. Issuer checks that the device can perform the requested action.
+            device through a device invitation. AFP uses Signer to sign operations with the device’s own key.
+            AFP checks device enrollment and invitation delivery locally against Realm membership.
+            Other member actions go through <code>/issuer/membership</code>.
           </li>
           <li>
             <strong className="text-gray-600">TURN credentials.</strong> In the Actr Realm mode, TURN validates its

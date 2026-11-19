@@ -146,7 +146,10 @@ async function issue(purpose) {
   const code = page.getByLabel("Invitation code");
   await code.waitFor();
   const value = await code.inputValue();
-  const receiptId = await page.evaluate((id) => sessionStorage.getItem("loran-admin:invite:" + id), realm);
+  const receiptId = await page.evaluate(
+    (id) => JSON.parse(sessionStorage.getItem("loran-admin:invite:" + id)).requestId,
+    realm,
+  );
   await button("Done").click();
   await code.waitFor({ state: "hidden" });
   await http(endpoint(realm, "/operations/" + receiptId + "/reveal"), {}, true, 409);
@@ -282,6 +285,40 @@ try {
     const current = await http(endpoint(realm, "/management-client"), null, true);
     assert(current.connected && current.key_id !== owner.id);
   });
+  await step("A lost invite response recovers the same code and does not issue a duplicate", async () => {
+    let deliveredHash, issuedId;
+    const delivery = url(endpoint(realm, "/member-actions"));
+    const readPending = () => page.evaluate(
+      (id) => JSON.parse(sessionStorage.getItem("loran-admin:invite:" + id)),
+      realm,
+    );
+    await page.getByLabel("Invite for").selectOption("viewer");
+    await page.route(delivery, async (route) => {
+      const committed = await route.fetch();
+      assert(committed.ok(), "Invitation commits successfully");
+      const result = await committed.json();
+      deliveredHash = createHash("sha256").update(result.invite).digest("hex");
+      issuedId = result.invite_id;
+      await route.abort("failed");
+    }, { times: 1 });
+    await button("Generate invite").click();
+    await button("Retrieve last invite").waitFor();
+    assert(await button("Generate invite").isDisabled());
+    const first = await readPending();
+    assert(deliveredHash && issuedId && first.requestId);
+    const before = (await http(endpoint(realm, "/members"), null, true)).invites.length;
+    await reloadDetails();
+    await button("Retrieve last invite").click();
+    const code = page.getByLabel("Invitation code");
+    await code.waitFor();
+    assert.equal(createHash("sha256").update(await code.inputValue()).digest("hex"), deliveredHash);
+    assert.equal((await readPending()).requestId, first.requestId);
+    assert.equal((await http(endpoint(realm, "/members"), null, true)).invites.length, before);
+    await button("Done").click();
+    await code.waitFor({ state: "hidden" });
+    await http(endpoint(realm, "/operations/" + first.requestId + "/reveal"), {}, true, 409);
+    await membership(owner, "revoke_invite", { invite_id: issuedId });
+  });
   await step("Owner-signed rename and Front upgrade keep the same App ID and complete selection", async () => {
     const current = (await http(endpoint(realm, "/profile"), null, true)).profile;
     await page.getByText("Edit app profile", { exact: true }).click();
@@ -340,6 +377,21 @@ try {
     openProfile = (await http(endpoint(other, "/profile"), null, true)).profile;
     assert(openProfile.signature);
     assert.deepEqual(openProfile.policy, { membership: "open", open_joins_per_minute: 1, max_members: 4 });
+  });
+  await step("Owner device authorization in an open App requires a current Owner invite and uses no member slot", async () => {
+    const ownerMember = (await membership(otherOwner, "list_members", {}, 200, other))
+      .members.find((member) => member.role === "owner").member_id;
+    const grant = () => membership(otherOwner, "create_invite", {
+      member_id: ownerMember,
+      invite_expires_at: future(3600),
+    }, 200, other);
+    const revoked = await grant();
+    await membership(otherOwner, "revoke_invite", { invite_id: revoked.invite_id }, 200, other);
+    await http(endpoint(other, "/management-client"), { invite: revoked.invite }, true, 409);
+    assert.equal((await http(endpoint(other), null, true)).realm.active_members, 1);
+    const active = await grant();
+    assert((await http(endpoint(other, "/management-client"), { invite: active.invite }, true)).connected);
+    assert.equal((await http(endpoint(other), null, true)).realm.active_members, 1);
   });
   let unusedInvite;
   const lastEditor = device();

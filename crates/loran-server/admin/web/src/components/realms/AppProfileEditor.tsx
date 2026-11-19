@@ -5,10 +5,12 @@ import { PackageCheck } from "./PackageCheck";
 export function AppProfileEditor({
   profile,
   disabled,
+  packageVerifierAvailable,
   onSave,
 }: {
   profile: AppProfile;
   disabled: boolean;
+  packageVerifierAvailable: boolean;
   onSave: (change: MemberAction) => Promise<void>;
 }) {
   const [name, setName] = useState(profile.realm.display_name || "");
@@ -61,7 +63,7 @@ export function AppProfileEditor({
             onChange={(e) => setPackages(e.target.value)}
           />
         </label>
-        <PackageCheck selection={packages} disabled={disabled} />
+        <PackageCheck selection={packages} available={packageVerifierAvailable} disabled={disabled} />
         <button
           className="rounded border px-3 py-2 text-sm disabled:opacity-50"
           disabled={disabled || (!changedName && !changedPackages)}

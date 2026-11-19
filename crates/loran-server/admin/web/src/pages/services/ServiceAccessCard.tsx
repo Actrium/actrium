@@ -181,7 +181,8 @@ export function ServiceAccessCard({ service, data, publisher, onRefresh }: {
   const [reloadMessage, setReloadMessage] = useState("");
   const access = data.access;
   const settings = (data.config_fields ?? []).filter(field => field.dynamic);
-  const hasAccess = data.enabled && !!access;
+  const externalRelay = service === "relay" && !data.enabled && !!access?.url && access.source === "relay.public_url";
+  const hasAccess = (data.enabled || externalRelay) && !!access;
   const extraSettings = settings.filter(field => !(hasAccess && inlineSettings[field.key]));
   const reloadPending = settings.some(field =>
     field.reloadable && settingDiffers(runningSetting(data, settingPrefixes[service], field.key), field),
@@ -228,11 +229,14 @@ export function ServiceAccessCard({ service, data, publisher, onRefresh }: {
   const port = endpoint?.port || (scheme === "https" || scheme === "wss" ? "443" : scheme === "http" || scheme === "ws" ? "80" : undefined);
   const protocol = service === "signer" ? `gRPC / ${access?.mtls ? "HTTP/2 with mTLS" : "cleartext HTTP/2"}` : scheme?.toUpperCase();
   const label = service === "publishers" ? "Admin list API · GET" : service === "signer" ? "Internal gRPC endpoint" :
-    service === "issuer" ? "Issuer base URL" : "Client endpoint";
+    service === "issuer" ? "Issuer base URL" : externalRelay ? "Published external relay endpoint" : "Client endpoint";
   const turnMode = { static: "Configured long-term users", realm: "Realm-scoped credentials from Issuer", rest: "External REST credential issuer" };
   return <section aria-label="Service access" className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
     <h2 className="font-semibold text-gray-800">Service access</h2>
-    {!data.enabled ? <p className="text-sm text-gray-600">Disabled on this node.</p> : !access ? <p>Listener configuration unavailable.</p> : <>
+    {!data.enabled && <p className="text-sm text-gray-600">
+      {service === "relay" ? "Local relay is disabled on this node." : "Disabled on this node."}
+    </p>}
+    {(data.enabled || externalRelay) && (!access ? <p>Listener configuration unavailable.</p> : <>
       <div className="rounded-lg bg-gray-50 px-3 py-2">
         <p className="mb-1 text-xs font-medium text-gray-600">{label}</p>
         {url && endpoint ? <Address value={url} label={label} /> : <p>{url ? "Invalid configured endpoint" : "No endpoint advertised"} {url && <code>{url}</code>}</p>}
@@ -244,7 +248,7 @@ export function ServiceAccessCard({ service, data, publisher, onRefresh }: {
         {!ice && <Field label={service === "signer" ? "gRPC method path" : "Path"}>
           {service === "signer" ? "/signer.v1.Signer/{method}" : endpoint?.pathname || "Unavailable"}</Field>}
         {endpoint && <Field label="Address scope">{addressScope(endpoint.hostname)}</Field>}
-        <Field label="Local listener">{access.listen} / {transport}</Field>
+        {data.enabled && <Field label="Local listener">{access.listen} / {transport}</Field>}
         <Field label="Address source">{access.source}</Field>
         <Field label="Used by">{callers[service]}</Field>
         {ice && access.shared && <Field label="Shared listener">STUN and TURN</Field>}
@@ -254,7 +258,7 @@ export function ServiceAccessCard({ service, data, publisher, onRefresh }: {
           <Field label="Credentials">{access.turn_auth && turnMode[access.turn_auth]}</Field>
           {access.issuer_ttl_secs != null && <Field label="Local Issuer credential lifetime">{access.issuer_ttl_secs} s</Field>}
         </>}
-        {service === "relay" && <>
+        {service === "relay" && data.enabled && <>
           <Field label="Local WebSocket route">{String(data.config?.path ?? "Unavailable")}</Field>
           <Field label="Authentication">{data.config?.auth === "aid" ? "Issuer-signed relay identity" : String(data.config?.auth ?? "Unavailable")}</Field>
         </>}
@@ -277,7 +281,7 @@ export function ServiceAccessCard({ service, data, publisher, onRefresh }: {
         <dl><Field label="Admin list via this browser’s management origin · GET · admin authentication required">
           <Address value={window.location.origin + endpoint.pathname} label="management origin URL" /></Field></dl>
       </div>}
-    </>}
+    </>)}
     {extraSettings.length > 0 && (
       <div className="space-y-3 border-t border-gray-100 pt-4">
         <h3 className="text-sm font-semibold text-gray-800">{service === "signaling" ? "Rate limits" : "Service settings"}</h3>

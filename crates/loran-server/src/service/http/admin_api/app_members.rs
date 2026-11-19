@@ -1,8 +1,12 @@
 //! The Admin acts as a registered device of one app's Owner. The Signer holds
-//! its private key. Every write goes through the normal signed Issuer protocol.
+//! its private key. The AFP signs membership operations with that device.
+//! Local invitation delivery and strict redemption use the membership store.
+
+mod invitations;
 use super::{AdminApiState, realm_writes_disabled_response};
 use actr_protocol::realm_membership::{
     MembershipOp, MembershipRequest, RealmInvite, Role, body_sha256, client_key_id, invite_id,
+    invite_secret_hash,
 };
 use actr_protocol::realm_profile::{RealmPackageSelection, jcs};
 use axum::{
@@ -14,13 +18,18 @@ use axum::{
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::Utc;
+use invitations::{Operation, StoredOperation};
 use issuer::{
     AIdIssuer,
     handlers::IssuerState,
     realm_profile::RealmProfiles,
     signer_client_wrapper::{SignerClientWrapper, create_signer_client},
 };
-use platform::{config::LoranConfig, realm::membership};
+use platform::{
+    config::{LoranConfig, realm::DevJoinMode},
+    realm::membership,
+    storage::db::get_database,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use signer::crypto::KeyEncryptor;
@@ -34,6 +43,8 @@ pub(crate) struct AppManagement {
     provider: String,
     signer: SignerClientWrapper,
     issuer: Router,
+    limits: membership::Limits,
+    invite_mode: DevJoinMode,
     db: SqlitePool,
     schema: OnceCell<()>,
     delivery: KeyEncryptor,
@@ -59,6 +70,17 @@ fn unavailable() -> Error {
 impl From<sqlx::Error> for Error {
     fn from(_: sqlx::Error) -> Self {
         unavailable()
+    }
+}
+impl From<membership::MembershipError> for Error {
+    fn from(error: membership::MembershipError) -> Self {
+        if error.code == membership::Code::Unavailable {
+            return unavailable();
+        }
+        Self(
+            StatusCode::from_u16(error.code.status()).expect("membership HTTP status"),
+            error.message,
+        )
     }
 }
 impl IntoResponse for Error {
@@ -128,6 +150,8 @@ impl AppManagement {
             provider,
             signer,
             issuer,
+            limits: membership::Limits::from(&config.realm),
+            invite_mode: config.realm.dev_join.mode,
             db,
             schema: OnceCell::new(),
             delivery: KeyEncryptor::from_kek(&kek)?,
@@ -136,23 +160,50 @@ impl AppManagement {
     }
 
     async fn ready(&self) -> Result<()> {
-        self.schema.get_or_try_init(|| async {
-            sqlx::raw_sql("CREATE TABLE IF NOT EXISTS admin_clients (
-                provider TEXT NOT NULL, realm TEXT NOT NULL, invite_id TEXT NOT NULL,
-                signer_id INTEGER NOT NULL, key_id TEXT NOT NULL, PRIMARY KEY(provider, realm));
-                CREATE TABLE IF NOT EXISTS admin_operations (
-                id TEXT PRIMARY KEY, provider TEXT NOT NULL, realm TEXT NOT NULL, key_id TEXT NOT NULL,
-                fingerprint TEXT NOT NULL, expires INTEGER NOT NULL, receipt TEXT);
-                CREATE INDEX IF NOT EXISTS admin_receipt_expiry ON admin_operations(expires) WHERE receipt IS NOT NULL;")
-                .execute(&self.db).await?;
-            Ok::<(), Error>(())
-        }).await?;
-        sqlx::query(
-            "UPDATE admin_operations SET receipt=NULL WHERE receipt IS NOT NULL AND expires<=?",
-        )
-        .bind(Utc::now().timestamp())
-        .execute(&self.db)
-        .await?;
+        self.schema
+            .get_or_try_init(|| async {
+                sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS admin_clients (
+                        provider TEXT NOT NULL, realm TEXT NOT NULL, invite_id TEXT NOT NULL,
+                        signer_id INTEGER NOT NULL, key_id TEXT NOT NULL, PRIMARY KEY(provider, realm))",
+                )
+                .execute(&self.db)
+                .await?;
+                // Existing displays can finish retrieving or dismissing a receipt
+                // from the old journal. All new operations use loran.db.
+                invitations::initialize(&self.db).await?;
+                invitations::initialize(get_database().get_pool()).await
+            })
+            .await?;
+        for pool in [get_database().get_pool(), &self.db] {
+            sqlx::query(
+                "UPDATE admin_operations SET receipt=NULL WHERE receipt IS NOT NULL AND expires<=?",
+            )
+            .bind(Utc::now().timestamp())
+            .execute(pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn operation(&self, id: &str) -> Result<Option<StoredOperation>> {
+        let active = invitations::load(get_database().get_pool(), id).await?;
+        if active.is_some() {
+            return Ok(active);
+        }
+        invitations::load(&self.db, id).await
+    }
+
+    async fn clear_receipt(&self, realm: &str, key: &str, id: &str) -> Result<()> {
+        for db in [get_database().get_pool(), &self.db] {
+            sqlx::query("UPDATE admin_operations SET receipt=NULL WHERE id=? AND provider=? AND realm=? AND key_id=?")
+                .bind(id)
+                .bind(&self.provider)
+                .bind(realm)
+                .bind(key)
+                .execute(db)
+                .await?;
+        }
         Ok(())
     }
 
@@ -187,12 +238,11 @@ impl AppManagement {
         )
     }
 
-    async fn send(
+    async fn signed_document(
         &self,
-        request: MembershipRequest,
+        request: &MembershipRequest,
         signer_id: u32,
         key: &str,
-        peer: ConnectInfo<SocketAddr>,
     ) -> Result<Value> {
         let mut doc = serde_json::to_value(request).map_err(|_| unavailable())?;
         let signature = self
@@ -202,6 +252,32 @@ impl AppManagement {
             .map_err(|_| unavailable())?;
         doc["signature"] =
             json!({"algorithm":"Ed25519","key_id":key,"value":STANDARD.encode(signature)});
+        Ok(doc)
+    }
+
+    async fn checked_request(
+        &self,
+        request: &MembershipRequest,
+        signer_id: u32,
+        key: &str,
+    ) -> Result<MembershipRequest> {
+        let doc = self.signed_document(request, signer_id, key).await?;
+        let checked =
+            MembershipRequest::parse(doc.to_string().as_bytes()).map_err(|_| unavailable())?;
+        checked
+            .check(&self.provider, Utc::now())
+            .map_err(|_| unavailable())?;
+        Ok(checked)
+    }
+
+    async fn send(
+        &self,
+        request: MembershipRequest,
+        signer_id: u32,
+        key: &str,
+        peer: ConnectInfo<SocketAddr>,
+    ) -> Result<Value> {
+        let doc = self.signed_document(&request, signer_id, key).await?;
         let mut req = Request::post("/membership")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(doc.to_string()))
@@ -322,7 +398,30 @@ pub(super) async fn attach(
     req.label = Some("Loran Admin".into());
     req.invite = Some(invite.secret);
     req.public_key = Some(STANDARD.encode(public_key));
-    let joined = admin.send(req, signer_id, &key, peer).await?;
+    let checked = admin.checked_request(&req, signer_id, &key).await?;
+    let verified_key = checked.verify_join().map_err(|_| unavailable())?;
+    let expires = chrono::DateTime::parse_from_rfc3339(&checked.expires_at)
+        .map_err(|_| unavailable())?
+        .timestamp();
+    if !platform::realm::management::use_nonce(&checked.nonce, expires)
+        .await
+        .map_err(|_| unavailable())?
+    {
+        return Err(conflict("The device proof was already used"));
+    }
+    let hash = invite_secret_hash(checked.invite.as_deref().ok_or_else(unavailable)?)
+        .map_err(|_| invalid("Invalid app invitation"))?;
+    // The verified invite is for an existing Owner's device. Redeem it
+    // strictly: the public Join route can otherwise admit a new Viewer.
+    let joined = membership::join_with_mode(
+        &realm,
+        &hash,
+        &verified_key,
+        "Loran Admin",
+        admin.limits,
+        admin.invite_mode,
+    )
+    .await?;
     if joined["role"] != "owner" || joined["member_id"] != owner || joined["key_id"] != key {
         let mut remove = admin.request(MembershipOp::RevokeClient, &realm);
         remove.key_id = Some(key.clone());
@@ -447,77 +546,69 @@ pub(super) async fn action(
         .owner(&realm)
         .await?
         .ok_or_else(|| conflict("An active Owner must authorize the Admin device"))?;
-    let req = cmd.action.request(admin, &realm, &key.member_id)?;
     let fingerprint = body_sha256(
         serde_json::to_string(&cmd.action)
             .map_err(|_| unavailable())?
             .as_bytes(),
     );
     let id = cmd.request_id.to_string();
-    let first = sqlx::query(
-        "INSERT OR IGNORE INTO admin_operations(id,provider,realm,key_id,fingerprint,expires)
-         VALUES(?,?,?,?,?,?)",
-    )
-    .bind(&id)
-    .bind(&admin.provider)
-    .bind(&realm)
-    .bind(&key.key_id)
-    .bind(&fingerprint)
-    .bind(Utc::now().timestamp() + 120)
-    .execute(&admin.db)
-    .await?
-    .rows_affected()
-        == 1;
-    if !first {
-        let previous: Option<String> = sqlx::query_scalar(
-            "SELECT fingerprint FROM admin_operations
-             WHERE id=? AND provider=? AND realm=? AND key_id=?",
-        )
-        .bind(&id)
-        .bind(&admin.provider)
-        .bind(&realm)
-        .bind(&key.key_id)
-        .fetch_optional(&admin.db)
-        .await?;
-        if previous.as_deref() != Some(&fingerprint) {
-            return Err(conflict(
-                "Operation ID already used for a different request",
-            ));
-        }
-        return receipt(&state, admin, &realm, &key.key_id, &id).await;
+    let operation = Operation {
+        id: &id,
+        provider: &admin.provider,
+        realm: &realm,
+        key_id: &key.key_id,
+        fingerprint: &fingerprint,
+    };
+    if let Some(stored) = admin.operation(&id).await? {
+        operation.require_same(&stored)?;
+        return receipt(admin, &realm, &key.key_id, &id, stored).await;
     }
-    let result = admin.send(req, signer, &key.key_id, peer).await?;
-    let encrypted = admin
-        .delivery
-        .encrypt(&result.to_string())
-        .map_err(|_| unavailable())?;
-    sqlx::query("UPDATE admin_operations SET receipt=? WHERE id=?")
-        .bind(encrypted)
-        .bind(&id)
-        .execute(&admin.db)
-        .await?;
-    Ok(reply(result))
+
+    let req = cmd.action.request(admin, &realm, &key.member_id)?;
+    let db = get_database().get_pool();
+    let issued = if req.op == MembershipOp::CreateInvite {
+        let request = admin.checked_request(&req, signer, &key.key_id).await?;
+        request.verify(&key.public_key).map_err(|_| unavailable())?;
+        invitations::issue(db, &admin.delivery, &operation, &request, admin.limits).await?
+    } else {
+        let first = {
+            let mut conn = db.acquire().await?;
+            operation.reserve(&mut conn, Utc::now().timestamp()).await?
+        };
+        if first {
+            let result = admin.send(req, signer, &key.key_id, peer).await?;
+            let mut conn = db.acquire().await?;
+            invitations::store_receipt(&mut conn, &admin.delivery, &id, &result).await?;
+            Some(result)
+        } else {
+            None
+        }
+    };
+    if let Some(result) = issued {
+        return Ok(reply(result));
+    }
+    // Another request won the operation ID. Never issue a second invite.
+    let stored = admin.operation(&id).await?.ok_or_else(unavailable)?;
+    operation.require_same(&stored)?;
+    receipt(admin, &realm, &key.key_id, &id, stored).await
 }
 
 async fn receipt(
-    state: &AdminApiState,
     admin: &AppManagement,
     realm: &str,
     key: &str,
     id: &str,
+    stored: StoredOperation,
 ) -> Result<Response> {
-    let encrypted: Option<String> = sqlx::query_scalar(
-        "SELECT receipt FROM admin_operations WHERE id=? AND provider=? AND realm=? AND key_id=?
-         AND expires>? AND receipt IS NOT NULL",
-    )
-    .bind(id)
-    .bind(&admin.provider)
-    .bind(realm)
-    .bind(key)
-    .bind(Utc::now().timestamp())
-    .fetch_optional(&admin.db)
-    .await?;
-    let encrypted=encrypted.ok_or_else(||conflict("No delivery receipt is available. Refresh members and open invites before issuing another invitation."))?;
+    let none = || {
+        conflict(
+            "No delivery receipt is available. Refresh members and open invites before issuing another invitation.",
+        )
+    };
+    if !stored.belongs_to(&admin.provider, realm, key) || stored.expires <= Utc::now().timestamp() {
+        return Err(none());
+    }
+    let encrypted = stored.receipt.ok_or_else(none)?;
     let plain = admin
         .delivery
         .decrypt(&encrypted)
@@ -527,19 +618,17 @@ async fn receipt(
         .as_str()
         .filter(|_| result["invite"].is_string())
     {
-        let members = state
-            .service
-            .list_realm_members_direct(realm)
-            .await
-            .map_err(|_| unavailable())?;
-        let open = members["invites"]
-            .as_array()
-            .is_some_and(|items| items.iter().any(|i| i["invite_id"] == invite_id));
+        let open: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM realm_invite WHERE realm=? AND invite_id=?
+                            AND used_at IS NULL AND revoked_at IS NULL AND expires_at>?)",
+        )
+        .bind(realm)
+        .bind(invite_id)
+        .bind(Utc::now().timestamp())
+        .fetch_one(get_database().get_pool())
+        .await?;
         if !open {
-            sqlx::query("UPDATE admin_operations SET receipt=NULL WHERE id=?")
-                .bind(id)
-                .execute(&admin.db)
-                .await?;
+            admin.clear_receipt(realm, key, id).await?;
             return Err(conflict("This invitation is no longer open"));
         }
     }
@@ -559,7 +648,12 @@ pub(super) async fn reveal(
         .owner(&realm)
         .await?
         .ok_or_else(|| conflict("Owner authorization is required"))?;
-    receipt(&state, admin, &realm, &key.key_id, &id.to_string()).await
+    let id = id.to_string();
+    let stored = admin
+        .operation(&id)
+        .await?
+        .ok_or_else(|| conflict("No delivery receipt is available"))?;
+    receipt(admin, &realm, &key.key_id, &id, stored).await
 }
 
 pub(super) async fn dismiss(
@@ -575,12 +669,8 @@ pub(super) async fn dismiss(
         .owner(&realm)
         .await?
         .ok_or_else(|| conflict("Owner authorization is required"))?;
-    sqlx::query("UPDATE admin_operations SET receipt=NULL WHERE id=? AND provider=? AND realm=? AND key_id=?")
-        .bind(id.to_string())
-        .bind(&admin.provider)
-        .bind(&realm)
-        .bind(&key.key_id)
-        .execute(&admin.db)
+    admin
+        .clear_receipt(&realm, &key.key_id, &id.to_string())
         .await?;
     Ok(reply(json!({"dismissed":true})))
 }

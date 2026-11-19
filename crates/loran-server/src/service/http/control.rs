@@ -185,6 +185,7 @@ async fn build_admin_ui_router(
         app_management,
         domain_management,
         provider,
+        package_verifier: Default::default(),
         access: super::admin_api::service_access(config, relay_endpoint.as_deref()),
         relay: json!({"enabled":config.is_relay_enabled(),"config":{
             "public_url":relay_endpoint, "path":"/relay/ws", "auth":config.relay.auth,

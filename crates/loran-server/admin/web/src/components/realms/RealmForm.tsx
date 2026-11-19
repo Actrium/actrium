@@ -11,6 +11,7 @@ interface RealmFormProps {
   onClose: () => void;
   provider?: string | null;
   limit: number;
+  packageVerifierAvailable: boolean;
   onRefresh?: () => void;
 }
 
@@ -19,7 +20,7 @@ interface RealmFormProps {
  * Realm under the Provider domain gets a Loran-signed Realm Profile, which
  * names its Service and Front packages.
  */
-export function RealmForm({ onSubmit, onClose, onRefresh, provider, limit }: RealmFormProps) {
+export function RealmForm({ onSubmit, onClose, onRefresh, provider, limit, packageVerifierAvailable }: RealmFormProps) {
   const [policy, setPolicy] = useState<RealmPolicy>({ membership: "invite-only" });
   const [name, setName] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -341,6 +342,7 @@ export function RealmForm({ onSubmit, onClose, onRefresh, provider, limit }: Rea
 
           {(advanced || selectingPackages) && (
             <PackageCheck
+              available={packageVerifierAvailable}
               selection={
                 advanced
                   ? selectionText
