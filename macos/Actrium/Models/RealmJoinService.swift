@@ -15,15 +15,39 @@ struct RealmJoinResult {
     let instanceURL: URL
 }
 
-/// The complete invite redemption flow: decode the `ri_` text, verify the
-/// Realm through the existing authority/profile funnel, create this
-/// installation's device identity, and exchange the invite.
-///
-/// Reuses the same core verification entry points as the address-bar
-/// discovery flow (`acceptAuthorityDescriptor`, `acceptRealmProfile`) and
-/// the same device identity storage as #417 (`RealmIdentityStore`); it
-/// changes nothing about how those steps verify.
+/// Enroll this installation's device identity with a verified Realm.
 enum RealmJoinService {
+    struct VerifiedProfile {
+        let info: RealmProfileInfo
+        let isOpen: Bool
+
+        init(body: Data, realmName: String, signingKeysJSON: String) throws {
+            guard let text = String(data: body, encoding: .utf8) else {
+                throw RealmJoinService.joinError("The Realm Profile is not valid text.")
+            }
+            info = try ActriumCore.acceptRealmProfile(
+                body: text, realmName: realmName, signingKeysJson: signingKeysJSON
+            )
+            // Read the policy from the same bytes verified by the core.
+            isOpen = try JSONDecoder().decode(AdmissionPolicy.self, from: Data(text.utf8)).policy.membership == "open"
+        }
+    }
+
+    private struct AdmissionPolicy: Decodable {
+        struct Policy: Decodable {
+            let membership: String
+        }
+
+        let policy: Policy
+    }
+
+    static func joinOpen(_ profile: VerifiedProfile, label: String) async throws {
+        guard profile.isOpen else {
+            throw joinError("This Realm requires an invite.")
+        }
+        _ = try await join(profile.info, inviteText: "", label: label, allowInsecureDevelopment: false)
+    }
+
     /// Redeem `inviteText` (an `ri_…` invite) and join as a new device.
     ///
     /// - Parameters:
@@ -76,25 +100,16 @@ enum RealmJoinService {
             throw joinError("The Realm Profile location is invalid.")
         }
         let profileBody = try await fetchBoundedDocument(profileURL)
-        guard let profileText = String(data: profileBody, encoding: .utf8) else {
-            throw joinError("The Realm Profile is not valid text.")
-        }
-        let profile = try ActriumCore.acceptRealmProfile(
-            body: profileText,
-            realmName: realmName,
-            signingKeysJson: descriptor.signingKeysJson
-        )
+        let profile = try VerifiedProfile(
+            body: profileBody, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson
+        ).info
 
         // 4. Device identity (created and persisted on first use) and the
         //    invite exchange. The same signer later registers the Host.
-        let store = try RealmIdentityStore()
-        let membership = try store.membership(
-            realm: profile.realmName,
-            providerId: profile.providerId,
-            issuer: profile.issuerUrl,
+        let memberJSON = try await join(
+            profile, inviteText: inviteText, label: label,
             allowInsecureDevelopment: allowInsecureDevelopment
         )
-        let memberJSON = try await membership.join(invite: inviteText, label: label)
 
         // 5. Surface the redemption result and the instance address.
         guard let member = try JSONSerialization.jsonObject(with: Data(memberJSON.utf8))
@@ -117,6 +132,21 @@ enum RealmJoinService {
     }
 
     // MARK: - Helpers
+
+    private static func join(
+        _ profile: RealmProfileInfo,
+        inviteText: String,
+        label: String,
+        allowInsecureDevelopment: Bool
+    ) async throws -> String {
+        let membership = try RealmIdentityStore().membership(
+            realm: profile.realmName,
+            providerId: profile.providerId,
+            issuer: profile.issuerUrl,
+            allowInsecureDevelopment: allowInsecureDevelopment
+        )
+        return try await membership.join(invite: inviteText, label: label)
+    }
 
     private static func joinError(_ message: String) -> NSError {
         NSError(
