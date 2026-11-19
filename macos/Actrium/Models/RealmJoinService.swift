@@ -18,14 +18,15 @@ struct RealmJoinResult {
 /// Enroll this installation's device identity with a verified Realm.
 enum RealmJoinService {
     struct VerifiedProfile {
-        let info: RealmProfileInfo
+        let accepted: RealmProfileStore.AcceptedRealm
+        var info: RealmProfileInfo { accepted.info }
         let isOpen: Bool
 
         init(body: Data, realmName: String, signingKeysJSON: String, preferences: UserDefaults) throws {
             guard let text = String(data: body, encoding: .utf8) else {
                 throw RealmJoinService.joinError("The Realm Profile is not valid text.")
             }
-            info = try RealmProfileStore.acceptRealm(
+            accepted = try RealmProfileStore.acceptRealm(
                 body: text, realmName: realmName, signingKeysJSON: signingKeysJSON, preferences: preferences
             )
             // Read the policy from the same bytes verified by the core.
@@ -87,9 +88,11 @@ enum RealmJoinService {
         guard let descriptorText = String(data: descriptorBody, encoding: .utf8) else {
             throw joinError("The authority information is not valid text.")
         }
-        let descriptor = try ActriumCore.acceptAuthorityDescriptor(
+        let descriptor = try RealmProfileStore.acceptAuthority(
             body: descriptorText,
-            domain: domain
+            domain: domain,
+            realmName: realmName,
+            preferences: preferences
         )
 
         // 3. Realm Profile: verify it with the keys accepted in step 2 and

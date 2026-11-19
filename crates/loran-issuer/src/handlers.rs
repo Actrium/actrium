@@ -350,22 +350,10 @@ async fn check_realm_registration<'e>(
     request: &RegisterRequest,
     signer: &Signer,
 ) -> Result<(), ErrorResponse> {
-    let document: Option<String> =
-        sqlx::query_scalar("SELECT document FROM realm_profile WHERE realm = ?")
-            .bind(&request.realm)
-            .fetch_optional(db)
-            .await
-            .map_err(|error| membership_error("unavailable", error))?;
-    // Realms without a Profile have no selected Service.
-    let Some(document) = document else {
+    let Some(selection) = realm_package_selection(db, &request.realm).await? else {
         return Ok(());
     };
     let invalid = |message: String| membership_error("realm_unavailable", message);
-    let selection: actr_protocol::realm_profile::RealmPackageSelection =
-        actr_protocol::signed_json::parse(document.as_bytes())
-            .and_then(serde_json::from_value)
-            .map_err(|e| invalid(format!("invalid stored Realm selection: {e}")))?;
-    selection.check().map_err(invalid)?;
     let (service, front) = selection.selected().map_err(invalid)?;
     let service = service.actr_type().map_err(invalid)?;
     if signer.role != Role::Owner
@@ -377,8 +365,54 @@ async fn check_realm_registration<'e>(
             "only the Realm owner registers the Realm's Service",
         ));
     }
+    check_front_manifest_pin(front, request)
+}
+
+async fn realm_package_selection<'e>(
+    db: impl sqlx::SqliteExecutor<'e>,
+    realm: &str,
+) -> Result<Option<actr_protocol::realm_profile::RealmPackageSelection>, ErrorResponse> {
+    let document: Option<String> =
+        sqlx::query_scalar("SELECT document FROM realm_profile WHERE realm = ?")
+            .bind(realm)
+            .fetch_optional(db)
+            .await
+            .map_err(|error| membership_error("unavailable", error))?;
+    // Realms without a Profile have no selected packages.
+    let Some(document) = document else {
+        return Ok(None);
+    };
+    let invalid = |message: String| membership_error("realm_unavailable", message);
+    let selection: actr_protocol::realm_profile::RealmPackageSelection =
+        actr_protocol::signed_json::parse(document.as_bytes())
+            .and_then(serde_json::from_value)
+            .map_err(|e| invalid(format!("invalid stored Realm selection: {e}")))?;
+    selection.check().map_err(invalid)?;
+    Ok(Some(selection))
+}
+
+pub(crate) async fn check_realm_front_pin<'e>(
+    db: impl sqlx::SqliteExecutor<'e>,
+    request: &RegisterRequest,
+) -> Result<(), ErrorResponse> {
+    if let Some(selection) = realm_package_selection(db, &request.realm).await? {
+        let (_, front) = selection
+            .selected()
+            .map_err(|error| membership_error("realm_unavailable", error))?;
+        check_front_manifest_pin(front, request)?;
+    }
+    Ok(())
+}
+
+fn check_front_manifest_pin(
+    front: &actr_protocol::realm_profile::RealmPackage,
+    request: &RegisterRequest,
+) -> Result<(), ErrorResponse> {
     if let Some(local) = &front.local_path
-        && front.actr_type().map_err(invalid)? == request.actr_type
+        && front
+            .actr_type()
+            .map_err(|error| membership_error("realm_unavailable", error))?
+            == request.actr_type
     {
         let manifest = request
             .manifest_raw
@@ -617,6 +651,7 @@ async fn reissue_credential(
     }
 
     let registration = &request.registration;
+    let pool = platform::storage::db::get_database().get_pool();
     // Authenticate before saying anything about the Realm or the attempt.
     let signer = match authenticate_client(
         &state,
@@ -661,6 +696,9 @@ async fn reissue_credential(
                     let (code, message) = aid_error_to_response(err);
                     return register_error(code, message);
                 }
+                if let Err(error) = check_realm_front_pin(pool, registration).await {
+                    return register_error(error.code, error.message);
+                }
             }
             return protobuf_response(cached.status, cached.body);
         }
@@ -672,6 +710,15 @@ async fn reissue_credential(
     if let Err(validation_err) = RealmEntity::validate_realm(&registration.realm).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
         let body = register_error_body(code, format!("Realm validation failed: {message}"));
+        return complete_attempt(&state, &lease, StatusCode::OK, body, register_error_body).await;
+    }
+
+    if let Err(error) = check_realm_front_pin(pool, registration).await {
+        if error.code >= 500 {
+            release_attempt(&state, &lease).await;
+            return register_error(error.code, error.message);
+        }
+        let body = register_error_body(error.code, error.message);
         return complete_attempt(&state, &lease, StatusCode::OK, body, register_error_body).await;
     }
 
@@ -688,7 +735,7 @@ async fn reissue_credential(
     let (response, succeeded) = match preparation {
         ReissuePreparation::Ready(prepared) => match state
             .idempotency
-            .complete_reissue(&lease, &request.actr_id, *prepared)
+            .complete_reissue(&lease, &request.actr_id, registration, *prepared)
             .await
         {
             Ok(cached) => (protobuf_response(cached.status, cached.body), true),

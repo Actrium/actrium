@@ -495,6 +495,111 @@ async fn v2_package_development_identity_cannot_become_a_registered_publisher() 
 
 #[tokio::test]
 #[serial]
+async fn reissue_checks_the_current_local_front_signing_pin() {
+    let mut env = setup_test_environment().await;
+    let realm = "v2-front-pin@example.com";
+    let publisher = "front-pin.example";
+    seed_realm(realm, Some(ROUTE_KEY_LABEL)).await;
+    let pool = platform::storage::db::get_database().get_pool();
+    let old_key = SigningKey::generate(&mut OsRng);
+    let new_key = SigningKey::generate(&mut OsRng);
+    let (publisher_id, old_id) = seed_publisher_with_key(pool, publisher, &old_key).await;
+    let new_id = actr_pack::compute_key_id(new_key.verifying_key().as_bytes());
+    let old_registration = v2_request_for_publisher(realm, publisher, &old_key);
+    let document = |id: &str| {
+        let mut selection = package_selection(&format!("{publisher}/service@1.0.0"));
+        selection["packages"]["ui"] = serde_json::json!({
+            "href":"/Users/example/front.actr",
+            "type":old_registration.actr_type.to_string_repr(),
+            "local_path":{"signing_key_id":id,"allow_rebuild":true},
+            "dependencies":{"service":"service"}
+        });
+        selection.to_string()
+    };
+    sqlx::query(
+        "INSERT INTO realm_profile (realm, sequence, digest, document, accepted_at)
+         VALUES (?, 1, 'front-pin-v1', ?, 1)",
+    )
+    .bind(realm)
+    .bind(document(&old_id))
+    .execute(pool)
+    .await
+    .unwrap();
+    let app = create_test_router(&env).await;
+    let registered =
+        success(post_register(app.clone(), old_registration.clone(), Some(ROUTE_KEY_LABEL)).await);
+    let original_attempt = ReissueCredentialRequest {
+        actr_id: registered.actr_id.clone(),
+        registration: old_registration.clone(),
+        renewal_proof: registered.renewal_token,
+        attempt_id: control_attempt_id(),
+    };
+    let previously_reissued =
+        success(post_reissue(app.clone(), original_attempt.clone(), Some(ROUTE_KEY_LABEL)).await);
+
+    // The old Publisher key is still valid for signed packages in general.
+    archive_key_to_history(
+        pool,
+        publisher_id,
+        &old_id,
+        &base64::prelude::BASE64_STANDARD.encode(old_key.verifying_key().as_bytes()),
+        "retired",
+    )
+    .await;
+    sqlx::query("UPDATE publisher SET key_id = ?, public_key = ? WHERE id = ?")
+        .bind(&new_id)
+        .bind(base64::prelude::BASE64_STANDARD.encode(new_key.verifying_key().as_bytes()))
+        .bind(publisher_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE realm_profile SET sequence = 2, digest = 'front-pin-v2', document = ? WHERE realm = ?",
+    )
+    .bind(document(&new_id))
+    .bind(realm)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let reject_pinned_key = |response: RegisterResponse| {
+        let Some(register_response::Result::Error(error)) = response.result else {
+            panic!("expected the current Front pin to refuse reissue");
+        };
+        assert_eq!(error.code, 403);
+        assert!(
+            error.message.starts_with("front_signing_key_mismatch:"),
+            "{}",
+            error.message
+        );
+    };
+    reject_pinned_key(post_reissue(app.clone(), original_attempt, Some(ROUTE_KEY_LABEL)).await);
+    let after_change = ReissueCredentialRequest {
+        actr_id: previously_reissued.actr_id.clone(),
+        registration: old_registration,
+        renewal_proof: previously_reissued.renewal_token,
+        attempt_id: control_attempt_id(),
+    };
+    reject_pinned_key(post_reissue(app.clone(), after_change.clone(), Some(ROUTE_KEY_LABEL)).await);
+
+    let reissued = success(
+        post_reissue(
+            app,
+            ReissueCredentialRequest {
+                registration: v2_request_for_publisher(realm, publisher, &new_key),
+                attempt_id: control_attempt_id(),
+                ..after_change
+            },
+            Some(ROUTE_KEY_LABEL),
+        )
+        .await,
+    );
+    assert_eq!(reissued.actr_id, registered.actr_id);
+    env.shutdown_signer().await;
+}
+
+#[tokio::test]
+#[serial]
 async fn v2_reissue_clears_a_legacy_target_without_changing_actor_id() {
     let mut env = setup_test_environment().await;
     let realm = "v2-upgrade@example.com";

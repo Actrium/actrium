@@ -1460,7 +1460,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         Task { @MainActor in
             var expectedURL = tab.url
             var expectedNonce = tab.reloadNonce
-            var acceptedProfile: RealmProfileInfo?
+            var acceptedProfile: RealmProfileStore.AcceptedRealm?
             @MainActor func currentTabIndex() -> Int? {
                 guard realmLoads[replacingTabId] == load else { return nil }
                 if let acceptedProfile,
@@ -1488,9 +1488,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                             comment: "Actr authority encoding error")])
                 }
 
-                let descriptor = try ActriumCore.acceptAuthorityDescriptor(
+                guard currentTabIndex() != nil else { return }
+                let realmName = "\(realmId)@\(domain)"
+                let descriptor = try RealmProfileStore.acceptAuthority(
                     body: body,
-                    domain: domain
+                    domain: domain,
+                    realmName: realmName,
+                    preferences: realmPreferences
                 )
                 let activeKeys = descriptor.signingKeys.filter { $0.status == "active" }
                 logger.notice("🌐 [navigateCurrentTab] Authority accepted for \(domain): realms=\(descriptor.realmsHref), keys sequence=\(descriptor.keysSequence), active keys=\(activeKeys.count)")
@@ -1518,7 +1522,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 do {
                     admission = try RealmJoinService.VerifiedProfile(
                         body: profileData,
-                        realmName: "\(realmId)@\(domain)",
+                        realmName: realmName,
                         signingKeysJSON: descriptor.signingKeysJson,
                         preferences: realmPreferences
                     )
@@ -1527,7 +1531,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     return
                 }
                 let profile = admission.info
-                acceptedProfile = profile
+                acceptedProfile = admission.accepted
                 logger.notice("📄 [navigateCurrentTab] Realm Profile accepted: \(profile.displayName) (\(profile.realmName)), sequence=\(profile.sequence), package=\(profile.packageHref)")
 
                 if admission.isOpen {
@@ -1797,11 +1801,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
         let servicePublisher = profile.serviceType.hasPrefix(publisher.domain + "/")
             ? publisher : try await realmPublisher(for: profile.serviceType, verifySignature: true)
-        let serviceKeys = servicePublisher.packageSigningKeys.compactMap { key -> Data? in
-            guard key.status == "active" || key.status == "retired",
-                  let data = Data(base64Encoded: key.publicKeyBase64), data.count == 32 else { return nil }
-            return data
-        }
+        let serviceKeys = servicePublisher.fixedArchiveVerificationKeys
         let staging = FileManager.default.temporaryDirectory
             .appendingPathComponent("realm-local-front-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
@@ -1827,12 +1827,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 archive: archive, trustedPublicKey: trustedKey, profile: profile,
                 serviceArchive: serviceBytes, servicePublicKeys: serviceKeys
             )
-            return (info.workloadBytes, Self.realmArchiveDigest(archive))
+            return (info, Self.realmArchiveDigest(archive))
         }.value
         guard isCurrent() else { return }
         if let download { _ = try ActrPackageCache.installArchive(at: download, digest: service.sha256) }
 
-        let (guest, digest) = snapshot
+        let (verified, digest) = snapshot
+        let guest = verified.front.workloadBytes
         let stage = staging.appendingPathComponent("front.actr")
         try archive.write(to: stage, options: .atomic)
         let cached = try ActrPackageCache.installArchive(at: stage, digest: digest)
@@ -1855,8 +1856,18 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         )
         var installed = false
         defer { if !installed { Task { await binding.stop() } } }
+        func requireCurrentPublisherKeys() throws {
+            try RealmProfileStore.requirePublisherKey(
+                trustedKey, domain: publisher.domain, localFront: policy, preferences: realmPreferences
+            )
+            try RealmProfileStore.requirePublisherKey(
+                verified.servicePublicKey, domain: servicePublisher.domain, preferences: realmPreferences
+            )
+        }
+        try requireCurrentPublisherKeys()
         try await binding.prepareLocalFront()
         guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        try requireCurrentPublisherKeys()
 
         // New renderer identity prevents late messages from the old Guest
         // from using the new binding or inheriting its approvals.

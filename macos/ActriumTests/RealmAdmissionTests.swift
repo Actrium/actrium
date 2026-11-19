@@ -58,9 +58,61 @@ final class RealmAdmissionTests: XCTestCase {
         let update = try profile(membership: "invite-only", sequence: 2, signer: signer)
         let next = try accept(update, preferences: preferences)
         // A failed package load after acceptance leaves this newer baseline in place.
-        XCTAssertEqual(next.sequence, 2)
+        XCTAssertEqual(next.info.sequence, 2)
         XCTAssertThrowsError(try accept(original, preferences: preferences))
         XCTAssertTrue(RealmProfileStore.isCurrent(next, preferences: preferences))
+    }
+
+    @MainActor
+    func testRevokedRetirementFallsBackToTheLastTrustedProfile() throws {
+        let preferences = try makePreferences()
+        let removed = Curve25519.Signing.PrivateKey()
+        let remaining = Curve25519.Signing.PrivateKey()
+        let initial = try authorityDescriptor(
+            sequence: 1, signer: removed, signerId: "removed",
+            keys: ["removed": removed, "remaining": remaining], extensionValue: "signed metadata"
+        )
+        let updated = try authorityDescriptor(
+            sequence: 2, signer: remaining, signerId: "remaining", keys: ["remaining": remaining]
+        )
+
+        func acceptAuthority(_ body: String, preferences: UserDefaults) throws -> AuthorityDiscoveryInfo {
+            try RealmProfileStore.acceptAuthority(
+                body: body, domain: "realm.example", realmName: realmName, preferences: preferences
+            )
+        }
+
+        let firstKeys = try acceptAuthority(initial, preferences: preferences)
+        let savedActive = try profile(membership: "open", sequence: 4, signer: remaining, keyId: "remaining")
+        let retired = try profile(
+            membership: "open", sequence: 90, status: "retired", signer: removed, keyId: "removed"
+        )
+        _ = try accept((savedActive.0, firstKeys.signingKeysJson), preferences: preferences)
+        XCTAssertThrowsError(try accept((retired.0, firstKeys.signingKeysJson), preferences: preferences)) { error in
+            guard case CoreError.RealmRetired = error else { return XCTFail("Expected accepted retirement") }
+        }
+
+        let current = try acceptAuthority(updated, preferences: preferences)
+        XCTAssertEqual(current.signingKeys.map(\.id), ["remaining"])
+        XCTAssertThrowsError(try acceptAuthority(initial, preferences: preferences))
+        // A Profile fetched against the earlier descriptor cannot reuse its revoked signer.
+        XCTAssertThrowsError(try accept((retired.0, firstKeys.signingKeysJson), preferences: preferences))
+        let rollback = try profile(membership: "open", sequence: 3, signer: remaining, keyId: "remaining")
+        XCTAssertThrowsError(try accept((rollback.0, current.signingKeysJson), preferences: preferences))
+        let replacement = try profile(membership: "open", sequence: 5, signer: remaining, keyId: "remaining")
+        let restored = try accept((replacement.0, current.signingKeysJson), preferences: preferences)
+        XCTAssertEqual(restored.info.sequence, 5)
+
+        // Upgrade from the previous one-document cache, which held only the revoked retirement.
+        let legacy = try makePreferences()
+        legacy.set([
+            "body": String(decoding: retired.0, as: UTF8.self), "signingKeys": firstKeys.signingKeysJson
+        ], forKey: "actr.acceptedRealmProfile.\(realmName)")
+        let migrated = try acceptAuthority(updated, preferences: legacy)
+        XCTAssertEqual(
+            try accept((rollback.0, migrated.signingKeysJson), preferences: legacy).info.sequence,
+            3
+        )
     }
 
     @MainActor
@@ -127,11 +179,81 @@ final class RealmAdmissionTests: XCTestCase {
     }
 
     @MainActor
-    private func accept(_ document: (Data, String), preferences: UserDefaults) throws -> RealmProfileInfo {
+    func testInFlightFrontInstallUsesLatestPublisherTrust() async throws {
+        let preferences = try makePreferences()
+        let domain = "publisher.example"
+        let root = Curve25519.Signing.PrivateKey()
+        let publicKey = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
+        let replacement = packageKey(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation, status: "active")
+        let initial = try publisherDescriptor(sequence: 1, root: root, keys: [packageKey(publicKey, status: "active")])
+        let snapshot = try RealmProfileStore.acceptPublisher(body: initial, domain: domain, preferences: preferences)
+        let keyId = try XCTUnwrap(snapshot.packageSigningKeys.first?.id)
+        let rebuildable = LocalRealmFront(signingKeyId: keyId, allowRebuild: true)
+        let pinned = LocalRealmFront(signingKeyId: keyId, allowRebuild: false)
+        let verifiedKey = try XCTUnwrap(snapshot.verificationKey(for: rebuildable))
+        let (started, signalStarted) = AsyncStream<Void>.makeStream()
+        let (resume, release) = AsyncStream<Void>.makeStream()
+        defer { release.finish() }
+        let install = Task { @MainActor in
+            signalStarted.yield(())
+            signalStarted.finish()
+            for await _ in resume { break }
+            try RealmProfileStore.requirePublisherKey(
+                verifiedKey, domain: domain, localFront: rebuildable, preferences: preferences
+            )
+        }
+        for await _ in started { break }
+        let retired = try publisherDescriptor(
+            sequence: 2, root: root, keys: [packageKey(publicKey, status: "retired"), replacement]
+        )
+        _ = try RealmProfileStore.acceptPublisher(body: retired, domain: domain, preferences: preferences)
+        release.yield(())
+        release.finish()
+        guard case .failure = await install.result else {
+            return XCTFail("A pending rebuild used a retired key")
+        }
+        XCTAssertNoThrow(try RealmProfileStore.requirePublisherKey(
+            verifiedKey, domain: domain, localFront: pinned, preferences: preferences
+        ))
+
+        let removed = try publisherDescriptor(sequence: 3, root: root, keys: [replacement])
+        _ = try RealmProfileStore.acceptPublisher(body: removed, domain: domain, preferences: preferences)
+        XCTAssertThrowsError(try RealmProfileStore.requirePublisherKey(
+            verifiedKey, domain: domain, localFront: pinned, preferences: preferences
+        ))
+    }
+
+    @MainActor
+    private func accept(_ document: (Data, String), preferences: UserDefaults) throws -> RealmProfileStore.AcceptedRealm {
         try RealmProfileStore.acceptRealm(
             body: String(decoding: document.0, as: UTF8.self), realmName: realmName,
             signingKeysJSON: document.1, preferences: preferences
         )
+    }
+
+    private func authorityDescriptor(
+        sequence: Int, signer: Curve25519.Signing.PrivateKey, signerId: String,
+        keys: [String: Curve25519.Signing.PrivateKey], extensionValue: String? = nil
+    ) throws -> String {
+        var member: [String: Any] = [
+            "sequence": sequence,
+            "keys": keys.sorted { $0.key < $1.key }.map { id, key in
+                [
+                    "id": id, "algorithm": "Ed25519", "status": "active",
+                    "public_key": key.publicKey.rawRepresentation.base64EncodedString()
+                ]
+            }
+        ]
+        member["x-extension"] = extensionValue
+        let signedKeys = try sign(member, with: signer, keyId: signerId)
+        let descriptor = try JSONSerialization.data(withJSONObject: [
+            "version": 1, "authority": "actr://realm.example",
+            "services": [[
+                "rel": "realms", "href": "https://realm.example/realm", "protocol": "actr-realm-profile/1"
+            ]],
+            "realm_signing_keys": try JSONSerialization.jsonObject(with: signedKeys)
+        ])
+        return String(decoding: descriptor, as: UTF8.self)
     }
 
     private func makePreferences() throws -> UserDefaults {
@@ -176,13 +298,14 @@ final class RealmAdmissionTests: XCTestCase {
 
     private func profile(
         membership: String, sequence: Int = 1, status: String = "active",
-        signer: Curve25519.Signing.PrivateKey = Curve25519.Signing.PrivateKey()
+        signer: Curve25519.Signing.PrivateKey = Curve25519.Signing.PrivateKey(),
+        keyId: String = "realm-key"
     ) throws -> (Data, String) {
         let publicKey = signer.publicKey.rawRepresentation.base64EncodedString()
         let keys = try sign([
             "sequence": 1,
-            "keys": [["id": "realm-key", "algorithm": "Ed25519", "public_key": publicKey, "status": "active"]]
-        ], with: signer)
+            "keys": [["id": keyId, "algorithm": "Ed25519", "public_key": publicKey, "status": "active"]]
+        ], with: signer, keyId: keyId)
         let body = try sign([
             "schema": "actr.realm/v1",
             "sequence": sequence,
@@ -209,7 +332,7 @@ final class RealmAdmissionTests: XCTestCase {
             ],
             "policy": ["membership": membership],
             "issued_at": "2026-07-29T00:00:00Z"
-        ], with: signer)
+        ], with: signer, keyId: keyId)
         return (body, String(decoding: keys, as: UTF8.self))
     }
 
@@ -221,12 +344,14 @@ final class RealmAdmissionTests: XCTestCase {
         ]
     }
 
-    private func sign(_ payload: [String: Any], with key: Curve25519.Signing.PrivateKey) throws -> Data {
+    private func sign(
+        _ payload: [String: Any], with key: Curve25519.Signing.PrivateKey, keyId: String = "realm-key"
+    ) throws -> Data {
         let body = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys, .withoutEscapingSlashes])
         let signature = try key.signature(for: body)
         var document = payload
         document["signature"] = [
-            "key_id": "realm-key", "algorithm": "Ed25519", "value": signature.base64EncodedString()
+            "key_id": keyId, "algorithm": "Ed25519", "value": signature.base64EncodedString()
         ]
         return try JSONSerialization.data(withJSONObject: document)
     }
