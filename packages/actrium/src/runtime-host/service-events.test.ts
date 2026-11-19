@@ -412,6 +412,37 @@ describe('createHttpServiceEventSource', () => {
     }
   });
 
+  test('reconnects when an open fetch stream goes silent', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      fetchCalls += 1;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener('abort', () => {
+              controller.error(new Error('Connection aborted.'));
+            });
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } }
+      );
+    }) as unknown as typeof fetch;
+    try {
+      const source = createHttpServiceEventSource('https://example.com/events', ['a'], {
+        idleTimeoutMs: 20,
+        initialRetryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      });
+      const unsubscribe = source.subscribe(() => {});
+      await waitFor(() => fetchCalls >= 2);
+      expect(fetchCalls).toBeGreaterThanOrEqual(2);
+      unsubscribe();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('restarts a terminal HTTP stream for a new handler', async () => {
     const originalFetch = globalThis.fetch;
     const encoder = new TextEncoder();
@@ -787,6 +818,74 @@ describe('createHttpServiceEventSource', () => {
       expect(fetchCalls).toBe(0);
       unsubscribe();
     } finally {
+      globalThis.fetch = originalFetch;
+      globalThis.XMLHttpRequest = originalXhr;
+      if (originalNavigator) {
+        Object.defineProperty(globalThis, 'navigator', originalNavigator);
+      } else {
+        delete (globalThis as { navigator?: Navigator }).navigator;
+      }
+    }
+  });
+
+  test('resets the XHR liveness deadline on comment heartbeats', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalXhr = globalThis.XMLHttpRequest;
+    const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    globalThis.fetch = (() => new Promise<Response>(() => {})) as unknown as typeof fetch;
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { product: 'ReactNative' },
+      writable: true,
+    });
+    const requests: FakeXhr[] = [];
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    class FakeXhr {
+      readyState = 0;
+      status = 0;
+      responseText = '';
+      onreadystatechange: (() => void) | null = null;
+      onprogress: (() => void) | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      open(): void {}
+      setRequestHeader(): void {}
+      abort(): void {}
+      send(): void {
+        requests.push(this);
+        this.readyState = 3;
+        this.status = 200;
+        this.onreadystatechange?.();
+        if (requests.length === 1) {
+          heartbeat = setInterval(() => {
+            // Comment-only SSE frames carry no event or ID, but their bytes
+            // still prove that the connection is alive.
+            this.responseText += ': keep-alive\n\n';
+            this.onprogress?.();
+          }, 5);
+        }
+      }
+    }
+    globalThis.XMLHttpRequest = FakeXhr as unknown as typeof XMLHttpRequest;
+    try {
+      const source = createHttpServiceEventSource('https://example.com/events', ['a'], {
+        idleTimeoutMs: 100,
+        initialRetryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      });
+      const unsubscribe = source.subscribe(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(requests.length).toBe(1);
+
+      if (heartbeat !== undefined) clearInterval(heartbeat);
+      heartbeat = undefined;
+      await waitFor(() => requests.length >= 2);
+      expect(requests.length).toBeGreaterThanOrEqual(2);
+      unsubscribe();
+    } finally {
+      if (heartbeat !== undefined) clearInterval(heartbeat);
       globalThis.fetch = originalFetch;
       globalThis.XMLHttpRequest = originalXhr;
       if (originalNavigator) {

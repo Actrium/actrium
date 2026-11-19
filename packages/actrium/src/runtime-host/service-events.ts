@@ -217,6 +217,9 @@ export interface HttpServiceEventSourceOptions {
   maxXhrResponseCharacters?: number;
   /** A connection this old is considered stable and resets reconnect backoff. */
   stableConnectionMs?: number;
+  /** Reconnect when no response bytes arrive for this long. Set this above the
+   * gateway's heartbeat interval; SSE comment heartbeats also reset the timer. */
+  idleTimeoutMs?: number;
   initialRetryDelayMs?: number;
   maxRetryDelayMs?: number;
 }
@@ -282,17 +285,20 @@ export function createHttpServiceEventSource(
   const maxBufferedCharacters = options.maxBufferedCharacters ?? 1_048_576;
   const maxXhrResponseCharacters = options.maxXhrResponseCharacters ?? 4_194_304;
   const stableConnectionMs = options.stableConnectionMs ?? 10_000;
+  const idleTimeoutMs = options.idleTimeoutMs ?? 90_000;
   const initialRetryDelayMs = options.initialRetryDelayMs ?? 1_000;
   const maxRetryDelayMs = options.maxRetryDelayMs ?? 30_000;
   if (
     !Number.isFinite(maxBufferedCharacters) ||
     !Number.isFinite(maxXhrResponseCharacters) ||
     !Number.isFinite(stableConnectionMs) ||
+    !Number.isFinite(idleTimeoutMs) ||
     !Number.isFinite(initialRetryDelayMs) ||
     !Number.isFinite(maxRetryDelayMs) ||
     maxBufferedCharacters <= 0 ||
     maxXhrResponseCharacters <= 0 ||
     stableConnectionMs < 0 ||
+    idleTimeoutMs <= 0 ||
     initialRetryDelayMs < 0 ||
     maxRetryDelayMs < 0
   ) {
@@ -350,6 +356,7 @@ export function createHttpServiceEventSource(
         let buffer = '';
         let transportAbort: (() => void) | undefined;
         let stableTimer: ReturnType<typeof setTimeout> | undefined;
+        let idleTimer: ReturnType<typeof setTimeout> | undefined;
         let resolveDone!: (result: SseConnectionResult) => void;
         const done = new Promise<SseConnectionResult>((resolve) => {
           resolveDone = resolve;
@@ -360,11 +367,28 @@ export function createHttpServiceEventSource(
           settled = true;
           if (!result.retry) terminal = true;
           if (stableTimer !== undefined) clearTimeout(stableTimer);
+          if (idleTimer !== undefined) clearTimeout(idleTimer);
           transportAbort?.();
           transportAbort = undefined;
           resolveDone(result);
         };
+        const resetIdleTimer = () => {
+          if (settled || !active) return;
+          if (idleTimer !== undefined) clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            finish({
+              retry: true,
+              error: new Error(
+                `Service event stream received no data for ${idleTimeoutMs} ms.`
+              ),
+            });
+          }, idleTimeoutMs);
+        };
         const markConnected = () => {
+          // Headers and every XHR progress notification prove liveness. The
+          // timer covers half-open sockets; xhr.timeout would instead kill a
+          // healthy long-lived SSE request.
+          resetIdleTimer();
           if (stableTimer !== undefined) return;
           stableTimer = setTimeout(() => {
             retryCount = 0;
@@ -481,6 +505,9 @@ export function createHttpServiceEventSource(
           }
         };
 
+        // Arm before awaiting response headers so a server that accepts the
+        // request but never replies cannot leave this connection pending.
+        resetIdleTimer();
         if (typeof fetch !== 'function' || prefersIncrementalXhr()) {
           startXhr();
         } else {
@@ -493,6 +520,7 @@ export function createHttpServiceEventSource(
               signal: controller.signal,
             });
             if (settled) return;
+            resetIdleTimer();
             if (!response.ok || response.status === 204) {
               finish({
                 retry: retryableHttpStatus(response.status),
@@ -519,6 +547,9 @@ export function createHttpServiceEventSource(
               while (!settled) {
                 const { done: eof, value } = await reader.read();
                 if (eof) break;
+                // Reset on raw bytes, before decoding or parsing. Comment-only
+                // SSE heartbeats and a partial UTF-8 sequence both count.
+                if (value.byteLength > 0) resetIdleTimer();
                 acceptText(decoder.decode(value, { stream: true }));
               }
               if (!settled) acceptText(decoder.decode());
