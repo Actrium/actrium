@@ -5,6 +5,7 @@ import Foundation
 /// Binds storage to the Host's current document, before sending the renderer config.
 @MainActor
 final class RendererLocalStorage {
+    private enum ExecutionError: Error { case expiredBeforeStart }
     private struct Manifest: Decodable {
         struct Module: Decodable { let rpc: [String]? }
         let hostModules: [String: Module]
@@ -68,6 +69,14 @@ final class RendererLocalStorage {
               document.methods.contains(call.operation) else {
             return GuestLocalStorageReply(id: call.id, error: "Local storage access was denied.")
         }
+        let now = DispatchTime.now()
+        let deadline = min(
+            call.deadlineUptimeNanoseconds,
+            (now + .seconds(GuestLocalStorageCall.timeoutSeconds)).uptimeNanoseconds
+        )
+        guard now.uptimeNanoseconds < deadline else {
+            return .expiredBeforeStart(id: call.id)
+        }
         guard pendingOperationCount < pendingLimit else {
             return GuestLocalStorageReply(id: call.id, error: "Too many pending local storage operations.")
         }
@@ -77,11 +86,16 @@ final class RendererLocalStorage {
         do {
             // Accepted database operations may finish after revocation.
             // Reject subsequent calls and prevent replies from reaching a replaced document.
-            let value = try await execute(call, origin: document.origin)
+            let value = try await execute(call, origin: document.origin, deadline: deadline)
             guard documents[tabId]?.id == document.id else {
-                return GuestLocalStorageReply(id: call.id, error: "The local storage document changed.")
+                return GuestLocalStorageReply(
+                    id: call.id, error: "The local storage document changed.",
+                    errorCode: call.operation == .getItem ? nil : .outcomeUnknown
+                )
             }
             return GuestLocalStorageReply(id: call.id, value: value)
+        } catch ExecutionError.expiredBeforeStart {
+            return .expiredBeforeStart(id: call.id)
         } catch GuestLocalStorageError.InvalidKey(let message),
                 GuestLocalStorageError.InvalidValue(let message),
                 GuestLocalStorageError.QuotaExceeded(let message) {
@@ -92,11 +106,16 @@ final class RendererLocalStorage {
         }
     }
 
-    private func execute(_ call: GuestLocalStorageCall, origin: String) async throws -> String? {
+    private func execute(_ call: GuestLocalStorageCall, origin: String, deadline: UInt64) async throws -> String? {
         let store = try open()
         return try await withCheckedThrowingContinuation { continuation in
             databaseQueue.async {
-                continuation.resume(with: Result { try Self.executeSynchronously(call, origin: origin, store: store) })
+                continuation.resume(with: Result {
+                    guard DispatchTime.now().uptimeNanoseconds < deadline else {
+                        throw ExecutionError.expiredBeforeStart
+                    }
+                    return try Self.executeSynchronously(call, origin: origin, store: store)
+                })
             }
         }
     }

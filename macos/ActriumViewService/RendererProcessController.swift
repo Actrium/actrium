@@ -162,7 +162,7 @@ final class RendererProcessController {
     private let arguments: Arguments
     private let connection: IPCHelperConnection
     private var serviceCalls: [UUID: (RealmServiceReply) -> Void] = [:]
-    private lazy var localStorage = RendererLocalStorageClient(connection: connection)
+    private lazy var localStorage = GuestLocalStorageClient(connection: connection)
 
     static func callLocalStorage(
         _ call: GuestLocalStorageCall, tabId: String,
