@@ -79,3 +79,9 @@ For workspace version `0.10.7`, the first snapshot is `0.10.7-alpha.1`.
 Each new commit gets the next numeric suffix for that version. Rebuilding a
 previously tagged commit reuses its tag and replaces only its two assets.
 Snapshots are prereleases and never marked Latest. On failure, rerun all jobs.
+Build metadata is updated in a marked block in the snapshot release notes.
+
+For stable releases from `main`, Release Train automatically builds the same
+unsigned DMG from the release tag and attaches it and its SHA-256 file to the
+existing `vX.Y.Z` Release. A Release Train dry run saves the DMG and checksum
+as an Actions artifact. The release report includes the macOS result.

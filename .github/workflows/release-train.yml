@@ -812,6 +812,16 @@ jobs:
       replace_assets: true
     secrets: inherit
 
+  publish-actrium-macos:
+    name: Publish Actrium macOS DMG
+    needs: [context, create-release]
+    if: needs.context.outputs.target_branch == 'main' && needs.context.outputs.pre_release == 'false'
+    uses: ./.github/workflows/_actrium-macos-release.yml
+    with:
+      tag: v${{ needs.context.outputs.version }}
+      source_sha: ${{ needs.context.outputs.release_sha }}
+      publish: ${{ !fromJSON(needs.context.outputs.dry_run) }}
+
   # ── Publish Loran server binaries ───────────────────────────────────────
   publish-loran:
     name: Publish Loran server binaries
@@ -858,6 +868,7 @@ jobs:
       - publish-typescript
       - publish-actrsharp
       - publish-cli
+      - publish-actrium-macos
       - publish-loran
       - publish-protoc-plugins
     runs-on: ubuntu-latest

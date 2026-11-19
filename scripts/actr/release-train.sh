@@ -92,6 +92,7 @@ readonly VALID_STAGES=(
 readonly REPORT_STAGES=(
   "${VALID_STAGES[@]}"
   "publish-actrsharp"
+  "publish-actrium-macos"
 )
 
 readonly OPTIONAL_SKIPPED_COMPONENTS=(
@@ -247,6 +248,9 @@ if state_path.exists():
                 "git_sha": git_sha,
             }
         )
+
+if any(row["kind"] == "macos_dmg" and row["status"] == "failure" for row in rows):
+    overall_status = "failure"
 
 payload = {
     "version": version,
@@ -2421,6 +2425,7 @@ kind_order = [
     ("nuget", "NuGet Packages"),
     ("package_sync", "Package Sync"),
     ("cli_binary", "CLI Binaries (GitHub Release)"),
+    ("macos_dmg", "Actrium macOS DMG (GitHub Release)"),
 ]
 
 by_kind = {}
