@@ -288,16 +288,20 @@ describe('capability model data', () => {
   });
 
   test('only implemented capabilities count as host-supported', () => {
-    expect(HOST_SUPPORTED_CAPABILITIES.size).toBe(9);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('service.call')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('service.on')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('service.attachmentUpload')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:clipboard.write')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:file-import.pick')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.recognize')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.onInterimResult')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.stop')).toBe(true);
-    expect(HOST_SUPPORTED_CAPABILITIES.has('host:speech.onStateChange')).toBe(true);
+    expect(HOST_SUPPORTED_CAPABILITIES).toEqual(new Set([
+      'service.call',
+      'service.on',
+      'service.attachmentUpload',
+      'host:clipboard.write',
+      'host:file-import.pick',
+      'host:local-storage.getItem',
+      'host:local-storage.setItem',
+      'host:local-storage.removeItem',
+      'host:speech.recognize',
+      'host:speech.onInterimResult',
+      'host:speech.stop',
+      'host:speech.onStateChange',
+    ]));
     for (const capability of FRONT_CAPABILITIES) {
       if (HOST_SUPPORTED_CAPABILITIES.has(capability)) continue;
       expect(FRONT_CAPABILITY_DEFINITIONS[capability].implemented).toBe(false);

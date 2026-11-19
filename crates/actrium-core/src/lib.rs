@@ -15,12 +15,14 @@ pub mod browser_data;
 pub mod c_api;
 pub mod domain;
 mod ffi;
+mod guest_local_storage;
 pub mod persistence;
 pub mod realm_link;
 pub mod runtime_persistence;
 pub mod speech;
 
 pub use ffi::*;
+pub use guest_local_storage::{GuestLocalStorage, GuestLocalStorageError};
 
 uniffi::include_scaffolding!("actrium_core");
 
