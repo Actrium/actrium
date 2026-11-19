@@ -59,6 +59,8 @@ pub fn check_realm_package_dependencies(
 /// Check mapped edges between verified archives, including exported RPC contracts.
 /// Callers obtain the dependency closure before calling; cycles need no ordering.
 /// Unfetched, unrelated entries in the Profile are not asserted to be verified.
+/// An unavailable local Front defers its export check to the user-authorized Host.
+/// Its incoming aliases, selected types, locks and source contracts are still checked.
 pub fn check_realm_dependencies(
     selection: &RealmPackageSelection,
     manifests: &BTreeMap<String, ActorPackageManifest>,
@@ -77,20 +79,29 @@ pub fn check_realm_dependencies(
             let invalid = |message: &str| {
                 PackError::InvalidPackage(format!("{source}.{alias} -> {target}: {message}"))
             };
-            let target_manifest = manifests
-                .get(target)
-                .ok_or_else(|| invalid("target archive has not been verified"))?;
+            let contract = manifest.dependencies[alias]
+                .contract
+                .as_ref()
+                .map(|path| {
+                    manifest
+                        .files
+                        .iter()
+                        .find(|file| &file.path == path && file.role == "contract")
+                        .ok_or_else(|| invalid("dependency contract is not a signed contract file"))
+                })
+                .transpose()?;
+            let Some(target_manifest) = manifests.get(target) else {
+                if selection.packages[target].local_path.is_some() {
+                    continue;
+                }
+                return Err(invalid("target archive has not been verified"));
+            };
             if target_manifest.actor_type() != selection.packages[target].r#type {
                 return Err(invalid(
                     "target manifest type differs from its Realm selection",
                 ));
             }
-            if let Some(path) = &manifest.dependencies[alias].contract {
-                let contract = manifest
-                    .files
-                    .iter()
-                    .find(|file| &file.path == path && file.role == "contract")
-                    .ok_or_else(|| invalid("dependency contract is not a signed contract file"))?;
+            if let Some(contract) = contract {
                 let matches_export = if target_manifest.workload.profile == "actr.component/1" {
                     let exported = target_manifest.component_rpc_contract()?;
                     target_manifest.files.iter().any(|file| {

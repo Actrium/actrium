@@ -211,12 +211,19 @@
           "required": ["local_path", "dependencies"],
           "properties": {
             "href": {
+              "not": {"pattern": "^\\s|\\s$"},
               "anyOf": [
                 {"maxLength": 255, "pattern": "^[^/\\\\:\\u0000-\\u001f\\u007f-\\u009f]+\\.actr$"},
                 {
                   "maxLength": 1023,
-                  "pattern": "^/(?:[^/\\\\:%\\u0000-\\u001f\\u007f-\\u009f]+/)*[^/\\\\:%\\u0000-\\u001f\\u007f-\\u009f]+\\.actr$",
-                  "not": {"pattern": "/\\.{1,2}/"}
+                  "description": "An absolute path outside protected system directories. The Host enforces the limits on UTF-8 bytes.",
+                  "pattern": "^/(?:[^/\\\\:%\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]{1,255}/)*[^/\\\\:%\\u0000-\\u001f\\u007f-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]{1,250}\\.actr$",
+                  "not": {
+                    "anyOf": [
+                      {"pattern": "/\\.{1,2}/"},
+                      {"pattern": "^/(?:[pP][rR][iI][vV][aA][tT][eE]/)?(?:[bB][iI][nN]|[dD][eE][vV]|[eE][tT][cC]|[lL][iI][bB][rR][aA][rR][yY]|[nN][eE][tT]|[nN][eE][tT][wW][oO][rR][kK]|[pP][rR][oO][cC]|[rR][oO][oO][tT]|[rR][uU][nN]|[sS][bB][iI][nN]|[sS][yY][sS]|[sS][yY][sS][tT][eE][mM]|[uU][sS][rR]|[vV][aA][rR]/(?:[dD][bB]|[rR][oO][oO][tT]|[rR][uU][nN]))(?:/|$)"}
+                    ]
+                  }
                 }
               ]
             },

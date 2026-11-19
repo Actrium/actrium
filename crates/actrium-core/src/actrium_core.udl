@@ -18,6 +18,8 @@ namespace actrium_core {
     VerifiedActrPackageInfo verify_local_realm_front_package(bytes archive, bytes trusted_public_key, RealmProfileInfo profile, bytes service_archive, sequence<bytes> service_public_keys);
     [Throws=CoreError]
     PublisherProfileInfo verify_realm_package_publisher(string body, string domain);
+    [Throws=CoreError]
+    PublisherProfileAcceptance accept_realm_package_publisher(string body, string domain, string? previous_pins_json);
 
     /// Generate a fresh installation id: 26 lowercase base32 characters
     /// from 16 OS-CSPRNG bytes. Platforms persist the value once and own
@@ -52,6 +54,8 @@ namespace actrium_core {
     /// Realms are rejected.
     [Throws=CoreError]
     RealmProfileInfo accept_realm_profile(string body, string realm_name, string signing_keys_json);
+    [Throws=CoreError]
+    RealmProfileInfo? accept_realm_profile_successor(string body, string realm_name, string signing_keys_json, RealmProfileBaseline? baseline);
 
     /// Validate the descriptor served by a publisher domain and verify its
     /// inline Publisher Profile; extract the package signing keys that
@@ -1101,6 +1105,11 @@ dictionary RealmProfileInfo {
     string provider_id;
 };
 
+dictionary RealmProfileBaseline {
+    string body;
+    string signing_keys_json;
+};
+
 /// The Realm name carried by a `ri_` invite text.
 dictionary ActrInviteInfo {
     /// Canonical Realm name `<realm_id>@<domain>`.
@@ -1124,6 +1133,11 @@ dictionary PublisherProfileInfo {
     /// RFC 3339; past this point the profile must be re-fetched.
     string profile_expires_at;
     sequence<PublisherPackageKeyInfo> package_signing_keys;
+};
+
+dictionary PublisherProfileAcceptance {
+    PublisherProfileInfo profile;
+    string pins_json;
 };
 
 dictionary VerifiedActrPackageInfo {

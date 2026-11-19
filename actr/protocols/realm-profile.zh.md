@@ -194,9 +194,12 @@ Service Host 验证 Service 归档，并在接受 Front 前核对所选 Front �
 的精确 Actor 类型、签名覆盖的载荷、Workload、Host 要求、平台策略和依赖锁。见 [Actor Package](actor-package.zh.md)。
 
 声明 `local_path` 的 Front 若使用绝对路径，Host 必须先向本机用户展示该路径并获得授权，才能访问文件。
-Host 拒绝符号链接、非本地卷和非普通文件。只有文件名提示的已有 Profile 仍通过本机选包授权。
+绝对路径须避开受保护的系统目录。在 macOS 上，主目录下的文件使用 `/Users/…` 路径。
+只有文件名提示的已有 Profile 仍通过本机选包授权。两种方式都只接受本地卷上的普通文件，
+并拒绝文件符号链接。读取已授权的绝对路径时，Host 也拒绝目录符号链接。
 Host 从同一次读取的字节验证固定的 Publisher 签名 key、精确 Actor 类型、Service 依赖和 RPC 契约。
-固定包核对整包摘要。`allow_rebuild` 开启时，每次加载重新计算构建摘要，刷新可重新读取获准位置的同名文件，
+固定包核对整包摘要，可以用已退役的包签名 key 验证。`allow_rebuild` 开启时须使用 active key。
+每次加载重新计算构建摘要，刷新可重新读取获准位置的同名文件，
 并重新验证 Realm 与 Publisher。后台只验本地包声明，可下载归档照常验包。Host 用已验证的 Service 契约
 比对本地包。
 

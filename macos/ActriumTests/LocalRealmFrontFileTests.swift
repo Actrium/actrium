@@ -47,8 +47,9 @@ final class LocalRealmFrontFileTests: XCTestCase {
         let approved = try LocalRealmFrontFile(selectedURL: package)
         XCTAssertEqual(try approved.readArchive(), Data("first".utf8))
 
-        try Data("rebuilt".utf8).write(to: package, options: .atomic)
-        XCTAssertEqual(try approved.readArchive(), Data("rebuilt".utf8))
+        let rebuilt = Data(repeating: 0x41, count: 65_537)
+        try rebuilt.write(to: package, options: .atomic)
+        XCTAssertEqual(try approved.readArchive(), rebuilt)
 
         try Data("different".utf8).write(to: other)
         try fm.removeItem(at: package)

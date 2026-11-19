@@ -7,18 +7,21 @@ import Foundation
 nonisolated final class LocalRealmFrontFile: Sendable {
     private let directory: Int32
     private let filename: String
-    private let requiresLocalVolume: Bool
 
     init(selectedURL: URL) throws {
-        guard selectedURL.isFileURL, selectedURL.pathExtension.lowercased() == "actr" else {
+        let name = selectedURL.lastPathComponent
+        guard selectedURL.isFileURL, name.hasSuffix(".actr"), name != ".actr" else {
             throw CocoaError(.fileReadUnsupportedScheme)
         }
         let parent = selectedURL.deletingLastPathComponent().resolvingSymlinksInPath().path
         let descriptor = Darwin.open(parent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard descriptor >= 0 else { throw Self.openError() }
+        guard Self.isLocalVolume(descriptor) else {
+            Darwin.close(descriptor)
+            throw CocoaError(.fileReadUnsupportedScheme)
+        }
         directory = descriptor
-        filename = selectedURL.lastPathComponent
-        requiresLocalVolume = false
+        filename = name
     }
 
     /// The caller must show this exact approved path to the user before calling.
@@ -49,7 +52,6 @@ nonisolated final class LocalRealmFrontFile: Sendable {
         }
         directory = descriptor
         filename = String(name)
-        requiresLocalVolume = true
     }
 
     deinit {
@@ -61,17 +63,22 @@ nonisolated final class LocalRealmFrontFile: Sendable {
         guard descriptor >= 0 else { throw Self.openError() }
         let file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         defer { try? file.close() }
-        if requiresLocalVolume && !Self.isLocalVolume(descriptor) {
+        guard Self.isLocalVolume(descriptor) else {
             throw CocoaError(.fileReadUnsupportedScheme)
         }
         var info = stat()
         let limit = 64 * 1024 * 1024
         guard fstat(descriptor, &info) == 0, info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
-              (1...Int64(limit)).contains(info.st_size),
-              let bytes = try file.read(upToCount: limit + 1),
-              !bytes.isEmpty, bytes.count <= limit else {
+              (1...Int64(limit)).contains(info.st_size) else {
             throw CocoaError(.fileReadCorruptFile)
         }
+        var bytes = Data()
+        bytes.reserveCapacity(Int(info.st_size))
+        while let chunk = try file.read(upToCount: min(64 * 1024, limit + 1 - bytes.count)), !chunk.isEmpty {
+            bytes.append(chunk)
+            guard bytes.count <= limit else { throw CocoaError(.fileReadCorruptFile) }
+        }
+        guard !bytes.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
         return bytes
     }
 

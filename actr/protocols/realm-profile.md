@@ -232,12 +232,16 @@ trusted key of the Publisher named in `type`. Check the manifest's exact Actor t
 Workload, Host requirements, platform policy and dependency locks. See [Actor Package](actor-package.zh.md).
 
 A `local_path` Front with an absolute `href` requires explicit user approval for that path
-before any file access. The Host rejects symbolic links, non-local volumes and non-regular files.
+before any file access. Absolute paths must be outside protected system directories. On macOS,
+use the canonical `/Users/…` path for files under a home directory.
 A legacy filename hint requires explicit local file selection. The Host checks one read snapshot against the pinned
-Publisher signing key, exact Actor type, Service dependency and RPC contract. It checks the fixed
-digest unless `allow_rebuild` is true. In that mode it computes a digest for each loaded build, and
-refresh may read a replacement of the approved filename. Realm and Publisher verification still
-apply on refresh. Management tools validate the declaration and downloadable archives, while the
+Publisher signing key, exact Actor type, Service dependency and RPC contract. In either flow,
+the archive must be a regular file on a local volume. The Host rejects symbolic links to the file
+and traverses approved absolute paths without following symbolic links. The Host checks a fixed
+digest and may use a retired package key to verify that archive. With `allow_rebuild` enabled,
+the key must be active. The Host computes a digest for each loaded build and may read a
+replacement of the approved filename on refresh. Realm and Publisher verification still apply
+on refresh. Management tools validate the declaration and downloadable archives, while the
 Host verifies the selected local archive against the verified Service contract.
 
 The primary Actor type identifies the instance's Service. Finding zero or multiple Actors of that

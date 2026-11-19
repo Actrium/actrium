@@ -21,12 +21,12 @@ enum RealmJoinService {
         let info: RealmProfileInfo
         let isOpen: Bool
 
-        init(body: Data, realmName: String, signingKeysJSON: String) throws {
+        init(body: Data, realmName: String, signingKeysJSON: String, preferences: UserDefaults) throws {
             guard let text = String(data: body, encoding: .utf8) else {
                 throw RealmJoinService.joinError("The Realm Profile is not valid text.")
             }
-            info = try ActriumCore.acceptRealmProfile(
-                body: text, realmName: realmName, signingKeysJson: signingKeysJSON
+            info = try RealmProfileStore.acceptRealm(
+                body: text, realmName: realmName, signingKeysJSON: signingKeysJSON, preferences: preferences
             )
             // Read the policy from the same bytes verified by the core.
             isOpen = try JSONDecoder().decode(AdmissionPolicy.self, from: Data(text.utf8)).policy.membership == "open"
@@ -62,7 +62,8 @@ enum RealmJoinService {
     static func joinWithInvite(
         inviteText: String,
         label: String,
-        allowInsecureDevelopment: Bool = false
+        allowInsecureDevelopment: Bool = false,
+        preferences: UserDefaults = .standard
     ) async throws -> RealmJoinResult {
         // 1. Decode the invite locally: learn the Realm name. The secret
         //    stays inside the invite text; `join` consumes it in Rust.
@@ -101,7 +102,7 @@ enum RealmJoinService {
         }
         let profileBody = try await fetchBoundedDocument(profileURL)
         let profile = try VerifiedProfile(
-            body: profileBody, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson
+            body: profileBody, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson, preferences: preferences
         ).info
 
         // 4. Device identity (created and persisted on first use) and the

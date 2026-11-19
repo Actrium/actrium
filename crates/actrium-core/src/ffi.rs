@@ -1,5 +1,5 @@
 use actr_protocol::authority::{
-    self, AuthorityDescriptor, AuthorityDescriptorError, RealmSigningKeys,
+    self, AuthorityDescriptor, AuthorityDescriptorError, KeyPinOutcome, KeyPins, RealmSigningKeys,
 };
 use actr_protocol::realm_membership::RealmInvite;
 use actr_protocol::realm_profile::{RealmProfile, RealmProfileError, RealmStatus};
@@ -1025,6 +1025,17 @@ pub fn accept_authority_descriptor(
     })
 }
 
+fn verified_realm_profile(
+    body: &str,
+    realm_name: &str,
+    signing_keys_json: &str,
+) -> Result<RealmProfile, CoreError> {
+    let keys: RealmSigningKeys = serde_json::from_str(signing_keys_json).map_err(|error| {
+        CoreError::RealmProfileInvalid(format!("malformed signing keys: {error}"))
+    })?;
+    Ok(RealmProfile::verify(body.as_bytes(), realm_name, &keys)?)
+}
+
 /// Validate a Realm Profile response for `realm_name` and extract the
 /// package selection.
 pub fn accept_realm_profile(
@@ -1032,13 +1043,41 @@ pub fn accept_realm_profile(
     realm_name: String,
     signing_keys_json: String,
 ) -> Result<RealmProfileInfo, CoreError> {
-    let keys: RealmSigningKeys = serde_json::from_str(&signing_keys_json).map_err(|error| {
-        CoreError::RealmProfileInvalid(format!("malformed signing keys: {error}"))
-    })?;
-    let profile = RealmProfile::verify(body.as_bytes(), &realm_name, &keys)?;
+    let profile = verified_realm_profile(&body, &realm_name, &signing_keys_json)?;
     if profile.realm.status != RealmStatus::Active {
         return Err(CoreError::RealmRetired(profile.realm.name.clone()));
     }
+    realm_profile_info(&profile)
+}
+
+/// The signed document and verification keys retained when the Host accepts
+/// a Realm Profile. The Host stores them before any package is loaded.
+pub struct RealmProfileBaseline {
+    pub body: String,
+    pub signing_keys_json: String,
+}
+
+/// Verify the next Profile against the last accepted document. A successful
+/// retirement returns `None`, so the Host can persist it and drop the runtime.
+pub fn accept_realm_profile_successor(
+    body: String,
+    realm_name: String,
+    signing_keys_json: String,
+    baseline: Option<RealmProfileBaseline>,
+) -> Result<Option<RealmProfileInfo>, CoreError> {
+    let profile = verified_realm_profile(&body, &realm_name, &signing_keys_json)?;
+    if let Some(baseline) = baseline {
+        let previous =
+            verified_realm_profile(&baseline.body, &realm_name, &baseline.signing_keys_json)?;
+        previous.check_successor(&profile)?;
+    }
+    if profile.realm.status == RealmStatus::Retired {
+        return Ok(None);
+    }
+    realm_profile_info(&profile).map(Some)
+}
+
+fn realm_profile_info(profile: &RealmProfile) -> Result<RealmProfileInfo, CoreError> {
     let selection = profile.selection.as_ref().ok_or_else(|| {
         CoreError::RealmProfileInvalid("active Realm has no package selection".to_string())
     })?;
@@ -1139,6 +1178,21 @@ pub fn verify_realm_package_publisher(
     body: String,
     domain: String,
 ) -> Result<PublisherProfileInfo, CoreError> {
+    Ok(accept_realm_package_publisher(body, domain, None)?.profile)
+}
+
+pub struct PublisherProfileAcceptance {
+    pub profile: PublisherProfileInfo,
+    pub pins_json: String,
+}
+
+/// Authenticate the Publisher Profile and advance the Host's pins only when
+/// the sequence and Profile signing key transitions are valid.
+pub fn accept_realm_package_publisher(
+    body: String,
+    domain: String,
+    previous_pins_json: Option<String>,
+) -> Result<PublisherProfileAcceptance, CoreError> {
     let invalid = |error: &dyn std::fmt::Display| {
         CoreError::AuthorityDescriptorInvalid(format!("invalid Publisher {domain}: {error}"))
     };
@@ -1149,9 +1203,22 @@ pub fn verify_realm_package_publisher(
     let publisher = descriptor
         .publisher
         .ok_or_else(|| invalid(&"missing Publisher Profile"))?;
-    let keys = publisher
-        .verify(&domain, std::time::SystemTime::now().into())
+    let previous: Option<KeyPins> = previous_pins_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
         .map_err(|e| invalid(&e))?;
+    let (keys, outcome) = publisher
+        .accept(
+            &domain,
+            std::time::SystemTime::now().into(),
+            previous.as_ref(),
+        )
+        .map_err(|e| invalid(&e))?;
+    let KeyPinOutcome::Accepted(pins) = outcome else {
+        return Err(invalid(&"Publisher signing identity changed"));
+    };
+    let pins_json = serde_json::to_string(&pins).map_err(|e| invalid(&e))?;
     let package_signing_keys = keys
         .keys
         .into_iter()
@@ -1166,11 +1233,14 @@ pub fn verify_realm_package_publisher(
             .into(),
         })
         .collect();
-    Ok(PublisherProfileInfo {
-        domain,
-        profile_sequence: keys.sequence,
-        profile_expires_at: keys.profile_expires_at,
-        package_signing_keys,
+    Ok(PublisherProfileAcceptance {
+        profile: PublisherProfileInfo {
+            domain,
+            profile_sequence: keys.sequence,
+            profile_expires_at: keys.profile_expires_at,
+            package_signing_keys,
+        },
+        pins_json,
     })
 }
 

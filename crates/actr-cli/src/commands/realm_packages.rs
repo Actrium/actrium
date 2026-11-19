@@ -13,7 +13,7 @@ use clap::Args;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fs::File,
     future::Future,
     io::{Read, Write},
@@ -346,9 +346,10 @@ where
     let mut manifests = BTreeMap::new();
     let mut files = BTreeMap::new();
     let mut locks = BTreeMap::new();
+    let mut visited = BTreeSet::new();
     let mut queue = VecDeque::from(roots);
     while let Some(name) = queue.pop_front() {
-        if files.contains_key(&name) {
+        if !visited.insert(name.clone()) {
             continue;
         }
         let entry = selection
@@ -370,10 +371,12 @@ where
                 slot.insert(keys)
             }
         };
+        queue.extend(entry.dependencies.values().cloned());
         if let Some(local) = &entry.local_path {
             ensure!(
                 keys.keys.iter().any(|key| key.id == local.signing_key_id
-                    && key.status == KeyStatus::Active
+                    && (key.status == KeyStatus::Active
+                        || (!local.allow_rebuild && key.status == KeyStatus::Retired))
                     && key.verification_key().is_ok()),
                 "local Front key is not trusted by its Publisher"
             );
@@ -412,11 +415,6 @@ where
         if !destination.exists() {
             write_atomic(&destination, &bytes)?;
         }
-        for target in entry.dependencies.values() {
-            if !files.contains_key(target) {
-                queue.push_back(target.clone());
-            }
-        }
         manifests.insert(name.clone(), manifest);
         files.insert(name.clone(), destination);
     }
@@ -427,7 +425,12 @@ where
     let dependencies: Vec<_> = manifests.iter().flat_map(|(source, manifest)| {
         manifest.dependencies.iter().map(move |(alias, declared)| {
             let target = selection.packages[source].dependencies.get(alias);
-            json!({"source":source,"alias":alias,"required":declared.required,"target":target,"status":if target.is_some(){"selected"}else{"unspecified"}})
+            let status = match target {
+                Some(target) if selection.packages[target].local_path.is_some() => "deferred",
+                Some(_) => "selected",
+                None => "unspecified",
+            };
+            json!({"source":source,"alias":alias,"required":declared.required,"target":target,"status":status})
         })
     }).collect();
     Ok(
