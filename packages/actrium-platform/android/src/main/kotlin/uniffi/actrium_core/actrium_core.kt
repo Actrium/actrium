@@ -1241,6 +1241,18 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -1260,7 +1272,13 @@ internal interface IntegrityCheckingUniffiLib : Library {
 ): Short
 fun uniffi_actrium_core_checksum_func_accept_publisher_profile(
 ): Short
+fun uniffi_actrium_core_checksum_func_accept_realm_authority(
+): Short
+fun uniffi_actrium_core_checksum_func_accept_realm_package_publisher(
+): Short
 fun uniffi_actrium_core_checksum_func_accept_realm_profile(
+): Short
+fun uniffi_actrium_core_checksum_func_accept_realm_profile_successor(
 ): Short
 fun uniffi_actrium_core_checksum_func_accept_realm_profile_update(
 ): Short
@@ -1648,6 +1666,8 @@ fun uniffi_actrium_core_checksum_func_pin_realm_front_publisher(
 ): Short
 fun uniffi_actrium_core_checksum_func_post_process_zh_asr_segments(
 ): Short
+fun uniffi_actrium_core_checksum_func_recover_realm_profile_baseline(
+): Short
 fun uniffi_actrium_core_checksum_func_relative_path_from(
 ): Short
 fun uniffi_actrium_core_checksum_func_runtime_app_status_alive(
@@ -1784,7 +1804,11 @@ fun uniffi_actrium_core_checksum_func_validate_installation_id(
 ): Short
 fun uniffi_actrium_core_checksum_func_verify_actr_package(
 ): Short
+fun uniffi_actrium_core_checksum_func_verify_local_realm_front_package(
+): Short
 fun uniffi_actrium_core_checksum_func_verify_realm_front_package(
+): Short
+fun uniffi_actrium_core_checksum_func_verify_realm_package_publisher(
 ): Short
 fun ffi_actrium_core_uniffi_contract_version(
 ): Int
@@ -1835,9 +1859,15 @@ internal interface UniffiLib : Library {
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_accept_publisher_profile(`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_accept_realm_authority(`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,`previousPinsJson`: RustBuffer.ByValue,`legacySigningKeysJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_accept_realm_package_publisher(`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,`previousPinsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_accept_realm_profile(`body`: RustBuffer.ByValue,`realmName`: RustBuffer.ByValue,`signingKeysJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-fun uniffi_actrium_core_fn_func_accept_realm_profile_update(`body`: RustBuffer.ByValue,`realmName`: RustBuffer.ByValue,`signingKeysJson`: RustBuffer.ByValue,`previousStateJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_actrium_core_fn_func_accept_realm_profile_successor(`body`: RustBuffer.ByValue,`realmName`: RustBuffer.ByValue,`signingKeysJson`: RustBuffer.ByValue,`previousDocuments`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_accept_realm_profile_update(`body`: RustBuffer.ByValue,`realmName`: RustBuffer.ByValue,`signingKeysJson`: RustBuffer.ByValue,`previousStateJson`: RustBuffer.ByValue,`authorityPinsJson`: RustBuffer.ByValue,`installedProfileJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_active_tab_from_row(`row`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -2223,6 +2253,8 @@ fun uniffi_actrium_core_fn_func_pin_realm_front_publisher(`body`: RustBuffer.ByV
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_post_process_zh_asr_segments(`text`: RustBuffer.ByValue,`segments`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_recover_realm_profile_baseline(`realmName`: RustBuffer.ByValue,`signingKeysJson`: RustBuffer.ByValue,`previousDocuments`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_relative_path_from(`absolutePath`: RustBuffer.ByValue,`baseDir`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_runtime_app_status_alive(uniffi_out_err: UniffiRustCallStatus,
@@ -2359,7 +2391,11 @@ fun uniffi_actrium_core_fn_func_validate_installation_id(`id`: RustBuffer.ByValu
 ): Unit
 fun uniffi_actrium_core_fn_func_verify_actr_package(`archive`: RustBuffer.ByValue,`trustedPublicKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_verify_local_realm_front_package(`archive`: RustBuffer.ByValue,`trustedPublicKey`: RustBuffer.ByValue,`profile`: RustBuffer.ByValue,`serviceArchive`: RustBuffer.ByValue,`servicePublicKeys`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_verify_realm_front_package(`archive`: RustBuffer.ByValue,`trustedPublicKey`: RustBuffer.ByValue,`profile`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_func_verify_realm_package_publisher(`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun ffi_actrium_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -2493,10 +2529,19 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_func_accept_publisher_profile() != 50717.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_func_accept_realm_authority() != 27100.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_func_accept_realm_package_publisher() != 23909.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_func_accept_realm_profile() != 6481.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actrium_core_checksum_func_accept_realm_profile_update() != 1226.toShort()) {
+    if (lib.uniffi_actrium_core_checksum_func_accept_realm_profile_successor() != 18494.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_func_accept_realm_profile_update() != 40113.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actrium_core_checksum_func_active_tab_from_row() != 51323.toShort()) {
@@ -3075,6 +3120,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_func_post_process_zh_asr_segments() != 19640.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_func_recover_realm_profile_baseline() != 29223.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_func_relative_path_from() != 43173.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -3279,7 +3327,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_func_verify_actr_package() != 49733.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_func_verify_local_realm_front_package() != 36653.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_func_verify_realm_front_package() != 30025.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_func_verify_realm_package_publisher() != 59675.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -5623,6 +5677,38 @@ public object FfiConverterTypeEmailBridgeContractInfo: FfiConverterRustBuffer<Em
 
 
 
+data class LocalRealmFront (
+    var `signingKeyId`: kotlin.String,
+    var `allowRebuild`: kotlin.Boolean
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLocalRealmFront: FfiConverterRustBuffer<LocalRealmFront> {
+    override fun read(buf: ByteBuffer): LocalRealmFront {
+        return LocalRealmFront(
+            FfiConverterString.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: LocalRealmFront) = (
+            FfiConverterString.allocationSize(value.`signingKeyId`) +
+            FfiConverterBoolean.allocationSize(value.`allowRebuild`)
+    )
+
+    override fun write(value: LocalRealmFront, buf: ByteBuffer) {
+            FfiConverterString.write(value.`signingKeyId`, buf)
+            FfiConverterBoolean.write(value.`allowRebuild`, buf)
+    }
+}
+
+
+
 data class PackageIntegrityFilePlanInfo (
     var `path`: kotlin.String,
     var `expectedHash`: kotlin.String
@@ -5799,6 +5885,38 @@ public object FfiConverterTypePublisherPackageKeyInfo: FfiConverterRustBuffer<Pu
 
 
 
+data class PublisherProfileAcceptance (
+    var `profile`: PublisherProfileInfo,
+    var `pinsJson`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePublisherProfileAcceptance: FfiConverterRustBuffer<PublisherProfileAcceptance> {
+    override fun read(buf: ByteBuffer): PublisherProfileAcceptance {
+        return PublisherProfileAcceptance(
+            FfiConverterTypePublisherProfileInfo.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PublisherProfileAcceptance) = (
+            FfiConverterTypePublisherProfileInfo.allocationSize(value.`profile`) +
+            FfiConverterString.allocationSize(value.`pinsJson`)
+    )
+
+    override fun write(value: PublisherProfileAcceptance, buf: ByteBuffer) {
+            FfiConverterTypePublisherProfileInfo.write(value.`profile`, buf)
+            FfiConverterString.write(value.`pinsJson`, buf)
+    }
+}
+
+
+
 /**
  * Verified Publisher Profile for a publisher domain.
  */
@@ -5845,6 +5963,42 @@ public object FfiConverterTypePublisherProfileInfo: FfiConverterRustBuffer<Publi
 
 
 
+data class RealmAuthorityAcceptance (
+    var `descriptor`: AuthorityDiscoveryInfo,
+    var `pinsJson`: kotlin.String,
+    var `signedKeysJson`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRealmAuthorityAcceptance: FfiConverterRustBuffer<RealmAuthorityAcceptance> {
+    override fun read(buf: ByteBuffer): RealmAuthorityAcceptance {
+        return RealmAuthorityAcceptance(
+            FfiConverterTypeAuthorityDiscoveryInfo.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RealmAuthorityAcceptance) = (
+            FfiConverterTypeAuthorityDiscoveryInfo.allocationSize(value.`descriptor`) +
+            FfiConverterString.allocationSize(value.`pinsJson`) +
+            FfiConverterString.allocationSize(value.`signedKeysJson`)
+    )
+
+    override fun write(value: RealmAuthorityAcceptance, buf: ByteBuffer) {
+            FfiConverterTypeAuthorityDiscoveryInfo.write(value.`descriptor`, buf)
+            FfiConverterString.write(value.`pinsJson`, buf)
+            FfiConverterString.write(value.`signedKeysJson`, buf)
+    }
+}
+
+
+
 /**
  * A verified Realm Profile: the package target and endpoints that feed
  * package acquisition.
@@ -5886,7 +6040,8 @@ data class RealmPackageInfo (
     var `href`: kotlin.String,
     var `sha256`: kotlin.String,
     var `actorType`: kotlin.String,
-    var `dependencies`: List<RealmDependencyInfo>
+    var `dependencies`: List<RealmDependencyInfo>,
+    var `localPath`: LocalRealmFront?
 ) {
 
     companion object
@@ -5903,6 +6058,7 @@ public object FfiConverterTypeRealmPackageInfo: FfiConverterRustBuffer<RealmPack
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterSequenceTypeRealmDependencyInfo.read(buf),
+            FfiConverterOptionalTypeLocalRealmFront.read(buf),
         )
     }
 
@@ -5911,7 +6067,8 @@ public object FfiConverterTypeRealmPackageInfo: FfiConverterRustBuffer<RealmPack
             FfiConverterString.allocationSize(value.`href`) +
             FfiConverterString.allocationSize(value.`sha256`) +
             FfiConverterString.allocationSize(value.`actorType`) +
-            FfiConverterSequenceTypeRealmDependencyInfo.allocationSize(value.`dependencies`)
+            FfiConverterSequenceTypeRealmDependencyInfo.allocationSize(value.`dependencies`) +
+            FfiConverterOptionalTypeLocalRealmFront.allocationSize(value.`localPath`)
     )
 
     override fun write(value: RealmPackageInfo, buf: ByteBuffer) {
@@ -5920,6 +6077,47 @@ public object FfiConverterTypeRealmPackageInfo: FfiConverterRustBuffer<RealmPack
             FfiConverterString.write(value.`sha256`, buf)
             FfiConverterString.write(value.`actorType`, buf)
             FfiConverterSequenceTypeRealmDependencyInfo.write(value.`dependencies`, buf)
+            FfiConverterOptionalTypeLocalRealmFront.write(value.`localPath`, buf)
+    }
+}
+
+
+
+data class RealmProfileAcceptance (
+    var `profile`: RealmProfileInfo?,
+    var `body`: kotlin.String,
+    var `signingKeyId`: kotlin.String,
+    var `baselineDocuments`: List<kotlin.String>
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRealmProfileAcceptance: FfiConverterRustBuffer<RealmProfileAcceptance> {
+    override fun read(buf: ByteBuffer): RealmProfileAcceptance {
+        return RealmProfileAcceptance(
+            FfiConverterOptionalTypeRealmProfileInfo.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RealmProfileAcceptance) = (
+            FfiConverterOptionalTypeRealmProfileInfo.allocationSize(value.`profile`) +
+            FfiConverterString.allocationSize(value.`body`) +
+            FfiConverterString.allocationSize(value.`signingKeyId`) +
+            FfiConverterSequenceString.allocationSize(value.`baselineDocuments`)
+    )
+
+    override fun write(value: RealmProfileAcceptance, buf: ByteBuffer) {
+            FfiConverterOptionalTypeRealmProfileInfo.write(value.`profile`, buf)
+            FfiConverterString.write(value.`body`, buf)
+            FfiConverterString.write(value.`signingKeyId`, buf)
+            FfiConverterSequenceString.write(value.`baselineDocuments`, buf)
     }
 }
 
@@ -6759,6 +6957,38 @@ public object FfiConverterTypeVerifiedActrPackageInfo: FfiConverterRustBuffer<Ve
 
 
 
+data class VerifiedLocalRealmFrontInfo (
+    var `front`: VerifiedActrPackageInfo,
+    var `servicePublicKey`: kotlin.ByteArray
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVerifiedLocalRealmFrontInfo: FfiConverterRustBuffer<VerifiedLocalRealmFrontInfo> {
+    override fun read(buf: ByteBuffer): VerifiedLocalRealmFrontInfo {
+        return VerifiedLocalRealmFrontInfo(
+            FfiConverterTypeVerifiedActrPackageInfo.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VerifiedLocalRealmFrontInfo) = (
+            FfiConverterTypeVerifiedActrPackageInfo.allocationSize(value.`front`) +
+            FfiConverterByteArray.allocationSize(value.`servicePublicKey`)
+    )
+
+    override fun write(value: VerifiedLocalRealmFrontInfo, buf: ByteBuffer) {
+            FfiConverterTypeVerifiedActrPackageInfo.write(value.`front`, buf)
+            FfiConverterByteArray.write(value.`servicePublicKey`, buf)
+    }
+}
+
+
+
 
 
 sealed class ActrPackageVerificationException(message: String): kotlin.Exception(message) {
@@ -7182,6 +7412,38 @@ public object FfiConverterOptionalTypeCoreInstalledAppInfo: FfiConverterRustBuff
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeLocalRealmFront: FfiConverterRustBuffer<LocalRealmFront?> {
+    override fun read(buf: ByteBuffer): LocalRealmFront? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeLocalRealmFront.read(buf)
+    }
+
+    override fun allocationSize(value: LocalRealmFront?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeLocalRealmFront.allocationSize(value)
+        }
+    }
+
+    override fun write(value: LocalRealmFront?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeLocalRealmFront.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypePackageIntegrityPlanInfo: FfiConverterRustBuffer<PackageIntegrityPlanInfo?> {
     override fun read(buf: ByteBuffer): PackageIntegrityPlanInfo? {
         if (buf.get().toInt() == 0) {
@@ -7204,6 +7466,38 @@ public object FfiConverterOptionalTypePackageIntegrityPlanInfo: FfiConverterRust
         } else {
             buf.put(1)
             FfiConverterTypePackageIntegrityPlanInfo.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeRealmProfileAcceptance: FfiConverterRustBuffer<RealmProfileAcceptance?> {
+    override fun read(buf: ByteBuffer): RealmProfileAcceptance? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeRealmProfileAcceptance.read(buf)
+    }
+
+    override fun allocationSize(value: RealmProfileAcceptance?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeRealmProfileAcceptance.allocationSize(value)
+        }
+    }
+
+    override fun write(value: RealmProfileAcceptance?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeRealmProfileAcceptance.write(value, buf)
         }
     }
 }
@@ -7360,6 +7654,34 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceByteArray: FfiConverterRustBuffer<List<kotlin.ByteArray>> {
+    override fun read(buf: ByteBuffer): List<kotlin.ByteArray> {
+        val len = buf.getInt()
+        return List<kotlin.ByteArray>(len) {
+            FfiConverterByteArray.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.ByteArray>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterByteArray.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.ByteArray>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterByteArray.write(it, buf)
         }
     }
 }
@@ -7731,6 +8053,26 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
     }
 
 
+    @Throws(CoreException::class) fun `acceptRealmAuthority`(`body`: kotlin.String, `domain`: kotlin.String, `previousPinsJson`: kotlin.String?, `legacySigningKeysJson`: kotlin.String?): RealmAuthorityAcceptance {
+            return FfiConverterTypeRealmAuthorityAcceptance.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_accept_realm_authority(
+        FfiConverterString.lower(`body`),FfiConverterString.lower(`domain`),FfiConverterOptionalString.lower(`previousPinsJson`),FfiConverterOptionalString.lower(`legacySigningKeysJson`),_status)
+}
+    )
+    }
+
+
+    @Throws(CoreException::class) fun `acceptRealmPackagePublisher`(`body`: kotlin.String, `domain`: kotlin.String, `previousPinsJson`: kotlin.String?): PublisherProfileAcceptance {
+            return FfiConverterTypePublisherProfileAcceptance.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_accept_realm_package_publisher(
+        FfiConverterString.lower(`body`),FfiConverterString.lower(`domain`),FfiConverterOptionalString.lower(`previousPinsJson`),_status)
+}
+    )
+    }
+
+
         /**
          * Validate a Realm Profile response for `realm_name` and extract the
          * package target.
@@ -7749,11 +8091,21 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
     }
 
 
-    @Throws(CoreException::class) fun `acceptRealmProfileUpdate`(`body`: kotlin.String, `realmName`: kotlin.String, `signingKeysJson`: kotlin.String, `previousStateJson`: kotlin.String?): RealmProfileUpdateInfo {
+    @Throws(CoreException::class) fun `acceptRealmProfileSuccessor`(`body`: kotlin.String, `realmName`: kotlin.String, `signingKeysJson`: kotlin.String, `previousDocuments`: List<kotlin.String>): RealmProfileAcceptance {
+            return FfiConverterTypeRealmProfileAcceptance.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_accept_realm_profile_successor(
+        FfiConverterString.lower(`body`),FfiConverterString.lower(`realmName`),FfiConverterString.lower(`signingKeysJson`),FfiConverterSequenceString.lower(`previousDocuments`),_status)
+}
+    )
+    }
+
+
+    @Throws(CoreException::class) fun `acceptRealmProfileUpdate`(`body`: kotlin.String, `realmName`: kotlin.String, `signingKeysJson`: kotlin.String, `previousStateJson`: kotlin.String?, `authorityPinsJson`: kotlin.String?, `installedProfileJson`: kotlin.String?): RealmProfileUpdateInfo {
             return FfiConverterTypeRealmProfileUpdateInfo.lift(
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_accept_realm_profile_update(
-        FfiConverterString.lower(`body`),FfiConverterString.lower(`realmName`),FfiConverterString.lower(`signingKeysJson`),FfiConverterOptionalString.lower(`previousStateJson`),_status)
+        FfiConverterString.lower(`body`),FfiConverterString.lower(`realmName`),FfiConverterString.lower(`signingKeysJson`),FfiConverterOptionalString.lower(`previousStateJson`),FfiConverterOptionalString.lower(`authorityPinsJson`),FfiConverterOptionalString.lower(`installedProfileJson`),_status)
 }
     )
     }
@@ -10024,6 +10376,16 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
     }
 
 
+    @Throws(CoreException::class) fun `recoverRealmProfileBaseline`(`realmName`: kotlin.String, `signingKeysJson`: kotlin.String, `previousDocuments`: List<kotlin.String>): RealmProfileAcceptance? {
+            return FfiConverterOptionalTypeRealmProfileAcceptance.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_recover_realm_profile_baseline(
+        FfiConverterString.lower(`realmName`),FfiConverterString.lower(`signingKeysJson`),FfiConverterSequenceString.lower(`previousDocuments`),_status)
+}
+    )
+    }
+
+
         /**
          * Return a normalized relative path from `base_dir` to `absolute_path`.
          */ fun `relativePathFrom`(`absolutePath`: kotlin.String, `baseDir`: kotlin.String): kotlin.String {
@@ -10721,11 +11083,31 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
     }
 
 
+    @Throws(ActrPackageVerificationException::class) fun `verifyLocalRealmFrontPackage`(`archive`: kotlin.ByteArray, `trustedPublicKey`: kotlin.ByteArray, `profile`: RealmProfileInfo, `serviceArchive`: kotlin.ByteArray, `servicePublicKeys`: List<kotlin.ByteArray>): VerifiedLocalRealmFrontInfo {
+            return FfiConverterTypeVerifiedLocalRealmFrontInfo.lift(
+    uniffiRustCallWithError(ActrPackageVerificationException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_verify_local_realm_front_package(
+        FfiConverterByteArray.lower(`archive`),FfiConverterByteArray.lower(`trustedPublicKey`),FfiConverterTypeRealmProfileInfo.lower(`profile`),FfiConverterByteArray.lower(`serviceArchive`),FfiConverterSequenceByteArray.lower(`servicePublicKeys`),_status)
+}
+    )
+    }
+
+
     @Throws(ActrPackageVerificationException::class) fun `verifyRealmFrontPackage`(`archive`: kotlin.ByteArray, `trustedPublicKey`: kotlin.ByteArray, `profile`: RealmProfileInfo): VerifiedActrPackageInfo {
             return FfiConverterTypeVerifiedActrPackageInfo.lift(
     uniffiRustCallWithError(ActrPackageVerificationException) { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_verify_realm_front_package(
         FfiConverterByteArray.lower(`archive`),FfiConverterByteArray.lower(`trustedPublicKey`),FfiConverterTypeRealmProfileInfo.lower(`profile`),_status)
+}
+    )
+    }
+
+
+    @Throws(CoreException::class) fun `verifyRealmPackagePublisher`(`body`: kotlin.String, `domain`: kotlin.String): PublisherProfileInfo {
+            return FfiConverterTypePublisherProfileInfo.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_func_verify_realm_package_publisher(
+        FfiConverterString.lower(`body`),FfiConverterString.lower(`domain`),_status)
 }
     )
     }

@@ -188,11 +188,14 @@ where
     };
     let service_change = kind == PackageSelectionChange::Service;
     for package in selection.packages.values() {
+        let Some(digest) = package.fixed_digest() else {
+            continue;
+        };
         ensure!(
             cache
                 .digests
                 .get(&package.r#type)
-                .is_none_or(|old| *old == package.sha256),
+                .is_none_or(|old| old == digest),
             "PACKAGE_EQUIVOCATION for {}",
             package.r#type
         );

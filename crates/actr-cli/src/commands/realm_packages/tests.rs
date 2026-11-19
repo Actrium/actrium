@@ -25,8 +25,13 @@ fn key(id: &str, key: &SigningKey) -> Value {
     json!({"id":id,"status":"active","algorithm":"Ed25519","public_key":STANDARD.encode(key.verifying_key().as_bytes())})
 }
 
-fn package(workload: &str, proto: &[u8], publisher: &SigningKey) -> (Value, Vec<u8>) {
-    package_version(workload, proto, publisher, "1.0.0")
+fn package(
+    workload: &str,
+    proto: &[u8],
+    publisher: &SigningKey,
+    name: Option<&str>,
+) -> (Value, Vec<u8>) {
+    package_artifact(workload, proto, publisher, "1.0.0", name)
 }
 
 fn package_version(
@@ -34,6 +39,16 @@ fn package_version(
     proto: &[u8],
     publisher: &SigningKey,
     version: &str,
+) -> (Value, Vec<u8>) {
+    package_artifact(workload, proto, publisher, version, None)
+}
+
+fn package_artifact(
+    workload: &str,
+    proto: &[u8],
+    publisher: &SigningKey,
+    version: &str,
+    name: Option<&str>,
 ) -> (Value, Vec<u8>) {
     let is_front = workload == KEEL_GUEST_PROFILE_V1;
     let template = if is_front {
@@ -51,6 +66,9 @@ fn package_version(
     m.workload.profile = workload.into();
     m.actor.publisher = "publisher.example".into();
     m.actor.version = version.into();
+    if let Some(name) = name {
+        m.actor.name = name.into();
+    }
     let contract = if is_front {
         FRONT_CONTRACT
     } else {
@@ -138,16 +156,17 @@ fn package_version(
     )
 }
 
-fn fixture(front_proto: &[u8]) -> (Documents, SigningKey, Value) {
+fn fixture(front_proto: &[u8]) -> (Documents, SigningKey, Value, SigningKey) {
     let pk = SigningKey::from_bytes(&rand::random());
-    fixture_with_publisher(front_proto, &pk)
+    let (documents, realm_key, profile) = fixture_with_publisher(front_proto, &pk);
+    (documents, realm_key, profile, pk)
 }
 
 fn fixture_with_publisher(front_proto: &[u8], pk: &SigningKey) -> (Documents, SigningKey, Value) {
     let rk = SigningKey::from_bytes(&rand::random());
     let root = SigningKey::from_bytes(&rand::random());
-    let (service, sb) = package("actr.component/1", PROTO, pk);
-    let (front, fb) = package(KEEL_GUEST_PROFILE_V1, front_proto, pk);
+    let (service, sb) = package("actr.component/1", PROTO, pk, None);
+    let (front, fb) = package(KEEL_GUEST_PROFILE_V1, front_proto, pk, None);
     let mut realm_keys = json!({"sequence":1,"keys":[key("realm-test",&rk)]});
     sign_document(&mut realm_keys, "realm-test", &rk);
     let rd = json!({"version":1,"authority":"actr://realm.example","services":[{"rel":"realms","href":"https://realm.example/realms","protocol":"actr-realm-profile/1"}],"realm_signing_keys":realm_keys});
@@ -329,7 +348,7 @@ fn extra_package() -> Value {
 fn native_and_linked_services_match_exports_but_not_imported_contracts() {
     let signer = SigningKey::from_bytes(&rand::random());
     let manifest = |workload, proto: &[u8]| {
-        let (_, bytes) = package(workload, proto, &signer);
+        let (_, bytes) = package(workload, proto, &signer, None);
         verify_actor_package(&bytes, &signer.verifying_key())
             .unwrap()
             .manifest
@@ -345,7 +364,7 @@ fn native_and_linked_services_match_exports_but_not_imported_contracts() {
 
 #[tokio::test]
 async fn fetches_a_signed_pair_and_rechecks_cached_archives() {
-    let (docs, rk, mut profile) = fixture(PROTO);
+    let (docs, rk, mut profile, _) = fixture(PROTO);
     let dir = tempfile::tempdir().unwrap();
     let args = FetchArgs {
         realm: REALM.into(),
@@ -386,7 +405,7 @@ async fn fetches_a_signed_pair_and_rechecks_cached_archives() {
 
 #[tokio::test]
 async fn pins_an_unrequested_package_across_removal_and_reintroduction() {
-    let (docs, signer, mut profile) = fixture(PROTO);
+    let (docs, signer, mut profile, _) = fixture(PROTO);
     let dir = tempfile::tempdir().unwrap();
     let args = FetchArgs {
         realm: REALM.into(),
@@ -422,7 +441,7 @@ async fn pins_an_unrequested_package_across_removal_and_reintroduction() {
 
 #[tokio::test]
 async fn recovers_missing_pins_before_replacing_a_cached_profile() {
-    let (docs, signer, mut profile) = fixture(PROTO);
+    let (docs, signer, mut profile, _) = fixture(PROTO);
     let dir = tempfile::tempdir().unwrap();
     let args = FetchArgs {
         realm: REALM.into(),
@@ -460,7 +479,7 @@ async fn recovers_missing_pins_before_replacing_a_cached_profile() {
 
 #[tokio::test]
 async fn rejects_incompatible_signed_contracts_and_altered_package_bytes() {
-    let (docs, _, profile) = fixture(OTHER_PROTO);
+    let (docs, _, profile, _) = fixture(OTHER_PROTO);
     let dir = tempfile::tempdir().unwrap();
     let args = FetchArgs {
         realm: REALM.into(),
@@ -492,7 +511,7 @@ async fn rejects_incompatible_signed_contracts_and_altered_package_bytes() {
 
 #[tokio::test]
 async fn previews_manual_selections_and_fetches_cyclic_dependency_closure() {
-    let (docs, signer, mut profile) = fixture(PROTO);
+    let (docs, signer, mut profile, _) = fixture(PROTO);
     profile["packages"]["view"]["dependencies"] = json!({"service":"svc"});
     profile["packages"]["svc"]["dependencies"] = json!({"upstream":"view"});
     publish_profile(&docs, &signer, &mut profile, 2);
@@ -552,4 +571,77 @@ async fn previews_manual_selections_and_fetches_cyclic_dependency_closure() {
         error.to_string().contains("svc.not-declared -> view"),
         "{error}"
     );
+}
+
+#[tokio::test]
+async fn traverses_local_front_dependencies_and_defers_its_incoming_export_check() {
+    let (docs, realm_signer, mut profile, publisher_signer) = fixture(PROTO);
+    let (extra, bytes) = package("actr.component/1", PROTO, &publisher_signer, Some("extra"));
+    docs.borrow_mut()
+        .insert(extra["href"].as_str().unwrap().into(), bytes);
+    let front = &mut profile["packages"]["view"];
+    front["href"] = json!("/Users/example/front.actr");
+    front.as_object_mut().unwrap().remove("sha256");
+    front["local_path"] = json!({
+        "allow_rebuild": true,
+        "signing_key_id": actr_protocol::package_key_id(publisher_signer.verifying_key().as_bytes())
+    });
+    front["dependencies"] = json!({"service":"svc","other":"extra"});
+    profile["packages"]["extra"] = extra;
+    profile["packages"]["svc"]["dependencies"] = json!({"upstream":"view"});
+    publish_profile(&docs, &realm_signer, &mut profile, 2);
+
+    let dir = tempfile::tempdir().unwrap();
+    let result = from_fixture(
+        &FetchArgs {
+            realm: REALM.into(),
+            output: dir.path().join("fetch"),
+            additional: vec![],
+        },
+        &docs,
+    )
+    .await
+    .unwrap();
+    assert!(result["front"].is_null());
+    assert!(result["packages"]["extra"].is_string());
+    assert_eq!(result["packages"].as_object().unwrap().len(), 2);
+    assert_eq!(
+        result["dependencies"],
+        json!([
+            {"source":"extra","alias":"upstream","required":false,"target":null,"status":"unspecified"},
+            {"source":"svc","alias":"upstream","required":false,"target":"view","status":"deferred"}
+        ])
+    );
+
+    let selection_path = dir.path().join("selection.json");
+    let write_selection = |profile: &Value| {
+        let selection = json!({
+            "primary_package":profile["primary_package"],
+            "front_package":profile["front_package"],
+            "packages":profile["packages"]
+        });
+        std::fs::write(&selection_path, serde_json::to_vec(&selection).unwrap()).unwrap();
+    };
+    write_selection(&profile);
+    let args = CheckArgs {
+        selection: selection_path.clone(),
+        output: dir.path().join("check"),
+    };
+    let check = |url: String, _limit| {
+        std::future::ready(
+            docs.borrow()
+                .get(&url)
+                .cloned()
+                .with_context(|| format!("unexpected fetch {url}")),
+        )
+    };
+    assert_eq!(
+        check_selection_with(&args, check).await.unwrap()["dependencies"],
+        result["dependencies"]
+    );
+
+    profile["packages"]["svc"]["dependencies"] = json!({"invalid":"view"});
+    write_selection(&profile);
+    let error = check_selection_with(&args, check).await.unwrap_err();
+    assert!(error.to_string().contains("svc.invalid -> view"), "{error}");
 }

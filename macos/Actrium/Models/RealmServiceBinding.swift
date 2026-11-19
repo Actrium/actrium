@@ -662,6 +662,10 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         )
     }
 
+    func prepareLocalFront() async throws {
+        try await prepareForSwitch()
+    }
+
     func subscribe(events requestedEvents: [String], generation: UInt64) async throws {
         let requested = Set(requestedEvents)
         guard !stopped, !requested.isEmpty, requested.isSubset(of: events) else {

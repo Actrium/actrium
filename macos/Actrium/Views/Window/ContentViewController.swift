@@ -274,8 +274,7 @@ private struct ContentAreaView: View {
                 backgroundColor: tabData["backgroundColor"] as? String
             )
 
-            viewModel.tabs.append(tab)
-            viewModel.tabSlotPositions[tab.id] = viewModel.tabs.count - 1
+            viewModel.insertTabFromCrossWindow(tab, at: viewModel.tabs.count, groupId: nil, select: false)
             newTabIds.append(tab.id)
         }
 
