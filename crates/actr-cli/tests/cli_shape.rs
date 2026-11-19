@@ -138,6 +138,57 @@ fn realm_group_exposes_the_signing_and_membership_tools() {
 }
 
 #[test]
+fn realm_update_checks_release_arguments() {
+    let normal = ["actr", "realm", "update", "--key", "owner.json"];
+    for args in [
+        vec!["--selection", "selection.json"],
+        vec!["--selection", "selection.json", "--output", "cache"],
+        vec!["--rollback"],
+        vec!["--rollback", "--output", "cache"],
+    ] {
+        cli()
+            .try_get_matches_from(normal.into_iter().chain(args))
+            .unwrap();
+    }
+    for args in [
+        vec!["--rollback", "--selection", "selection.json"],
+        vec![
+            "--probe-config",
+            "probe.toml",
+            "--probe-route",
+            "echo.v1.EchoService.Echo",
+            "--selection",
+            "selection.json",
+        ],
+        vec!["--front-only", "--selection", "selection.json"],
+        vec!["--service", "--selection", "selection.json"],
+    ] {
+        assert!(
+            cli()
+                .try_get_matches_from(normal.into_iter().chain(args))
+                .is_err()
+        );
+    }
+    cli()
+        .try_get_matches_from([
+            "actr",
+            "realm",
+            "check-selection",
+            "--selection",
+            "selection.json",
+            "--output",
+            "cache",
+            "--probe-realm",
+            "echo@realm.example",
+            "--probe-config",
+            "probe.toml",
+            "--probe-route",
+            "echo.v1.EchoService.Echo",
+        ])
+        .unwrap();
+}
+
+#[test]
 fn dlq_group_exposes_list_show_stats_replay_purge() {
     let mut subs = subcommand_names("dlq");
     subs.sort();

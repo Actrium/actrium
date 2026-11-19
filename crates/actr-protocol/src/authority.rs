@@ -135,6 +135,7 @@ const CORE_RELATIONS: &[&str] = &[
     "discovery",
     "ice-config",
     "contracts",
+    "realm",
     "realms",
     "realm-management",
 ];
@@ -843,7 +844,17 @@ impl AuthorityDescriptor {
     }
 
     pub fn service(&self, relation: &str) -> Option<&ServiceLink> {
-        self.services.iter().find(|service| service.rel == relation)
+        self.services
+            .iter()
+            .find(|service| service.rel == relation)
+            .or_else(|| {
+                let alias = match relation {
+                    "realm" => "realms",
+                    "realms" => "realm",
+                    _ => return None,
+                };
+                self.services.iter().find(|service| service.rel == alias)
+            })
     }
 
     pub fn require_service(

@@ -1,4 +1,5 @@
 use super::*;
+use crate::commands::realm_members::SendError;
 use actr_pack::{
     ActorDependency, ActorPackOptions, KEEL_GUEST_PROFILE_V1, PackageFileEntry, pack_actor_package,
     verify_actor_package,
@@ -8,6 +9,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::SigningKey;
 use sha2::{Digest, Sha256};
 use std::{cell::RefCell, collections::HashMap};
+
+mod front_e2e;
 
 const REALM: &str = "echo@realm.example";
 const REALM_URL: &str = "https://realm.example/realms/echo";
@@ -28,6 +31,25 @@ fn package(
     publisher: &SigningKey,
     name: Option<&str>,
 ) -> (Value, Vec<u8>) {
+    package_artifact(workload, proto, publisher, "1.0.0", name)
+}
+
+fn package_version(
+    workload: &str,
+    proto: &[u8],
+    publisher: &SigningKey,
+    version: &str,
+) -> (Value, Vec<u8>) {
+    package_artifact(workload, proto, publisher, version, None)
+}
+
+fn package_artifact(
+    workload: &str,
+    proto: &[u8],
+    publisher: &SigningKey,
+    version: &str,
+    name: Option<&str>,
+) -> (Value, Vec<u8>) {
     let is_front = workload == KEEL_GUEST_PROFILE_V1;
     let template = if is_front {
         include_str!(concat!(
@@ -43,7 +65,7 @@ fn package(
     let mut m = ActorPackageManifest::from_toml(template).unwrap();
     m.workload.profile = workload.into();
     m.actor.publisher = "publisher.example".into();
-    m.actor.version = "1.0.0".into();
+    m.actor.version = version.into();
     if let Some(name) = name {
         m.actor.name = name.into();
     }
@@ -135,17 +157,22 @@ fn package(
 }
 
 fn fixture(front_proto: &[u8]) -> (Documents, SigningKey, Value, SigningKey) {
-    let rk = SigningKey::from_bytes(&rand::random());
     let pk = SigningKey::from_bytes(&rand::random());
+    let (documents, realm_key, profile) = fixture_with_publisher(front_proto, &pk);
+    (documents, realm_key, profile, pk)
+}
+
+fn fixture_with_publisher(front_proto: &[u8], pk: &SigningKey) -> (Documents, SigningKey, Value) {
+    let rk = SigningKey::from_bytes(&rand::random());
     let root = SigningKey::from_bytes(&rand::random());
-    let (service, sb) = package("actr.component/1", PROTO, &pk, None);
-    let (front, fb) = package(KEEL_GUEST_PROFILE_V1, front_proto, &pk, None);
+    let (service, sb) = package("actr.component/1", PROTO, pk, None);
+    let (front, fb) = package(KEEL_GUEST_PROFILE_V1, front_proto, pk, None);
     let mut realm_keys = json!({"sequence":1,"keys":[key("realm-test",&rk)]});
     sign_document(&mut realm_keys, "realm-test", &rk);
     let rd = json!({"version":1,"authority":"actr://realm.example","services":[{"rel":"realms","href":"https://realm.example/realms","protocol":"actr-realm-profile/1"}],"realm_signing_keys":realm_keys});
     let now = chrono::Utc::now();
     let mut publisher = json!({"schema":"actr.publisher/v1","domain":"publisher.example","sequence":1,
-        "profile_signing_keys":[key("pub-root",&root)],"keys":[key(&actr_protocol::package_key_id(pk.verifying_key().as_bytes()),&pk)],
+        "profile_signing_keys":[key("pub-root",&root)],"keys":[key(&actr_protocol::package_key_id(pk.verifying_key().as_bytes()),pk)],
         "profile_issued_at":(now-chrono::Duration::hours(1)).to_rfc3339(),"profile_expires_at":(now+chrono::Duration::days(1)).to_rfc3339()});
     sign_document(&mut publisher, "pub-root", &root);
     let pd = json!({"version":1,"authority":"actr://publisher.example","services":[{"rel":"contracts","href":"https://publisher.example/contracts"}],"publisher":publisher});
@@ -167,7 +194,7 @@ fn fixture(front_proto: &[u8]) -> (Documents, SigningKey, Value, SigningKey) {
         (service["href"].as_str().unwrap().into(), sb),
         (front["href"].as_str().unwrap().into(), fb),
     ]);
-    (RefCell::new(docs), rk, p, pk)
+    (RefCell::new(docs), rk, p)
 }
 
 async fn from_fixture(args: &FetchArgs, docs: &Documents) -> Result<Value> {
@@ -182,11 +209,135 @@ async fn from_fixture(args: &FetchArgs, docs: &Documents) -> Result<Value> {
     .await
 }
 
+#[tokio::test]
+async fn front_release_resumes_after_a_lost_reply_and_rolls_back() -> Result<()> {
+    use actr_protocol::realm_membership::{MembershipOp, MembershipRequest};
+    use std::cell::Cell;
+
+    let pk = SigningKey::from_bytes(&rand::random());
+    let (docs, rk, old) = fixture_with_publisher(PROTO, &pk);
+    let (mut front, bytes) = package_version(KEEL_GUEST_PROFILE_V1, PROTO, &pk, "1.1.0");
+    let location = "https://cdn.example/front-v11.actr";
+    front["href"] = json!(location);
+    docs.borrow_mut().insert(location.to_owned(), bytes);
+    let mut selection: RealmPackageSelection = serde_json::from_value(old.clone())?;
+    selection
+        .packages
+        .insert("view".into(), serde_json::from_value(front)?);
+    let output = tempfile::tempdir()?;
+    let journal_path = output.path().join("package-release.json");
+    let refuse_first = Cell::new(true);
+    let lose_reply = Cell::new(true);
+    let replies = RefCell::new(BTreeMap::<String, Value>::new());
+    let get = |url, _| {
+        std::future::ready(
+            docs.borrow()
+                .get(&url)
+                .cloned()
+                .with_context(|| format!("unexpected fetch {url}")),
+        )
+    };
+    let send = |request: MembershipRequest| {
+        if refuse_first.replace(false) {
+            return std::future::ready(Err(SendError::Refused(anyhow::anyhow!(
+                "Issuer rejected the selection"
+            ))));
+        }
+        let result = (|| {
+            assert_eq!(request.op, MembershipOp::UpdateFront);
+            let update = request.front_update.unwrap();
+            if let Some(reply) = replies.borrow().get(&update.operation_id) {
+                return Ok(reply.clone());
+            }
+            let mut current: Value = serde_json::from_slice(&docs.borrow()[REALM_URL])?;
+            assert_eq!(current["sequence"], update.expected_sequence);
+            let previous: RealmPackageSelection = serde_json::from_value(current.clone())?;
+            let target = request.selection.unwrap();
+            previous
+                .check_unchanged_service(&target)
+                .map_err(anyhow::Error::msg)?;
+            current["packages"] = serde_json::to_value(target.packages)?;
+            current["primary_package"] = json!(target.primary_package);
+            current["front_package"] = json!(target.front_package);
+            let sequence = update.expected_sequence + 1;
+            publish_profile(&docs, &rk, &mut current, sequence);
+            let reply = json!({
+                "operation_id": update.operation_id,
+                "sequence": sequence,
+                "previous_selection": previous,
+            });
+            replies
+                .borrow_mut()
+                .insert(update.operation_id, reply.clone());
+            if lose_reply.replace(false) {
+                bail!("reply lost after publication");
+            }
+            Ok(reply)
+        })();
+        std::future::ready(result.map_err(SendError::Unknown))
+    };
+    let update = |selection| {
+        front::release_with(REALM, "afp.example", output.path(), selection, &get, &send)
+    };
+    let read_pending = || -> Result<Value> {
+        let journal: Value = serde_json::from_slice(&std::fs::read(&journal_path)?)?;
+        Ok(journal["pending"].clone())
+    };
+    let refused = update(Some(selection.clone())).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("Issuer rejected the selection"));
+    assert!(read_pending()?.is_null());
+    assert!(update(Some(selection.clone())).await.is_err());
+    assert!(read_pending()?.is_object());
+    assert_eq!(update(Some(selection)).await?["sequence"], 2);
+    assert_eq!(replies.borrow().len(), 1);
+    assert_eq!(update(None).await?["sequence"], 3);
+    let published: Value = serde_json::from_slice(&docs.borrow()[REALM_URL])?;
+    assert_eq!(published["packages"], old["packages"]);
+    Ok(())
+}
+
 fn publish_profile(docs: &Documents, signer: &SigningKey, profile: &mut Value, sequence: u64) {
     profile["sequence"] = sequence.into();
     sign_document(profile, "realm-test", signer);
     docs.borrow_mut()
         .insert(REALM_URL.into(), serde_json::to_vec(profile).unwrap());
+}
+
+#[tokio::test]
+async fn service_release_rejects_mismatched_rpc_contract() -> Result<()> {
+    let publisher = SigningKey::from_bytes(&rand::random());
+    let (docs, _, profile) = fixture_with_publisher(PROTO, &publisher);
+    let mut selection: RealmPackageSelection = serde_json::from_value(profile)?;
+    for (reference, workload, contract) in [
+        ("svc", "actr.component/1", PROTO),
+        ("view", KEEL_GUEST_PROFILE_V1, OTHER_PROTO),
+    ] {
+        let (mut entry, bytes) = package_version(workload, contract, &publisher, "1.1.0");
+        let address = format!("https://cdn.example/{reference}-v11.actr");
+        entry["href"] = json!(&address);
+        docs.borrow_mut().insert(address, bytes);
+        selection
+            .packages
+            .insert(reference.into(), serde_json::from_value(entry)?);
+    }
+    let output = tempfile::tempdir()?;
+    let get =
+        |url, _| std::future::ready(docs.borrow().get(&url).cloned().context("missing fixture"));
+    let error = front::release_with(
+        REALM,
+        "afp.example",
+        output.path(),
+        Some(selection),
+        &get,
+        |_| async { panic!("an incompatible Service reached publication") },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("RPC contracts differ"),
+        "{error:#}"
+    );
+    Ok(())
 }
 
 fn extra_package() -> Value {
@@ -392,9 +543,13 @@ async fn previews_manual_selections_and_fetches_cyclic_dependency_closure() {
         )
     });
     std::fs::write(&selection_path, serde_json::to_vec(&selection).unwrap()).unwrap();
+    let trust_dir = dir.path().join("trust");
     let args = CheckArgs {
         selection: selection_path.clone(),
         output: dir.path().join("check"),
+        trust_dir: Some(trust_dir.clone()),
+        probe_realm: None,
+        probe: ServiceProbeArgs::default(),
     };
     let check = |url: String, _limit| {
         std::future::ready(
@@ -407,6 +562,8 @@ async fn previews_manual_selections_and_fetches_cyclic_dependency_closure() {
     let result = check_selection_with(&args, check).await.unwrap();
     assert_eq!(result["selection"], selection);
     assert_eq!(result["dependencies"].as_array().unwrap().len(), 2);
+    assert!(trust_dir.join("selection-state.json").is_file());
+    assert!(!args.output.join("selection-state.json").exists());
     selection["packages"]["svc"]["dependencies"] = json!({"not-declared":"view"});
     std::fs::write(&selection_path, serde_json::to_vec(&selection).unwrap()).unwrap();
     let error = check_selection_with(&args, check).await.unwrap_err();
@@ -469,6 +626,9 @@ async fn traverses_local_front_dependencies_and_defers_its_incoming_export_check
     let args = CheckArgs {
         selection: selection_path.clone(),
         output: dir.path().join("check"),
+        trust_dir: None,
+        probe_realm: None,
+        probe: ServiceProbeArgs::default(),
     };
     let check = |url: String, _limit| {
         std::future::ready(

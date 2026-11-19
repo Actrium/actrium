@@ -1,6 +1,40 @@
 use super::RealmPackage;
 use serde::{Deserialize, Deserializer, Serialize, de};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+/// A conditional package release based on a specific accepted Profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrontUpdate {
+    pub operation_id: String,
+    pub expected_sequence: u64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rollback: bool,
+}
+
+impl FrontUpdate {
+    pub fn check(&self) -> Result<(), String> {
+        if self.operation_id.len() != 32
+            || !self
+                .operation_id
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            return Err("operation_id must be 32 lowercase hex digits".into());
+        }
+        if self.expected_sequence >= super::MAX_EXACT_INTEGER {
+            return Err("expected_sequence is out of range".into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackageSelectionChange {
+    Front,
+    Service,
+}
 
 /// A complete, atomic selection. Serialized directly into the Profile or management envelope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,6 +176,45 @@ impl RealmPackageSelection {
             }
         }
         Ok(())
+    }
+
+    /// A Front release must preserve the primary Service and all packages
+    /// reachable through its signed dependency selection.
+    pub fn check_unchanged_service(&self, next: &Self) -> Result<(), String> {
+        if self.primary_package != next.primary_package {
+            return Err("a Front update cannot change primary_package".into());
+        }
+        let mut pending = vec![self.primary_package.as_str()];
+        let mut checked = BTreeSet::new();
+        while let Some(reference) = pending.pop() {
+            if !checked.insert(reference) {
+                continue;
+            }
+            let old = self
+                .packages
+                .get(reference)
+                .ok_or_else(|| format!("unknown Service package reference {reference:?}"))?;
+            if next.packages.get(reference) != Some(old) {
+                return Err(format!(
+                    "a Front update cannot change Service package {reference:?}"
+                ));
+            }
+            pending.extend(old.dependencies.values().map(String::as_str));
+        }
+        Ok(())
+    }
+
+    /// Identify a release from the accepted and proposed selections.
+    pub fn release_change(&self, next: &Self) -> Result<Option<PackageSelectionChange>, String> {
+        self.check_successor(next)?;
+        if self == next {
+            return Ok(None);
+        }
+        if self.selected()?.0.r#type != next.selected()?.0.r#type {
+            return Ok(Some(PackageSelectionChange::Service));
+        }
+        self.check_unchanged_service(next)?;
+        Ok(Some(PackageSelectionChange::Front))
     }
 }
 
