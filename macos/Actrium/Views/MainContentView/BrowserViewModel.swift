@@ -847,6 +847,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     handleResolvedRealmLink(info, input: trimmed, tabIndex: index)
                     return
                 }
+                // URI-carried invite (`?args={"invite":"ri_…"}`): skip the
+                // sheet and redeem directly; redemption failures surface the
+                // same error page as manual entry.
+                if let invite = inviteFromURIArgs(trimmed) {
+                    redeemInvite(code: invite, uri: trimmed)
+                    return
+                }
                 pendingInviteRedeem = PendingInviteRedeem(uri: trimmed, domain: info.domain)
                 return
             } catch {
@@ -1051,16 +1058,40 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         pendingInviteRedeem = nil
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedCode.isEmpty else { return }
+        redeemInvite(code: trimmedCode, uri: pending.uri)
+    }
 
+    /// Extract an embedded invite code from the `args` query parameter of an
+    /// `actr://` link. `args` carries a percent-encoded JSON object such as
+    /// `{"invite":"ri_…"}`; returns nil when the parameter is absent, not
+    /// valid JSON, or carries an empty invite — those links keep the manual
+    /// invite sheet.
+    private func inviteFromURIArgs(_ uri: String) -> String? {
+        guard let components = URLComponents(string: uri),
+              let argsValue = components.queryItems?
+                  .first(where: { $0.name == "args" })?
+                  .value,
+              let data = argsValue.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let invite = object["invite"] as? String
+        else { return nil }
+        let trimmed = invite.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Shared redemption body for the invite sheet and URI-carried invites:
+    /// the invite must name the same Realm as the requested link, then join
+    /// hands over to the Rust-provided method for the follow-up flow.
+    private func redeemInvite(code: String, uri: String) {
         Task { @MainActor in
             do {
                 // The invite must name the same Realm as the requested link:
                 // join sends this device's public key and the invite secret to
                 // the Realm's issuer, so a mismatched code would leak both to
                 // the wrong Realm before any server-side check fires.
-                let invite = try ActriumCore.decodeActrInvite(inviteText: trimmedCode)
+                let invite = try ActriumCore.decodeActrInvite(inviteText: code)
                 let requested = try ActriumCore.parseActrUri(
-                    uri: pending.uri,
+                    uri: uri,
                     installationId: InstallationIdProvider.getOrCreate()
                 )
                 let requestedRealm = [requested.realmId, requested.domain]
@@ -1074,7 +1105,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 }
 
                 let result = try await RealmJoinService.joinWithInvite(
-                    inviteText: trimmedCode,
+                    inviteText: code,
                     label: Host.current().localizedName ?? "Mac"
                 )
                 markRedeemed(result.realmName)
