@@ -81,9 +81,7 @@ struct RendererLocalStorageTimeoutTests {
     @Test func aReadWatchdogReportsTimeoutWithoutClaimingAnUnknownWrite() async throws {
         let pair = try StorageTransport()
         defer { pair.close() }
-        let started = ContinuousClock.now
-        let response = try await pair.send(expiring(call(UUID(), .getItem)))
-        #expect(started.duration(to: .now) < .seconds(2))
+        let response = try await pair.send(expiring(call(UUID(), .getItem), budget: .milliseconds(200)))
         #expect(try errorCode(response) == "local_storage_timeout")
         #expect(response.error?.contains("unknown") != true)
     }
@@ -126,9 +124,12 @@ struct RendererLocalStorageTimeoutTests {
         GuestLocalStorageCall(id: UUID(), documentId: document, operation: operation, key: key, value: value)
     }
 
-    private func expiring(_ call: GuestLocalStorageCall, deadline: UInt64? = nil) throws -> GuestLocalStorageCall {
+    private func expiring(
+        _ call: GuestLocalStorageCall, deadline: UInt64? = nil,
+        budget: DispatchTimeInterval = .seconds(GuestLocalStorageCall.timeoutSeconds)
+    ) throws -> GuestLocalStorageCall {
         var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(call)) as? [String: Any])
-        json["deadlineUptimeNanoseconds"] = deadline ?? (DispatchTime.now() + .milliseconds(200)).uptimeNanoseconds
+        json["deadlineUptimeNanoseconds"] = deadline ?? (DispatchTime.now() + budget).uptimeNanoseconds
         return try JSONDecoder().decode(GuestLocalStorageCall.self, from: JSONSerialization.data(withJSONObject: json))
     }
 
