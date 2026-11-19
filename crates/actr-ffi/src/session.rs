@@ -79,6 +79,7 @@ impl ActriumServiceConfig {
             .into_iter()
             .map(|entry| (entry.route, entry.capabilities.into_iter().collect()))
             .collect();
+        let routes = actr_hyper::actrium::service_routes(&routes);
         actrium_runtime::ServiceConfig {
             service_actor_id: self.service_actor_id,
             runtime_instance_id: actr_hyper::process_runtime_instance_id().to_owned(),
@@ -273,6 +274,33 @@ impl ActrPeerSessionWrapper {
     ) -> ActrResult<()> {
         self.inner
             .tell(&route, &capability, payload)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Resume this lease after the verified transport channel is rebuilt.
+    /// Returns a SessionExpired error when a fresh Attach is required.
+    pub async fn resume(&self) -> ActrResult<()> {
+        self.inner.resume().await.map_err(Into::into)
+    }
+
+    /// Send a DataChunk with proof metadata bound to this Attach session.
+    pub async fn send_data_chunk(
+        &self,
+        route: String,
+        capability: String,
+        chunk: crate::types::DataChunk,
+        payload_type: crate::types::PayloadType,
+        timeout_ms: u64,
+    ) -> ActrResult<()> {
+        self.inner
+            .send_data_chunk(
+                &route,
+                &capability,
+                chunk.into(),
+                payload_type.into(),
+                Duration::from_millis(timeout_ms),
+            )
             .await
             .map_err(Into::into)
     }

@@ -639,6 +639,20 @@ async fn authorized_takeover_invalidates_old_session_and_channel() {
         .await
         .unwrap();
     assert_eq!(new.response.lease_epoch, old.response.lease_epoch + 1);
+    assert!(
+        fixture
+            .service
+            .session_secret(&old.response.session_id)
+            .await
+            .is_none()
+    );
+    assert!(
+        fixture
+            .service
+            .session_secret(&new.response.session_id)
+            .await
+            .is_some()
+    );
     assert_code(
         fixture
             .service
@@ -1184,6 +1198,13 @@ async fn detach_releases_lease_without_stopping_service() {
         )
         .await
         .unwrap();
+    assert!(
+        fixture
+            .service
+            .session_secret(&outcome.response.session_id)
+            .await
+            .is_none()
+    );
     assert_eq!(
         fixture
             .service
@@ -1199,6 +1220,45 @@ async fn detach_releases_lease_without_stopping_service() {
         .attach(attach_request(&bob, &bob_channel, "b1"), &bob_channel)
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn expired_session_releases_its_response_signing_secret() {
+    let front = Front::new("alice");
+    let fixture = Fixture::new(std::slice::from_ref(&front));
+    let channel = make_channel(&front, "a", 2_000);
+    let outcome = fixture
+        .service
+        .attach(attach_request(&front, &channel, "a1"), &channel)
+        .await
+        .unwrap();
+    assert!(
+        fixture
+            .service
+            .session_secret(&outcome.response.session_id)
+            .await
+            .is_some()
+    );
+
+    fixture
+        .clock
+        .set(outcome.response.lease.expires_at_epoch_secs);
+    assert!(
+        fixture
+            .service
+            .session_secret(&outcome.response.session_id)
+            .await
+            .is_none()
+    );
+    assert_eq!(
+        fixture
+            .service
+            .status(&outcome.response.session_id)
+            .await
+            .unwrap()
+            .state,
+        SessionState::Closed
+    );
 }
 
 #[tokio::test]

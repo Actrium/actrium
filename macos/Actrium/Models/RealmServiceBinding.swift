@@ -166,6 +166,7 @@ actor RealmServiceBinding {
     struct Connection: Sendable {
         let reference: ActrRefWrapper
         let session: ActrPeerSessionWrapper
+        let target: ActrBindings.ActrId
     }
 
     private let directory = FileManager.default.temporaryDirectory
@@ -189,6 +190,7 @@ actor RealmServiceBinding {
     /// identify a delivery on its own.
     private var attachmentDeliveries: [String: @Sendable (RealmServiceAttachmentResultEvent) -> Void] = [:]
     private var startup: (id: UUID, task: Task<Connection, Error>)?
+    private var recovery: (id: UUID, task: Task<Connection, Error>)?
     private var stopped = false
 
     init(
@@ -264,7 +266,7 @@ actor RealmServiceBinding {
               (1...300_000).contains(request.timeoutMs), request.payload.count <= 1_048_576 else {
             throw RealmServiceError(message: "The Service call is outside this tab's declared capabilities.")
         }
-        let connection = try await connect()
+        let connection = try await readyConnection()
         guard !stopped else { throw CancellationError() }
         return try await connection.session.call(
             route: request.route,
@@ -281,8 +283,8 @@ actor RealmServiceBinding {
         attachmentUploadAllowed && !stopped
     }
 
-    /// Prepares one attachment upload: validates capability and fields,
-    /// discovers the Service target once and fixes it for the whole session,
+    /// Prepares one attachment upload: validates capability and fields, binds
+    /// the prepare RPC and every later chunk to the same Attach session,
     /// registers the result stream, then issues the fixed
     /// `ask.AskService.PrepareAttachmentUpload` reliable RPC with a 20 second
     /// budget. Any failure unregisters the result stream again so no state
@@ -295,24 +297,20 @@ actor RealmServiceBinding {
             guard attachmentUploadAllowed else { throw RealmServiceAttachmentUploadError.notPermitted }
             guard !stopped else { throw RealmServiceAttachmentUploadError.cancelled }
             let checksum = try RealmServiceAttachmentUploadPolicy.validatePrepare(call)
-            // Register before the first suspension: connect() and discover()
-            // may take seconds, and a renderer cancellation during that window
-            // must find this upload instead of letting it start afterwards.
+            // Register before the first suspension: connect(), recovery, and
+            // stream registration may take seconds, and a renderer
+            // cancellation during that window must find this upload instead
+            // of letting it start afterwards.
             try await sessions.registerPreparing(call, checksum: checksum)
             do {
-                let reference = try await connect().reference
+                let connection = try await readyConnection()
+                let reference = connection.reference
                 guard !stopped,
                       await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
                     throw RealmServiceAttachmentUploadError.cancelled
                 }
-                guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
-                    throw RealmServiceAttachmentUploadError.unavailable(
-                        "The Realm's selected Service is not online.")
-                }
-                guard !stopped,
-                      await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
-                    throw RealmServiceAttachmentUploadError.cancelled
-                }
+                // Prepare and every chunk use the target fixed by this Attach;
+                // a second Discover could select a different Service instance.
                 // The result delivery must exist before registration: the
                 // Service may answer the prepare RPC and publish its terminal
                 // result while this actor is still suspended on the RPC.
@@ -344,11 +342,12 @@ actor RealmServiceBinding {
                 request.checksumAlgorithm = call.checksumAlgorithm
                 request.sizeBytes = call.sizeBytes
                 request.resultStreamID = call.resultStreamId
-                let response = try await reference.callPeer(
-                    target: target,
-                    routeKey: RealmServiceAttachmentIPC.prepareRoute,
-                    requestPayload: request.serializedData(),
-                    timeoutMs: Int64(RealmServiceAttachmentIPC.prepareTimeoutMs)
+                let response = try await connection.session.call(
+                    route: RealmServiceAttachmentIPC.prepareRoute,
+                    capability: routeCapabilities[RealmServiceAttachmentUploadPolicy.transportRoute]
+                        ?? "service",
+                    payload: request.serializedData(),
+                    timeoutMs: UInt64(RealmServiceAttachmentIPC.prepareTimeoutMs)
                 )
                 // A late reply belongs to this attempt only. If the caller
                 // unregistered and started a retry with the same attachment
@@ -369,7 +368,7 @@ actor RealmServiceBinding {
                 try await sessions.markUploading(
                     attachmentId: call.attachmentId,
                     streamId: call.streamId,
-                    target: target
+                    target: connection.target
                 )
                 return RealmServiceAttachmentPrepareReply(
                     id: call.id,
@@ -399,7 +398,7 @@ actor RealmServiceBinding {
         do {
             guard attachmentUploadAllowed else { throw RealmServiceAttachmentUploadError.notPermitted }
             guard !stopped else { throw RealmServiceAttachmentUploadError.cancelled }
-            let reference = try await connect().reference
+            let connection = try await readyConnection()
             guard !stopped else { throw RealmServiceAttachmentUploadError.cancelled }
             let planned = try await sessions.planChunk(
                 streamId: call.streamId,
@@ -407,6 +406,17 @@ actor RealmServiceBinding {
                 payloadBytes: call.payload.count,
                 metadata: call.metadata
             )
+            // A re-Attach may select a different Service instance. Its upload
+            // state does not exist there, so never continue a prepared stream
+            // against a new target; the caller must restart the upload.
+            guard planned.session.target == connection.target else {
+                await cleanupAttachmentSession(
+                    attachmentId: planned.session.attachmentId,
+                    streamId: planned.session.chunkStreamId
+                )
+                throw RealmServiceAttachmentUploadError.unavailable(
+                    "The Service instance changed after reconnecting; restart the attachment upload.")
+            }
             let chunk = ActrBindings.DataChunk(
                 streamId: planned.session.chunkStreamId,
                 sequence: planned.plan.sequence,
@@ -415,10 +425,13 @@ actor RealmServiceBinding {
                 timestampMs: Int64(Date().timeIntervalSince1970 * 1000)
             )
             do {
-                try await reference.sendDataChunk(
-                    target: planned.plan.target,
+                try await connection.session.sendDataChunk(
+                    route: RealmServiceAttachmentUploadPolicy.transportRoute,
+                    capability: routeCapabilities[RealmServiceAttachmentUploadPolicy.transportRoute]
+                        ?? "service",
                     chunk: chunk,
-                    payloadType: .streamReliable
+                    payloadType: .streamReliable,
+                    timeoutMs: UInt64(RealmServiceAttachmentIPC.chunkTimeoutMs)
                 )
             } catch {
                 // The sequence window already moved; the session cannot
@@ -556,6 +569,71 @@ actor RealmServiceBinding {
         }
     }
 
+    /// Return a connection whose session is valid on the current verified
+    /// channel. Actor reentrancy is serialized through one shared recovery
+    /// task, so concurrent requests cannot Resume or re-Attach independently.
+    private func readyConnection() async throws -> Connection {
+        guard !stopped else { throw CancellationError() }
+        if let recovery {
+            let recovered = try await recovery.task.value
+            guard !stopped else { throw CancellationError() }
+            return recovered
+        }
+        let connection = try await connect()
+        let id = UUID()
+        let task = Task<Connection, Error> {
+            try await resumeOrReattach(connection)
+        }
+        recovery = (id, task)
+        do {
+            let recovered = try await task.value
+            guard !stopped else { throw CancellationError() }
+            if recovery?.id == id {
+                startup = (id, Task { recovered })
+                recovery = nil
+            }
+            return recovered
+        } catch {
+            task.cancel()
+            if recovery?.id == id {
+                recovery = nil
+            }
+            throw error
+        }
+    }
+
+    static func requiresReattach(_ error: Error) -> Bool {
+        let message = String(describing: error)
+        return ["SessionExpired", "SessionEpochMismatch", "ChannelExpired"]
+            .contains(where: { message.contains($0) })
+    }
+
+    private func resumeOrReattach(_ connection: Connection) async throws -> Connection {
+        do {
+            try await connection.session.resume()
+            try Task.checkCancellation()
+            guard !stopped else { throw CancellationError() }
+            return connection
+        } catch {
+            guard Self.requiresReattach(error) else { throw error }
+            try? await connection.session.detach()
+            let attached = try await attach(connection.reference)
+            let replacement = Connection(
+                reference: connection.reference,
+                session: attached.session,
+                target: attached.target
+            )
+            do {
+                try Task.checkCancellation()
+                guard !stopped else { throw CancellationError() }
+                return replacement
+            } catch {
+                try? await replacement.session.detach()
+                throw error
+            }
+        }
+    }
+
     /// Internal for the shutdown-race tests: a stopped binding must reject
     /// before it creates or reuses a startup task.
     func connect() async throws -> Connection {
@@ -587,14 +665,16 @@ actor RealmServiceBinding {
             )
             let reference = try await configured.start()
             do {
-                let session = try await attach(reference)
+                let attached = try await attach(reference)
                 do {
                     try Task.checkCancellation()
                 } catch {
-                    try? await session.detach()
+                    try? await attached.session.detach()
                     throw error
                 }
-                return Connection(reference: reference, session: session)
+                return Connection(
+                    reference: reference, session: attached.session, target: attached.target
+                )
             } catch {
                 reference.shutdown()
                 await reference.waitForShutdown()
@@ -616,7 +696,9 @@ actor RealmServiceBinding {
     /// Attach may race the peer handshake that creates the verified channel.
     /// Retry until the Service is discoverable and Attach succeeds, bounded so
     /// a permanently unreachable Service still surfaces an error.
-    private func attach(_ reference: ActrRefWrapper) async throws -> ActrPeerSessionWrapper {
+    private func attach(
+        _ reference: ActrRefWrapper
+    ) async throws -> (target: ActrBindings.ActrId, session: ActrPeerSessionWrapper) {
         let deadline = Date().addingTimeInterval(30)
         var lastError: Error?
         while Date() < deadline {
@@ -625,7 +707,8 @@ actor RealmServiceBinding {
             do {
                 let targets = try await reference.discover(targetType: serviceType, count: 1)
                 if let target = targets.first {
-                    return try await reference.attachActrium(service: target, params: attachParams)
+                    let session = try await reference.attachActrium(service: target, params: attachParams)
+                    return (target, session)
                 }
                 lastError = RealmServiceError(message: "The Realm's selected Service is not online.")
             } catch {
@@ -671,34 +754,41 @@ actor RealmServiceBinding {
 
     func stop() async {
         stopped = true
+        let startup = self.startup
+        let recovery = self.recovery
+        self.recovery = nil
+        startup?.task.cancel()
+        recovery?.task.cancel()
+
+        var base: Connection?
         if let startup {
-            startup.task.cancel()
-            let connection = try? await startup.task.value
-            // Unregister every attachment stream before the runtime goes
-            // down so a restarting Service never sees ghost streams. Local
-            // bookkeeping is dropped even when startup never produced a
-            // usable runtime.
-            let removed = await sessions.cancelAll()
-            for session in removed {
-                attachmentDeliveries.removeValue(forKey: session.chunkStreamId)
-                if let reference = connection?.reference {
-                    try? await reference.unregisterStream(streamId: session.resultStreamId)
-                    try? await reference.unregisterStream(streamId: session.chunkStreamId)
-                }
-            }
-            if let connection {
-                try? await connection.session.detach()
-                connection.reference.shutdown()
-                await connection.reference.waitForShutdown()
-            }
-            self.startup = nil
-        } else {
-            // No runtime to unregister from; drop local bookkeeping only.
-            let removed = await sessions.cancelAll()
-            for session in removed {
-                attachmentDeliveries.removeValue(forKey: session.chunkStreamId)
+            base = try? await startup.task.value
+        }
+        var recovered: Connection?
+        if let recovery {
+            recovered = try? await recovery.task.value
+        }
+        // A completed recovery owns the newest session; its reference is the
+        // same runtime as the original startup connection.
+        let connection = recovered ?? base
+
+        // Unregister every attachment stream before the runtime goes down so
+        // a restarting Service never sees ghost streams. Local bookkeeping is
+        // dropped even when startup never produced a usable runtime.
+        let removed = await sessions.cancelAll()
+        for session in removed {
+            attachmentDeliveries.removeValue(forKey: session.chunkStreamId)
+            if let reference = connection?.reference {
+                try? await reference.unregisterStream(streamId: session.resultStreamId)
+                try? await reference.unregisterStream(streamId: session.chunkStreamId)
             }
         }
+        if let connection {
+            try? await connection.session.detach()
+            connection.reference.shutdown()
+            await connection.reference.waitForShutdown()
+        }
+        self.startup = nil
         try? FileManager.default.removeItem(at: directory)
     }
 }

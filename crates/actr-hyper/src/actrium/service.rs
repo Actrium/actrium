@@ -1,16 +1,16 @@
 //! Service-side Actrium session wiring: system-route dispatch and the
-//! current-policy business guard, sharing one session service and its secrets.
+//! current-policy business guard, sharing one session service and admission state.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard};
 
 use actr_protocol::{
     ActorResult, ActrError, DataChunk, Direction, MetadataEntry, RpcEnvelope, prost::Message as _,
 };
 use actrium_runtime::{
-    AttachRequest, AttachResponse, BusinessRequest, DetachRequest, GetStatusRequest,
-    GuardedRequest, HeartbeatRequest, InMemorySessionService, MessageKind, ResumeRequest,
-    SessionSecret, TakeoverRequest, request_proof, request_signing_bytes, verify_request_proof,
+    AttachRequest, BusinessRequest, DetachRequest, GetStatusRequest, GuardedRequest,
+    HeartbeatRequest, InMemorySessionService, MessageKind, ResumeRequest, SessionSecret,
+    TakeoverRequest, request_proof, request_signing_bytes, verify_request_proof,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -35,11 +35,19 @@ pub struct TakeoverPayload {
 
 #[derive(Default)]
 pub(crate) struct Shared {
-    secrets: Mutex<HashMap<String, SessionSecret>>,
     admitted: Mutex<HashMap<String, Admitted>>,
-    /// Pending outbound calls waiting for their response proof. Shared with
-    /// outbound peer sessions so the single inbound guard can verify responses.
-    pub(crate) pending: Mutex<HashMap<String, PendingCall>>,
+    /// Pending outbound calls waiting for their response proof. A synchronous
+    /// mutex lets the RPC-owned guard reclaim its entry even when the caller
+    /// drops the future while suspended.
+    pending: StdMutex<HashMap<String, PendingCall>>,
+}
+
+impl Shared {
+    pub(crate) fn pending(&self) -> StdMutexGuard<'_, HashMap<String, PendingCall>> {
+        self.pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 }
 
 /// An outbound call awaiting its response proof. Kept in the shared inbound
@@ -47,6 +55,27 @@ pub(crate) struct Shared {
 pub(crate) struct PendingCall {
     pub(crate) request: BusinessRequest,
     pub(crate) secret: SessionSecret,
+}
+
+/// Owns one pending response-proof entry for exactly as long as its RPC.
+/// Dropping or aborting the call future therefore cannot leak its payload or
+/// session secret into the long-lived node state.
+pub(crate) struct PendingCallGuard {
+    shared: Arc<Shared>,
+    request_id: String,
+}
+
+impl PendingCallGuard {
+    pub(crate) fn new(shared: Arc<Shared>, request_id: String, pending: PendingCall) -> Self {
+        shared.pending().insert(request_id.clone(), pending);
+        Self { shared, request_id }
+    }
+}
+
+impl Drop for PendingCallGuard {
+    fn drop(&mut self) {
+        self.shared.pending().remove(&self.request_id);
+    }
 }
 
 /// Lightweight metadata kept for signing a response to an admitted request.
@@ -113,7 +142,8 @@ struct Admitted {
 }
 
 /// Dispatches the exact `actrium.session.v1` system routes into the session
-/// service and records each granted session secret for response signing.
+/// service. Response signing reads the secret back from that registry so its
+/// lifetime follows the registry's expiry, Detach, Takeover, and retention rules.
 pub struct ActriumServiceRegistry {
     service: InMemorySessionService,
     shared: Arc<Shared>,
@@ -121,8 +151,8 @@ pub struct ActriumServiceRegistry {
 
 impl ActriumServiceRegistry {
     /// Builds the registry/guard pair over one session service. Install both
-    /// on the same node; they share session secrets, admission state, and
-    /// outbound pending calls so the guard can verify peer responses.
+    /// on the same node; they share admission state and outbound pending calls
+    /// so the guard can verify peer responses.
     pub(crate) fn new(
         service: InMemorySessionService,
         shared: Arc<Shared>,
@@ -134,14 +164,6 @@ impl ActriumServiceRegistry {
             },
             ActriumServiceGuard { service, shared },
         )
-    }
-
-    async fn record_secret(&self, response: &AttachResponse, secret: SessionSecret) {
-        self.shared
-            .secrets
-            .lock()
-            .await
-            .insert(response.session_id.clone(), secret);
     }
 }
 
@@ -177,8 +199,6 @@ impl SessionRegistry for ActriumServiceRegistry {
                     .attach(attach, &channel)
                     .await
                     .map_err(session_actr_error)?;
-                self.record_secret(&outcome.response, outcome.session_secret)
-                    .await;
                 encode_payload(&outcome.response)
             }
             SessionMethod::Resume => {
@@ -188,8 +208,6 @@ impl SessionRegistry for ActriumServiceRegistry {
                     .resume(resume, &channel)
                     .await
                     .map_err(session_actr_error)?;
-                self.record_secret(&outcome.response, outcome.session_secret)
-                    .await;
                 encode_payload(&outcome.response)
             }
             SessionMethod::Takeover => {
@@ -199,8 +217,6 @@ impl SessionRegistry for ActriumServiceRegistry {
                     .takeover(payload.takeover, payload.attach, &channel)
                     .await
                     .map_err(session_actr_error)?;
-                self.record_secret(&outcome.response, outcome.session_secret)
-                    .await;
                 encode_payload(&outcome.response)
             }
             SessionMethod::Heartbeat => {
@@ -218,7 +234,6 @@ impl SessionRegistry for ActriumServiceRegistry {
                     .detach(detach.clone(), &channel)
                     .await
                     .map_err(session_actr_error)?;
-                self.shared.secrets.lock().await.remove(&detach.session_id);
                 self.shared
                     .admitted
                     .lock()
@@ -417,12 +432,7 @@ impl IncomingGuard for ActriumServiceGuard {
         // the pending caller is woken. Non-session responses have no pending entry
         // and pass through unchanged.
         if envelope.direction == Some(Direction::Response as i32) {
-            let pending = self
-                .shared
-                .pending
-                .lock()
-                .await
-                .remove(&envelope.request_id);
+            let pending = self.shared.pending().remove(&envelope.request_id);
             if let Some(pending) = pending {
                 verify_inbound_response(envelope, pending)?;
             }
@@ -491,20 +501,17 @@ impl IncomingGuard for ActriumServiceGuard {
             return Ok(());
         };
         let signing = entry.signing.clone();
+        drop(admitted);
         let secret = self
-            .shared
-            .secrets
-            .lock()
+            .service
+            .session_secret(&signing.session_id)
             .await
-            .get(&signing.session_id)
-            .cloned()
             .ok_or_else(|| {
                 IncomingGuardError::new(
                     IncomingGuardErrorCode::Revoked,
-                    "the session secret is no longer available".to_string(),
+                    "the session is closed or expired".to_string(),
                 )
             })?;
-        drop(admitted);
 
         let payload = response_payload_bytes(response)?;
         let mut proof_input = signing.into_request(MessageKind::Response, payload);

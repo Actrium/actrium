@@ -779,6 +779,10 @@ impl LifecycleService {
         Ok(instance)
     }
 
+    /// Stop an instance and persist the intent to restart it. This is only a
+    /// durable state transition: no workload is started here. After the Host
+    /// has actually started the runtime, it must call [`Self::mark_running`]
+    /// with the returned runtime instance identity.
     pub async fn restart(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
@@ -804,7 +808,32 @@ impl LifecycleService {
         instance.desired_state = DesiredState::Running;
         instance.reachability = Reachability::Unknown;
         instance.health = Health::Unknown;
+        instance.attachment = AttachmentState::Idle;
         self.persist_transition(&mut instance, LifecycleState::Starting)?;
+        Ok(instance)
+    }
+
+    /// Commit a Host-confirmed runtime start. The generation check prevents a
+    /// stale start completion from marking a later restart as Online.
+    pub async fn mark_running(
+        &self,
+        actor_id: &str,
+        runtime_instance_id: &str,
+    ) -> Result<ServiceInstance, LifecycleError> {
+        let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
+        let _guard = operation_lock.lock().await;
+        let mut instance = self.instance(actor_id)?;
+        // Only a pending start can commit Running. In particular, do not let a
+        // stale completion revive a suspended instance through the ordinary
+        // Suspended -> Running transition.
+        if instance.lifecycle_state != LifecycleState::Starting {
+            return Err(invalid_transition(&instance, LifecycleState::Running));
+        }
+        if instance.runtime_instance_id != runtime_instance_id {
+            return Err(LifecycleError::InvalidRequest(
+                "the running runtime instance does not match the pending start".into(),
+            ));
+        }
         instance.reachability = Reachability::Online;
         instance.health = Health::Healthy;
         instance.attachment = AttachmentState::Idle;
@@ -1219,6 +1248,9 @@ fn sync_dir(path: &Path) -> Result<(), std::io::Error> {
         const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
         let file = std::fs::OpenOptions::new()
             .read(true)
+            // FlushFileBuffers requires GENERIC_WRITE, including for directory
+            // handles opened with FILE_FLAG_BACKUP_SEMANTICS.
+            .write(true)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
             .open(path)?;
         file.sync_all()

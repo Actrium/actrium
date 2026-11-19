@@ -9,7 +9,7 @@ use actr_framework::{Bytes, Context, MessageDispatcher, Workload};
 use actr_hyper::actrium::ActriumAttachParams;
 use actr_hyper::test_support::TestSignalingServer;
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
-use actr_protocol::{ActrId, ActrType, RpcEnvelope, RpcRequest};
+use actr_protocol::{ActrId, ActrType, DataChunk, PayloadType, RpcEnvelope, RpcRequest};
 use actrium_runtime::{
     AttachmentPolicy, InMemorySessionService, ProgramRelease, ServiceConfig, ServicePolicies,
 };
@@ -18,6 +18,8 @@ use tempfile::TempDir;
 
 const REALM: &str = "test7@example.com";
 const READ: &str = "documents.read";
+const PREPARE_ATTACHMENT_ROUTE: &str = "ask.AskService.PrepareAttachmentUpload";
+const ATTACHMENT_UPLOAD_ROUTE: &str = "uploadAttachment";
 
 /// Minimal typed RPC request used for the business call.
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
@@ -58,7 +60,7 @@ impl MessageDispatcher for EchoDispatcher {
         _ctx: &C,
     ) -> actr_protocol::ActorResult<Bytes> {
         match envelope.route_key.as_str() {
-            "echo" => Ok(envelope.payload.unwrap_or_default()),
+            "echo" | PREPARE_ATTACHMENT_ROUTE => Ok(envelope.payload.unwrap_or_default()),
             other => Err(actr_protocol::ActrError::InvalidArgument(format!(
                 "unknown route: {other}"
             ))),
@@ -266,7 +268,17 @@ fn make_service_config(
             keel_api: "1".into(),
         }],
         program_capabilities: BTreeSet::from([READ.to_string()]),
-        routes: BTreeMap::from([("echo".to_string(), BTreeSet::from([READ.to_string()]))]),
+        routes: BTreeMap::from([
+            ("echo".to_string(), BTreeSet::from([READ.to_string()])),
+            (
+                PREPARE_ATTACHMENT_ROUTE.to_string(),
+                BTreeSet::from([READ.to_string()]),
+            ),
+            (
+                ATTACHMENT_UPLOAD_ROUTE.to_string(),
+                BTreeSet::from([READ.to_string()]),
+            ),
+        ]),
         attachment_policy: AttachmentPolicy::Exclusive,
         lease_duration: Duration::from_secs(300),
         heartbeat_interval: Duration::from_secs(30),
@@ -419,6 +431,100 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
         .tell("echo", READ, b"tell payload".to_vec())
         .await
         .expect("session-signed tell is admitted");
+
+    // The same authenticated session carries the attachment prepare RPC and
+    // the stream chunks. Both paths are admitted by the receiving Guard.
+    let prepared = session
+        .call(
+            PREPARE_ATTACHMENT_ROUTE,
+            READ,
+            b"prepare".to_vec(),
+            Duration::from_secs(30),
+        )
+        .await
+        .expect("prepare RPC is bound to the Attach session");
+    assert_eq!(prepared, b"prepare");
+
+    let (chunks, mut received) = tokio::sync::mpsc::unbounded_channel();
+    service
+        .app_context()
+        .await
+        .register_stream("attachment-chunk".into(), move |chunk, _| {
+            let chunks = chunks.clone();
+            Box::pin(async move {
+                chunks.send(chunk).unwrap();
+                Ok(())
+            })
+        })
+        .await
+        .expect("register the attachment chunk stream");
+    let chunk_payload = b"attachment bytes".to_vec();
+    session
+        .send_data_chunk(
+            ATTACHMENT_UPLOAD_ROUTE,
+            READ,
+            DataChunk {
+                stream_id: "attachment-chunk".into(),
+                sequence: 0,
+                payload: Bytes::from(chunk_payload.clone()),
+                ..Default::default()
+            },
+            PayloadType::StreamReliable,
+            Duration::from_secs(30),
+        )
+        .await
+        .expect("session-signed DataChunk is admitted");
+    let chunk = tokio::time::timeout(Duration::from_secs(10), received.recv())
+        .await
+        .expect("the Service receives the attachment chunk")
+        .expect("the chunk receiver is open");
+    assert_eq!(chunk.payload, Bytes::from(chunk_payload));
+    assert!(
+        chunk
+            .metadata
+            .iter()
+            .any(|entry| entry.key == actr_hyper::actrium::metadata::PROOF)
+    );
+
+    // A rebuilt verified channel gets a fresh channel generation. Resume the
+    // same lease before the next business request, exactly as the macOS Host
+    // does for an already-open tab.
+    let previous_epoch = session.lease_epoch().await;
+    let discovery_before = server.relay_discovery_requests();
+    server.disconnect_relay_connections();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while server.relay_connection_count() != 2
+            || server.relay_discovery_requests() < discovery_before + 2
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("both relay channels are rebuilt");
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if session.resume().await.is_ok() && session.lease_epoch().await > previous_epoch {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("the same tab resumes over the rebuilt channel");
+    let resumed_payload = b"after reconnect".to_vec();
+    let response = tokio::time::timeout(
+        Duration::from_secs(60),
+        session.call(
+            "echo",
+            READ,
+            resumed_payload.clone(),
+            Duration::from_secs(30),
+        ),
+    )
+    .await
+    .expect("resumed call must not hang")
+    .expect("the resumed session makes a signed business call");
+    assert_eq!(response, resumed_payload);
 
     session.detach().await.expect("detach succeeds");
     let after = tokio::time::timeout(

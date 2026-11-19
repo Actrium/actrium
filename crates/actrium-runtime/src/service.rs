@@ -117,6 +117,12 @@ impl InMemorySessionService {
         self.registry.status(session_id).await
     }
 
+    /// Host-only response-signing key for a live session. This never crosses
+    /// the Guest or FFI boundary and disappears with the registry record.
+    pub async fn session_secret(&self, session_id: &str) -> Option<crate::SessionSecret> {
+        self.registry.session_secret(session_id).await
+    }
+
     pub async fn session(&self, session_id: &str) -> Option<FrontServiceSession> {
         self.registry.session(session_id).await
     }

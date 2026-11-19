@@ -408,7 +408,7 @@ impl RunCommand {
             protocol_fingerprint: metadata.protocol_fingerprint.clone(),
             supported_runtimes: vec![metadata.runtime.clone()],
             program_capabilities: metadata.program_capabilities.clone(),
-            routes: metadata.routes.clone(),
+            routes: actr_hyper::actrium::service_routes(&metadata.routes),
             attachment_policy: actrium_runtime::AttachmentPolicy::Exclusive,
             lease_duration: actrium.lease_duration,
             heartbeat_interval: actrium.heartbeat_interval,

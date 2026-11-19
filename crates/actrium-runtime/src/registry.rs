@@ -1395,6 +1395,25 @@ impl InMemorySessionRegistry {
             .ok_or_else(|| SessionError::expired("unknown session"))
     }
 
+    /// Return the Host-only proof key for a live session. Closed, expired, and
+    /// pruned sessions have no signing key, matching the other registry rules.
+    pub async fn session_secret(&self, session_id: &str) -> Option<SessionSecret> {
+        let mut state = self.state.lock().await;
+        let now = self.now();
+        Self::close_expired(&mut state, session_id, now);
+        self.prune(&mut state, now);
+        state
+            .sessions
+            .get(session_id)
+            .filter(|entry| {
+                matches!(
+                    entry.record.state,
+                    SessionState::Active | SessionState::Grace
+                )
+            })
+            .map(|entry| entry.secret.clone())
+    }
+
     pub async fn session(&self, session_id: &str) -> Option<FrontServiceSession> {
         let mut state = self.state.lock().await;
         let now = self.now();

@@ -19,6 +19,21 @@ use crate::error::HyperError;
 pub const ACTRIUM_VERSION_V1: &str = "1.0.0";
 pub const FRONT_HOST_API_V1: &str = "1.0";
 pub const SERVICE_CAPABILITY: &str = "service";
+pub const ATTACHMENT_UPLOAD_TRANSPORT: &str = "uploadAttachment";
+pub const ATTACHMENT_PREPARE_ROUTE: &str = "ask.AskService.PrepareAttachmentUpload";
+
+/// Add the fixed wire route for a declared reserved upload transport. The
+/// transport alias remains configured for signed DataChunk metadata, while the
+/// prepare RPC is admitted under its actual protobuf route.
+pub fn service_routes(
+    declared: &BTreeMap<String, BTreeSet<String>>,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mut routes = declared.clone();
+    if let Some(capabilities) = declared.get(ATTACHMENT_UPLOAD_TRANSPORT) {
+        routes.insert(ATTACHMENT_PREPARE_ROUTE.to_owned(), capabilities.clone());
+    }
+    routes
+}
 
 /// Exact compatibility declarations extracted from one verified Front package.
 #[derive(Debug, Clone)]
@@ -202,4 +217,30 @@ fn read_declared(
     manifest
         .read_declared_file(archive, path, actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES)
         .map_err(|error| invalid(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upload_transport_adds_its_fixed_prepare_route() {
+        let capabilities = BTreeSet::from([SERVICE_CAPABILITY.to_owned()]);
+        let declared = BTreeMap::from([
+            ("notes.save".to_owned(), capabilities.clone()),
+            (ATTACHMENT_UPLOAD_TRANSPORT.to_owned(), capabilities.clone()),
+        ]);
+
+        let routes = service_routes(&declared);
+        assert_eq!(routes.get("notes.save"), Some(&capabilities));
+        assert_eq!(routes.get(ATTACHMENT_UPLOAD_TRANSPORT), Some(&capabilities));
+        assert_eq!(routes.get(ATTACHMENT_PREPARE_ROUTE), Some(&capabilities));
+    }
+
+    #[test]
+    fn business_routes_do_not_gain_the_upload_transport() {
+        let capabilities = BTreeSet::from([SERVICE_CAPABILITY.to_owned()]);
+        let declared = BTreeMap::from([("notes.save".to_owned(), capabilities.clone())]);
+        assert_eq!(service_routes(&declared), declared);
+    }
 }

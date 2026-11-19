@@ -21,7 +21,7 @@ use ed25519_dalek::SigningKey;
 
 use super::metadata;
 use super::peer::business_metadata;
-use super::service::{ActriumServiceRegistry, PendingCall, Shared as PeerShared};
+use super::service::{ActriumServiceRegistry, PendingCall, PendingCallGuard, Shared as PeerShared};
 use crate::lifecycle::{
     IncomingDispatchRequest, IncomingGuard, IncomingStreamChunk, SessionRegistry,
 };
@@ -698,9 +698,7 @@ async fn inbound_response_without_proof_is_rejected() {
     let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
     let (attach, secret) = attach(&registry).await;
     shared
-        .pending
-        .lock()
-        .await
+        .pending()
         .insert("call-1".into(), pending_call(&attach, &secret));
 
     let response = RpcEnvelope {
@@ -728,9 +726,7 @@ async fn inbound_response_with_tampered_payload_is_rejected() {
     let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
     let (attach, secret) = attach(&registry).await;
     shared
-        .pending
-        .lock()
-        .await
+        .pending()
         .insert("call-1".into(), pending_call(&attach, &secret));
 
     let mut response = signed_response_envelope("call-1", b"document body", &attach, &secret);
@@ -752,9 +748,7 @@ async fn inbound_response_proof_round_trip_consumes_pending() {
     let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
     let (attach, secret) = attach(&registry).await;
     shared
-        .pending
-        .lock()
-        .await
+        .pending()
         .insert("call-1".into(), pending_call(&attach, &secret));
 
     let response = signed_response_envelope("call-1", b"document body", &attach, &secret);
@@ -763,8 +757,34 @@ async fn inbound_response_proof_round_trip_consumes_pending() {
         .await
         .expect("valid inbound response passes");
     assert!(
-        shared.pending.lock().await.is_empty(),
+        shared.pending().is_empty(),
         "pending call is consumed after verification"
+    );
+}
+
+#[tokio::test]
+async fn cancelling_call_without_a_response_releases_pending_proof() {
+    let shared = Arc::new(PeerShared::default());
+    let (registry, _guard) = ActriumServiceRegistry::new(service(), shared.clone());
+    let (attach, secret) = attach(&registry).await;
+
+    let task = tokio::spawn({
+        let shared = shared.clone();
+        async move {
+            let _pending =
+                PendingCallGuard::new(shared, "call-1".into(), pending_call(&attach, &secret));
+            std::future::pending::<()>().await;
+        }
+    });
+    tokio::task::yield_now().await;
+    assert_eq!(shared.pending().len(), 1);
+
+    task.abort();
+    let join = task.await;
+    assert!(join.expect_err("the call task is cancelled").is_cancelled());
+    assert!(
+        shared.pending().is_empty(),
+        "cancellation without a response releases the request payload and secret"
     );
 }
 

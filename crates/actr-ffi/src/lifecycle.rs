@@ -534,11 +534,28 @@ impl ActrLifecycleService {
             .map(Into::into)
     }
 
-    /// Stop then start an instance, rotating its runtime instance identity.
+    /// Stop an instance and persist a pending restart with a fresh runtime
+    /// instance identity. This does not start a workload. After the Host has
+    /// started that exact runtime, call `mark_running` to commit Online state.
     pub async fn restart(self: Arc<Self>, actor_id: String) -> ActrResult<ServiceInstance> {
         let inner = self.inner.clone();
         run_on_tokio_runtime("lifecycle restart", async move {
             inner.restart(&actor_id).await
+        })
+        .await
+        .map(Into::into)
+    }
+
+    /// Mark a pending start as Running only after the Host has successfully
+    /// started the workload with this exact runtime instance identity.
+    pub async fn mark_running(
+        self: Arc<Self>,
+        actor_id: String,
+        runtime_instance_id: String,
+    ) -> ActrResult<ServiceInstance> {
+        let inner = self.inner.clone();
+        run_on_tokio_runtime("lifecycle mark running", async move {
+            inner.mark_running(&actor_id, &runtime_instance_id).await
         })
         .await
         .map(Into::into)

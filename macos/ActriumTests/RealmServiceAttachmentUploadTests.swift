@@ -441,4 +441,31 @@ struct RealmServiceAttachmentUploadTests {
         let reply = await binding.prepareAttachmentUpload(makePrepareCall(), deliver: { _ in })
         #expect(reply.failure?.code == "cancelled")
     }
+
+    // MARK: - Session recovery
+
+    private struct SessionError: Error, CustomStringConvertible, Sendable {
+        let description: String
+    }
+
+    @Test func onlyTerminalSessionErrorsTriggerAFreshAttach() {
+        // A rebuilt channel generation or an expired lease cannot be repaired
+        // by Resume alone; the Host must Attach a new session.
+        for code in ["SessionExpired", "SessionEpochMismatch", "ChannelExpired"] {
+            #expect(RealmServiceBinding.requiresReattach(
+                SessionError(description: "actrium.session/v1:\(code):detail")))
+        }
+        // Transient transport failures must be surfaced; re-Attaching on every
+        // RPC error would churn sessions and lose the tab's lease.
+        for message in [
+            "Unavailable: the peer is offline",
+            "SessionOccupied: another tab owns this lease",
+            "TimedOut: no response within the deadline",
+            "CancellationError()",
+        ] {
+            #expect(!RealmServiceBinding.requiresReattach(SessionError(description: message)))
+        }
+        #expect(!RealmServiceBinding.requiresReattach(SessionError(description: "")))
+        #expect(!RealmServiceBinding.requiresReattach(CancellationError()))
+    }
 }

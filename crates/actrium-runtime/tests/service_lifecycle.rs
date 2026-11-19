@@ -382,13 +382,43 @@ async fn lifecycle_stop_restart_trash_and_purge_rotate_runtime_but_not_actor_id(
     let restarted = service.restart(&actor_id).await.unwrap();
     assert_eq!(restarted.actor_id, actor_id);
     assert_ne!(restarted.runtime_instance_id, created.runtime_instance_id);
+    assert_eq!(restarted.lifecycle_state, LifecycleState::Starting);
+    assert_eq!(restarted.reachability, Reachability::Unknown);
+    assert_eq!(restarted.health, Health::Unknown);
+    assert!(!service.attach_allowed(&actor_id).unwrap());
+    assert!(
+        service
+            .mark_running(&actor_id, "stale-runtime")
+            .await
+            .is_err()
+    );
+    let running = service
+        .mark_running(&actor_id, &restarted.runtime_instance_id)
+        .await
+        .unwrap();
+    assert_eq!(running.lifecycle_state, LifecycleState::Running);
+    assert_eq!(running.reachability, Reachability::Online);
+    assert!(service.attach_allowed(&actor_id).unwrap());
 
     let stopped = service.stop(&actor_id).await.unwrap();
     assert_eq!(stopped.actor_id, actor_id);
     assert_ne!(stopped.runtime_instance_id, restarted.runtime_instance_id);
 
-    service.start(&actor_id).await.unwrap();
+    let stopped_restart = service.restart(&actor_id).await.unwrap();
+    assert_eq!(stopped_restart.lifecycle_state, LifecycleState::Starting);
+    service
+        .mark_running(&actor_id, &stopped_restart.runtime_instance_id)
+        .await
+        .unwrap();
     service.suspend(&actor_id).await.unwrap();
+    // A late completion from the previous start must not revive a suspended
+    // instance through the ordinary Suspended -> Running transition.
+    assert!(
+        service
+            .mark_running(&actor_id, &stopped_restart.runtime_instance_id)
+            .await
+            .is_err()
+    );
     let stopped_from_suspend = service.stop(&actor_id).await.unwrap();
     assert_ne!(
         stopped_from_suspend.runtime_instance_id,
