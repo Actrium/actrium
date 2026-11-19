@@ -31,6 +31,7 @@ const service = contract.hostModules['host:service'];
 const call = service.call as unknown as InputSchema;
 const tell = service.tell as unknown as InputSchema;
 const on = service.on as unknown as EventSchema;
+const uploadAttachment = service.uploadAttachment as unknown as InputSchema;
 
 describe('host:service contract', () => {
   test('call accepts a valid request and keeps the route opaque', () => {
@@ -147,6 +148,48 @@ describe('host:service contract', () => {
       payloadBase64: '',
     });
     expect(() => on.schema?.parseEvent?.({ event: '', payloadBase64: '' })).toThrow();
+  });
+
+  test('uploadAttachment accepts a valid request and defaults the type', () => {
+    expect(
+      uploadAttachment.schema?.parseInput?.({
+        filename: 'report.pdf',
+        base64: 'AAEC',
+      })
+    ).toEqual({ filename: 'report.pdf', base64: 'AAEC', type: 'document', id: undefined });
+    expect(
+      uploadAttachment.schema?.parseInput?.({
+        filename: 'photo.png',
+        base64: 'AAEC',
+        type: 'image',
+        id: 'fixed-id',
+      })
+    ).toEqual({ filename: 'photo.png', base64: 'AAEC', type: 'image', id: 'fixed-id' });
+  });
+
+  test('uploadAttachment rejects invalid input', () => {
+    const reject = (input: unknown) =>
+      expect(() => uploadAttachment.schema?.parseInput?.(input)).toThrow();
+    reject({ base64: 'AAEC' }); // missing filename
+    reject({ filename: '', base64: 'AAEC' });
+    reject({ filename: 'a.txt', base64: 'AAE' }); // unpadded base64
+    reject({ filename: 'a.txt', base64: '!!!' });
+    reject({ filename: 'a.txt', base64: 'AAEC', type: 'archive' });
+    reject({ filename: 'a.txt', base64: 'AAEC', id: '' });
+    reject({ filename: 'a.txt', base64: 'AAEC', id: 1 });
+    // 7 MiB + 1 byte, base64-encoded.
+    const oversized = Buffer.alloc(7 * 1024 * 1024 + 1).toString('base64');
+    reject({ filename: 'big.bin', base64: oversized });
+  });
+
+  test('uploadAttachment validates the output attachment id', () => {
+    expect(uploadAttachment.schema?.parseOutput?.({ attachmentId: 'a-1' })).toEqual({
+      attachmentId: 'a-1',
+    });
+    expect(() => uploadAttachment.schema?.parseOutput?.({})).toThrow();
+    expect(() =>
+      uploadAttachment.schema?.parseOutput?.({ attachmentId: 1 })
+    ).toThrow();
   });
 });
 

@@ -9,6 +9,7 @@ export const V1_COMPONENTS = [
   'Button',
   'FlatList',
   'ImageAsset',
+  'Supramark',
   'Switch',
 ] as const;
 
@@ -31,6 +32,13 @@ const HEADER = '// keel:v1-linkage ';
 
 /** Source module prefix for a fixed business route or event. */
 export const V1_SERVICE_PREFIX = 'host:service/';
+
+/**
+ * Fixed `host:service` exports that may be imported directly because they take
+ * no caller-supplied route. Raw `call`/`tell`/`on` stay unavailable; new fixed
+ * transports must be added here explicitly.
+ */
+const V1_SERVICE_TRANSPORTS: ReadonlySet<string> = new Set(['uploadAttachment']);
 
 /** Dotted, bounded business names that can be encoded as Keel module IDs. */
 const SERVICE_NAME = /^[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z_][A-Za-z0-9_-]*)+$/;
@@ -123,8 +131,15 @@ export function createV1CapabilityManifest(
       imports.add(moduleId);
       continue;
     }
-    // Raw service methods take an arbitrary route, so they require a fixed route import.
-    if (moduleId === 'host:service') {
+    // Raw service methods take an arbitrary route, so they require a fixed
+    // route import. Only the explicitly classified fixed transports (such as
+    // `uploadAttachment`) may be imported from `host:service` directly; they
+    // take no route and fall through to the generic contract validation below.
+    if (
+      moduleId === 'host:service' &&
+      exportName !== undefined &&
+      !V1_SERVICE_TRANSPORTS.has(exportName)
+    ) {
       throw new Error(
         'capability_mismatch: use a fixed route or event import from host:service/<name>'
       );

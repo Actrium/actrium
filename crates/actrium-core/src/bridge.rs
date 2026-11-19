@@ -99,6 +99,17 @@ pub mod email_bridge_contract {
     pub const ERROR_OPEN_FAILED: &str = "EMAIL_OPEN_FAILED";
 }
 
+/// Per-tab native service bridge used by the JS Host. The fixed attachment
+/// upload transport (`host:service.uploadAttachment`) drives these methods
+/// and the single result event below.
+pub mod realm_service_contract {
+    pub const MODULE_NAME: &str = "RealmService";
+    pub const METHOD_PREPARE_ATTACHMENT_UPLOAD: &str = "prepareAttachmentUpload";
+    pub const METHOD_SEND_ATTACHMENT_CHUNK: &str = "sendAttachmentChunk";
+    pub const METHOD_UNREGISTER_STREAM: &str = "unregisterStream";
+    pub const EVENT_ATTACHMENT_RESULT: &str = "RealmServiceAttachmentResult";
+}
+
 pub mod user_info_bridge_contract {
     pub const MODULE_NAME: &str = "UserInfoModule";
     pub const METHOD_GET_CURRENT_USER_INFO: &str = "getCurrentUserInfo";
@@ -326,6 +337,26 @@ mod tests {
         assert_eq!(contract::key::SIZE_BYTES, "sizeBytes");
         assert_eq!(contract::key::RESULT_STREAM_ID, "resultStreamId");
         assert_eq!(contract::ERROR_PROMPT_REQUEST, "USR_PROMPT_REQUEST_ERROR");
+    }
+
+    #[test]
+    fn realm_service_contract_keeps_attachment_upload_wire_names() {
+        use realm_service_contract as contract;
+
+        assert_eq!(contract::MODULE_NAME, "RealmService");
+        assert_eq!(
+            contract::METHOD_PREPARE_ATTACHMENT_UPLOAD,
+            "prepareAttachmentUpload"
+        );
+        assert_eq!(
+            contract::METHOD_SEND_ATTACHMENT_CHUNK,
+            "sendAttachmentChunk"
+        );
+        assert_eq!(contract::METHOD_UNREGISTER_STREAM, "unregisterStream");
+        assert_eq!(
+            contract::EVENT_ATTACHMENT_RESULT,
+            "RealmServiceAttachmentResult"
+        );
     }
 
     #[test]

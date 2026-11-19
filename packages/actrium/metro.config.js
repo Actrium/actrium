@@ -9,6 +9,17 @@ const workspaceNodeModules = path.resolve(workspaceRoot, 'node_modules');
 const projectNodeModules = path.resolve(projectRoot, 'node_modules');
 const keelRoot = path.resolve(workspacePackagesRoot, 'keel');
 const appSdkRoot = path.resolve(workspacePackagesRoot, 'actrium-app-sdk');
+const supramarkRoot = process.env.ACTRIUM_SUPRAMARK_DIR
+  ? fs.realpathSync(process.env.ACTRIUM_SUPRAMARK_DIR)
+  : undefined;
+const supramarkCore = supramarkRoot && path.join(supramarkRoot, 'packages/core/src');
+const supramarkSources = supramarkCore ? {
+  './guest-markdown-renderer': path.join(projectRoot, 'src/runtime-host/guest-markdown-renderer.supramark.js'),
+  '@supramark/core': path.join(supramarkCore, 'index.rn.ts'),
+  '@supramark/core/rn': path.join(supramarkCore, 'index.rn.ts'),
+  '@supramark/markdown-native-rn': path.join(supramarkRoot, 'crates/supramark-markdown/packages/react-native/src/index.ts'),
+  '@supramark/rn': path.join(supramarkRoot, 'packages/renderers/rn/src/Supramark.tsx'),
+} : {};
 const reactNativeMetroConfigRoot = path.dirname(
   require.resolve('@react-native/metro-config/package.json'),
 );
@@ -23,6 +34,25 @@ const existingDirs = (paths) =>
 const resolveWithDefault = (context, moduleName, platform) =>
   context.resolveRequest(context, moduleName, platform);
 
+function resolveSupramark(origin, moduleName) {
+  if (Object.hasOwn(supramarkSources, moduleName)) {
+    return { type: 'sourceFile', filePath: supramarkSources[moduleName] };
+  }
+  if (!origin.startsWith(supramarkRoot + path.sep)) return;
+  if (origin.startsWith(supramarkCore + path.sep) && moduleName === './plugin-loader.js') {
+    return { type: 'sourceFile', filePath: path.join(supramarkCore, 'plugin-loader-rn.ts') };
+  }
+  // SupraMark's native renderer imports the same engine facade as its web renderer.
+  if (/^@actrium\/(graphviz-anywhere|(?:d2|mermaid|plantuml)-little)-web$/.test(moduleName)) {
+    return { type: 'empty' };
+  }
+  if (/^\.\.?\//.test(moduleName) && moduleName.endsWith('.js')) {
+    const source = path.resolve(path.dirname(origin), moduleName.slice(0, -3));
+    const sourceFile = [source + '.ts', source + '.tsx'].find((file) => fs.existsSync(file));
+    if (sourceFile) return { type: 'sourceFile', filePath: sourceFile };
+  }
+}
+
 const defaultConfig = getDefaultConfig(projectRoot);
 const customConfig = {
   projectRoot,
@@ -30,6 +60,7 @@ const customConfig = {
     keelRoot,
     appSdkRoot,
     workspaceNodeModules,
+    ...(supramarkRoot ? [supramarkRoot] : []),
   ]),
   serializer: {
     getModulesRunBeforeMainModule: () => [],
@@ -40,7 +71,14 @@ const customConfig = {
   resolver: {
     unstable_enableSymlinks: true,
     unstable_enablePackageExports: true,
-    nodeModulesPaths: [projectNodeModules, workspaceNodeModules],
+    nodeModulesPaths: [
+      projectNodeModules,
+      workspaceNodeModules,
+      ...(supramarkRoot ? [
+        path.join(supramarkRoot, 'node_modules'),
+        path.join(supramarkRoot, 'examples/react-native/node_modules'),
+      ] : []),
+    ],
     blockList: [
       new RegExp(`${keelRoot}/node_modules/.*`),
       new RegExp(`${appSdkRoot}/node_modules/.*`),
@@ -51,6 +89,11 @@ const customConfig = {
       'react-reconciler': path.resolve(projectNodeModules, 'react-reconciler'),
     },
     resolveRequest: (context, moduleName, platform) => {
+      if (platform === 'macos' && supramarkRoot) {
+        const resolution = resolveSupramark(context.originModulePath, moduleName);
+        if (resolution) return resolution;
+      }
+
       if (moduleName === '@babel/runtime' || moduleName.startsWith('@babel/runtime/')) {
         return {
           type: 'sourceFile',
@@ -84,8 +127,10 @@ const customConfig = {
 
       const localModules = {
         keel: path.resolve(keelRoot, 'src/host/index.ts'),
+        'keel/contract': path.resolve(keelRoot, 'src/contract/index.ts'),
         'keel/host': path.resolve(keelRoot, 'src/host/index.ts'),
         'keel/host/preset': path.resolve(keelRoot, 'src/host/preset/index.ts'),
+        'keel/v1': path.resolve(keelRoot, 'src/v1.ts'),
         askit: path.resolve(appSdkRoot, 'src/index.host.ts'),
         'askit/core': path.resolve(appSdkRoot, 'src/core/index.ts'),
         'askit/contracts': path.resolve(appSdkRoot, 'src/contracts/index.ts'),

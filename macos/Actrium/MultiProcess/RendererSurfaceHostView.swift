@@ -812,8 +812,9 @@ final class RendererSurfaceHostView: NSView {
     /// Forwards a non-text key (arrow, enter, backspace, ...) to the Renderer.
     /// `modifiers` restores flags that interpretKeyEvents discarded when it
     /// reduced the key event to a selector (e.g. Shift for selection-extending
-    /// movement); without them the Renderer rebuilds a plain caret move.
-    func sendCommandKey(keyCode: UInt32, modifiers: UInt32 = 0) {
+    /// movement or Shift-Return); without them the Renderer rebuilds a plain
+    /// caret move / unmodified Return.
+    func sendCommandKey(keyCode: UInt32, modifiers: NSEvent.ModifierFlags = []) {
         guard let tabId else { return }
         // interpretKeyEvents on the render side derives editing commands from
         // the event's characters; an empty string produces no command.
@@ -835,7 +836,7 @@ final class RendererSurfaceHostView: NSView {
         var down = Actrium_Ipc_InputEvent()
         down.type = .keyDown
         down.keyCode = keyCode
-        down.modifiers = modifiers
+        down.modifiers = encodedModifiers(modifiers)
         if let chars = characters[keyCode] {
             down.characters = chars
         }
@@ -901,6 +902,7 @@ final class IMECompositionView: NSTextView {
 
     private var forwardingMarkedText: String = ""
     private var forwardingMarkedSelection: NSRange = NSRange(location: 0, length: 0)
+    private var interpretingModifiers: NSEvent.ModifierFlags = []
 
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: 1, height: 1), textContainer: nil)
@@ -996,6 +998,9 @@ final class IMECompositionView: NSTextView {
             surfaceView?.forwardKey(event, type: .keyUp)
             return
         }
+        let previousModifiers = interpretingModifiers
+        interpretingModifiers = flags
+        defer { interpretingModifiers = previousModifiers }
         interpretKeyEvents([event])
     }
 
@@ -1015,27 +1020,27 @@ final class IMECompositionView: NSTextView {
     /// common ones to raw key codes and forward them to the Renderer so RN
     /// keeps working (enter to send, arrows to move, backspace, ...).
     override func doCommand(by aSelector: Selector) {
-        let keyCodes: [Selector: (keyCode: UInt32, modifiers: UInt32)] = [
-            #selector(NSResponder.deleteBackward(_:)): (51, 0),
-            #selector(NSResponder.deleteForward(_:)): (117, 0),
-            #selector(NSResponder.moveLeft(_:)): (123, 0),
-            #selector(NSResponder.moveRight(_:)): (124, 0),
-            #selector(NSResponder.moveUp(_:)): (126, 0),
-            #selector(NSResponder.moveDown(_:)): (125, 0),
-            #selector(NSResponder.moveLeftAndModifySelection(_:)): (123, 1),
-            #selector(NSResponder.moveRightAndModifySelection(_:)): (124, 1),
-            #selector(NSResponder.moveUpAndModifySelection(_:)): (126, 1),
-            #selector(NSResponder.moveDownAndModifySelection(_:)): (125, 1),
-            #selector(NSResponder.moveToBeginningOfLine(_:)): (115, 0),
-            #selector(NSResponder.moveToEndOfLine(_:)): (119, 0),
-            #selector(NSResponder.moveToBeginningOfDocument(_:)): (115, 0),
-            #selector(NSResponder.moveToEndOfDocument(_:)): (119, 0),
-            #selector(NSResponder.pageUp(_:)): (116, 0),
-            #selector(NSResponder.pageDown(_:)): (121, 0),
-            #selector(NSResponder.insertNewline(_:)): (36, 0),
-            #selector(NSResponder.insertTab(_:)): (48, 0),
-            #selector(NSResponder.insertBacktab(_:)): (48, 0),
-            #selector(NSResponder.cancelOperation(_:)): (53, 0),
+        let keyCodes: [Selector: (keyCode: UInt32, modifiers: NSEvent.ModifierFlags)] = [
+            #selector(NSResponder.deleteBackward(_:)): (51, []),
+            #selector(NSResponder.deleteForward(_:)): (117, []),
+            #selector(NSResponder.moveLeft(_:)): (123, []),
+            #selector(NSResponder.moveRight(_:)): (124, []),
+            #selector(NSResponder.moveUp(_:)): (126, []),
+            #selector(NSResponder.moveDown(_:)): (125, []),
+            #selector(NSResponder.moveLeftAndModifySelection(_:)): (123, .shift),
+            #selector(NSResponder.moveRightAndModifySelection(_:)): (124, .shift),
+            #selector(NSResponder.moveUpAndModifySelection(_:)): (126, .shift),
+            #selector(NSResponder.moveDownAndModifySelection(_:)): (125, .shift),
+            #selector(NSResponder.moveToBeginningOfLine(_:)): (115, []),
+            #selector(NSResponder.moveToEndOfLine(_:)): (119, []),
+            #selector(NSResponder.moveToBeginningOfDocument(_:)): (115, []),
+            #selector(NSResponder.moveToEndOfDocument(_:)): (119, []),
+            #selector(NSResponder.pageUp(_:)): (116, []),
+            #selector(NSResponder.pageDown(_:)): (121, []),
+            #selector(NSResponder.insertNewline(_:)): (36, []),
+            #selector(NSResponder.insertTab(_:)): (48, []),
+            #selector(NSResponder.insertBacktab(_:)): (48, []),
+            #selector(NSResponder.cancelOperation(_:)): (53, []),
         ]
         if let command = keyCodes[aSelector] {
             // With no active composition, Esc means nothing here; forwarding
@@ -1046,7 +1051,12 @@ final class IMECompositionView: NSTextView {
                forwardingMarkedText.isEmpty {
                 return
             }
-            surfaceView?.sendCommandKey(keyCode: command.keyCode, modifiers: command.modifiers)
+            // The renderer distinguishes Return from Shift-Return using the
+            // original modifiers, which the table cannot express.
+            let modifiers = command.keyCode == 36
+                ? interpretingModifiers
+                : command.modifiers
+            surfaceView?.sendCommandKey(keyCode: command.keyCode, modifiers: modifiers)
             return
         }
         super.doCommand(by: aSelector)
