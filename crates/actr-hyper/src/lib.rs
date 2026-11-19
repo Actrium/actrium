@@ -1751,22 +1751,38 @@ pub(crate) async fn load_workload_package_inner(
             (binary_kind, workload, packaged_lock, None)
         }
         RuntimePackageManifest::V2(manifest) => {
-            let grants =
-                package_runtime::resolve_component_host_grants(manifest, configured_wasi_data)?;
+            let native = manifest.workload.profile == "actr.native/1";
+            let grants = if native {
+                package_runtime::validate_native_host(manifest)?;
+                None
+            } else {
+                package_runtime::resolve_component_host_grants(manifest, configured_wasi_data)?
+            };
             let packaged_lock = package_runtime::read_v2_lock(bytes, manifest, max_bytes)?;
             let service_spec = service_spec::calculate_v2_service_spec(bytes, manifest, max_bytes)?;
-            let wasm_bytes = manifest
+            let binary = manifest
                 .read_declared_file(bytes, &manifest.workload.entry, max_bytes)
                 .map_err(|e| HyperError::InvalidManifest(e.to_string()))?;
-            let workload = instantiate_wasm_component(
-                inner,
-                wasm_bytes,
-                &manifest.workload.entry,
-                manifest.actor_type(),
-                grants,
-            )
-            .await?;
-            (BinaryKind::Wasm, workload, packaged_lock, service_spec)
+            let actor_type = manifest.actor_type();
+            let (binary_kind, workload) = if native {
+                (
+                    BinaryKind::DynClib,
+                    load_v2_dynclib(inner, &binary, actor_type)?,
+                )
+            } else {
+                (
+                    BinaryKind::Wasm,
+                    instantiate_wasm_component(
+                        inner,
+                        binary,
+                        &manifest.workload.entry,
+                        actor_type,
+                        grants,
+                    )
+                    .await?,
+                )
+            };
+            (binary_kind, workload, packaged_lock, service_spec)
         }
     };
     Ok(LoadedWorkload {
@@ -1776,6 +1792,51 @@ pub(crate) async fn load_workload_package_inner(
         packaged_lock,
         v2_service_spec,
     })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_v2_dynclib(
+    _inner: &HyperInner,
+    binary: &[u8],
+    actor_type: String,
+) -> HyperResult<crate::workload::Workload> {
+    #[cfg(feature = "dynclib-engine")]
+    {
+        use sha2::{Digest, Sha256};
+        let hash: [u8; 32] = Sha256::digest(binary).into();
+        let path = v2_dynclib_cache_path(&_inner.config.data_dir, &hash);
+        ensure_v2_dynclib_cache_file(&path, binary)?;
+        let host = crate::dynclib::DynclibHost::load(&path)
+            .map_err(|e| HyperError::Runtime(format!("failed to load native package: {e}")))?;
+        instantiate_dynclib_workload(host, actor_type, "native package")
+    }
+    #[cfg(not(feature = "dynclib-engine"))]
+    {
+        let _ = (binary, actor_type);
+        Err(HyperError::Runtime(
+            "native package requires the `dynclib-engine` feature".into(),
+        ))
+    }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
+fn instantiate_dynclib_workload(
+    host: crate::dynclib::DynclibHost,
+    actor_type: String,
+    context: impl std::fmt::Display,
+) -> HyperResult<crate::workload::Workload> {
+    let instance = host
+        .instantiate(&actr_framework::guest::dynclib_abi::InitPayloadV1 {
+            version: actr_framework::guest::dynclib_abi::version::V1,
+            actr_type: actor_type,
+            credential: Vec::new(),
+            actor_id: Vec::new(),
+            realm: String::new(),
+        })
+        .map_err(|e| HyperError::Runtime(format!("failed to initialize {context}: {e}")))?;
+    Ok(crate::workload::Workload::DynClib(
+        crate::dynclib::DynClibWorkload::new(host, instance),
+    ))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1883,24 +1944,11 @@ fn load_dynclib_workload_inner(
     {
         let cache_path = ensure_dynclib_cache_path(&_inner.config.data_dir, bytes, manifest)?;
         let host = load_dynclib_host_with_rebuild(&cache_path, bytes, manifest)?;
-        let instance = host
-            .instantiate(&actr_framework::guest::dynclib_abi::InitPayloadV1 {
-                version: actr_framework::guest::dynclib_abi::version::V1,
-                actr_type: manifest.actr_type_str(),
-                credential: Vec::new(),
-                actor_id: Vec::new(),
-                realm: String::new(),
-            })
-            .map_err(|e| {
-                HyperError::Runtime(format!(
-                    "failed to initialize dynclib package target `{}`: {e}",
-                    manifest.binary.target
-                ))
-            })?;
-
-        Ok(crate::workload::Workload::DynClib(
-            crate::dynclib::DynClibWorkload::new(host, instance),
-        ))
+        instantiate_dynclib_workload(
+            host,
+            manifest.actr_type_str(),
+            format_args!("dynclib package target `{}`", manifest.binary.target),
+        )
     }
 
     #[cfg(not(feature = "dynclib-engine"))]
@@ -2248,6 +2296,15 @@ fn dynclib_cache_path(data_dir: &Path, binary_hash: &[u8; 32]) -> PathBuf {
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
+fn v2_dynclib_cache_path(data_dir: &Path, binary_hash: &[u8; 32]) -> PathBuf {
+    dynclib_cache_dir(data_dir).join("v2").join(format!(
+        "{}{}",
+        hex::encode(binary_hash),
+        dynclib_tempfile_suffix()
+    ))
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
 fn extract_dynclib_binary(bytes: &[u8], manifest: &PackageManifest) -> HyperResult<Vec<u8>> {
     actr_pack::load_binary(bytes).map_err(|e| {
         HyperError::Runtime(format!(
@@ -2258,7 +2315,10 @@ fn extract_dynclib_binary(bytes: &[u8], manifest: &PackageManifest) -> HyperResu
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
-fn write_dynclib_cache_file(cache_path: &Path, binary_bytes: &[u8]) -> HyperResult<()> {
+fn stage_dynclib_cache_file(
+    cache_path: &Path,
+    binary_bytes: &[u8],
+) -> HyperResult<tempfile::NamedTempFile> {
     let cache_dir = cache_path.parent().ok_or_else(|| {
         HyperError::Runtime("dynclib cache path has no parent directory".to_string())
     })?;
@@ -2291,8 +2351,12 @@ fn write_dynclib_cache_file(cache_path: &Path, binary_bytes: &[u8]) -> HyperResu
             temp_file.path().display()
         ))
     })?;
+    Ok(temp_file)
+}
 
-    match temp_file.persist_noclobber(cache_path) {
+#[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
+fn write_dynclib_cache_file(cache_path: &Path, binary_bytes: &[u8]) -> HyperResult<()> {
+    match stage_dynclib_cache_file(cache_path, binary_bytes)?.persist_noclobber(cache_path) {
         Ok(_) => Ok(()),
         Err(err) if err.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(err) => Err(HyperError::Runtime(format!(
@@ -2301,6 +2365,63 @@ fn write_dynclib_cache_file(cache_path: &Path, binary_bytes: &[u8]) -> HyperResu
             err.error
         ))),
     }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
+fn v2_dynclib_cache_matches(path: &Path, binary: &[u8]) -> bool {
+    use std::io::Read;
+
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() || metadata.len() != binary.len() as u64 {
+        return false;
+    }
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut offset = 0;
+    let mut buffer = [0u8; 8192];
+    while offset < binary.len() {
+        let Ok(count) = file.read(&mut buffer) else {
+            return false;
+        };
+        if count == 0
+            || count > binary.len() - offset
+            || buffer[..count] != binary[offset..offset + count]
+        {
+            return false;
+        }
+        offset += count;
+    }
+    matches!(file.read(&mut buffer[..1]), Ok(0))
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
+fn ensure_v2_dynclib_cache_file(path: &Path, binary: &[u8]) -> HyperResult<()> {
+    if v2_dynclib_cache_matches(path, binary) {
+        return Ok(());
+    }
+
+    // Replace the directory entry atomically so concurrent loaders can keep opening it.
+    let persisted = stage_dynclib_cache_file(path, binary)?
+        .into_temp_path()
+        .persist(path);
+    // A concurrent repair may already have published the verified bytes, even if
+    // replacement failed (for example, when Windows has the repaired library open).
+    if v2_dynclib_cache_matches(path, binary) {
+        return Ok(());
+    }
+    persisted.map_err(|err| {
+        HyperError::Runtime(format!(
+            "failed to persist native cache file `{}`: {}",
+            path.display(),
+            err.error
+        ))
+    })?;
+    Err(HyperError::Runtime(
+        "native cache does not match the verified package".into(),
+    ))
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]

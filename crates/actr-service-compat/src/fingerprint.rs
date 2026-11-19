@@ -32,25 +32,27 @@ impl Fingerprint {
     /// Calculate semantic fingerprint for multiple proto files (service level)
     /// Uses proto-sign for each file and combines the results deterministically
     pub fn calculate_service_semantic_fingerprint(proto_files: &[ProtoFile]) -> Result<String> {
-        let mut sorted_files = proto_files.to_vec();
-        sorted_files.sort_by(|a, b| a.name.cmp(&b.name));
-
-        let mut semantic_fingerprints = Vec::new();
-        for file in &sorted_files {
+        let mut semantic_fingerprints = Vec::with_capacity(proto_files.len());
+        for file in proto_files {
             let spec = proto_fingerprint::Spec::try_from(file.content.as_str()).map_err(|e| {
                 CompatibilityError::ProtoParseError {
                     file_name: file.name.clone(),
                     source: e,
                 }
             })?;
-
-            semantic_fingerprints.push(format!("{}:{}", file.name, spec.fingerprint));
+            semantic_fingerprints.push((file.name.clone(), spec.fingerprint));
         }
+        Ok(Self::service_fingerprint_from_hashes(semantic_fingerprints))
+    }
 
-        let combined = semantic_fingerprints.join("\n");
-        let mut hasher = Sha256::new();
-        hasher.update(combined.as_bytes());
-        Ok(format!("service_semantic:{:x}", hasher.finalize()))
+    pub(crate) fn service_fingerprint_from_hashes(mut hashes: Vec<(String, String)>) -> String {
+        hashes.sort_by(|a, b| a.0.cmp(&b.0));
+        let combined = hashes
+            .into_iter()
+            .map(|(name, hash)| format!("{name}:{hash}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("service_semantic:{:x}", Sha256::digest(combined.as_bytes()))
     }
 
     // Removed: calculate_service_fingerprints() - content fingerprints are not semantically meaningful
