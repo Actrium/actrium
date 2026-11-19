@@ -16,6 +16,7 @@ import type {
   SpeechStateHandler,
 } from './contract';
 import type { FrontCapability } from './capabilities';
+import type { ServiceEventSource } from './service-events';
 import type { AttachmentUploadManager } from './attachment-upload';
 
 export type ServiceCallRequest = ServiceCallInput;
@@ -42,7 +43,7 @@ export type HostModules = HostModulesImplementation<ActriumContract>;
 
 /** Methods with a real Host implementation, excluding throwing placeholders. */
 export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
-  'host:service': new Set(['call', 'uploadAttachment']),
+  'host:service': new Set(['call', 'on', 'uploadAttachment']),
   'host:clipboard': new Set(['writeText']),
   'host:speech': new Set(['recognize', 'onInterimResult', 'stop', 'onStateChange']),
   'host:file-import': new Set(['pick']),
@@ -85,8 +86,16 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
  */
 export function createHostModules(options: {
   hasServiceCapability: boolean;
+  hasServiceOnCapability: boolean;
   callActor: ActorCall;
+  serviceEventSource?: ServiceEventSource;
   authorizeCapability: (capability: FrontCapability) => Promise<void>;
+  onCapabilityRevoked?: (
+    capability: FrontCapability,
+    listener: () => void
+  ) => () => void;
+  /** Track the complete Guest cleanup for engine reload/tab teardown. */
+  trackServiceEventSubscription?: (cleanup: () => void) => () => void;
   writeClipboardText: (text: string) => Promise<void>;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
   recognizeSpeech?: (
@@ -137,8 +146,72 @@ export function createHostModules(options: {
       tell: async (_input: ServiceTellInput) => {
         throw notImplemented('host:service', 'tell');
       },
-      on: (_handler: (event: ServiceEvent) => void) => {
-        throw notImplemented('host:service', 'on');
+      on: (handler: (event: ServiceEvent) => void) => {
+        if (!options.hasServiceOnCapability) {
+          throw new Error(
+            'The application does not declare the service.on capability.'
+          );
+        }
+        if (!options.serviceEventSource) {
+          throw new Error('Service event source is not available.');
+        }
+
+        // Authorize before opening the native or HTTP transport. The cleanup
+        // handle remains synchronous and also cancels a pending authorization.
+        let disposed = false;
+        let unsubscribeTransport: (() => void) | undefined;
+        let stopWatchingRevocation: (() => void) | undefined;
+        let stopTracking: (() => void) | undefined;
+        const cleanup = () => {
+          if (disposed) return;
+          disposed = true;
+          stopWatchingRevocation?.();
+          stopWatchingRevocation = undefined;
+          stopTracking?.();
+          stopTracking = undefined;
+          unsubscribeTransport?.();
+          unsubscribeTransport = undefined;
+        };
+        const untrack = options.trackServiceEventSubscription?.(cleanup);
+        if (disposed) untrack?.();
+        else stopTracking = untrack;
+        void options.authorizeCapability('service.on').then(
+          () => {
+            if (disposed) return;
+            // Attach revocation before startup. `onCapabilityRevoked` checks
+            // the latest snapshot synchronously, so a revoke that landed while
+            // authorization was resolving cannot open the transport.
+            const stopWatching = options.onCapabilityRevoked?.('service.on', cleanup);
+            if (disposed) {
+              stopWatching?.();
+              return;
+            }
+            stopWatchingRevocation = stopWatching;
+            try {
+              unsubscribeTransport = options.serviceEventSource!.subscribe((event) => {
+                if (disposed) return;
+                try {
+                  handler(event);
+                } catch (error) {
+                  console.warn('[Actrium] Service event handler failed:', error);
+                }
+              });
+              if (disposed) {
+                unsubscribeTransport?.();
+                unsubscribeTransport = undefined;
+              }
+            } catch (error) {
+              console.warn('[Actrium] Service event subscription failed:', error);
+              cleanup();
+            }
+          },
+          (error) => {
+            console.warn('[Actrium] service.on authorization rejected:', error);
+            cleanup();
+          }
+        );
+
+        return cleanup;
       },
       uploadAttachment: async (
         input: ServiceUploadAttachmentInput

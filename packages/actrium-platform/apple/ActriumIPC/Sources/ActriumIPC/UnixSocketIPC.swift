@@ -349,8 +349,20 @@ private func socketAddress(_ path: String) throws -> sockaddr_un {
 
 // MARK: - Frame I/O Helpers
 
+enum IPCFrameLimits {
+    /// Exclusive payload bound shared by the writer and both readers.
+    static let maxFrameBytes = 10_000_000
+}
+
 /// Send a length-prefixed frame
 private func sendFrame(to fd: Int32, data: Data) throws {
+    // Reject before writing any bytes. A peer that rejects an oversized frame
+    // closes the connection, which would also interrupt every other tab hosted
+    // by the same worker.
+    guard data.count < IPCFrameLimits.maxFrameBytes else {
+        throw IPCError.frameTooLarge
+    }
+
     // Write length (4 bytes, big-endian)
     var length = UInt32(data.count).bigEndian
     try withUnsafeBytes(of: &length) { ptr in
@@ -415,7 +427,7 @@ private func readFrame(from fd: Int32) throws -> Data {
     }
 
     let length = Int(UInt32(bigEndian: lengthBE))
-    guard length > 0 && length < 10_000_000 else {  // Max 10MB
+    guard length > 0 && length < IPCFrameLimits.maxFrameBytes else {
         throw IPCError.invalidFrameLength
     }
 
@@ -440,6 +452,7 @@ public enum IPCError: Error, LocalizedError {
     case writeFailed(Int32)
     case connectionClosed
     case invalidFrameLength
+    case frameTooLarge
 
     public var errorDescription: String? {
         switch self {
@@ -461,6 +474,8 @@ public enum IPCError: Error, LocalizedError {
             return "Connection closed"
         case .invalidFrameLength:
             return "Invalid frame length"
+        case .frameTooLarge:
+            return "IPC frame exceeds the payload limit"
         }
     }
 }

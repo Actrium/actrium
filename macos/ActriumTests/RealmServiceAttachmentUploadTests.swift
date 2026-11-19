@@ -385,6 +385,7 @@ struct RealmServiceAttachmentUploadTests {
             front: Data([0x50, 0x4B, 0x03, 0x04]),
             metadata: metadata,
             trustedFrontKey: Data(),
+            capabilitiesJSON: capabilitiesJSON,
             permissions: permissions
         )
     }

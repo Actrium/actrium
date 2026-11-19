@@ -6,20 +6,29 @@ import type { FileImportPickInput, FileImportPickOutput } from './contract';
 import type { FrontCapability } from './capabilities';
 import type { AttachmentUploadManager } from './attachment-upload';
 import { createHostModules, type HostModules } from './host-modules';
+import { createTestServiceEventSource } from './service-events.test-utils';
 
 const input = { route: 'echo.EchoService.Echo', payloadBase64: 'AAEC' };
 
 function createTestHostModules(options?: {
   hasServiceCapability?: boolean;
+  hasServiceOnCapability?: boolean;
+  serviceEventSource?: ReturnType<typeof createTestServiceEventSource>['source'];
   authorizeCapability?: (capability: FrontCapability) => Promise<void>;
+  onCapabilityRevoked?: (capability: FrontCapability, listener: () => void) => () => void;
+  trackServiceEventSubscription?: (cleanup: () => void) => () => void;
   writeClipboardText?: (text: string) => Promise<void>;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
   recognizeSpeech?: Parameters<typeof createHostModules>[0]['recognizeSpeech'];
 }): HostModules {
   return createHostModules({
     hasServiceCapability: options?.hasServiceCapability ?? true,
+    hasServiceOnCapability: options?.hasServiceOnCapability ?? true,
     callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
+    serviceEventSource: options?.serviceEventSource,
     authorizeCapability: options?.authorizeCapability ?? (async () => {}),
+    onCapabilityRevoked: options?.onCapabilityRevoked,
+    trackServiceEventSubscription: options?.trackServiceEventSubscription,
     writeClipboardText: options?.writeClipboardText ?? (async () => {}),
     pickFiles: options?.pickFiles,
     recognizeSpeech: options?.recognizeSpeech,
@@ -31,6 +40,7 @@ describe('host:service implementation', () => {
     let called = false;
     const hostModules = createHostModules({
       hasServiceCapability: false,
+      hasServiceOnCapability: false,
       callActor: async () => {
         called = true;
         return { success: true, payloadBase64: 'AAEC' };
@@ -53,6 +63,7 @@ describe('host:service implementation', () => {
     } | null = null;
     const hostModules = createHostModules({
       hasServiceCapability: true,
+      hasServiceOnCapability: true,
       callActor: async (request) => {
         captured = request;
         return { success: true, payloadBase64: 'AAEC' };
@@ -73,6 +84,7 @@ describe('host:service implementation', () => {
   test('propagates gateway errors', async () => {
     const hostModules = createHostModules({
       hasServiceCapability: true,
+      hasServiceOnCapability: true,
       callActor: async () => ({ success: false, message: 'gateway down' }),
       authorizeCapability: async () => {},
       writeClipboardText: async () => {},
@@ -86,6 +98,7 @@ describe('host:service implementation', () => {
   test('times out a call that never resolves', async () => {
     const hostModules = createHostModules({
       hasServiceCapability: true,
+      hasServiceOnCapability: true,
       callActor: () => new Promise(() => {}),
       authorizeCapability: async () => {},
       writeClipboardText: async () => {},
@@ -99,6 +112,7 @@ describe('host:service implementation', () => {
   test('rejects a success response without a payload', async () => {
     const hostModules = createHostModules({
       hasServiceCapability: true,
+      hasServiceOnCapability: true,
       callActor: async () => ({ success: true }),
       authorizeCapability: async () => {},
       writeClipboardText: async () => {},
@@ -109,15 +123,192 @@ describe('host:service implementation', () => {
     );
   });
 
-  test('fails closed for tell and on until implemented', async () => {
+  test('fails closed for tell until implemented', async () => {
     const hostModules = createTestHostModules();
 
     await expect(hostModules['host:service'].tell(input)).rejects.toThrow(
       'not implemented'
     );
+  });
+
+  test('rejects service.on without the service.on capability', () => {
+    const hostModules = createTestHostModules({
+      hasServiceOnCapability: false,
+      serviceEventSource: createTestServiceEventSource(['notes.v1.changed'])
+        .source,
+    });
+
     expect(() => hostModules['host:service'].on(() => {})).toThrow(
-      'not implemented'
+      'service.on capability'
     );
+  });
+
+  test('rejects service.on when no event source is available', () => {
+    const hostModules = createTestHostModules({
+      serviceEventSource: undefined,
+    });
+
+    expect(() => hostModules['host:service'].on(() => {})).toThrow(
+      'Service event source is not available'
+    );
+  });
+
+  test('delivers service events through the event source after authorization', async () => {
+    const { source, emit, subscriberCount } = createTestServiceEventSource([
+      'notes.v1.changed',
+    ]);
+    const hostModules = createTestHostModules({ serviceEventSource: source });
+
+    const received: { event: string; payloadBase64: string }[] = [];
+    const unsubscribe = hostModules['host:service'].on((event) => {
+      received.push(event);
+    });
+
+    // Authorization resolves on the next microtask; events before that are dropped.
+    emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
+    expect(received).toEqual([]);
+
+    await Promise.resolve();
+    emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
+    expect(received).toEqual([
+      { event: 'notes.v1.changed', payloadBase64: 'AAEC' },
+    ]);
+
+    unsubscribe?.();
+    expect(subscriberCount()).toBe(0);
+    emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
+    expect(received).toHaveLength(1);
+  });
+
+  test('unsubscribes the transport when service.on is revoked', async () => {
+    let subscriptions = 0;
+    let revoke!: () => void;
+    const hostModules = createTestHostModules({
+      serviceEventSource: {
+        subscribe: () => {
+          subscriptions += 1;
+          return () => { subscriptions -= 1; };
+        },
+      },
+      onCapabilityRevoked: (_capability, listener) => {
+        revoke = listener;
+        return () => {};
+      },
+    });
+    hostModules['host:service'].on(() => {});
+    await Promise.resolve();
+
+    expect(subscriptions).toBe(1);
+    revoke();
+    expect(subscriptions).toBe(0);
+  });
+
+  test('engine teardown removes both transport and revocation listeners', async () => {
+    let transportSubscriptions = 0;
+    const revocationListeners = new Set<() => void>();
+    const trackedCleanups = new Set<() => void>();
+    const hostModules = createTestHostModules({
+      serviceEventSource: {
+        subscribe: () => {
+          transportSubscriptions += 1;
+          return () => { transportSubscriptions -= 1; };
+        },
+      },
+      onCapabilityRevoked: (_capability, listener) => {
+        revocationListeners.add(listener);
+        return () => { revocationListeners.delete(listener); };
+      },
+      trackServiceEventSubscription: (cleanup) => {
+        trackedCleanups.add(cleanup);
+        return () => { trackedCleanups.delete(cleanup); };
+      },
+    });
+    const unsubscribe = hostModules['host:service'].on(() => {});
+    await Promise.resolve();
+    expect(transportSubscriptions).toBe(1);
+    expect(revocationListeners.size).toBe(1);
+    expect(trackedCleanups.size).toBe(1);
+
+    for (const cleanup of [...trackedCleanups]) cleanup();
+    expect(transportSubscriptions).toBe(0);
+    expect(revocationListeners.size).toBe(0);
+    expect(trackedCleanups.size).toBe(0);
+
+    unsubscribe?.();
+    expect(transportSubscriptions).toBe(0);
+  });
+
+  test('unsubscribes when service.on authorization is rejected', async () => {
+    const { source, emit, subscriberCount } = createTestServiceEventSource([
+      'notes.v1.changed',
+    ]);
+    const hostModules = createTestHostModules({
+      serviceEventSource: source,
+      authorizeCapability: async () => {
+        throw new Error('permission_denied');
+      },
+    });
+
+    const received: { event: string; payloadBase64: string }[] = [];
+    hostModules['host:service'].on((event) => {
+      received.push(event);
+    });
+
+    // Denial must not briefly open and then close an unauthorized transport.
+    expect(subscriberCount()).toBe(0);
+    await Promise.resolve();
+    expect(subscriberCount()).toBe(0);
+    emit({ event: 'notes.v1.changed', payloadBase64: 'AAEC' });
+    expect(received).toEqual([]);
+  });
+
+  test('cancelling pending service.on authorization never opens the transport', async () => {
+    const { source, subscriberCount } = createTestServiceEventSource([
+      'notes.v1.changed',
+    ]);
+    let approve!: () => void;
+    const hostModules = createTestHostModules({
+      serviceEventSource: source,
+      authorizeCapability: () => new Promise<void>((resolve) => {
+        approve = resolve;
+      }),
+    });
+
+    const unsubscribe = hostModules['host:service'].on(() => {});
+    expect(subscriberCount()).toBe(0);
+    unsubscribe?.();
+    approve();
+    await Promise.resolve();
+
+    expect(subscriberCount()).toBe(0);
+  });
+
+  test('revocation after authorization resolution never opens the transport', async () => {
+    let subscribeCalls = 0;
+    let revoked = false;
+    const hostModules = createTestHostModules({
+      serviceEventSource: {
+        subscribe: () => {
+          subscribeCalls += 1;
+          return () => {};
+        },
+      },
+      onCapabilityRevoked: (_capability, listener) => {
+        if (revoked) listener();
+        return () => {};
+      },
+    });
+
+    // The authorization promise resolves on a later microtask. The snapshot is
+    // revoked before that continuation starts, so attaching the listener must
+    // synchronously observe the latest state and prevent subscription startup.
+    // Count starts, not net subscriptions: cleanup after an already-opened
+    // transport would otherwise hide the regression.
+    hostModules['host:service'].on(() => {});
+    revoked = true;
+    await Promise.resolve();
+
+    expect(subscribeCalls).toBe(0);
   });
 });
 
@@ -150,6 +341,7 @@ describe('host:service.attachmentUpload implementation', () => {
     const grants: string[] = [];
     const hostModules = createHostModules({
       hasServiceCapability: true,
+      hasServiceOnCapability: true,
       callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
       authorizeCapability: async (capability) => {
         grants.push(capability);
@@ -173,6 +365,7 @@ describe('host:service.attachmentUpload implementation', () => {
     const { uploader, uploads } = createUploader();
     const hostModules = createHostModules({
       hasServiceCapability: true,
+      hasServiceOnCapability: true,
       callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
       authorizeCapability: async () => {
         throw new Error('permission_required: service.attachmentUpload');
@@ -196,6 +389,7 @@ describe('host:service.attachmentUpload implementation', () => {
       contract,
       createHostModules({
         hasServiceCapability: true,
+        hasServiceOnCapability: true,
         callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
         authorizeCapability: async () => {},
         writeClipboardText: async () => {},

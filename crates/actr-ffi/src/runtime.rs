@@ -104,6 +104,7 @@ pub fn resolve_manifest_dependency_alias_list(manifest_path: String) -> ActrResu
 pub struct ActrNode {
     inner: Mutex<Option<Node<Registered>>>,
     network_event_handle: Mutex<Option<NetworkEventHandle>>,
+    front_event_router: Option<actr_hyper::FrontEventRouter>,
 }
 
 #[uniffi::export]
@@ -192,21 +193,40 @@ impl ActrNode {
         membership: Arc<crate::RealmMembership>,
         actor_key_namespace: Option<String>,
     ) -> ActrResult<Arc<Self>> {
-        run_on_tokio_runtime("Front membership bootstrap", async move {
-            let init =
-                Node::from_config_file(&config_path)
-                    .await
-                    .map_err(|e| ActrError::Config {
-                        msg: format!("Failed to load runtime config `{config_path}`: {e}"),
-                    })?;
-            crate::logger::init_observability(init.runtime_config().observability.clone());
-            let service_type: actr_protocol::ActrType = service_type.into();
-            let attached = init
-                .attach_front(&WorkloadPackage::new(front_archive), &service_type)
-                .await
-                .map_err(|e| ActrError::Config { msg: e.to_string() })?;
-            register_linked_node(membership.bind(attached)?, actor_key_namespace).await
-        })
+        new_from_front_inner(
+            config_path,
+            front_archive,
+            service_type,
+            membership,
+            actor_key_namespace,
+            None,
+        )
+        .await
+    }
+
+    /// Start a Realm Front and deliver declared Service business events to the
+    /// host. No Service peer is trusted until `set_service_event_peer` is called
+    /// with the ActorId returned by discovery.
+    #[uniffi::constructor(async_runtime = "tokio")]
+    pub async fn new_from_front_with_membership_and_events(
+        config_path: String,
+        front_archive: Vec<u8>,
+        service_type: ActrType,
+        membership: Arc<crate::RealmMembership>,
+        events: Vec<String>,
+        listener: Box<dyn ServiceEventListener>,
+    ) -> ActrResult<Arc<Self>> {
+        let listener: Arc<dyn ServiceEventListener> = Arc::from(listener);
+        let adapter = Arc::new(FrontEventListenerAdapter { listener });
+        let router = actr_hyper::FrontEventRouter::new(events, adapter);
+        new_from_front_inner(
+            config_path,
+            front_archive,
+            service_type,
+            membership,
+            None,
+            Some(router),
+        )
         .await
     }
 
@@ -367,6 +387,7 @@ async fn new_from_package_file_inner(
     Ok(Arc::new(ActrNode {
         inner: Mutex::new(Some(registered)),
         network_event_handle: Mutex::new(None),
+        front_event_router: None,
     }))
 }
 
@@ -374,6 +395,7 @@ async fn new_from_package_file_inner(
 impl ActrNode {
     /// Start the package-backed node and return a running actor reference.
     pub async fn start(self: Arc<Self>) -> ActrResult<Arc<ActrRefWrapper>> {
+        let front_event_router = self.front_event_router.clone();
         let hyper = self
             .inner
             .lock()
@@ -388,7 +410,10 @@ impl ActrNode {
         let actr_ref =
             run_on_tokio_runtime("runtime startup", async move { hyper.start().await }).await?;
 
-        Ok(Arc::new(ActrRefWrapper { inner: actr_ref }))
+        Ok(Arc::new(ActrRefWrapper {
+            inner: actr_ref,
+            front_event_router,
+        }))
     }
 }
 
@@ -529,10 +554,39 @@ fn log_network_event_result(api: &'static str, result: &NetworkEventResult) {
     }
 }
 
+/// Service business event delivered to a Realm Front.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct ServiceEventBridge {
+    pub event: String,
+    pub payload: Vec<u8>,
+}
+
+/// Host callback for authenticated, manifest-allowed Service events.
+/// Synchronous so the host can snapshot subscription ownership before this
+/// event crosses any executor or main-thread hop.
+#[uniffi::export(callback_interface)]
+pub trait ServiceEventListener: Send + Sync + 'static {
+    fn on_event(&self, event: ServiceEventBridge);
+}
+
+struct FrontEventListenerAdapter {
+    listener: Arc<dyn ServiceEventListener>,
+}
+
+impl actr_hyper::FrontEventListener for FrontEventListenerAdapter {
+    fn on_event(&self, event: actr_hyper::FrontServiceEvent) {
+        self.listener.on_event(ServiceEventBridge {
+            event: event.event,
+            payload: event.payload.to_vec(),
+        });
+    }
+}
+
 /// Wrapper for a running actor reference.
 #[derive(uniffi::Object)]
 pub struct ActrRefWrapper {
     inner: ActrRef,
+    front_event_router: Option<actr_hyper::FrontEventRouter>,
 }
 
 /// Listener for per-peer WebRTC state updates.
@@ -614,6 +668,17 @@ impl ActrRefWrapper {
         actr_ref_attach_actrium(&self.inner, service, params).await
     }
 
+    /// Discover the unique Service of the specified type in this Realm.
+    /// Unlike `discover`, this rejects both zero and ambiguous candidates.
+    pub async fn discover_service(&self, service_type: ActrType) -> ActrResult<ActrId> {
+        let proto_type: actr_protocol::ActrType = service_type.into();
+        self.inner
+            .discover_service(&proto_type)
+            .await
+            .map(Into::into)
+            .map_err(ActrError::from)
+    }
+
     /// Trigger shutdown.
     pub fn shutdown(&self) {
         self.inner.shutdown();
@@ -673,6 +738,19 @@ impl ActrRefWrapper {
             }
         });
         Some(Arc::new(RtcPeerStateSubscription { task }))
+    }
+
+    /// Select the discovered Service allowed to publish business events to a
+    /// Realm Front. Pass `None` when the last event subscription is removed.
+    pub fn set_service_event_peer(&self, peer: Option<ActrId>) -> ActrResult<()> {
+        let router =
+            self.front_event_router
+                .as_ref()
+                .ok_or_else(|| ActrError::InvalidArgument {
+                    msg: "This actor was not created with a Front event router".into(),
+                })?;
+        router.set_service(peer.map(Into::into));
+        Ok(())
     }
 
     /// Call the local guest workload via RPC.
@@ -845,11 +923,49 @@ async fn load_linked_init(
     Ok(init)
 }
 
+async fn new_from_front_inner(
+    config_path: String,
+    front_archive: Vec<u8>,
+    service_type: ActrType,
+    membership: Arc<crate::RealmMembership>,
+    actor_key_namespace: Option<String>,
+    event_router: Option<actr_hyper::FrontEventRouter>,
+) -> ActrResult<Arc<ActrNode>> {
+    run_on_tokio_runtime("Front membership bootstrap", async move {
+        let init = Node::from_config_file(&config_path)
+            .await
+            .map_err(|e| ActrError::Config { msg: e.to_string() })?;
+        crate::logger::init_observability(init.runtime_config().observability.clone());
+        let attached = init
+            .attach_front_with_events(
+                &WorkloadPackage::new(front_archive),
+                &service_type.into(),
+                event_router.clone(),
+            )
+            .await
+            .map_err(|e| ActrError::Config { msg: e.to_string() })?;
+        register_linked_node_with_router(
+            membership.bind(attached)?,
+            actor_key_namespace,
+            event_router,
+        )
+        .await
+    })
+    .await
+}
+
 async fn register_linked_node(
     attached: Node<actr_hyper::Attached>,
     actor_key_namespace: Option<String>,
 ) -> ActrResult<Arc<ActrNode>> {
-    let mut attached = attached;
+    register_linked_node_with_router(attached, actor_key_namespace, None).await
+}
+
+async fn register_linked_node_with_router(
+    mut attached: Node<actr_hyper::Attached>,
+    actor_key_namespace: Option<String>,
+    front_event_router: Option<actr_hyper::FrontEventRouter>,
+) -> ActrResult<Arc<ActrNode>> {
     if let Some(namespace) = actor_key_namespace {
         attached =
             attached
@@ -869,6 +985,7 @@ async fn register_linked_node(
     Ok(Arc::new(ActrNode {
         inner: Mutex::new(Some(registered)),
         network_event_handle: Mutex::new(None),
+        front_event_router,
     }))
 }
 
@@ -935,6 +1052,7 @@ mod tests {
         Arc::new(ActrNode {
             inner: Mutex::new(None),
             network_event_handle: Mutex::new(None),
+            front_event_router: None,
         })
     }
 
