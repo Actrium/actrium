@@ -531,7 +531,7 @@ async fn lifecycle_start_lock_excludes_a_second_manager_on_the_same_directory() 
         let actor_id = actor_id.clone();
         async move {
             manager
-                .start_with(&actor_id, || {
+                .start_with(&actor_id, move || {
                     entered_tx.send(()).unwrap();
                     release_rx.recv().unwrap();
                     Ok(())
