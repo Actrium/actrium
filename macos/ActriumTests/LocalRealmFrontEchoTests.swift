@@ -1,4 +1,5 @@
 import AppKit
+import ActriumCore
 import ActriumIPC
 import Foundation
 import XCTest
@@ -48,7 +49,7 @@ final class LocalRealmFrontEchoTests: XCTestCase {
     }
 
     @MainActor
-    func testOpenRealmEchoesWithoutAnInvite() async throws {
+    func testRememberedOpenRealmJoinsAndRefreshesWithoutAnInvite() async throws {
         let env = ProcessInfo.processInfo.environment
         guard let address = env["ACTRIUM_OPEN_REALM_TEST_URI"],
               let front = env["ACTRIUM_OPEN_REALM_TEST_FRONT"] else {
@@ -64,21 +65,34 @@ final class LocalRealmFrontEchoTests: XCTestCase {
         let suiteName = "ActriumTests.OpenRealm.\(UUID())"
         let preferences = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { preferences.removePersistentDomain(forName: suiteName) }
+        let link = try ActriumCore.parseActrUri(
+            uri: address, installationId: InstallationIdProvider.getOrCreate()
+        )
+        let realmId = try XCTUnwrap(link.realmId)
+        preferences.set(["\(realmId)@\(link.domain)"], forKey: "actr.redeemedRealms")
         let viewModel = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
         defer {
             if let tab = viewModel.currentTab { RealmServiceBindings.shared.remove(tab.id) }
         }
-        let initial = try XCTUnwrap(viewModel.currentTab?.id)
-        viewModel.navigateCurrentTab(to: address)
-        let frontTab = try await waitForFront(in: viewModel, replacing: initial) {
+        let rejectInvite: () throws -> Void = {
             throw NSError(domain: "LocalRealmFrontEchoTests", code: 2, userInfo: [
                 NSLocalizedDescriptionKey: "An Open Realm requested an invite."
             ])
         }
+        let initial = try XCTUnwrap(viewModel.currentTab?.id)
+        viewModel.navigateCurrentTab(to: address)
+        let frontTab = try await waitForFront(in: viewModel, replacing: initial, onInvite: rejectInvite)
         XCTAssertEqual(frontTab.url?.absoluteString, address)
         XCTAssertEqual(approval.count, 1)
         XCTAssertNil(viewModel.pendingInviteRedeem)
         try await echo("invite-free", tabId: frontTab.id)
+
+        viewModel.reloadCurrentTab()
+        let refreshed = try await waitForFront(in: viewModel, replacing: frontTab.id, onInvite: rejectInvite)
+        XCTAssertEqual(refreshed.url, frontTab.url)
+        XCTAssertEqual(approval.count, 1)
+        XCTAssertNil(viewModel.pendingInviteRedeem)
+        try await echo("invite-free after refresh", tabId: refreshed.id)
     }
 
     @MainActor

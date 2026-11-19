@@ -3,7 +3,7 @@ import ActriumCore
 import Actr
 import ActrBindings
 
-/// The outcome of a successful Realm admission.
+/// The outcome of a successful invite redemption.
 struct RealmJoinResult {
     /// Canonical Realm name `<realm_id>@<domain>`.
     let realmName: String
@@ -15,25 +15,37 @@ struct RealmJoinResult {
     let instanceURL: URL
 }
 
-/// Authenticate the Realm and enroll this installation's device identity.
-///
-/// Reuses the same core verification entry points as the address-bar
-/// discovery flow (`acceptAuthorityDescriptor`, `acceptRealmProfile`) and
-/// the same device identity storage as #417 (`RealmIdentityStore`); it
-/// changes nothing about how those steps verify.
+/// Enroll this installation's device identity with a verified Realm.
 enum RealmJoinService {
-    struct Admission {
-        fileprivate let profile: RealmProfileInfo
-        fileprivate let instanceURL: URL
+    struct VerifiedProfile {
+        let info: RealmProfileInfo
         let isOpen: Bool
+
+        init(body: Data, realmName: String, signingKeysJSON: String) throws {
+            guard let text = String(data: body, encoding: .utf8) else {
+                throw RealmJoinService.joinError("The Realm Profile is not valid text.")
+            }
+            info = try ActriumCore.acceptRealmProfile(
+                body: text, realmName: realmName, signingKeysJson: signingKeysJSON
+            )
+            // Read the policy from the same bytes verified by the core.
+            isOpen = try JSONDecoder().decode(AdmissionPolicy.self, from: Data(text.utf8)).policy.membership == "open"
+        }
     }
 
-    private struct AdmissionDocument: Decodable {
+    private struct AdmissionPolicy: Decodable {
         struct Policy: Decodable {
             let membership: String
         }
 
-        let policy: Policy?
+        let policy: Policy
+    }
+
+    static func joinOpen(_ profile: VerifiedProfile, label: String) async throws {
+        guard profile.isOpen else {
+            throw joinError("This Realm requires an invite.")
+        }
+        _ = try await join(profile.info, inviteText: "", label: label, allowInsecureDevelopment: false)
     }
 
     /// Redeem `inviteText` (an `ri_…` invite) and join as a new device.
@@ -55,32 +67,20 @@ enum RealmJoinService {
         // 1. Decode the invite locally: learn the Realm name. The secret
         //    stays inside the invite text; `join` consumes it in Rust.
         let invite = try ActriumCore.decodeActrInvite(inviteText: inviteText)
-        let admission = try await Self.admission(for: invite.realmName)
-        return try await join(
-            admission, inviteText: inviteText, label: label,
-            allowInsecureDevelopment: allowInsecureDevelopment
-        )
-    }
+        let realmName = invite.realmName
 
-    static func joinOpen(_ admission: Admission, label: String) async throws -> RealmJoinResult {
-        guard admission.isOpen else {
-            throw joinError("This Realm requires an invite.")
-        }
-        return try await join(admission, inviteText: "", label: label, allowInsecureDevelopment: false)
-    }
-
-    static func admission(for realmName: String) async throws -> Admission {
         guard let at = realmName.firstIndex(of: "@") else {
-            throw joinError("The Realm name is malformed.")
+            throw joinError("The invite names a malformed Realm.")
         }
         let realmId = String(realmName[..<at])
         let domain = String(realmName[realmName.index(after: at)...])
         guard !realmId.isEmpty, !domain.isEmpty else {
-            throw joinError("The Realm name is malformed.")
+            throw joinError("The invite names a malformed Realm.")
         }
 
+        // 2. Realm discovery: the authority descriptor for the Realm domain.
         guard let discoveryURL = URL(string: "https://\(domain)/.well-known/actr") else {
-            throw joinError("The Realm domain is invalid.")
+            throw joinError("The Realm domain in the invite is invalid.")
         }
         let descriptorBody = try await fetchBoundedDocument(discoveryURL)
         guard let descriptorText = String(data: descriptorBody, encoding: .utf8) else {
@@ -91,7 +91,8 @@ enum RealmJoinService {
             domain: domain
         )
 
-        // Authenticate the Profile before interpreting its admission policy.
+        // 3. Realm Profile: verify it with the keys accepted in step 2 and
+        //    learn the membership endpoints (issuer, provider id).
         var profilePath = descriptor.realmsHref
         if profilePath.hasSuffix("/") { profilePath.removeLast() }
         profilePath += "/\(realmId)"
@@ -99,38 +100,18 @@ enum RealmJoinService {
             throw joinError("The Realm Profile location is invalid.")
         }
         let profileBody = try await fetchBoundedDocument(profileURL)
-        guard let profileText = String(data: profileBody, encoding: .utf8) else {
-            throw joinError("The Realm Profile is not valid text.")
-        }
-        let profile = try ActriumCore.acceptRealmProfile(
-            body: profileText,
-            realmName: realmName,
-            signingKeysJson: descriptor.signingKeysJson
-        )
+        let profile = try VerifiedProfile(
+            body: profileBody, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson
+        ).info
 
-        let document = try JSONDecoder().decode(AdmissionDocument.self, from: profileBody)
-        guard let instanceURL = URL(string: "actr://\(domain)/\(realmId)") else {
-            throw joinError("The instance address could not be built.")
-        }
-        return Admission(profile: profile, instanceURL: instanceURL, isOpen: document.policy?.membership == "open")
-    }
-
-    private static func join(
-        _ admission: Admission,
-        inviteText: String,
-        label: String,
-        allowInsecureDevelopment: Bool
-    ) async throws -> RealmJoinResult {
-        let profile = admission.profile
-        let store = try RealmIdentityStore()
-        let membership = try store.membership(
-            realm: profile.realmName,
-            providerId: profile.providerId,
-            issuer: profile.issuerUrl,
+        // 4. Device identity (created and persisted on first use) and the
+        //    invite exchange. The same signer later registers the Host.
+        let memberJSON = try await join(
+            profile, inviteText: inviteText, label: label,
             allowInsecureDevelopment: allowInsecureDevelopment
         )
-        let memberJSON = try await membership.join(invite: inviteText, label: label)
 
+        // 5. Surface the redemption result and the instance address.
         guard let member = try JSONSerialization.jsonObject(with: Data(memberJSON.utf8))
                 as? [String: Any],
             let memberId = member["member_id"] as? String,
@@ -138,16 +119,34 @@ enum RealmJoinService {
             let keyId = member["key_id"] as? String else {
             throw joinError("The join response could not be read.")
         }
+        guard let instanceURL = URL(string: "actr://\(domain)/\(realmId)") else {
+            throw joinError("The instance address could not be built.")
+        }
         return RealmJoinResult(
             realmName: profile.realmName,
             memberId: memberId,
             role: role,
             keyId: keyId,
-            instanceURL: admission.instanceURL
+            instanceURL: instanceURL
         )
     }
 
     // MARK: - Helpers
+
+    private static func join(
+        _ profile: RealmProfileInfo,
+        inviteText: String,
+        label: String,
+        allowInsecureDevelopment: Bool
+    ) async throws -> String {
+        let membership = try RealmIdentityStore().membership(
+            realm: profile.realmName,
+            providerId: profile.providerId,
+            issuer: profile.issuerUrl,
+            allowInsecureDevelopment: allowInsecureDevelopment
+        )
+        return try await membership.join(invite: inviteText, label: label)
+    }
 
     private static func joinError(_ message: String) -> NSError {
         NSError(
