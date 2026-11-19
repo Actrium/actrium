@@ -318,13 +318,15 @@ final class RealmServiceBindings {
 /// subscriptions before any executor hop can observe a replacement.
 final class RealmServiceEventRelay: ActrBindings.ServiceEventListener, @unchecked Sendable {
     private let bindingId: UUID
+    private let registry: RealmServiceBindings
 
-    init(bindingId: UUID) {
+    init(bindingId: UUID, registry: RealmServiceBindings = .shared) {
         self.bindingId = bindingId
+        self.registry = registry
     }
 
     func onEvent(event: ActrBindings.ServiceEventBridge) {
-        RealmServiceBindings.shared.publish(
+        registry.publish(
             bindingId: bindingId, event: event.event, payload: event.payload
         )
     }

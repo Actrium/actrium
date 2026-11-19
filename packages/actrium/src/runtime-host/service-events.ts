@@ -250,7 +250,8 @@ export function createNativeServiceEventSource(
 }
 
 export interface HttpServiceEventSourceOptions {
-  /** Maximum incomplete SSE frame size, measured in decoded UTF-16 units. */
+  /** Maximum SSE frame size, measured in decoded UTF-16 units. Applies to
+   * complete frames and to an incomplete buffered frame alike. */
   maxBufferedCharacters?: number;
   /** React Native's XHR retains every received responseText character. Rotate
    * the connection after this many characters to bound that buffer. */
@@ -444,6 +445,19 @@ export function createHttpServiceEventSource(
             // generation. Never deliver the rest of this old batch to its
             // replacement handlers or advance their resume state.
             if (settled || !active) break;
+            // The leftover-buffer check below cannot bound a frame that the
+            // transport already delivered with its delimiter. Enforce the same
+            // limit on every complete frame before parsing it or advancing the
+            // resume cursor.
+            if (chunk.length > maxBufferedCharacters) {
+              finish({
+                retry: true,
+                error: new Error(
+                  `Service event stream exceeded the ${maxBufferedCharacters}-character frame limit.`
+                ),
+              });
+              break;
+            }
             const frame = parseSseChunk(chunk);
             // SSE id-only frames update the resume cursor even without data;
             // an empty id clears it so the next request omits Last-Event-ID.

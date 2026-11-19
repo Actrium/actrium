@@ -284,13 +284,13 @@ describe('host:service implementation', () => {
   });
 
   test('revocation after authorization resolution never opens the transport', async () => {
-    let subscriptions = 0;
+    let subscribeCalls = 0;
     let revoked = false;
     const hostModules = createTestHostModules({
       serviceEventSource: {
         subscribe: () => {
-          subscriptions += 1;
-          return () => { subscriptions -= 1; };
+          subscribeCalls += 1;
+          return () => {};
         },
       },
       onCapabilityRevoked: (_capability, listener) => {
@@ -302,11 +302,13 @@ describe('host:service implementation', () => {
     // The authorization promise resolves on a later microtask. The snapshot is
     // revoked before that continuation starts, so attaching the listener must
     // synchronously observe the latest state and prevent subscription startup.
+    // Count starts, not net subscriptions: cleanup after an already-opened
+    // transport would otherwise hide the regression.
     hostModules['host:service'].on(() => {});
     revoked = true;
     await Promise.resolve();
 
-    expect(subscriptions).toBe(0);
+    expect(subscribeCalls).toBe(0);
   });
 });
 

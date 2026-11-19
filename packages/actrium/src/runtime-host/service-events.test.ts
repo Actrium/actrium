@@ -743,6 +743,46 @@ describe('createHttpServiceEventSource', () => {
     }
   });
 
+  test('rejects an oversized complete SSE frame before parsing or resuming', async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    const resumeIds: (string | null)[] = [];
+    const received: unknown[] = [];
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      calls += 1;
+      resumeIds.push(new Headers(init?.headers).get('Last-Event-ID'));
+      if (calls >= 2) return new Response(null, { status: 204 });
+      return new Response(new ReadableStream({
+        start(controller) {
+          // The delimiter arrives in the same transport chunk, so the leftover
+          // buffer check alone would never see this oversized frame.
+          controller.enqueue(new TextEncoder().encode(
+            'id: oversized\nevent: a\ndata: {"payloadBase64":"' + 'A'.repeat(32) + '"}\n\n'
+          ));
+          controller.close();
+        },
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      const source = createHttpServiceEventSource(
+        'https://example.com/events',
+        ['a'],
+        { initialRetryDelayMs: 1, maxBufferedCharacters: 16 }
+      );
+      const unsubscribe = source.subscribe((event) => { received.push(event); });
+      await waitFor(() => calls >= 2);
+      unsubscribe();
+      expect(received).toEqual([]);
+      // The rejected frame must not become the resume cursor either.
+      expect(resumeIds).toEqual([null, null]);
+    } finally {
+      console.error = originalError;
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('does not retry a permanent HTTP client error', async () => {
     const originalFetch = globalThis.fetch;
     const originalError = console.error;

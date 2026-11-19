@@ -296,8 +296,10 @@ struct RealmServiceBindingLifecycleTests {
 
         // The synchronous Rust callback captures the old ID before the queued
         // MainActor delivery runs. Replacement on the same binding must not
-        // inherit that event.
-        RealmServiceEventRelay(bindingId: binding.id).onEvent(event: ActrBindings.ServiceEventBridge(
+        // inherit that event. Inject the same registry the test configured;
+        // publishing through the shared singleton would bypass these handlers.
+        let relay = RealmServiceEventRelay(bindingId: binding.id, registry: bindings)
+        relay.onEvent(event: ActrBindings.ServiceEventBridge(
             event: "notes.changed", payload: Data([1])
         ))
         bindings.unsubscribe(oldId, tabId: tabId)
@@ -308,7 +310,7 @@ struct RealmServiceBindingLifecycleTests {
         for _ in 0..<5 { await Task.yield() }
         #expect(delivered.isEmpty)
 
-        RealmServiceEventRelay(bindingId: binding.id).onEvent(event: ActrBindings.ServiceEventBridge(
+        relay.onEvent(event: ActrBindings.ServiceEventBridge(
             event: "notes.changed", payload: Data([2])
         ))
         for _ in 0..<20 where delivered.isEmpty { await Task.yield() }
