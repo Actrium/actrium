@@ -402,7 +402,7 @@ impl ActriumPeerSession {
                 .map_err(|error| error.into_actr_error())?;
         }
         let preserve_result = result_stream.is_some();
-        let mut pending = PendingCallGuard::new(self.runtime.shared.clone(), request_id, pending)
+        let pending = PendingCallGuard::new(self.runtime.shared.clone(), request_id, pending)
             .with_attachment_result(result_stream);
         let result = self
             .runtime
@@ -416,7 +416,7 @@ impl ActriumPeerSession {
             .await
             .map(|bytes| bytes.to_vec());
         if result.is_ok() && preserve_result {
-            pending = pending.preserve_attachment_result();
+            let _pending = pending.preserve_attachment_result();
         }
         result
     }
