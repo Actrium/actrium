@@ -210,16 +210,21 @@ final class RealmAdmissionTests: XCTestCase {
 
     @MainActor
     func testOpenRealmImportsInTheBackgroundAfterJoining() async throws {
-        try await assertBackgroundFrontImport(membership: "open")
+        try await assertBackgroundFrontImport(membership: "open", withInvite: false)
+    }
+
+    @MainActor
+    func testOpenRealmRedeemsExplicitInviteBeforeLoadingFront() async throws {
+        try await assertBackgroundFrontImport(membership: "open", withInvite: true)
     }
 
     @MainActor
     func testEmbeddedInviteImportsInTheBackgroundAfterRedemption() async throws {
-        try await assertBackgroundFrontImport(membership: "invite-only")
+        try await assertBackgroundFrontImport(membership: "invite-only", withInvite: true)
     }
 
     @MainActor
-    private func assertBackgroundFrontImport(membership: String) async throws {
+    private func assertBackgroundFrontImport(membership: String, withInvite: Bool) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -230,11 +235,9 @@ final class RealmAdmissionTests: XCTestCase {
         let publisherStore = trustDirectory.appendingPathComponent("verified-publishers.json")
         let apps = AppRepository(database: DatabaseManager(path: ":memory:"))
         let appId = "publisher.example/echo-front@1.0.0"
-        let invite = try makeInviteText()
+        let invite = withInvite ? try makeInviteText() : nil
         let instanceURL = try XCTUnwrap(URL(string: realmURI))
-        var link = try XCTUnwrap(URLComponents(url: instanceURL, resolvingAgainstBaseURL: false))
-        link.queryItems = [URLQueryItem(name: "args", value: #"{"invite":"\#(invite)"}"#)]
-        let linkURL = try XCTUnwrap(link.url)
+        let linkURL = try invite.map { try linkCarryingInvite($0, to: instanceURL) } ?? instanceURL
         var documents = try discoveryDocuments(membership: membership, frontDigest: frontDigest)
         documents["https://publisher.example/.well-known/actr"] = try JSONSerialization.data(withJSONObject: [
             "publisher": ["keys": [[
@@ -262,19 +265,19 @@ final class RealmAdmissionTests: XCTestCase {
             },
             joinOpenRealm: { admission in
                 XCTAssertEqual(membership, "open")
+                XCTAssertNil(invite, "An explicit invite must not use invite-free admission")
                 XCTAssertEqual(admission.info.realmName, self.realmName)
                 joinAttempts += 1
                 await join.wait()
                 joined = true
             },
             joinRealmWithInvite: { code in
-                XCTAssertEqual(membership, "invite-only")
                 XCTAssertEqual(code, invite)
                 joinAttempts += 1
                 await join.wait()
                 joined = true
                 return RealmJoinResult(
-                    realmName: self.realmName, memberId: "member", role: "viewer", keyId: "key", instanceURL: instanceURL
+                    realmName: self.realmName, memberId: "member", role: "editor", keyId: "key", instanceURL: instanceURL
                 )
             },
             downloadRealmArchive: { url in
@@ -305,7 +308,7 @@ final class RealmAdmissionTests: XCTestCase {
         XCTAssertEqual(view.currentTab?.url?.absoluteString, "https://old.example/")
         XCTAssertNil(view.currentTab?.appId)
         XCTAssertEqual(downloads, 0)
-        if membership == "invite-only" {
+        if withInvite {
             XCTAssertTrue(view.inviteRedemptionInFlight)
             view.navigateCurrentTab(to: linkURL.absoluteString)
             view.openURLInNewTab(linkURL)
@@ -336,6 +339,107 @@ final class RealmAdmissionTests: XCTestCase {
 
         view.updateTabURL(for: tabId, url: try XCTUnwrap(URL(string: "https://old.example/late")))
         XCTAssertEqual(view.tabs.first { $0.id == tabId }?.url?.absoluteString, realmURI)
+    }
+
+    @MainActor
+    func testDistinctEmbeddedInvitesSurviveOverlappingDiscovery() async throws {
+        try await assertOverlappingInvites(navigateAwayFromSecondTab: false)
+    }
+
+    @MainActor
+    func testQueuedInviteDoesNotEnrollAfterNavigatingAway() async throws {
+        try await assertOverlappingInvites(navigateAwayFromSecondTab: true)
+    }
+
+    @MainActor
+    private func assertOverlappingInvites(navigateAwayFromSecondTab: Bool) async throws {
+        let firstURL = try XCTUnwrap(URL(string: realmURI))
+        let secondURL = try XCTUnwrap(URL(string: "actr://other.example/other"))
+        let secondRealm = "other@other.example"
+        let firstInvite = try makeInviteText()
+        let secondInvite = try makeInviteText(for: secondRealm, secretByte: 2)
+        let firstLink = try linkCarryingInvite(firstInvite, to: firstURL)
+        let secondLink = try linkCarryingInvite(secondInvite, to: secondURL)
+        let firstDocuments = try discoveryDocuments(membership: "invite-only", for: firstURL)
+        let secondDocuments = try discoveryDocuments(membership: "invite-only", for: secondURL)
+        let firstProfile = NavigationGate()
+        let secondProfile = NavigationGate()
+        let firstJoin = NavigationGate()
+        defer {
+            firstProfile.release()
+            secondProfile.release()
+            firstJoin.release()
+        }
+
+        let earlySecondJoin = expectation(description: "The second exchange must wait for the first")
+        earlySecondJoin.isInverted = true
+        var firstJoinFinished = false
+        var secondProfileReturned = false
+        var joinAttempts: [String] = []
+        let preferences = try makePreferences()
+        let view = BrowserViewModel(
+            realmPreferences: preferences,
+            fetchRealmDocument: { url, _ in
+                if url.host == "publisher.example" { throw CancellationError() }
+                if url.path == "/realm/echo" { await firstProfile.wait() }
+                if url.path == "/realm/other" {
+                    await secondProfile.wait()
+                    secondProfileReturned = true
+                }
+                return try XCTUnwrap(firstDocuments[url.absoluteString] ?? secondDocuments[url.absoluteString])
+            },
+            joinRealmWithInvite: { code in
+                joinAttempts.append(code)
+                if code == firstInvite {
+                    await firstJoin.wait()
+                    firstJoinFinished = true
+                    return RealmJoinResult(
+                        realmName: self.realmName, memberId: "first", role: "editor", keyId: "key", instanceURL: firstURL
+                    )
+                }
+                XCTAssertEqual(code, secondInvite)
+                if !firstJoinFinished { earlySecondJoin.fulfill() }
+                return RealmJoinResult(
+                    realmName: secondRealm, memberId: "second", role: "editor", keyId: "key", instanceURL: secondURL
+                )
+            },
+            saveBrowserSession: { _, _ in }
+        )
+
+        let firstTab = try XCTUnwrap(view.currentTabId)
+        view.navigateCurrentTab(to: firstLink.absoluteString)
+        try await waitUntil { firstProfile.waiting }
+        view.openURLInNewTab(firstLink)
+        XCTAssertEqual(view.tabs.map(\.id), [firstTab])
+        view.openURLInNewTab(secondLink)
+        let secondTab = try XCTUnwrap(view.currentTabId)
+        XCTAssertNotEqual(firstTab, secondTab)
+        try await waitUntil { secondProfile.waiting }
+
+        firstProfile.release()
+        try await waitUntil { firstJoin.waiting }
+        secondProfile.release()
+        try await waitUntil { secondProfileReturned }
+        await fulfillment(of: [earlySecondJoin], timeout: 0.25)
+        XCTAssertEqual(joinAttempts, [firstInvite])
+        view.openURLInNewTab(secondLink)
+        XCTAssertEqual(view.tabs.map(\.id), [firstTab, secondTab])
+        if navigateAwayFromSecondTab { view.navigateCurrentTab(to: "https://active.example/") }
+
+        firstJoin.release()
+        try await waitUntil { !view.inviteRedemptionInFlight }
+        if navigateAwayFromSecondTab {
+            XCTAssertEqual(joinAttempts, [firstInvite])
+            XCTAssertEqual(preferences.stringArray(forKey: "actr.redeemedRealms"), [realmName])
+            XCTAssertEqual(view.currentTab?.url?.absoluteString, "https://active.example/")
+        } else {
+            try await waitUntil { view.currentTab?.url == secondURL }
+            XCTAssertEqual(joinAttempts, [firstInvite, secondInvite])
+            XCTAssertEqual(Set(preferences.stringArray(forKey: "actr.redeemedRealms") ?? []), [realmName, secondRealm])
+        }
+        try await waitUntil { view.tabs.first { $0.id == firstTab }?.url == firstURL }
+        XCTAssertEqual(view.currentTabId, secondTab)
+        XCTAssertNil(view.pendingInviteRedeem)
     }
 
     @MainActor
@@ -399,23 +503,28 @@ final class RealmAdmissionTests: XCTestCase {
         return preferences
     }
 
-    private func discoveryDocuments(membership: String, frontDigest: String? = nil) throws -> [String: Data] {
-        let (body, keys) = try profile(membership: membership, frontDigest: frontDigest)
+    private func discoveryDocuments(
+        membership: String, frontDigest: String? = nil, for realmURL: URL? = nil
+    ) throws -> [String: Data] {
+        let address = try realmURL ?? XCTUnwrap(URL(string: realmURI))
+        let domain = try XCTUnwrap(address.host)
+        let realmId = address.lastPathComponent
+        let (body, keys) = try profile(membership: membership, frontDigest: frontDigest, realmName: "\(realmId)@\(domain)")
         let descriptor = try JSONSerialization.data(withJSONObject: [
             "version": 1,
-            "authority": "actr://realm.example",
+            "authority": "actr://\(domain)",
             "services": [[
-                "rel": "realms", "href": "https://realm.example/realm", "protocol": "actr-realm-profile/1"
+                "rel": "realms", "href": "https://\(domain)/realm", "protocol": "actr-realm-profile/1"
             ]],
             "realm_signing_keys": try JSONSerialization.jsonObject(with: Data(keys.utf8))
         ])
         return [
-            "https://realm.example/.well-known/actr": descriptor,
-            "https://realm.example/realm/echo": body
+            "https://\(domain)/.well-known/actr": descriptor,
+            "https://\(domain)/realm/\(realmId)": body
         ]
     }
 
-    private func profile(membership: String, frontDigest: String? = nil) throws -> (Data, String) {
+    private func profile(membership: String, frontDigest: String? = nil, realmName: String? = nil) throws -> (Data, String) {
         let signer = Curve25519.Signing.PrivateKey()
         let publicKey = signer.publicKey.rawRepresentation.base64EncodedString()
         let keys = try sign([
@@ -427,7 +536,7 @@ final class RealmAdmissionTests: XCTestCase {
         let body = try sign([
             "schema": "actr.realm/v1",
             "sequence": 1,
-            "realm": ["name": realmName, "display_name": "Echo", "status": "active"],
+            "realm": ["name": realmName ?? self.realmName, "display_name": "Echo", "status": "active"],
             "primary_package": "service",
             "front_package": "front",
             "packages": [
@@ -549,13 +658,19 @@ final class RealmAdmissionTests: XCTestCase {
             .replacingOccurrences(of: "=", with: "")
     }
 
-    private func makeInviteText() throws -> String {
+    private func makeInviteText(for realm: String? = nil, secretByte: UInt8 = 1) throws -> String {
         let body = try JSONSerialization.data(withJSONObject: [
             "schema": "actr.realm-invite/v1",
-            "realm": realmName,
-            "secret": base64URL(Data(repeating: 1, count: 32))
+            "realm": realm ?? realmName,
+            "secret": base64URL(Data(repeating: secretByte, count: 32))
         ])
         return "ri_" + base64URL(body)
+    }
+
+    private func linkCarryingInvite(_ invite: String, to instanceURL: URL) throws -> URL {
+        var link = try XCTUnwrap(URLComponents(url: instanceURL, resolvingAgainstBaseURL: false))
+        link.queryItems = [URLQueryItem(name: "args", value: #"{"invite":"\#(invite)"}"#)]
+        return try XCTUnwrap(link.url)
     }
 }
 

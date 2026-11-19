@@ -84,15 +84,17 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// actr:// link awaiting invite-code redemption (temporary-flow sheet presented).
     @Published var pendingInviteRedeem: PendingInviteRedeem?
 
-    /// Blocks duplicate link deliveries during a single-use invite exchange.
+    /// Tracks invite exchanges that are queued or running.
     @Published private(set) var inviteRedemptionInFlight = false
 
     private enum RealmNavigation {
-        case loading(UUID)
+        case loading(UUID, inviteCode: String?)
         case invite(PendingInviteRedeem)
     }
 
     private var realmNavigations: [UUID: RealmNavigation] = [:]
+    private var activeInviteCode: String?
+    private var inviteRedemptionTail: (load: UUID, task: Task<RealmJoinResult, Error>)?
     private let realmPreferences: UserDefaults
 
     /// Successfully joined Realms for session restore and invite prompts.
@@ -836,10 +838,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     /// Navigation Current Tab To Assign URL Or apply ID
     func openURLInNewTab(_ url: URL) {
-        // Drop duplicate actr:// deliveries before they create a tab: the
-        // navigation entry ignores them while a redemption is in flight, and
-        // an orphaned blank tab would be the only trace.
-        if inviteRedemptionInFlight, url.scheme?.lowercased() == "actr" { return }
+        if url.scheme?.lowercased() == "actr",
+           let code = ActrLinkInvite.invite(from: url.absoluteString), hasPendingInvite(code) { return }
         // These flows manage their own tabs when they recover an instance or import a package.
         if !ActrInstanceAddress.isLocalInstanceURL(url), !ActrPackageLinkPolicy.isPackageDownloadURL(url) {
             addNewTab(focusAddressBar: false)
@@ -856,8 +856,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     func navigateCurrentTab(to input: String) {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let isRealmLink = trimmed.lowercased().hasPrefix("actr://")
+        let inviteCode = isRealmLink ? ActrLinkInvite.invite(from: trimmed) : nil
         // A duplicate delivery must leave the active redemption's load intact.
-        if isRealmLink, inviteRedemptionInFlight { return }
+        if let inviteCode, hasPendingInvite(inviteCode) { return }
 
         // Address-bar navigation must always land somewhere: create a tab
         // when the window has none (e.g. right after a relaunch).
@@ -885,9 +886,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     uri: address,
                     installationId: InstallationIdProvider.getOrCreate()
                 )
-                handleResolvedRealmLink(
-                    info, address: address, tabIndex: index, inviteCode: ActrLinkInvite.invite(from: trimmed)
-                )
+                handleResolvedRealmLink(info, address: address, tabIndex: index, inviteCode: inviteCode)
                 return
             } catch {
                 logger.warning("⚠️ [navigateCurrentTab] actr:// input rejected: \(error)")
@@ -1077,8 +1076,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     // The verified Realm Profile decides if an invite is required.
 
     private func isCurrentRealmLoad(_ load: UUID, for tabId: UUID) -> Bool {
-        guard case .loading(let current)? = realmNavigations[tabId] else { return false }
+        guard case .loading(let current, _)? = realmNavigations[tabId] else { return false }
         return current == load
+    }
+
+    private func hasPendingInvite(_ code: String) -> Bool {
+        activeInviteCode == code || realmNavigations.values.contains {
+            guard case .loading(_, let inviteCode) = $0 else { return false }
+            return inviteCode == code
+        }
     }
 
     func pendingRealmInvite(for tabId: UUID) -> PendingInviteRedeem? {
@@ -1112,58 +1118,71 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     func confirmInviteRedeem(_ pending: PendingInviteRedeem, code: String) {
         guard pendingRealmInvite(for: pending.tabId)?.id == pending.id else { return }
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedCode.isEmpty else { return }
-        redeemInvite(code: trimmedCode, address: pending.uri, tabId: pending.tabId)
-    }
-
-    /// Redeem a code from either the invite sheet or a verified Realm link.
-    private func redeemInvite(code: String, address: String, tabId: UUID) {
-        guard !inviteRedemptionInFlight else { return }
-        inviteRedemptionInFlight = true
+        guard !trimmedCode.isEmpty, !hasPendingInvite(trimmedCode) else { return }
+        let tabId = pending.tabId
         let load = UUID()
-        realmNavigations[tabId] = .loading(load)
+        realmNavigations[tabId] = .loading(load, inviteCode: trimmedCode)
         if currentTabId == tabId { presentCurrentTabInvite() }
 
         Task { @MainActor in
             defer {
-                inviteRedemptionInFlight = false
                 if isCurrentRealmLoad(load, for: tabId) { invalidateRealmNavigation(for: tabId) }
             }
             guard isCurrentRealmLoad(load, for: tabId) else { return }
             do {
-                // The invite must name the same Realm as the requested link:
-                // join sends this device's public key and the invite secret to
-                // the Realm's issuer, so a mismatched code would leak both to
-                // the wrong Realm before any server-side check fires.
-                let invite = try ActriumCore.decodeActrInvite(inviteText: code)
                 let requested = try ActriumCore.parseActrUri(
-                    uri: address,
+                    uri: pending.uri,
                     installationId: InstallationIdProvider.getOrCreate()
                 )
-                let requestedRealm = [requested.realmId, requested.domain]
-                    .compactMap { $0 }.joined(separator: "@")
-                guard invite.realmName == requestedRealm else {
-                    throw NSError(
-                        domain: "ActrJoin", code: 4,
-                        userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                            "This invite belongs to another Realm.",
-                            comment: "Actr join realm mismatch error")])
-                }
-
-                let result = try await joinRealmWithInvite(code)
-                markRedeemed(result.realmName)
-                logger.notice("🎟️ [InviteRedeem] joined \(result.realmName): member=\(result.memberId), role=\(result.role), key=\(result.keyId)")
+                let realmName = [requested.realmId, requested.domain].compactMap { $0 }.joined(separator: "@")
+                let result = try await redeemInvite(code: trimmedCode, realmName: realmName, tabId: tabId, load: load)
                 guard isCurrentRealmLoad(load, for: tabId),
                       let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
                 let address = result.instanceURL.absoluteString
                 let info = try ActriumCore.parseActrUri(uri: address, installationId: InstallationIdProvider.getOrCreate())
                 handleResolvedRealmLink(info, address: address, tabIndex: index)
             } catch {
-                guard isCurrentRealmLoad(load, for: tabId) else { return }
+                guard isCurrentRealmLoad(load, for: tabId), !(error is CancellationError) else { return }
                 logger.warning("⚠️ [InviteRedeem] redemption failed: \(error)")
                 presentRealmLinkError(error)
             }
         }
+    }
+
+    private func redeemInvite(code: String, realmName: String, tabId: UUID, load: UUID) async throws -> RealmJoinResult {
+        guard let nonce = tabs.first(where: { $0.id == tabId })?.reloadNonce else { throw CancellationError() }
+        // Check the Realm before sending either the invite secret or the client key.
+        let invite = try ActriumCore.decodeActrInvite(inviteText: code)
+        guard invite.realmName == realmName else {
+            throw NSError(
+                domain: "ActrJoin", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                    "This invite belongs to another Realm.", comment: "Actr join realm mismatch error")])
+        }
+
+        // Each distinct invite waits for the preceding exchange. A tab that
+        // navigated away or closed while waiting must not start a new join.
+        let previous = inviteRedemptionTail?.task
+        let task = Task { @MainActor in
+            _ = await previous?.result
+            guard isCurrentRealmLoad(load, for: tabId),
+                  tabs.contains(where: { $0.id == tabId && $0.reloadNonce == nonce }) else { throw CancellationError() }
+            activeInviteCode = code
+            defer { activeInviteCode = nil }
+            let result = try await joinRealmWithInvite(code)
+            markRedeemed(result.realmName)
+            logger.notice("🎟️ [InviteRedeem] joined \(result.realmName): member=\(result.memberId), role=\(result.role), key=\(result.keyId)")
+            return result
+        }
+        inviteRedemptionTail = (load, task)
+        if !inviteRedemptionInFlight { inviteRedemptionInFlight = true }
+        defer {
+            if inviteRedemptionTail?.load == load {
+                inviteRedemptionTail = nil
+                inviteRedemptionInFlight = false
+            }
+        }
+        return try await task.value
     }
 
     func confirmInstanceCreation() {
@@ -1475,7 +1494,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     ) {
         let replacingTabId = tab.id
         let load = UUID()
-        realmNavigations[replacingTabId] = .loading(load)
+        realmNavigations[replacingTabId] = .loading(load, inviteCode: inviteCode)
         if currentTabId == replacingTabId { presentCurrentTabInvite() }
         Task { @MainActor in
             var expectedNonce = tab.reloadNonce
@@ -1538,23 +1557,21 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 let profile = admission.info
                 logger.notice("📄 [navigateCurrentTab] Realm Profile accepted: \(profile.displayName) (\(profile.realmName)), sequence=\(profile.sequence), package=\(profile.packageHref)")
 
-                if admission.isOpen {
+                if let inviteCode {
+                    _ = try await redeemInvite(code: inviteCode, realmName: profile.realmName, tabId: replacingTabId, load: load)
+                } else if admission.isOpen {
                     // Check membership for the current device key on every
-                    // load. Open joins reuse an existing member.
+                    // invite-free load. Open joins reuse an existing member.
                     try await joinOpenRealm(admission)
                 } else if !redeemedRealms.contains(profile.realmName) {
-                    if let inviteCode {
-                        redeemInvite(code: inviteCode, address: address, tabId: replacingTabId)
-                    } else {
-                        realmNavigations[replacingTabId] = .invite(
-                            PendingInviteRedeem(tabId: replacingTabId, uri: address, domain: domain)
-                        )
-                        if currentTabId == replacingTabId { presentCurrentTabInvite() }
-                    }
+                    realmNavigations[replacingTabId] = .invite(
+                        PendingInviteRedeem(tabId: replacingTabId, uri: address, domain: domain)
+                    )
+                    if currentTabId == replacingTabId { presentCurrentTabInvite() }
                     return
                 }
                 guard let startingIndex = currentTabIndex() else { return }
-                if admission.isOpen { markRedeemed(profile.realmName) }
+                if admission.isOpen, inviteCode == nil { markRedeemed(profile.realmName) }
                 prepareRealmTab(startingIndex, address: address, title: title)
                 expectedNonce = tabs[startingIndex].reloadNonce
 
