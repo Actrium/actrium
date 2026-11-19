@@ -164,6 +164,12 @@ timer_inventory! {
         success: "next protocol tick", interrupt: "detach, session expiry, or last session handle drop",
         expiry: "send session Heartbeat to renew the lease", reset: "Service-granted interval only", external: false
     },
+    ACTRIUM_SESSION_CHANNEL_RECOVERY => {
+        id: "actrium.front.session_channel_recovery", owner: "actrium_front", category: FailureBackoff,
+        duration: "CHANNEL_RECOVERY_POLL bounded by CHANNEL_RECOVERY_TIMEOUT", arm: "Resume waits for a verified channel after a reconnect",
+        success: "a verified peer channel becomes available", interrupt: "request cancellation or the recovery deadline",
+        expiry: "return the terminal channel error so the Host can Attach a fresh session", reset: "each Resume call", external: false
+    },
     RECOVERY_CLEANUP_TEARDOWN => {
         id: "lifecycle.recovery.cleanup_teardown", owner: "recovery_supervisor", category: FailureDeadline,
         duration: "remaining cleanup obligation deadline", arm: "cleanup effect starts",

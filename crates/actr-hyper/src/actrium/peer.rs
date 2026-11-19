@@ -248,7 +248,11 @@ impl ActriumPeerSession {
                     if Self::channel_is_recovering(&error)
                         && tokio::time::Instant::now() < deadline =>
                 {
-                    tokio::time::sleep(CHANNEL_RECOVERY_POLL).await;
+                    crate::timer::sleep(
+                        crate::timer::ids::ACTRIUM_SESSION_CHANNEL_RECOVERY,
+                        CHANNEL_RECOVERY_POLL,
+                    )
+                    .await;
                 }
                 Err(error) => return Err(error),
             }
