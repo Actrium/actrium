@@ -7,8 +7,6 @@ const input = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-m
 export function RealmPackages({ realm, onClose }: { realm: string; onClose: () => void }) {
   const [snapshot, setSnapshot] = useState<RealmPackageState>();
   const [selection, setSelection] = useState<RealmPackageSelection>();
-  const [route, setRoute] = useState("");
-  const [payload, setPayload] = useState("");
   const [error, setError] = useState("");
   const [result, setResult] = useState("");
   const [saving, setSaving] = useState(false);
@@ -32,8 +30,7 @@ export function RealmPackages({ realm, onClose }: { realm: string; onClose: () =
   async function submit(rollback: boolean) {
     const target = rollback ? snapshot?.previous_selection : selection;
     if (!snapshot || !target) return;
-    const readiness = route.trim() ? { route: route.trim(), request_base64: payload.trim() || undefined } : undefined;
-    const key = JSON.stringify([target, snapshot.sequence, rollback, readiness]);
+    const key = JSON.stringify([target, snapshot.sequence, rollback]);
     if (pending.current?.key !== key) pending.current = { key, id: crypto.randomUUID().replace(/-/g, "") };
     setSaving(true);
     setError("");
@@ -42,7 +39,6 @@ export function RealmPackages({ realm, onClose }: { realm: string; onClose: () =
       const response = await api.updateRealmPackages(realm, {
         selection: target,
         operation: { operation_id: pending.current.id, expected_sequence: snapshot.sequence, rollback },
-        readiness,
       });
       accept(await api.getRealmPackages(realm));
       pending.current = undefined;
@@ -93,14 +89,6 @@ export function RealmPackages({ realm, onClose }: { realm: string; onClose: () =
                 </fieldset>
               );
             })}
-            <details className="space-y-2">
-              <summary className="cursor-pointer text-sm font-medium text-gray-700">Service readiness RPC</summary>
-              <p className="text-xs text-gray-500">When the Service version changes, Loran probes the target before it publishes.</p>
-              <input aria-label="Readiness RPC route" placeholder="echo.v1.EchoService.Echo" maxLength={240}
-                value={route} onChange={(event) => setRoute(event.target.value)} className={input} />
-              <textarea aria-label="Readiness request body in Base64" placeholder="Base64 request body (optional)"
-                value={payload} onChange={(event) => setPayload(event.target.value)} className={input} />
-            </details>
             {snapshot.previous_selection && (
               <p className="text-xs text-gray-500">Rollback restores Profile packages from before the last release.</p>
             )}

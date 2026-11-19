@@ -577,25 +577,17 @@ pub struct UpdateArgs {
     /// Directory for verified packages and release history. Defaults to the Realm's local data directory.
     #[arg(long, value_name = "DIR")]
     pub output: Option<PathBuf>,
-    #[command(flatten)]
-    pub probe: super::realm_packages::ServiceProbeArgs,
 }
 
 pub async fn update(args: &UpdateArgs) -> Result<Value> {
     use sha2::{Digest, Sha256};
 
     let member = Member::load(&args.key)?;
-    let (selection, file_probe) = args
+    let selection = args
         .selection
         .as_deref()
-        .map(super::realm_packages::read_release_selection)
-        .transpose()?
-        .map_or((None, None), |(selection, probe)| (Some(selection), probe));
-    let argument_probe = args.probe.probe();
-    anyhow::ensure!(
-        argument_probe.is_none() || file_probe.is_none(),
-        "use readiness in the selection JSON or the probe options"
-    );
+        .map(super::realm::read_selection)
+        .transpose()?;
     let output = args
         .output
         .clone()
@@ -608,8 +600,7 @@ pub async fn update(args: &UpdateArgs) -> Result<Value> {
             })
         })
         .context("local Realm release directory is unavailable; use --output")?;
-    let probe = argument_probe.or(file_probe);
-    super::realm_packages::release(&member, &output, selection, probe.as_ref()).await
+    super::realm_packages::release(&member, &output, selection).await
 }
 
 pub async fn members(args: &KeyArgs) -> Result<Value> {

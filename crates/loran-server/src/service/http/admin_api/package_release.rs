@@ -5,11 +5,10 @@ use axum::{
     extract::{Path, State},
     response::{IntoResponse, Response},
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 use platform::realm::RealmPackageReleaseRecord;
 use serde::Deserialize;
 use serde_json::json;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::process::Command;
 use tonic::Status;
 
@@ -18,14 +17,9 @@ use tonic::Status;
 pub(super) struct ReleaseRequest {
     operation: FrontUpdate,
     selection: RealmPackageSelection,
-    readiness: Option<Readiness>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Readiness {
-    route: String,
-    request_base64: Option<String>,
+    // Older admin tabs may still send this deployment setting.
+    #[serde(rename = "readiness")]
+    _legacy_readiness: Option<serde::de::IgnoredAny>,
 }
 
 pub(super) async fn current(
@@ -60,7 +54,7 @@ async fn release(
     let ReleaseRequest {
         operation,
         selection,
-        readiness,
+        ..
     } = request;
     operation.check().map_err(Status::invalid_argument)?;
     selection.check().map_err(Status::invalid_argument)?;
@@ -90,16 +84,7 @@ async fn release(
     let Some(kind) = kind else {
         return Ok(json!({"realm": realm, "sequence": snapshot.sequence, "changed": false}));
     };
-    let readiness = if kind == PackageSelectionChange::Service {
-        Some(readiness.ok_or_else(|| {
-            Status::invalid_argument(
-                "This update changes Service. Enter its readiness RPC and submit again.",
-            )
-        })?)
-    } else {
-        None
-    };
-    verify_packages(realm, &selection, readiness).await?;
+    verify_packages(&selection, kind).await?;
     let mut result = state
         .service
         .publish_verified_packages(realm, selection, operation, kind)
@@ -109,9 +94,8 @@ async fn release(
 }
 
 async fn verify_packages(
-    realm: &str,
     selection: &RealmPackageSelection,
-    readiness: Option<Readiness>,
+    kind: PackageSelectionChange,
 ) -> Result<(), Status> {
     let executable = std::env::var_os("LORAN_PACKAGE_VERIFIER").ok_or_else(|| {
         Status::unavailable("Configure LORAN_PACKAGE_VERIFIER with the actr executable.")
@@ -130,51 +114,9 @@ async fn verify_packages(
         .arg(selection_path)
         .arg("--output")
         .arg(work.path().join("verified"));
-    if let Some(readiness) = readiness {
-        if readiness.route.is_empty()
-            || readiness.route.len() > 240
-            || !readiness
-                .route
-                .bytes()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_'))
-        {
-            return Err(Status::invalid_argument(
-                "Enter a valid readiness RPC route.",
-            ));
-        }
-        let directory = std::env::var_os("LORAN_REALM_PROBE_DIR").ok_or_else(|| {
-            Status::unavailable("Configure LORAN_REALM_PROBE_DIR with Realm probe runtimes.")
-        })?;
-        if realm.contains(['/', '\\']) {
-            return Err(Status::invalid_argument("Invalid Realm name."));
-        }
-        let config = PathBuf::from(directory).join(format!("{realm}.toml"));
-        if !tokio::fs::try_exists(&config).await.unwrap_or(false) {
-            return Err(Status::unavailable(
-                "This Realm needs an operator-configured readiness probe runtime.",
-            ));
-        }
-        command
-            .args(["--probe-realm", realm, "--probe-config"])
-            .arg(config)
-            .args(["--probe-route", &readiness.route]);
-        if let Some(body) = readiness.request_base64 {
-            let bytes = STANDARD
-                .decode(body)
-                .map_err(|_| Status::invalid_argument("Readiness request must be Base64."))?;
-            if bytes.len() > 1024 * 1024 {
-                return Err(Status::invalid_argument("Readiness request exceeds 1 MiB."));
-            }
-            let request_path = work.path().join("request.pb");
-            tokio::fs::write(&request_path, bytes)
-                .await
-                .map_err(|error| Status::internal(error.to_string()))?;
-            command.arg("--probe-request").arg(request_path);
-        }
-    }
     let output = tokio::time::timeout(Duration::from_secs(120), command.output())
         .await
-        .map_err(|_| Status::unavailable("Package verification or readiness timed out."))?
+        .map_err(|_| Status::unavailable("Package verification timed out."))?
         .map_err(|error| {
             Status::unavailable(format!("Could not start the package verifier: {error}"))
         })?;
@@ -194,6 +136,11 @@ async fn verify_packages(
     if actual.as_ref() != Some(selection) {
         return Err(Status::unavailable(
             "The package verifier returned another selection.",
+        ));
+    }
+    if kind == PackageSelectionChange::Service && report["front"].as_str().is_none() {
+        return Err(Status::invalid_argument(
+            "A Service release needs a downloadable Front archive for RPC contract verification.",
         ));
     }
     Ok(())

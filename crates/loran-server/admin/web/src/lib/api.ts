@@ -300,7 +300,6 @@ export const api = {
   updateRealmPackages: (realm: string, data: {
     selection: RealmPackageSelection;
     operation: { operation_id: string; expected_sequence: number; rollback: boolean };
-    readiness?: { route: string; request_base64?: string };
   }) => request<{ sequence: number; changed?: boolean }>(`/realms/${encodeURIComponent(realm)}/packages`, {
     method: "PUT",
     body: JSON.stringify(data),

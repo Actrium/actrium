@@ -249,7 +249,7 @@ impl AdminApiService {
         })
     }
 
-    /// Publish the selection after the caller has verified its archives and, for a Service change, probed readiness.
+    /// Publish a selection after the caller has verified its archives and RPC contract.
     pub async fn publish_verified_packages(
         &self,
         realm: &str,

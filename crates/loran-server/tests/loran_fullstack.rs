@@ -5355,11 +5355,13 @@ async fn admin_api_manages_many_realms_by_name() {
         .as_str()
         .unwrap()
         .to_owned();
-    let kind = release["selection"]["packages"][&primary]["type"]
-        .as_str()
-        .unwrap();
-    let program = kind.rsplit_once('@').unwrap().0;
-    release["selection"]["packages"][&primary]["type"] = json!(format!("{program}@2.0.0"));
+    let package = &mut release["selection"]["packages"][&primary];
+    let original_digest = package["sha256"].as_str().unwrap();
+    package["sha256"] = json!(if original_digest == "a".repeat(64) {
+        "b".repeat(64)
+    } else {
+        "a".repeat(64)
+    });
     let refused = client
         .put(&packages_url)
         .bearer_auth(token)
@@ -5368,7 +5370,13 @@ async fn admin_api_manages_many_realms_by_name() {
         .await
         .unwrap();
     assert_eq!(refused.status(), reqwest::StatusCode::BAD_REQUEST);
-    assert!(refused.text().await.unwrap().contains("readiness RPC"));
+    assert!(
+        refused
+            .text()
+            .await
+            .unwrap()
+            .contains("digest changed for immutable package")
+    );
 
     // The operator sees the members, read-only.
     let members: Value = client

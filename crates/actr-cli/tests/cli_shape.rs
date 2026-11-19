@@ -142,26 +142,9 @@ fn realm_update_checks_release_arguments() {
     let normal = ["actr", "realm", "update", "--key", "owner.json"];
     for args in [
         vec!["--selection", "selection.json"],
-        vec![
-            "--selection",
-            "selection.json",
-            "--output",
-            "cache",
-            "--probe-config",
-            "probe.toml",
-            "--probe-route",
-            "echo.v1.EchoService.Echo",
-        ],
+        vec!["--selection", "selection.json", "--output", "cache"],
         vec!["--rollback"],
-        vec![
-            "--rollback",
-            "--output",
-            "cache",
-            "--probe-config",
-            "probe.toml",
-            "--probe-route",
-            "echo.v1.EchoService.Echo",
-        ],
+        vec!["--rollback", "--output", "cache"],
     ] {
         cli()
             .try_get_matches_from(normal.into_iter().chain(args))
@@ -172,6 +155,8 @@ fn realm_update_checks_release_arguments() {
         vec![
             "--probe-config",
             "probe.toml",
+            "--probe-route",
+            "echo.v1.EchoService.Echo",
             "--selection",
             "selection.json",
         ],
@@ -184,6 +169,23 @@ fn realm_update_checks_release_arguments() {
                 .is_err()
         );
     }
+    cli()
+        .try_get_matches_from([
+            "actr",
+            "realm",
+            "check-selection",
+            "--selection",
+            "selection.json",
+            "--output",
+            "cache",
+            "--probe-realm",
+            "echo@realm.example",
+            "--probe-config",
+            "probe.toml",
+            "--probe-route",
+            "echo.v1.EchoService.Echo",
+        ])
+        .unwrap();
 }
 
 #[test]

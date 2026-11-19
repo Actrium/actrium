@@ -25,7 +25,9 @@ use tempfile::NamedTempFile;
 use super::realm_members::resolve_profile;
 
 mod front;
-pub(super) use front::{ServiceProbeArgs, read_release_selection, release};
+mod probe;
+pub(super) use front::release;
+use probe::ServiceProbeArgs;
 
 const DOCUMENT_LIMIT: usize = actr_protocol::realm_profile::MAX_REALM_PROFILE_BYTES;
 const ARCHIVE_LIMIT: usize = 64 * 1024 * 1024;
@@ -43,7 +45,7 @@ pub struct FetchArgs {
     pub output: PathBuf,
 }
 
-/// Validate manually selected archives before creating or updating a Realm.
+/// Validate selected archives and optionally check a deployed Service.
 #[derive(Args, Debug)]
 pub struct CheckArgs {
     /// JSON file with primary_package, front_package and the complete packages map

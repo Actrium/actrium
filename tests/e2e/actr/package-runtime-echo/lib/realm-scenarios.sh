@@ -227,7 +227,7 @@ run_package_release_roundtrips() {
     kill -0 "$SERVER_PID" 2>/dev/null || fail "Original Service stopped during the release"
     if [ "${REALM_SERVICE_SWITCH:-0}" = 1 ]; then
         kill -0 "$CANDIDATE_SERVICE_PID" 2>/dev/null || fail "Candidate Service stopped during the release"
-        grep -E '^SERVICE_(SWITCH|READINESS_GATE) ' "$LOG_DIR/front-release.log"
+        grep -E '^SERVICE_(SWITCH|PACKAGE_GATE) ' "$LOG_DIR/front-release.log"
         success "Front reached the original, upgraded, and restored Actor in order"
     else
         grep '^FRONT_RELEASE ' "$LOG_DIR/front-release.log"

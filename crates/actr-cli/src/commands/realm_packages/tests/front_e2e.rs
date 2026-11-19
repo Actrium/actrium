@@ -106,104 +106,53 @@ async fn realm_front_release_fixture() -> Result<()> {
             let selection = (step == 1)
                 .then(|| crate::commands::realm::read_selection(&request.selection))
                 .transpose()?;
-            if request.service_actors.is_some() {
+            if step == 1 && request.service_actors.is_some() {
                 let (baseline, _, _) =
                     resolve_profile(realm, None, |url| get(url, DOCUMENT_LIMIT), None).await?;
-                let target_selection = selection
+                let mut incompatible = selection.clone().context("target selection")?;
+                let (_, previous_front) = original_selection
                     .as_ref()
-                    .or(original_selection.as_ref())
-                    .context("previous selection")?;
-                let (target, _) = target_selection.selected().map_err(anyhow::Error::msg)?;
-                let probe_dir = request.output.join(format!("probe-{step}"));
-                let probe_config = front_config(
-                    &baseline,
-                    target,
-                    &request.front_key,
-                    &request.package_key,
-                    &probe_dir,
-                )?;
-                let payload = probe_dir.join("echo.pb");
-                std::fs::write(
-                    &payload,
-                    EchoRequest {
-                        message: format!("ready-{step}"),
-                    }
-                    .encode_to_vec(),
-                )?;
-                let mut probe = front::ServiceProbe {
-                    probe_config,
-                    probe_request: Some(payload),
-                    probe_payload: None,
-                    probe_route: EchoRequest::route_key().to_owned(),
-                };
-                if step == 1 {
-                    let missing = front::release_with(
-                        realm,
-                        provider,
-                        &request.output,
-                        selection.clone(),
-                        &get,
-                        |_| async { bail!("unprobed Service attempted publication") },
-                    )
-                    .await
-                    .unwrap_err();
-                    ensure!(
-                        missing
-                            .to_string()
-                            .contains("Service change requires readiness"),
-                        "unexpected missing probe error: {missing:#}"
-                    );
-                    probe.probe_route = "echo.EchoService.NotReady".into();
-                    let refused = front::release_selection_with(
-                        realm,
-                        provider,
-                        &request.output,
-                        selection.clone(),
-                        Some(&probe),
-                        &get,
-                        |_| async { bail!("unready Service attempted publication") },
-                    )
-                    .await
-                    .unwrap_err();
-                    ensure!(
-                        refused
-                            .to_string()
-                            .contains("did not pass the readiness RPC"),
-                        "unexpected probe failure: {refused:#}"
-                    );
-                    let (unchanged, _, _) =
-                        resolve_profile(realm, None, |url| get(url, DOCUMENT_LIMIT), None).await?;
-                    ensure!(
-                        unchanged.sequence == baseline.sequence,
-                        "failed probe changed the Profile"
-                    );
-                    println!(
-                        "SERVICE_READINESS_GATE sequence={} rejected_unready={}",
-                        baseline.sequence, target.r#type
-                    );
-                    probe.probe_route = EchoRequest::route_key().to_owned();
-                }
-                front::release_selection_with(
+                    .context("previous selection")?
+                    .selected()
+                    .map_err(anyhow::Error::msg)?;
+                incompatible
+                    .packages
+                    .insert(incompatible.front_package.clone(), previous_front.clone());
+                let mismatch = front::release_with(
                     realm,
                     provider,
                     &request.output,
-                    selection,
-                    Some(&probe),
+                    Some(incompatible),
                     &get,
-                    |operation| owner.send(operation),
+                    |_| async { bail!("incompatible package selection attempted publication") },
                 )
-                .await?;
-            } else {
-                front::release_with(
-                    realm,
-                    provider,
-                    &request.output,
-                    selection,
-                    &get,
-                    |operation| owner.send(operation),
-                )
-                .await?;
+                .await
+                .unwrap_err();
+                ensure!(
+                    mismatch.to_string().contains("Front service dependency"),
+                    "unexpected contract verification failure: {mismatch:#}"
+                );
+                let (unchanged, _, _) =
+                    resolve_profile(realm, None, |url| get(url, DOCUMENT_LIMIT), None).await?;
+                ensure!(
+                    unchanged.sequence == baseline.sequence,
+                    "incompatible package selection changed the Profile"
+                );
+                println!(
+                    "SERVICE_PACKAGE_GATE sequence={} rejected_incompatible_front",
+                    baseline.sequence
+                );
             }
+
+            front::release_with(
+                realm,
+                provider,
+                &request.output,
+                selection,
+                &get,
+                |operation| owner.send(operation),
+            )
+            .await?;
         }
         let pair = fetch_with(&args, &get).await?;
         let (profile, _, _) =

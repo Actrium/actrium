@@ -317,26 +317,6 @@ impl RealmProfileRecord {
                     "the last package release is no longer available for rollback".into(),
                 ));
             }
-            if expected == PackageSelectionChange::Service
-                && let Some(owner) = owner
-            {
-                let service_type = &new.selected().map_err(RealmError::Conflict)?.0.r#type;
-                let registered: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM issued_actor_identity
-                         WHERE realm = ? AND actor_type = ?
-                           AND member_id = ? AND auth_mode = 1 AND development = 0)",
-                )
-                .bind(name)
-                .bind(service_type)
-                .bind(&owner.member_id)
-                .fetch_one(&mut *tx)
-                .await?;
-                if !registered {
-                    return Err(RealmError::Conflict(
-                        "the owner has not registered this Service type".into(),
-                    ));
-                }
-            }
             let inserted = sqlx::query(
                 "INSERT INTO realm_package_release
                  (realm, operation_id, sequence, previous_document, document, rollback)

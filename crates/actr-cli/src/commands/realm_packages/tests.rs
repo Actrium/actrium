@@ -267,6 +267,43 @@ fn publish_profile(docs: &Documents, signer: &SigningKey, profile: &mut Value, s
         .insert(REALM_URL.into(), serde_json::to_vec(profile).unwrap());
 }
 
+#[tokio::test]
+async fn service_release_rejects_mismatched_rpc_contract() -> Result<()> {
+    let publisher = SigningKey::from_bytes(&rand::random());
+    let (docs, _, profile) = fixture_with_publisher(PROTO, &publisher);
+    let mut selection: RealmPackageSelection = serde_json::from_value(profile)?;
+    for (reference, workload, contract) in [
+        ("svc", "actr.component/1", PROTO),
+        ("view", KEEL_GUEST_PROFILE_V1, OTHER_PROTO),
+    ] {
+        let (mut entry, bytes) = package_version(workload, contract, &publisher, "1.1.0");
+        let address = format!("https://cdn.example/{reference}-v11.actr");
+        entry["href"] = json!(&address);
+        docs.borrow_mut().insert(address, bytes);
+        selection
+            .packages
+            .insert(reference.into(), serde_json::from_value(entry)?);
+    }
+    let output = tempfile::tempdir()?;
+    let get =
+        |url, _| std::future::ready(docs.borrow().get(&url).cloned().context("missing fixture"));
+    let error = front::release_with(
+        REALM,
+        "afp.example",
+        output.path(),
+        Some(selection),
+        &get,
+        |_| async { panic!("an incompatible Service reached publication") },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("RPC contracts differ"),
+        "{error:#}"
+    );
+    Ok(())
+}
+
 fn extra_package() -> Value {
     json!({"type": EXTRA_TYPE, "sha256": "a".repeat(64), "href": "https://cdn.example/extra.actr"})
 }

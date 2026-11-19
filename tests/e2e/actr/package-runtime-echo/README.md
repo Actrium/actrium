@@ -82,7 +82,7 @@ REALM_HTTPS=1 REALM_MODE=provider REALM_FRONT_RELEASE=1 \
 
 The log records the three Profile revisions and checks the Service type, digest, and ActorId at every Echo call.
 
-To verify a Service switch, including a failed readiness RPC before publication and rollback to the original Actor, run:
+To verify Service publication, rejection of incompatible packages, and rollback to the original Actor, run:
 
 ```sh
 REALM_HTTPS=1 REALM_MODE=provider REALM_SERVICE_SWITCH=1 \
