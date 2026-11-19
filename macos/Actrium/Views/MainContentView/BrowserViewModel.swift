@@ -1686,26 +1686,58 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             front: front, service: service, publicKey: trustedKey
         )
         let file: LocalRealmFrontFile
-        if let existing, existing.scope == scope {
-            file = existing.file
-        } else {
-            guard isCurrent(), currentTabId == tabId else { throw CancellationError() }
-            let panel = NSOpenPanel()
-            panel.title = "Choose the local Realm Front"
-            let rebuild = policy.allowRebuild
-                ? "Refresh can load new builds signed by this key from the selected filename."
-                : "The archive must match the digest in the Realm Profile."
-            panel.message = """
-                \(profile.realmName) requests the local Front \(front.href).
-                \(profile.packageType) · \(policy.signingKeyId)
-                \(rebuild)
-                """
-            panel.prompt = "Allow and Open"
-            panel.canChooseDirectories = false
-            panel.allowedContentTypes = [UTType(filenameExtension: "actr") ?? .data]
-            guard let selectedURL = chooseLocalFrontFile(panel), isCurrent() else { throw CancellationError() }
-            file = try LocalRealmFrontFile(selectedURL: selectedURL)
+        let archive: Data
+        do {
+            if let existing, existing.scope == scope {
+                file = existing.file
+            } else {
+                guard isCurrent(), currentTabId == tabId else { throw CancellationError() }
+                let rebuild = policy.allowRebuild
+                    ? "Refresh can load new builds signed by this key from the approved file."
+                    : "The archive must match the digest in the Realm Profile."
+                let message = """
+                    \(profile.realmName) requests the local Front \(front.href).
+                    \(profile.packageType) · \(policy.signingKeyId)
+                    \(rebuild)
+                    """
+                if front.href.hasPrefix("/") {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = "Open this local Realm Front?"
+                    alert.informativeText = message
+                    alert.addButton(withTitle: "Allow and Open")
+                    alert.addButton(withTitle: "Cancel")
+                    guard alert.runModal() == .alertFirstButtonReturn, isCurrent() else {
+                        throw CancellationError()
+                    }
+                    let approvedPath = front.href
+                    file = try await Task.detached {
+                        try LocalRealmFrontFile(approvedAbsolutePath: approvedPath)
+                    }.value
+                } else {
+                    let panel = NSOpenPanel()
+                    panel.title = "Choose the local Realm Front"
+                    panel.message = message
+                    panel.prompt = "Allow and Open"
+                    panel.canChooseDirectories = false
+                    panel.allowedContentTypes = [UTType(filenameExtension: "actr") ?? .data]
+                    guard let selectedURL = chooseLocalFrontFile(panel), isCurrent() else {
+                        throw CancellationError()
+                    }
+                    file = try LocalRealmFrontFile(selectedURL: selectedURL)
+                }
+            }
+            guard isCurrent() else { return }
+            archive = try await Task.detached { try file.readArchive() }.value
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            let message = front.href.hasPrefix("/")
+                ? "The local Front file was not found at \(front.href)."
+                : "The selected local Front file was not found."
+            throw RealmServiceError(message: message)
+        } catch let error as CocoaError where error.code == .fileReadUnsupportedScheme {
+            throw RealmServiceError(message: "Choose a regular local .actr file on a local volume without symbolic links.")
         }
+        guard isCurrent() else { return }
 
         let servicePublisher = profile.serviceType.hasPrefix(publisher.domain + "/")
             ? publisher : try await realmPublisher(for: profile.serviceType, verifySignature: true)
@@ -1735,17 +1767,16 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
         guard isCurrent() else { return }
         let snapshot = try await Task.detached {
-            let archive = try file.readArchive()
             let info = try ActriumCore.verifyLocalRealmFrontPackage(
                 archive: archive, trustedPublicKey: trustedKey, profile: profile,
                 serviceArchive: serviceBytes, servicePublicKeys: serviceKeys
             )
-            return (archive, info.workloadBytes, Self.realmArchiveDigest(archive))
+            return (info.workloadBytes, Self.realmArchiveDigest(archive))
         }.value
         guard isCurrent() else { return }
         if let download { _ = try ActrPackageCache.installArchive(at: download, digest: service.sha256) }
 
-        let (archive, guest, digest) = snapshot
+        let (guest, digest) = snapshot
         let stage = staging.appendingPathComponent("front.actr")
         try archive.write(to: stage, options: .atomic)
         let cached = try ActrPackageCache.installArchive(at: stage, digest: digest)
@@ -1880,6 +1911,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             message = NSLocalizedString(
                 "This local Realm belongs to a different installation.",
                 comment: "Actr URI foreign local Realm error")
+        case let error as RealmServiceError:
+            message = error.localizedDescription
         default:
             message = "\(error)"
         }

@@ -210,7 +210,16 @@
         {
           "required": ["local_path", "dependencies"],
           "properties": {
-            "href": {"maxLength": 255, "pattern": "^[^/\\\\:]+\\.actr$"},
+            "href": {
+              "anyOf": [
+                {"maxLength": 255, "pattern": "^[^/\\\\:\\u0000-\\u001f\\u007f-\\u009f]+\\.actr$"},
+                {
+                  "maxLength": 1023,
+                  "pattern": "^/(?:[^/\\\\:%\\u0000-\\u001f\\u007f-\\u009f]+/)*[^/\\\\:%\\u0000-\\u001f\\u007f-\\u009f]+\\.actr$",
+                  "not": {"pattern": "/\\.{1,2}/"}
+                }
+              ]
+            },
             "dependencies": {"required": ["service"]}
           },
           "if": {"properties": {"local_path": {"properties": {"allow_rebuild": {"const": true}}}}},

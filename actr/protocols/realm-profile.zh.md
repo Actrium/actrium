@@ -96,7 +96,7 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `primary_package` | `packages` 中的一个引用名，指定本实例的默认主 Service 包。 |
 | `front_package` | `packages` 中本实例选用的 Front 包引用名。 |
 | `packages` | 本应用实例选定的包引用映射。 |
-| `packages[ref].href` | 该归档的 HTTPS 下载地址。声明 `local_path` 时仅填写文件名提示。 |
+| `packages[ref].href` | 该归档的 HTTPS 下载地址。声明 `local_path` 时填写本地绝对路径，兼容已有的文件名提示。 |
 | `packages[ref].sha256` | 该归档全部字节的 SHA-256（64 位小写十六进制）。仅 `allow_rebuild: true` 的本地 Front 省略。 |
 | `packages[ref].local_path` | 所选 Front 的可选签名字段，包含 `signing_key_id` 和 `allow_rebuild`。 |
 | `packages[ref].type` | 该归档 manifest 声明的精确 Actor 类型 `publisher/program@version`。 |
@@ -130,7 +130,7 @@ Realm 从 `packages` 中选定本实例的 Service 和 Front。其余条目供�
 1. `active` Profile **MUST** 同时提供 `primary_package`、`front_package` 和 `packages`。`retired` Profile 可整体省略包选择。字段不齐时拒绝。
 2. `packages` 是包含 2–32 项的 JSON 对象。键为 1–63 个 ASCII 小写字母、数字或连字符，首尾须为字母或数字。
 3. 提供包选择时，`primary_package` 与 `front_package` **MUST** 精确匹配两个不同的键，且条目的 Actor 类型不同。
-4. 每项 **MUST** 包含精确 `type`（`publisher/program@version`）。下载包须提供 HTTPS `href` 和固定摘要。仅所选 Front 可声明 `local_path`，其 `href` 为简单的 `.actr` 文件名，`service` 依赖必须绑定 `primary_package`。固定包的精确类型和摘要绑定保持不可变。接收方 **MUST** 拒绝版本范围和 `latest`。
+4. 每项 **MUST** 包含精确 `type`（`publisher/program@version`）。下载包须提供 HTTPS `href` 和固定摘要。仅所选 Front 可声明 `local_path`，其 `href` 为本地 `.actr` 绝对路径或已有的文件名提示，`service` 依赖必须绑定 `primary_package`。固定包的精确类型和摘要绑定保持不可变。接收方 **MUST** 拒绝版本范围和 `latest`。
 5. 完整签名 Profile 最多 64 KiB。接收方 **MUST** 拒绝超限文档和重复的 JSON member。
 6. 提供 `packages[ref].dependencies` 时，它 **MUST** 是 JSON 对象；键是非空且首尾无空白的依赖 alias，值 **MUST** 精确匹配 `packages` 中的一个键。不存在的目标引用必须拒绝。
 
@@ -193,7 +193,8 @@ Service Host 验证 Service 归档，并在接受 Front 前核对所选 Front �
 `type` 所属 Publisher 的受信公钥验证包内 `manifest.sig` 对原始 `manifest.toml` 的签名。再核对清单中
 的精确 Actor 类型、签名覆盖的载荷、Workload、Host 要求、平台策略和依赖锁。见 [Actor Package](actor-package.zh.md)。
 
-声明 `local_path` 的 Front 必须经本机用户选包授权后才能读取。Profile 里的文件名只作提示。
+声明 `local_path` 的 Front 若使用绝对路径，Host 必须先向本机用户展示该路径并获得授权，才能访问文件。
+Host 拒绝符号链接、非本地卷和非普通文件。只有文件名提示的已有 Profile 仍通过本机选包授权。
 Host 从同一次读取的字节验证固定的 Publisher 签名 key、精确 Actor 类型、Service 依赖和 RPC 契约。
 固定包核对整包摘要。`allow_rebuild` 开启时，每次加载重新计算构建摘要，刷新可重新读取获准位置的同名文件，
 并重新验证 Realm 与 Publisher。后台只验本地包声明，可下载归档照常验包。Host 用已验证的 Service 契约

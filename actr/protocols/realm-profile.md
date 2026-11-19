@@ -121,7 +121,7 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `primary_package` | A key in `packages` selecting the instance's default Service package. |
 | `front_package` | A key in `packages` selecting the Front for this instance. |
 | `packages` | Map of archive references selected for this application instance. |
-| `packages[ref].href` | HTTPS download address, or a filename hint when `local_path` is present. |
+| `packages[ref].href` | HTTPS download address, or an absolute local path when `local_path` is present. Existing filename hints are supported. |
 | `packages[ref].sha256` | SHA-256 of all archive bytes, as 64 lowercase hexadecimal digits. Omit only for a local Front with `allow_rebuild: true`. |
 | `packages[ref].local_path` | Optional signed declaration for the selected Front: `signing_key_id` and `allow_rebuild`. |
 | `packages[ref].type` | Exact Actor type `publisher/program@version` declared by that archive's manifest. |
@@ -158,7 +158,7 @@ The Realm selects its Service and Front by naming two entries in `packages`. Oth
 1. An `active` Profile **MUST** supply `primary_package`, `front_package` and `packages`. A `retired` Profile may omit the entire selection. Reject partial selections.
 2. `packages` is a JSON object with 2–32 entries. Keys consist of 1–63 lowercase ASCII letters, digits or hyphens and start and end with a letter or digit.
 3. When a selection is present, `primary_package` and `front_package` **MUST** exactly match two distinct map keys whose entries have different Actor types.
-4. Each entry **MUST** include an exact `type` (`publisher/program@version`). Download entries require HTTPS `href` and a fixed `sha256`. The selected Front alone may declare `local_path`, with a simple `.actr` filename as `href` and a `service` dependency bound to `primary_package`. Fixed entries retain an immutable digest for each exact type. Receivers **MUST** reject version ranges and `latest`.
+4. Each entry **MUST** include an exact `type` (`publisher/program@version`). Download entries require HTTPS `href` and a fixed `sha256`. The selected Front alone may declare `local_path`, with an absolute local `.actr` path or a legacy filename hint as `href`, and a `service` dependency bound to `primary_package`. Fixed entries retain an immutable digest for each exact type. Receivers **MUST** reject version ranges and `latest`.
 5. The complete signed Profile is at most 64 KiB. Receivers **MUST** reject oversized documents and duplicate JSON members.
 6. If supplied, `packages[ref].dependencies` **MUST** be a JSON object. Keys are nonempty dependency aliases without leading or trailing whitespace; each value **MUST** exactly match a key in `packages`. Reject references to missing packages.
 
@@ -231,8 +231,9 @@ the raw `manifest.toml` with the
 trusted key of the Publisher named in `type`. Check the manifest's exact Actor type, signed payloads,
 Workload, Host requirements, platform policy and dependency locks. See [Actor Package](actor-package.zh.md).
 
-A `local_path` Front requires explicit local file selection before any file read. Its filename is a
-hint and is never resolved from the Profile. The Host checks one read snapshot against the pinned
+A `local_path` Front with an absolute `href` requires explicit user approval for that path
+before any file access. The Host rejects symbolic links, non-local volumes and non-regular files.
+A legacy filename hint requires explicit local file selection. The Host checks one read snapshot against the pinned
 Publisher signing key, exact Actor type, Service dependency and RPC contract. It checks the fixed
 digest unless `allow_rebuild` is true. In that mode it computes a digest for each loaded build, and
 refresh may read a replacement of the approved filename. Realm and Publisher verification still

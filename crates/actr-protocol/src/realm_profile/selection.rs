@@ -180,9 +180,27 @@ mod tests {
         selection.check().unwrap();
         assert_eq!(selection.selected().unwrap().1.fixed_digest(), None);
 
-        let front = selection.packages.get_mut("front").unwrap();
-        front.href = "/Users/test/front.actr".into();
-        assert!(selection.check().is_err());
+        selection.packages.get_mut("front").unwrap().href = "/Users/test/My App/front.actr".into();
+        selection.check().unwrap();
+        for invalid in [
+            "project/front.actr",
+            "//server/share/front.actr",
+            "file:///Users/test/front.actr",
+            "/Users/test/../front.actr",
+            "/Users/test/%2e%2e/front.actr",
+            "/Users/test//front.actr",
+            "/Users/test/.actr",
+            "/Users/test/front.unsigned",
+            "/dev/front.actr",
+            "/System/Library/front.actr",
+            "/private/etc/front.actr",
+            "/private/var/root/front.actr",
+            "/Users/test/\nfront.actr",
+            "/Users/test/\u{202e}front.actr",
+        ] {
+            selection.packages.get_mut("front").unwrap().href = invalid.into();
+            assert!(selection.check().is_err(), "{invalid:?}");
+        }
 
         let front = selection.packages.get_mut("front").unwrap();
         front.href = "front.actr".into();

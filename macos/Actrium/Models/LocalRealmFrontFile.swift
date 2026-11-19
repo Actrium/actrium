@@ -7,6 +7,7 @@ import Foundation
 nonisolated final class LocalRealmFrontFile: Sendable {
     private let directory: Int32
     private let filename: String
+    private let requiresLocalVolume: Bool
 
     init(selectedURL: URL) throws {
         guard selectedURL.isFileURL, selectedURL.pathExtension.lowercased() == "actr" else {
@@ -14,9 +15,41 @@ nonisolated final class LocalRealmFrontFile: Sendable {
         }
         let parent = selectedURL.deletingLastPathComponent().resolvingSymlinksInPath().path
         let descriptor = Darwin.open(parent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard descriptor >= 0 else { throw CocoaError(.fileReadNoPermission) }
+        guard descriptor >= 0 else { throw Self.openError() }
         directory = descriptor
         filename = selectedURL.lastPathComponent
+        requiresLocalVolume = false
+    }
+
+    /// The caller must show this exact approved path to the user before calling.
+    /// Traverse each directory by descriptor so a symlink cannot redirect consent.
+    init(approvedAbsolutePath path: String) throws {
+        let components = path.split(separator: "/", omittingEmptySubsequences: false).dropFirst()
+        guard path.hasPrefix("/"), !path.utf8.contains(0),
+              let name = components.last, name.hasSuffix(".actr"), name != ".actr",
+              components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+            throw CocoaError(.fileReadUnsupportedScheme)
+        }
+        let flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+        var descriptor = Darwin.open("/", flags)
+        guard descriptor >= 0 else { throw Self.openError() }
+        do {
+            for component in components.dropLast() {
+                let next = openat(descriptor, String(component), flags)
+                guard next >= 0 else { throw Self.openError() }
+                Darwin.close(descriptor)
+                descriptor = next
+                guard Self.isLocalVolume(descriptor) else {
+                    throw CocoaError(.fileReadUnsupportedScheme)
+                }
+            }
+        } catch {
+            Darwin.close(descriptor)
+            throw error
+        }
+        directory = descriptor
+        filename = String(name)
+        requiresLocalVolume = true
     }
 
     deinit {
@@ -25,9 +58,12 @@ nonisolated final class LocalRealmFrontFile: Sendable {
 
     func readArchive() throws -> Data {
         let descriptor = openat(directory, filename, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
-        guard descriptor >= 0 else { throw CocoaError(.fileReadNoPermission) }
+        guard descriptor >= 0 else { throw Self.openError() }
         let file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         defer { try? file.close() }
+        if requiresLocalVolume && !Self.isLocalVolume(descriptor) {
+            throw CocoaError(.fileReadUnsupportedScheme)
+        }
         var info = stat()
         let limit = 64 * 1024 * 1024
         guard fstat(descriptor, &info) == 0, info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
@@ -37,5 +73,21 @@ nonisolated final class LocalRealmFrontFile: Sendable {
             throw CocoaError(.fileReadCorruptFile)
         }
         return bytes
+    }
+
+    private static func openError() -> CocoaError {
+        switch errno {
+        case ENOENT:
+            return CocoaError(.fileReadNoSuchFile)
+        case ELOOP, ENOTDIR:
+            return CocoaError(.fileReadUnsupportedScheme)
+        default:
+            return CocoaError(.fileReadNoPermission)
+        }
+    }
+
+    private static func isLocalVolume(_ descriptor: Int32) -> Bool {
+        var volume = statfs()
+        return fstatfs(descriptor, &volume) == 0 && volume.f_flags & UInt32(MNT_LOCAL) != 0
     }
 }

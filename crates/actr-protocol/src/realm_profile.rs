@@ -86,7 +86,7 @@ pub enum RealmStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RealmPackage {
-    /// HTTPS download URL, or the filename hint for a local Front.
+    /// HTTPS download URL, or an absolute path or legacy filename hint for a local Front.
     pub href: String,
     /// Lowercase hex SHA-256 of the whole package, omitted only for a rebuildable local Front.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -116,13 +116,11 @@ impl RealmPackage {
     /// Check `href`, `sha256` and `type`.
     pub fn check(&self) -> Result<(), String> {
         if let Some(local) = &self.local_path {
-            if self.href.len() > 255
-                || self.href.trim() != self.href
-                || self.href.contains(['/', '\\', ':'])
-                || self.href.chars().any(char::is_control)
-                || self.href.strip_suffix(".actr").is_none_or(str::is_empty)
-            {
-                return Err("local package.href must be a .actr filename".into());
+            if !valid_local_front_href(&self.href) {
+                return Err(
+                    "local package.href must be a safe absolute .actr path or a legacy filename"
+                        .into(),
+                );
             }
             if !local
                 .signing_key_id
@@ -180,6 +178,58 @@ impl RealmPackage {
         crate::ActrType::from_program_identity(&self.r#type)
             .map_err(|error| format!("package.type: {error}"))
     }
+}
+
+fn valid_local_front_href(href: &str) -> bool {
+    let filename = href.rsplit('/').next().unwrap_or_default();
+    if href.trim() != href
+        || href.contains(['\\', ':'])
+        || href.chars().any(char::is_control)
+        || filename.strip_suffix(".actr").is_none_or(str::is_empty)
+    {
+        return false;
+    }
+
+    let Some(relative) = href.strip_prefix('/') else {
+        return href.len() <= 255 && !href.contains('/');
+    };
+    if href.len() > 1023
+        || href.contains('%')
+        || href.chars().any(|c| {
+            matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+        || relative
+            .split('/')
+            .any(|part| part.is_empty() || part.len() > 255 || matches!(part, "." | ".."))
+    {
+        return false;
+    }
+    let mut parts = relative.split('/');
+    let mut root = parts.next().unwrap_or_default().to_ascii_lowercase();
+    if root == "private" {
+        root = parts.next().unwrap_or_default().to_ascii_lowercase();
+    }
+    let system_directory = matches!(
+        root.as_str(),
+        "bin"
+            | "dev"
+            | "etc"
+            | "library"
+            | "net"
+            | "network"
+            | "proc"
+            | "root"
+            | "run"
+            | "sbin"
+            | "sys"
+            | "system"
+            | "usr"
+    );
+    let protected_var_directory = root == "var"
+        && parts.next().is_some_and(|part| {
+            matches!(part.to_ascii_lowercase().as_str(), "db" | "root" | "run")
+        });
+    !(system_directory || protected_var_directory)
 }
 
 // Parse the original RFC 3986 URI without repairing missing authorities (for

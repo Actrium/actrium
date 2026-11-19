@@ -11,6 +11,17 @@ interface RealmFormProps {
   onRefresh?: () => void;
 }
 
+function isSafeLocalFrontPath(value: string): boolean {
+  const bytes = new TextEncoder();
+  if (!value.startsWith("/") || value.trim() !== value || bytes.encode(value).length > 1023
+      || /[\\:%\p{Cc}\u200e\u200f\u202a-\u202e\u2066-\u2069]/u.test(value)) return false;
+  const components = value.slice(1).split("/");
+  const filename = components[components.length - 1] ?? "";
+  if (!filename.endsWith(".actr") || filename === ".actr"
+      || components.some((part) => !part || part === "." || part === ".." || bytes.encode(part).length > 255)) return false;
+  return !/^\/(?:private\/)?(?:bin|dev|etc|library|net|network|proc|root|run|sbin|sys|system|usr|var\/(?:db|root|run))(?:\/|$)/i.test(value);
+}
+
 /**
  * Creates a Realm. A Realm name is fixed at creation and never reused. A
  * Realm under the Provider domain gets a Loran-signed Realm Profile, which
@@ -23,7 +34,10 @@ export function RealmForm({ onSubmit, onClose, onRefresh, limit }: RealmFormProp
   const emptyPackage = { href: "", sha256: "", type: "" };
   const [service, setService] = useState(emptyPackage);
   const [front, setFront] = useState(emptyPackage);
-  const selectingPackages = Object.values(service).some(Boolean) || Object.values(front).some(Boolean);
+  const [localFront, setLocalFront] = useState(false);
+  const [frontKey, setFrontKey] = useState("");
+  const [allowRebuild, setAllowRebuild] = useState(false);
+  const selectingPackages = localFront || Object.values(service).some(Boolean) || Object.values(front).some(Boolean);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -54,13 +68,25 @@ export function RealmForm({ onSubmit, onClose, onRefresh, limit }: RealmFormProp
     setLoading(true);
 
     try {
+      if (localFront && !isSafeLocalFrontPath(front.href)) {
+        throw new Error("Enter a safe absolute local path ending in .actr, such as /Users/you/project/front.actr.");
+      }
+      const frontPackage = localFront
+        ? {
+            href: front.href,
+            type: front.type,
+            ...(allowRebuild ? {} : { sha256: front.sha256 }),
+            dependencies: { service: "service" },
+            local_path: { signing_key_id: frontKey, allow_rebuild: allowRebuild },
+          }
+        : front;
       const resp = await onSubmit({
         realm: name,
         policy,
         enabled: false,
         ...(displayName ? { display_name: displayName } : {}),
         ...(selectingPackages
-          ? { primary_package: "service", front_package: "front", packages: { service, front } }
+          ? { primary_package: "service", front_package: "front", packages: { service, front: frontPackage } }
           : {}),
       });
       if (resp.owner_invite) {
@@ -241,17 +267,39 @@ export function RealmForm({ onSubmit, onClose, onRefresh, limit }: RealmFormProp
           <div className="grid gap-3">
             {(["service", "front"] as const).map((role) => {
               const [pkg, setPackage] = role === "service" ? [service, setService] : [front, setFront];
+              const isLocal = role === "front" && localFront;
               return (
                 <fieldset key={role} className="grid gap-1">
                   <legend className="text-sm font-medium text-gray-700">{role === "service" ? "Service package" : "Front package"}</legend>
-                  {(["href", "sha256", "type"] as const).map((field) => (
-                    <input key={field} type={field === "href" ? "url" : "text"}
+                  {role === "front" && (
+                    <select aria-label="Front source" value={localFront ? "local" : "https"}
+                      onChange={(event) => setLocalFront(event.target.value === "local")}
+                      className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
+                      <option value="https">HTTPS release package</option>
+                      <option value="local">Local path</option>
+                    </select>
+                  )}
+                  {(["href", "sha256", "type"] as const).filter((field) => !(isLocal && allowRebuild && field === "sha256")).map((field) => (
+                    <input key={field} type={field === "href" && !isLocal ? "url" : "text"}
                       aria-label={role + " " + field} required={selectingPackages}
                       value={pkg[field]} pattern={field === "sha256" ? "[0-9a-f]{64}" : undefined}
-                      placeholder={{ href: "HTTPS download URL", sha256: "SHA-256 (64 lowercase hex digits)", type: "publisher.example/program@1.0.0" }[field]}
-                      onChange={(event) => setPackage({ ...pkg, [field]: event.target.value.trim() })}
+                      placeholder={{ href: isLocal ? "/Users/you/project/front.actr" : "HTTPS download URL", sha256: "SHA-256 (64 lowercase hex digits)", type: "publisher.example/program@1.0.0" }[field]}
+                      onChange={(event) => setPackage({ ...pkg, [field]: isLocal && field === "href" ? event.target.value : event.target.value.trim() })}
                       className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono" />
                   ))}
+                  {isLocal && (
+                    <>
+                      <input aria-label="Front signing key ID" required pattern="actr-pub-[0-9a-f]{16}"
+                        value={frontKey} onChange={(event) => setFrontKey(event.target.value.trim())}
+                        placeholder="Publisher signing key ID"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono" />
+                      <label className="flex items-center gap-2 text-sm text-gray-700">
+                        <input type="checkbox" checked={allowRebuild} onChange={(event) => setAllowRebuild(event.target.checked)} />
+                        Allow rebuilds signed by this key
+                      </label>
+                      <p className="text-xs text-gray-500">The signed Realm Profile includes the full path. Actrium asks before reading it.</p>
+                    </>
+                  )}
                 </fieldset>
               );
             })}
