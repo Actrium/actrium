@@ -177,6 +177,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// Callback when URL changes (including History.pushState/replaceState)
     var onURLChanged: ((URL?) -> Void)?
 
+    /// Callback when a clicked link is allowed to navigate this tab's main frame.
+    var onMainFrameLinkActivated: (() -> Void)?
+
     /// Callback when loading state changes
     var onLoadingStateChanged: ((Bool) -> Void)?
 
@@ -877,6 +880,10 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             return
         }
 
+        if navigationAction.navigationType == .linkActivated,
+           navigationAction.targetFrame?.isMainFrame == true {
+            onMainFrameLinkActivated?()
+        }
         decisionHandler(.allow)
     }
 
@@ -1669,6 +1676,7 @@ struct FocusedWebOverlay: View {
     init(tab: Tab, url: URL, viewportSize: CGSize,
          onNavigationFinished: ((String?, URL?) -> Void)? = nil,
          onURLChanged: ((URL?) -> Void)? = nil,
+         onMainFrameLinkActivated: (() -> Void)? = nil,
          onLoadingStateChanged: ((Bool) -> Void)? = nil,
          onOpenNewWindow: ((URL) -> Void)? = nil,
          onThemeColorChanged: ((String) -> Void)? = nil,
@@ -1689,6 +1697,7 @@ struct FocusedWebOverlay: View {
         // Set callbacks immediately in init (SwiftUI View init can be called multiple times)
         holder.onNavigationFinished = onNavigationFinished
         holder.onURLChanged = onURLChanged
+        holder.onMainFrameLinkActivated = onMainFrameLinkActivated
         holder.onLoadingStateChanged = onLoadingStateChanged
         holder.onOpenNewWindow = onOpenNewWindow
         holder.onThemeColorChanged = onThemeColorChanged

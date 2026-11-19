@@ -15,6 +15,9 @@ import CryptoKit
 /// Long-term target: unified verifyActrPackage FFI on actr-ffi + Publisher Registry
 /// (plan 15 IF-1).
 enum ActrPackageTrustStore {
+    /// Application support directory scoped to a test and the tasks it starts.
+    @TaskLocal static var supportDirectoryOverrideForTesting: URL?
+
     struct TrustedKey {
         /// Raw 32-byte Ed25519 public key.
         let publicKey: Data
@@ -30,7 +33,7 @@ enum ActrPackageTrustStore {
         // ~/.actr/dev-key.json is writable by any local process, so trusting it
         // in release builds would let anything bypass signature verification.
         // Keep it for development only (05 §14 local development signing key).
-        if allowsDevelopmentKeychain {
+        if supportDirectoryOverrideForTesting == nil, allowsDevelopmentKeychain {
             keys.append(contentsOf: loadFromDevKeychain())
         }
         return keys
@@ -44,11 +47,9 @@ enum ActrPackageTrustStore {
     /// Restart restore re-verifies with these keys instead of requiring a
     /// manually installed key.
     private static var verifiedPublishersFile: URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return support
+        let support = supportDirectory ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("Actrium", isDirectory: true)
-            .appendingPathComponent("verified-publishers.json", isDirectory: false)
+        return support.appendingPathComponent("verified-publishers.json", isDirectory: false)
     }
 
     /// Records publisher keys that successfully verified a package manifest
@@ -116,13 +117,16 @@ enum ActrPackageTrustStore {
 
     // MARK: - Sources
 
+    private static var supportDirectory: URL? {
+        supportDirectoryOverrideForTesting ?? FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Actrium", isDirectory: true)
+    }
+
     /// `~/Library/Application Support/Actrium/trusted-keys.json`
     private static func loadFromAppSupport() -> [TrustedKey] {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        guard let support else { return [] }
-        let file = support
-            .appendingPathComponent("Actrium", isDirectory: true)
-            .appendingPathComponent("trusted-keys.json", isDirectory: false)
+        guard let support = supportDirectory else { return [] }
+        let file = support.appendingPathComponent("trusted-keys.json", isDirectory: false)
         guard let data = try? Data(contentsOf: file),
               let entries = try? JSONSerialization.jsonObject(with: data) as? [[String: String]]
         else { return [] }

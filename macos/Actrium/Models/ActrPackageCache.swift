@@ -13,8 +13,8 @@ import Foundation
 ///
 /// Cached packages are capped at 2 GiB and evicted least recently used first.
 nonisolated enum ActrPackageCache {
-    /// Test-only cache root. Production code always uses the system caches directory.
-    nonisolated(unsafe) static var rootOverrideForTesting: URL?
+    /// Cache root scoped to a test and the tasks it starts.
+    @TaskLocal static var rootOverrideForTesting: URL?
 
     static let maxCacheBytes: Int64 = 2 * 1024 * 1024 * 1024
 

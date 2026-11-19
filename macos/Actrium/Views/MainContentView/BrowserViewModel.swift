@@ -131,9 +131,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// History view model reference for recording ACTR app visits
     weak var historyVM: HistoryViewModel?
     private let browserDataRepository = BrowserDataRepository.shared
+    private lazy var appRepository = AppRepository()
     private let saveBrowserSession: ([Tab], UUID?) -> Void
     private let fetchRealmDocument: @MainActor (URL, String) async throws -> Data
     private let joinOpenRealm: @MainActor (RealmJoinService.VerifiedProfile) async throws -> Void
+    private let joinRealmWithInvite: @MainActor (String) async throws -> RealmJoinResult
     private let downloadRealmArchive: @MainActor (URL) async throws -> URL
 
     var currentTab: Tab? {
@@ -143,8 +145,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     init(
         realmPreferences: UserDefaults = .standard,
+        appRepository: AppRepository? = nil,
         fetchRealmDocument: (@MainActor (URL, String) async throws -> Data)? = nil,
         joinOpenRealm: (@MainActor (RealmJoinService.VerifiedProfile) async throws -> Void)? = nil,
+        joinRealmWithInvite: (@MainActor (String) async throws -> RealmJoinResult)? = nil,
         downloadRealmArchive: (@MainActor (URL) async throws -> URL)? = nil,
         saveBrowserSession: @escaping ([Tab], UUID?) -> Void = { tabs, currentTabId in
             BrowserDataRepository.shared.saveSession(tabs: tabs, currentTabId: currentTabId)
@@ -153,8 +157,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         self.realmPreferences = realmPreferences
         self.fetchRealmDocument = fetchRealmDocument ?? Self.fetchBoundedDocument(from:insecureMessage:)
         self.joinOpenRealm = joinOpenRealm ?? { try await RealmJoinService.joinOpen($0, label: "Mac") }
+        self.joinRealmWithInvite = joinRealmWithInvite ?? { code in
+            try await RealmJoinService.joinWithInvite(inviteText: code, label: Host.current().localizedName ?? "Mac")
+        }
         self.downloadRealmArchive = downloadRealmArchive ?? { try await ActrPackageDownloadService.download(from: $0) }
         self.saveBrowserSession = saveBrowserSession
+        if let appRepository { self.appRepository = appRepository }
         // Initialize slot positions first
         initializeSlotPositions()
 
@@ -808,6 +816,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         persistBrowserPageSession()
     }
 
+    func webTabDidActivateLink(_ tabId: UUID) {
+        guard let tab = tabs.first(where: { $0.id == tabId }), case .web = tab.contentType else { return }
+        invalidateRealmNavigation(for: tabId)
+    }
+
     /// Update background color for a specific tab
     func updateTabBackgroundColor(for tabId: UUID, color: String) {
         guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
@@ -919,10 +932,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
                 if let bundleId = ActriumAppURLScheme.bundleId(from: url) {
                     logger.notice("📱 [navigateCurrentTab] Navigator to Actrium Apply (bundleId): \(bundleId)")
-                    let appRepo = AppRepository()
-                    if let app = appRepo.getByBundleId(bundleId) {
+                    if let app = appRepository.getByBundleId(bundleId) {
                         sourcePath = app.sourcePath
-                        appRepo.updateLastUsed(bundleId: bundleId)
+                        appRepository.updateLastUsed(bundleId: bundleId)
                     } else {
                         logger.warning("⚠️ [navigateCurrentTab] No applications found: \(bundleId)")
                         return
@@ -978,9 +990,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         } else {
             // Try to load as app bundle ID directly
             logger.notice("📱 [navigateCurrentTab] Try as bundle ID Load: \(trimmed)")
-            let appRepo = AppRepository()
-            if let app = appRepo.getByBundleId(trimmed) {
-                appRepo.updateLastUsed(bundleId: trimmed)
+            if let app = appRepository.getByBundleId(trimmed) {
+                appRepository.updateLastUsed(bundleId: trimmed)
                 loadActrPackageIntoCurrentTab(from: URL(fileURLWithPath: app.sourcePath), tabIndex: index)
             } else {
                 logger.warning("⚠️ [navigateCurrentTab] No applications found: \(trimmed)")
@@ -1116,14 +1127,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                             comment: "Actr join realm mismatch error")])
                 }
 
-                let result = try await RealmJoinService.joinWithInvite(
-                    inviteText: trimmedCode,
-                    label: Host.current().localizedName ?? "Mac"
-                )
-                guard isCurrentRealmLoad(load, for: pending.tabId),
-                      let index = tabs.firstIndex(where: { $0.id == pending.tabId }) else { return }
+                let result = try await joinRealmWithInvite(trimmedCode)
                 markRedeemed(result.realmName)
                 logger.notice("🎟️ [InviteRedeem] joined \(result.realmName): member=\(result.memberId), role=\(result.role), key=\(result.keyId)")
+                guard isCurrentRealmLoad(load, for: pending.tabId),
+                      let index = tabs.firstIndex(where: { $0.id == pending.tabId }) else { return }
                 let address = result.instanceURL.absoluteString
                 let info = try ActriumCore.parseActrUri(uri: address, installationId: InstallationIdProvider.getOrCreate())
                 handleResolvedRealmLink(info, input: address, tabIndex: index)
@@ -2022,8 +2030,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     private func schedulePackageCacheEviction() {
         guard let appDelegate = NSApplication.shared.delegate as? AppDelegate else { return }
         let protectedDigests = appDelegate.protectedPackageDigests()
+        let cacheRootOverride = ActrPackageCache.rootOverrideForTesting
         Task.detached(priority: .utility) {
-            _ = ActrPackageCache.evictIfNeeded(protectedDigests: protectedDigests)
+            ActrPackageCache.$rootOverrideForTesting.withValue(cacheRootOverride) {
+                _ = ActrPackageCache.evictIfNeeded(protectedDigests: protectedDigests)
+            }
         }
     }
 
@@ -2415,7 +2426,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// actro://<bundleId> resolves via AppRepository; actro:///path is a direct path.
     private func actroSourcePath(for url: URL) -> String? {
         if let bundleId = ActriumAppURLScheme.bundleId(from: url) {
-            return AppRepository().getByBundleId(bundleId)?.sourcePath
+            return appRepository.getByBundleId(bundleId)?.sourcePath
         }
         return url.path
     }
@@ -2585,17 +2596,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         sourcePath: String,
         icon: String?
     ) {
-        let appRepo = AppRepository()
-
         // Check if already registered
-        if let existing = appRepo.getByBundleId(bundleId) {
+        if let existing = appRepository.getByBundleId(bundleId) {
             // Update existing entry
             var updated = existing
             updated.sourcePath = sourcePath
             if let v = version { updated.version = v }
             if let d = description { updated.description = d }
             if let i = icon { updated.icon = i }
-            appRepo.update(updated)
+            appRepository.update(updated)
             logger.notice("📱 [registerApp] Update application: \(bundleId)")
         } else {
             // Create new entry
@@ -2608,7 +2617,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 sourcePath: sourcePath,
                 icon: icon
             )
-            appRepo.add(app)
+            appRepository.add(app)
             logger.notice("📱 [registerApp] Register new applications: \(bundleId) -> \(sourcePath)")
         }
     }

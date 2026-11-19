@@ -1,6 +1,7 @@
 import ActriumCore
 import CryptoKit
 import Foundation
+import WebKit
 import XCTest
 
 @testable import Actrium
@@ -89,10 +90,77 @@ final class RealmAdmissionTests: XCTestCase {
     }
 
     @MainActor
+    func testMainFrameWebLinkSupersedesAPendingRealmLoad() async throws {
+        try await assertNoEnrollment { view in
+            let tabId = try XCTUnwrap(view.currentTabId)
+            let holder = WebViewHolder()
+            let pageReady = expectation(description: "The previous page finished loading")
+            holder.onNavigationFinished = { _, _ in pageReady.fulfill() }
+            let linkActivated = expectation(description: "WebKit allowed the main-frame link")
+            var activationCount = 0
+            holder.onMainFrameLinkActivated = {
+                view.webTabDidActivateLink(tabId)
+                activationCount += 1
+                linkActivated.fulfill()
+            }
+            _ = holder.webView.loadHTMLString(#"<a href="about:blank?next">Next</a>"#, baseURL: nil)
+            await fulfillment(of: [pageReady], timeout: 5)
+            holder.onNavigationFinished = nil
+            XCTAssertEqual(activationCount, 0)
+
+            _ = try await holder.webView.evaluateJavaScript("document.querySelector('a').click()")
+            await fulfillment(of: [linkActivated], timeout: 5)
+        }
+    }
+
+    @MainActor
     func testClosingWindowInvalidatesAPendingRealmLoad() async throws {
         try await assertNoEnrollment { view in
             view.invalidateRealmNavigationForWindowClose()
         }
+    }
+
+    @MainActor
+    func testInviteRedemptionPersistsAfterNavigatingAway() async throws {
+        let preferences = try makePreferences()
+        let documents = try discoveryDocuments(membership: "invite-only")
+        let inviteBody = try JSONSerialization.data(withJSONObject: [
+            "schema": "actr.realm-invite/v1",
+            "realm": realmName,
+            "secret": base64URL(Data(repeating: 1, count: 32))
+        ])
+        let inviteText = "ri_" + base64URL(inviteBody)
+        let instanceURL = try XCTUnwrap(URL(string: realmURI))
+        let join = NavigationGate()
+        defer { join.release() }
+        let unexpectedDiscovery = expectation(description: "A stale redemption must not reopen the Realm")
+        unexpectedDiscovery.isInverted = true
+        let view = BrowserViewModel(
+            realmPreferences: preferences,
+            fetchRealmDocument: { url, _ in
+                if join.waiting { unexpectedDiscovery.fulfill() }
+                return try XCTUnwrap(documents[url.absoluteString])
+            },
+            joinRealmWithInvite: { code in
+                XCTAssertEqual(code, inviteText)
+                await join.wait()
+                return RealmJoinResult(
+                    realmName: self.realmName, memberId: "member", role: "viewer", keyId: "key", instanceURL: instanceURL
+                )
+            },
+            saveBrowserSession: { _, _ in }
+        )
+        view.navigateCurrentTab(to: realmURI)
+        try await waitUntil { view.pendingInviteRedeem != nil }
+        view.confirmInviteRedeem(try XCTUnwrap(view.pendingInviteRedeem), code: inviteText)
+        try await waitUntil { join.waiting }
+        view.navigateCurrentTab(to: "https://new.example/")
+        join.release()
+
+        try await waitUntil { preferences.stringArray(forKey: "actr.redeemedRealms") == [self.realmName] }
+        await fulfillment(of: [unexpectedDiscovery], timeout: 0.25)
+        XCTAssertEqual(view.currentTab?.url?.absoluteString, "https://new.example/")
+        XCTAssertNil(view.pendingInviteRedeem)
     }
 
     @MainActor
@@ -101,9 +169,13 @@ final class RealmAdmissionTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: directory) }
         let fixture = try makeFrontArchive(in: directory)
-        var documents = try discoveryDocuments(
-            membership: "open", frontDigest: digest(Data(contentsOf: fixture.archive))
-        )
+        let frontDigest = try digest(Data(contentsOf: fixture.archive))
+        let cacheDirectory = directory.appendingPathComponent("cache", isDirectory: true)
+        let trustDirectory = directory.appendingPathComponent("trust", isDirectory: true)
+        let publisherStore = trustDirectory.appendingPathComponent("verified-publishers.json")
+        let apps = AppRepository(database: DatabaseManager(path: ":memory:"))
+        let appId = "publisher.example/echo-front@1.0.0"
+        var documents = try discoveryDocuments(membership: "open", frontDigest: frontDigest)
         documents["https://publisher.example/.well-known/actr"] = try JSONSerialization.data(withJSONObject: [
             "publisher": ["keys": [[
                 "id": fixture.keyId, "public_key": fixture.publicKey.base64EncodedString(), "status": "active"
@@ -115,6 +187,7 @@ final class RealmAdmissionTests: XCTestCase {
         var downloads = 0
         let view = BrowserViewModel(
             realmPreferences: try makePreferences(),
+            appRepository: apps,
             fetchRealmDocument: { url, _ in
                 if url.host == "publisher.example" { XCTAssertTrue(joined) }
                 return try XCTUnwrap(documents[url.absoluteString])
@@ -135,7 +208,12 @@ final class RealmAdmissionTests: XCTestCase {
         view.navigateCurrentTab(to: "https://old.example/")
         let tabId = try XCTUnwrap(view.currentTabId)
         defer { RealmServiceBindings.shared.remove(tabId) }
-        view.navigateCurrentTab(to: realmURI)
+        let cachedArchive = ActrPackageCache.$rootOverrideForTesting.withValue(cacheDirectory) {
+            ActrPackageTrustStore.$supportDirectoryOverrideForTesting.withValue(trustDirectory) {
+                view.navigateCurrentTab(to: realmURI)
+            }
+            return ActrPackageCache.archiveURL(forDigest: frontDigest)
+        }
         try await waitUntil { join.waiting }
         XCTAssertEqual(view.currentTab?.url?.absoluteString, "https://old.example/")
         XCTAssertNil(view.currentTab?.appId)
@@ -145,16 +223,22 @@ final class RealmAdmissionTests: XCTestCase {
         try await waitUntil { view.currentTab?.appId != nil }
         XCTAssertEqual(view.currentTabId, tabId)
         XCTAssertEqual(view.currentTab?.url?.absoluteString, realmURI)
-        XCTAssertEqual(view.currentTab?.appId, "publisher.example/echo-front@1.0.0")
+        XCTAssertEqual(view.currentTab?.appId, appId)
         XCTAssertEqual(view.currentTab?.unifiedScript, fixture.script)
         XCTAssertEqual(downloads, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cachedArchive.path))
+        XCTAssertEqual(apps.getByBundleId(appId)?.sourcePath, cachedArchive.standardizedFileURL.path)
+        let pinnedKeys = try JSONDecoder().decode([String: [[String: String]]].self, from: Data(contentsOf: publisherStore))
+        XCTAssertEqual(pinnedKeys["publisher.example"], [[
+            "public_key": fixture.publicKey.base64EncodedString(), "key_id": fixture.keyId
+        ]])
 
         view.updateTabURL(for: tabId, url: try XCTUnwrap(URL(string: "https://old.example/late")))
         XCTAssertEqual(view.currentTab?.url?.absoluteString, realmURI)
     }
 
     @MainActor
-    private func assertNoEnrollment(after supersede: (BrowserViewModel) -> Void) async throws {
+    private func assertNoEnrollment(after supersede: @MainActor (BrowserViewModel) async throws -> Void) async throws {
         let documents = try discoveryDocuments(membership: "open")
         let profile = NavigationGate()
         let unwantedWork = expectation(description: "A superseded load must not enroll or download a Front")
@@ -176,9 +260,10 @@ final class RealmAdmissionTests: XCTestCase {
             saveBrowserSession: { _, _ in }
         )
         defer { profile.release() }
+        view.navigateCurrentTab(to: "https://old.example/")
         view.navigateCurrentTab(to: realmURI)
         try await waitUntil { profile.waiting }
-        supersede(view)
+        try await supersede(view)
         profile.release()
         await fulfillment(of: [unwantedWork], timeout: 0.25)
         XCTAssertNil(view.currentTab?.appId)
@@ -342,6 +427,13 @@ final class RealmAdmissionTests: XCTestCase {
 
     private func digest(_ bytes: Data) -> String {
         SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func base64URL(_ bytes: Data) -> String {
+        bytes.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
 
