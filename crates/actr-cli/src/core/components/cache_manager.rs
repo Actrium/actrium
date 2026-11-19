@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use super::{CacheManager, CacheStats, CachedProto, Fingerprint, ProtoFile};
@@ -139,7 +140,9 @@ impl CacheManager for DefaultCacheManager {
             };
             let file_name = Self::validate_component(&file_name, "proto file name")?;
             let file_path = staging.path().join(file_name);
-            std::fs::write(&file_path, &file.content)?;
+            std::fs::File::create_new(&file_path)
+                .and_then(|mut staged| staged.write_all(file.content.as_bytes()))
+                .with_context(|| format!("failed to stage Proto `{file_name}`"))?;
             tracing::debug!(
                 "Cached proto file: {} -> {}",
                 file.name,

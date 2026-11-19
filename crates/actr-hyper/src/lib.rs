@@ -845,6 +845,19 @@ impl Node<Init> {
         front: &WorkloadPackage,
         service_type: &actr_protocol::ActrType,
     ) -> HyperResult<Node<Attached>> {
+        self.attach_front_with_events(front, service_type, None)
+            .await
+    }
+
+    /// Register a Front with a host-side business-event route. Services publish
+    /// an event as a reliable Tell whose route is the declared event name and
+    /// whose payload is the unmodified business payload.
+    pub async fn attach_front_with_events(
+        self,
+        front: &WorkloadPackage,
+        service_type: &actr_protocol::ActrType,
+        events: Option<FrontEventRouter>,
+    ) -> HyperResult<Node<Attached>> {
         let front_identity = verify_package_for_hyper(&self.hyper, front.bytes()).await?;
         let RuntimePackageManifest::V2(front_manifest) = &front_identity.manifest else {
             return Err(HyperError::InvalidManifest(
@@ -859,7 +872,7 @@ impl Node<Init> {
         )?;
         let mut attached = self
             .with_actor_type(front_identity.manifest.actor_type())
-            .link(FrontWorkload)
+            .link(FrontWorkload { events })
             .await?;
         let attachment = attached.attachment.as_mut().expect("attached Front");
         attachment.verified = Some(front_identity);
@@ -1111,7 +1124,98 @@ impl Node<Init> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-struct FrontWorkload;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrontServiceEvent {
+    pub event: String,
+    pub payload: bytes::Bytes,
+}
+
+/// Host callback for Service business events delivered to a Front actor.
+/// Synchronous so the embedding host can capture subscription ownership at the
+/// acceptance boundary, before any executor hop can observe a replacement.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait FrontEventListener: Send + Sync + 'static {
+    fn on_event(&self, event: FrontServiceEvent);
+}
+
+/// Authenticates and filters inbound Service events before they cross into the
+/// embedding host. The selected Service is set after discovery; no peer is
+/// trusted by default, including when a Front has declared event names.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+pub struct FrontEventRouter {
+    inner: std::sync::Arc<FrontEventRouterInner>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct FrontEventRouterInner {
+    events: std::collections::HashSet<String>,
+    service: std::sync::Mutex<Option<actr_protocol::ActrId>>,
+    listener: std::sync::Arc<dyn FrontEventListener>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl FrontEventRouter {
+    pub fn new(
+        events: impl IntoIterator<Item = String>,
+        listener: std::sync::Arc<dyn FrontEventListener>,
+    ) -> Self {
+        Self {
+            inner: std::sync::Arc::new(FrontEventRouterInner {
+                events: events.into_iter().collect(),
+                service: std::sync::Mutex::new(None),
+                listener,
+            }),
+        }
+    }
+
+    /// Replace the discovered Service identity. Passing `None` suspends event
+    /// delivery without discarding the Front's declared event allowlist.
+    pub fn set_service(&self, service: Option<actr_protocol::ActrId>) {
+        *self
+            .inner
+            .service
+            .lock()
+            .expect("Front Service event lock poisoned") = service;
+    }
+
+    fn accept(
+        &self,
+        envelope: &actr_protocol::RpcEnvelope,
+        caller: Option<&actr_protocol::ActrId>,
+    ) -> Option<FrontServiceEvent> {
+        if envelope.direction != Some(actr_protocol::Direction::Tell as i32)
+            || !self.inner.events.contains(&envelope.route_key)
+        {
+            return None;
+        }
+        let service = self
+            .inner
+            .service
+            .lock()
+            .expect("Front Service event lock poisoned")
+            .clone();
+        match (caller, service.as_ref()) {
+            (Some(caller), Some(service)) if caller == service => {}
+            // An in-process Tell may have no authenticated caller. Never let
+            // two absent identities compare equal and select an arbitrary peer.
+            _ => return None,
+        }
+        Some(FrontServiceEvent {
+            event: envelope.route_key.clone(),
+            payload: envelope.payload.clone().unwrap_or_default(),
+        })
+    }
+
+    fn deliver(&self, event: FrontServiceEvent) {
+        self.inner.listener.on_event(event);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct FrontWorkload {
+    events: Option<FrontEventRouter>,
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 impl actr_framework::Workload for FrontWorkload {
@@ -1124,18 +1228,103 @@ impl actr_framework::MessageDispatcher for FrontWorkload {
     type Workload = Self;
 
     async fn dispatch<C: actr_framework::Context>(
-        _: &Self,
-        _: actr_protocol::RpcEnvelope,
-        _: &C,
+        workload: &Self,
+        envelope: actr_protocol::RpcEnvelope,
+        ctx: &C,
     ) -> actr_protocol::ActorResult<bytes::Bytes> {
+        if envelope.direction == Some(actr_protocol::Direction::Tell as i32)
+            && let Some(events) = &workload.events
+        {
+            if let Some(event) = events.accept(&envelope, ctx.caller_id()) {
+                events.deliver(event);
+            }
+            // Tell has no response body. Undeclared events and events from any
+            // other peer are acknowledged but never exposed to the Host.
+            return Ok(bytes::Bytes::new());
+        }
         Err(actr_protocol::ActrError::NotImplemented(
             "A Realm Front does not serve RPCs".into(),
         ))
     }
 }
 
-// ── State transition: Attached → Registered ──────────────────────────────────
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod front_event_tests {
+    use super::*;
 
+    struct NoopListener;
+
+    impl FrontEventListener for NoopListener {
+        fn on_event(&self, _: FrontServiceEvent) {}
+    }
+
+    fn envelope(route: &str, direction: actr_protocol::Direction) -> actr_protocol::RpcEnvelope {
+        actr_protocol::RpcEnvelope {
+            route_key: route.into(),
+            payload: Some(bytes::Bytes::from_static(&[0, 1, 2])),
+            direction: Some(direction as i32),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn front_events_require_the_selected_service_and_declared_route() {
+        let router = FrontEventRouter::new(
+            ["counter.changed".into()],
+            std::sync::Arc::new(NoopListener),
+        );
+        let service = actr_protocol::ActrId {
+            realm: "realm@example.com".into(),
+            serial_number: 7,
+        };
+        let other = actr_protocol::ActrId {
+            serial_number: 8,
+            ..service.clone()
+        };
+        let event = envelope("counter.changed", actr_protocol::Direction::Tell);
+
+        assert!(router.accept(&event, Some(&service)).is_none());
+        assert!(router.accept(&event, None).is_none());
+        router.set_service(Some(service.clone()));
+        assert!(router.accept(&event, Some(&other)).is_none());
+        assert!(router.accept(&event, None).is_none());
+        assert!(
+            router
+                .accept(
+                    &envelope("other", actr_protocol::Direction::Tell),
+                    Some(&service)
+                )
+                .is_none()
+        );
+        assert!(
+            router
+                .accept(&event, Some(&service))
+                .is_some_and(|event| event.payload.as_ref() == [0, 1, 2])
+        );
+        assert!(
+            router
+                .accept(
+                    &envelope("counter.changed", actr_protocol::Direction::Request),
+                    Some(&service)
+                )
+                .is_none()
+        );
+
+        let restarted = actr_protocol::ActrId {
+            serial_number: 9,
+            ..service.clone()
+        };
+        router.set_service(Some(restarted.clone()));
+        assert!(router.accept(&event, Some(&service)).is_none());
+        assert!(router.accept(&event, Some(&restarted)).is_some());
+
+        router.set_service(None);
+        assert!(router.accept(&event, Some(&service)).is_none());
+        assert!(router.accept(&event, None).is_none());
+    }
+}
+
+// ── State transition: Attached → Registered ──────────────────────────────────
 #[cfg(not(target_arch = "wasm32"))]
 impl Node<Attached> {
     /// Use a platform-managed membership key for initial registration and all
@@ -1589,22 +1778,38 @@ pub(crate) async fn load_workload_package_inner(
             (binary_kind, workload, packaged_lock, None)
         }
         RuntimePackageManifest::V2(manifest) => {
-            let grants =
-                package_runtime::resolve_component_host_grants(manifest, configured_wasi_data)?;
+            let native = manifest.workload.profile == "actr.native/1";
+            let grants = if native {
+                package_runtime::validate_native_host(manifest)?;
+                None
+            } else {
+                package_runtime::resolve_component_host_grants(manifest, configured_wasi_data)?
+            };
             let packaged_lock = package_runtime::read_v2_lock(bytes, manifest, max_bytes)?;
             let service_spec = service_spec::calculate_v2_service_spec(bytes, manifest, max_bytes)?;
-            let wasm_bytes = manifest
+            let binary = manifest
                 .read_declared_file(bytes, &manifest.workload.entry, max_bytes)
                 .map_err(|e| HyperError::InvalidManifest(e.to_string()))?;
-            let workload = instantiate_wasm_component(
-                inner,
-                wasm_bytes,
-                &manifest.workload.entry,
-                manifest.actor_type(),
-                grants,
-            )
-            .await?;
-            (BinaryKind::Wasm, workload, packaged_lock, service_spec)
+            let actor_type = manifest.actor_type();
+            let (binary_kind, workload) = if native {
+                (
+                    BinaryKind::DynClib,
+                    load_v2_dynclib(inner, &binary, actor_type)?,
+                )
+            } else {
+                (
+                    BinaryKind::Wasm,
+                    instantiate_wasm_component(
+                        inner,
+                        binary,
+                        &manifest.workload.entry,
+                        actor_type,
+                        grants,
+                    )
+                    .await?,
+                )
+            };
+            (binary_kind, workload, packaged_lock, service_spec)
         }
     };
     Ok(LoadedWorkload {
@@ -1614,6 +1819,51 @@ pub(crate) async fn load_workload_package_inner(
         packaged_lock,
         v2_service_spec,
     })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_v2_dynclib(
+    _inner: &HyperInner,
+    binary: &[u8],
+    actor_type: String,
+) -> HyperResult<crate::workload::Workload> {
+    #[cfg(feature = "dynclib-engine")]
+    {
+        use sha2::{Digest, Sha256};
+        let hash: [u8; 32] = Sha256::digest(binary).into();
+        let path = v2_dynclib_cache_path(&_inner.config.data_dir, &hash);
+        ensure_v2_dynclib_cache_file(&path, binary)?;
+        let host = crate::dynclib::DynclibHost::load(&path)
+            .map_err(|e| HyperError::Runtime(format!("failed to load native package: {e}")))?;
+        instantiate_dynclib_workload(host, actor_type, "native package")
+    }
+    #[cfg(not(feature = "dynclib-engine"))]
+    {
+        let _ = (binary, actor_type);
+        Err(HyperError::Runtime(
+            "native package requires the `dynclib-engine` feature".into(),
+        ))
+    }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
+fn instantiate_dynclib_workload(
+    host: crate::dynclib::DynclibHost,
+    actor_type: String,
+    context: impl std::fmt::Display,
+) -> HyperResult<crate::workload::Workload> {
+    let instance = host
+        .instantiate(&actr_framework::guest::dynclib_abi::InitPayloadV1 {
+            version: actr_framework::guest::dynclib_abi::version::V1,
+            actr_type: actor_type,
+            credential: Vec::new(),
+            actor_id: Vec::new(),
+            realm: String::new(),
+        })
+        .map_err(|e| HyperError::Runtime(format!("failed to initialize {context}: {e}")))?;
+    Ok(crate::workload::Workload::DynClib(
+        crate::dynclib::DynClibWorkload::new(host, instance),
+    ))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1721,24 +1971,11 @@ fn load_dynclib_workload_inner(
     {
         let cache_path = ensure_dynclib_cache_path(&_inner.config.data_dir, bytes, manifest)?;
         let host = load_dynclib_host_with_rebuild(&cache_path, bytes, manifest)?;
-        let instance = host
-            .instantiate(&actr_framework::guest::dynclib_abi::InitPayloadV1 {
-                version: actr_framework::guest::dynclib_abi::version::V1,
-                actr_type: manifest.actr_type_str(),
-                credential: Vec::new(),
-                actor_id: Vec::new(),
-                realm: String::new(),
-            })
-            .map_err(|e| {
-                HyperError::Runtime(format!(
-                    "failed to initialize dynclib package target `{}`: {e}",
-                    manifest.binary.target
-                ))
-            })?;
-
-        Ok(crate::workload::Workload::DynClib(
-            crate::dynclib::DynClibWorkload::new(host, instance),
-        ))
+        instantiate_dynclib_workload(
+            host,
+            manifest.actr_type_str(),
+            format_args!("dynclib package target `{}`", manifest.binary.target),
+        )
     }
 
     #[cfg(not(feature = "dynclib-engine"))]
@@ -2053,6 +2290,15 @@ fn dynclib_cache_path(data_dir: &Path, binary_hash: &[u8; 32]) -> PathBuf {
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
+fn v2_dynclib_cache_path(data_dir: &Path, binary_hash: &[u8; 32]) -> PathBuf {
+    dynclib_cache_dir(data_dir).join("v2").join(format!(
+        "{}{}",
+        hex::encode(binary_hash),
+        dynclib_tempfile_suffix()
+    ))
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
 fn extract_dynclib_binary(bytes: &[u8], manifest: &PackageManifest) -> HyperResult<Vec<u8>> {
     actr_pack::load_binary(bytes).map_err(|e| {
         HyperError::Runtime(format!(
@@ -2063,7 +2309,10 @@ fn extract_dynclib_binary(bytes: &[u8], manifest: &PackageManifest) -> HyperResu
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
-fn write_dynclib_cache_file(cache_path: &Path, binary_bytes: &[u8]) -> HyperResult<()> {
+fn stage_dynclib_cache_file(
+    cache_path: &Path,
+    binary_bytes: &[u8],
+) -> HyperResult<tempfile::NamedTempFile> {
     let cache_dir = cache_path.parent().ok_or_else(|| {
         HyperError::Runtime("dynclib cache path has no parent directory".to_string())
     })?;
@@ -2096,8 +2345,12 @@ fn write_dynclib_cache_file(cache_path: &Path, binary_bytes: &[u8]) -> HyperResu
             temp_file.path().display()
         ))
     })?;
+    Ok(temp_file)
+}
 
-    match temp_file.persist_noclobber(cache_path) {
+#[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
+fn write_dynclib_cache_file(cache_path: &Path, binary_bytes: &[u8]) -> HyperResult<()> {
+    match stage_dynclib_cache_file(cache_path, binary_bytes)?.persist_noclobber(cache_path) {
         Ok(_) => Ok(()),
         Err(err) if err.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(err) => Err(HyperError::Runtime(format!(
@@ -2106,6 +2359,63 @@ fn write_dynclib_cache_file(cache_path: &Path, binary_bytes: &[u8]) -> HyperResu
             err.error
         ))),
     }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
+fn v2_dynclib_cache_matches(path: &Path, binary: &[u8]) -> bool {
+    use std::io::Read;
+
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() || metadata.len() != binary.len() as u64 {
+        return false;
+    }
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut offset = 0;
+    let mut buffer = [0u8; 8192];
+    while offset < binary.len() {
+        let Ok(count) = file.read(&mut buffer) else {
+            return false;
+        };
+        if count == 0
+            || count > binary.len() - offset
+            || buffer[..count] != binary[offset..offset + count]
+        {
+            return false;
+        }
+        offset += count;
+    }
+    matches!(file.read(&mut buffer[..1]), Ok(0))
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]
+fn ensure_v2_dynclib_cache_file(path: &Path, binary: &[u8]) -> HyperResult<()> {
+    if v2_dynclib_cache_matches(path, binary) {
+        return Ok(());
+    }
+
+    // Replace the directory entry atomically so concurrent loaders can keep opening it.
+    let persisted = stage_dynclib_cache_file(path, binary)?
+        .into_temp_path()
+        .persist(path);
+    // A concurrent repair may already have published the verified bytes, even if
+    // replacement failed (for example, when Windows has the repaired library open).
+    if v2_dynclib_cache_matches(path, binary) {
+        return Ok(());
+    }
+    persisted.map_err(|err| {
+        HyperError::Runtime(format!(
+            "failed to persist native cache file `{}`: {}",
+            path.display(),
+            err.error
+        ))
+    })?;
+    Err(HyperError::Runtime(
+        "native cache does not match the verified package".into(),
+    ))
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "dynclib-engine"))]

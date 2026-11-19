@@ -35,7 +35,27 @@ final class DocumentSelection: NSObject {
 }
 
 @objc(RealmService)
-final class RealmService: NSObject {
+final class RealmService: RCTEventEmitter {
+    private static weak var instance: RealmService?
+    private var hasListeners = false
+
+    override init() {
+        super.init()
+        RealmService.instance = self
+    }
+
+    static func emit(_ event: RealmServiceEvent, tabId: String) {
+        DispatchQueue.main.async {
+            guard let instance, instance.hasListeners else { return }
+            instance.sendEvent(withName: "realmServiceEvent", body: [
+                "tabId": tabId,
+                "subscriptionId": event.subscriptionId.uuidString,
+                "event": event.event,
+                "payloadBase64": event.payload.base64EncodedString(),
+            ])
+        }
+    }
+
     @objc(call:route:payloadBase64:timeoutMs:resolver:rejecter:)
     func call(
         _ tabId: String,
@@ -65,6 +85,34 @@ final class RealmService: NSObject {
                         return NSError(domain: failure.domain ?? "RealmService", code: 1, userInfo: userInfo)
                     }
                     reject("realm_service_call_failed", response.error ?? "The Service call failed.", error)
+                }
+            }
+        }
+    }
+
+    @objc(subscribeServiceEvents:events:resolver:rejecter:)
+    func subscribeServiceEvents(
+        _ tabId: String,
+        events: [String],
+        resolver resolve: @escaping RCTPromiseResolveBlock,
+        rejecter reject: @escaping RCTPromiseRejectBlock
+    ) {
+        guard !events.isEmpty, events.allSatisfy({ !$0.isEmpty }) else {
+            reject("invalid_service_event", "A Service event subscription needs declared event names.", nil)
+            return
+        }
+        let subscription = RealmServiceEventSubscription(id: UUID(), events: events)
+        DispatchQueue.main.async {
+            RendererProcessController.subscribeRealmServiceEvents(
+                tabId: tabId, subscription: subscription
+            ) { response in
+                if let failure = response.failure {
+                    reject(failure.code, failure.message, NSError(
+                        domain: failure.domain ?? "RealmService", code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: failure.message]
+                    ))
+                } else {
+                    resolve(subscription.id.uuidString)
                 }
             }
         }
@@ -161,6 +209,20 @@ final class RealmService: NSObject {
         }
     }
 
+    @objc(unsubscribeServiceEvents:subscriptionId:)
+    func unsubscribeServiceEvents(_ tabId: String, subscriptionId: String) {
+        guard let id = UUID(uuidString: subscriptionId) else { return }
+        DispatchQueue.main.async {
+            RendererProcessController.unsubscribeRealmServiceEvents(
+                tabId: tabId, subscriptionId: id
+            )
+        }
+    }
+
+    override func supportedEvents() -> [String]! { ["realmServiceEvent"] }
+    override func startObserving() { hasListeners = true }
+    override func stopObserving() { hasListeners = false }
+
     /// Reports whether the owning tab has a Realm Service binding that permits
     /// the fixed upload transport. The Guest preflight uses this instead of
     /// assuming the browser-wide native module implies a usable tab.
@@ -182,7 +244,7 @@ final class RealmService: NSObject {
         }
     }
 
-    @objc static func requiresMainQueueSetup() -> Bool { false }
+    @objc override static func requiresMainQueueSetup() -> Bool { true }
 }
 
 // MARK: - Attachment upload validation helpers
