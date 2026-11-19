@@ -205,7 +205,7 @@ async fn register_actr(State(state): State<IssuerState>, headers: HeaderMap, bod
     }
 
     let pool = platform::storage::db::get_database().get_pool();
-    if let Err(error) = check_service_owner(pool, &request, &signer).await {
+    if let Err(error) = check_realm_registration(pool, &request, &signer).await {
         return encode_result(RegisterResponse {
             result: Some(register_response::Result::Error(error)),
         });
@@ -345,33 +345,18 @@ async fn authenticate_client(
 /// Only the owner registers the Realm's Service: an Actor whose publisher
 /// and program are those of the selected primary package, any version.
 /// Reads the Profile on `db`, which may be the registration transaction.
-async fn check_service_owner<'e>(
+async fn check_realm_registration<'e>(
     db: impl sqlx::SqliteExecutor<'e>,
     request: &RegisterRequest,
     signer: &Signer,
 ) -> Result<(), ErrorResponse> {
-    let document: Option<String> =
-        sqlx::query_scalar("SELECT document FROM realm_profile WHERE realm = ?")
-            .bind(&request.realm)
-            .fetch_optional(db)
-            .await
-            .map_err(|error| membership_error("unavailable", error))?;
-    // Realms without a Profile have no selected Service.
-    let Some(document) = document else {
+    let Some(document) = realm_profile_document(db, &request.realm).await? else {
         return Ok(());
     };
+    let selection = realm_package_selection(document)?;
     let invalid = |message: String| membership_error("realm_unavailable", message);
-    let selection: actr_protocol::realm_profile::RealmPackageSelection =
-        actr_protocol::signed_json::parse(document.as_bytes())
-            .and_then(serde_json::from_value)
-            .map_err(|e| invalid(format!("invalid stored Realm selection: {e}")))?;
-    selection.check().map_err(invalid)?;
-    let service = selection
-        .selected()
-        .map_err(invalid)?
-        .0
-        .actr_type()
-        .map_err(invalid)?;
+    let (service, front) = selection.selected().map_err(invalid)?;
+    let service = service.actr_type().map_err(invalid)?;
     if signer.role != Role::Owner
         && service.publisher == request.actr_type.publisher
         && service.name == request.actr_type.name
@@ -380,6 +365,97 @@ async fn check_service_owner<'e>(
             "service_owner_only",
             "only the Realm owner registers the Realm's Service",
         ));
+    }
+    check_front_manifest_pin(front, request)
+}
+
+async fn realm_profile_document<'e>(
+    db: impl sqlx::SqliteExecutor<'e>,
+    realm: &str,
+) -> Result<Option<serde_json::Value>, ErrorResponse> {
+    let document: Option<String> =
+        sqlx::query_scalar("SELECT document FROM realm_profile WHERE realm = ?")
+            .bind(realm)
+            .fetch_optional(db)
+            .await
+            .map_err(|error| membership_error("unavailable", error))?;
+    document
+        .map(|document| {
+            actr_protocol::signed_json::parse(document.as_bytes())
+                .map_err(|error| membership_error("realm_unavailable", error))
+        })
+        .transpose()
+}
+
+fn realm_package_selection(
+    document: serde_json::Value,
+) -> Result<actr_protocol::realm_profile::RealmPackageSelection, ErrorResponse> {
+    let invalid = |message: String| membership_error("realm_unavailable", message);
+    let selection: actr_protocol::realm_profile::RealmPackageSelection =
+        serde_json::from_value(document)
+            .map_err(|e| invalid(format!("invalid stored Realm selection: {e}")))?;
+    selection.check().map_err(invalid)?;
+    Ok(selection)
+}
+
+pub(crate) async fn check_realm_front_pin<'e>(
+    db: impl sqlx::SqliteExecutor<'e>,
+    request: &RegisterRequest,
+) -> Result<(), ErrorResponse> {
+    let Some(document) = realm_profile_document(db, &request.realm).await? else {
+        return Ok(());
+    };
+    // The v10 migration retains the old signed single-package document.
+    // Only that shape can omit the Front selection during credential reissue.
+    if let Some(legacy) = document.get("package")
+        && ["primary_package", "front_package", "packages"]
+            .iter()
+            .all(|field| document.get(*field).is_none())
+    {
+        let package: actr_protocol::realm_profile::RealmPackage =
+            serde_json::from_value(legacy.clone())
+                .map_err(|error| membership_error("realm_unavailable", error))?;
+        if package.local_path.is_some() {
+            return Err(membership_error(
+                "realm_unavailable",
+                "a legacy primary package must be downloadable",
+            ));
+        }
+        return package
+            .check()
+            .map_err(|error| membership_error("realm_unavailable", error));
+    }
+    let selection = realm_package_selection(document)?;
+    let (_, front) = selection
+        .selected()
+        .map_err(|error| membership_error("realm_unavailable", error))?;
+    check_front_manifest_pin(front, request)
+}
+
+fn check_front_manifest_pin(
+    front: &actr_protocol::realm_profile::RealmPackage,
+    request: &RegisterRequest,
+) -> Result<(), ErrorResponse> {
+    if let Some(local) = &front.local_path
+        && front
+            .actr_type()
+            .map_err(|error| membership_error("realm_unavailable", error))?
+            == request.actr_type
+    {
+        let manifest = request
+            .manifest_raw
+            .as_deref()
+            .and_then(|raw| actr_pack::RegistrationManifest::parse(raw).ok());
+        if manifest
+            .as_ref()
+            .and_then(|manifest| manifest.signing_key_id())
+            != Some(local.signing_key_id.as_str())
+        {
+            return Err(membership_error(
+                "front_signing_key_mismatch",
+                "the selected local Front must use the Publisher key pinned by the Realm",
+            ));
+        }
     }
     Ok(())
 }
@@ -463,7 +539,7 @@ async fn persist_registration_state(
         Ok(signer) => signer,
         Err(error) => return Err((error.code.status().into(), error.to_string())),
     };
-    check_service_owner(&mut *tx, request, &signer)
+    check_realm_registration(&mut *tx, request, &signer)
         .await
         .map_err(|error| (error.code, error.message))?;
 
@@ -603,6 +679,7 @@ async fn reissue_credential(
     }
 
     let registration = &request.registration;
+    let pool = platform::storage::db::get_database().get_pool();
     // Authenticate before saying anything about the Realm or the attempt.
     let signer = match authenticate_client(
         &state,
@@ -647,6 +724,9 @@ async fn reissue_credential(
                     let (code, message) = aid_error_to_response(err);
                     return register_error(code, message);
                 }
+                if let Err(error) = check_realm_front_pin(pool, registration).await {
+                    return register_error(error.code, error.message);
+                }
             }
             return protobuf_response(cached.status, cached.body);
         }
@@ -658,6 +738,15 @@ async fn reissue_credential(
     if let Err(validation_err) = RealmEntity::validate_realm(&registration.realm).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
         let body = register_error_body(code, format!("Realm validation failed: {message}"));
+        return complete_attempt(&state, &lease, StatusCode::OK, body, register_error_body).await;
+    }
+
+    if let Err(error) = check_realm_front_pin(pool, registration).await {
+        if error.code >= 500 {
+            release_attempt(&state, &lease).await;
+            return register_error(error.code, error.message);
+        }
+        let body = register_error_body(error.code, error.message);
         return complete_attempt(&state, &lease, StatusCode::OK, body, register_error_body).await;
     }
 
@@ -674,7 +763,7 @@ async fn reissue_credential(
     let (response, succeeded) = match preparation {
         ReissuePreparation::Ready(prepared) => match state
             .idempotency
-            .complete_reissue(&lease, &request.actr_id, *prepared)
+            .complete_reissue(&lease, &request.actr_id, registration, *prepared)
             .await
         {
             Ok(cached) => (protobuf_response(cached.status, cached.body), true),
@@ -1439,7 +1528,11 @@ mod tests {
         };
 
         // The owner's request passed the entry check; then ownership moves.
-        assert!(check_service_owner(pool, &request, &owner).await.is_ok());
+        assert!(
+            check_realm_registration(pool, &request, &owner)
+                .await
+                .is_ok()
+        );
         membership::transfer_owner(&owner, &editor.member_id, Role::Editor)
             .await
             .unwrap();

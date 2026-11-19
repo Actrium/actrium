@@ -255,7 +255,8 @@ final class RendererSurfaceHostView: NSView {
         lastConfiguredFingerprint = requestedFingerprint
         configureTask?.cancel()
         configureTask = Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, !Task.isCancelled,
+                  self.tabId == tabId, self.fingerprint == requestedFingerprint else { return }
             do {
                 // A Tab can navigate from a built-in page to an ordinary app
                 // without SwiftUI recreating this NSView. Always reconcile the
@@ -266,12 +267,6 @@ final class RendererSurfaceHostView: NSView {
                     for: tabId,
                     fingerprint: requestedFingerprint
                 )
-                guard !Task.isCancelled,
-                      self.tabId == tabId,
-                      self.fingerprint == requestedFingerprint else {
-                    return
-                }
-
                 if previousRendererId != nil, previousRendererId != rendererId {
                     self.showPlaceholder()
                     self.coordinator?.xpcServiceReady = false
