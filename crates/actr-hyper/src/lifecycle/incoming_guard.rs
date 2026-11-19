@@ -309,6 +309,16 @@ pub trait IncomingGuard: Send + Sync + 'static {
         request: IncomingStreamChunk<'_>,
     ) -> Result<(), IncomingGuardError>;
 
+    /// Authenticate an outbound stream chunk when it belongs to a Host-owned
+    /// session exchange. Ordinary chunks remain unchanged by default.
+    async fn authenticate_stream(
+        &self,
+        _target: &ActrId,
+        _chunk: &mut DataChunk,
+    ) -> Result<(), IncomingGuardError> {
+        Ok(())
+    }
+
     /// Release any per-request state kept by the guard after the request has
     /// been dispatched and its response (if any) has been sent. The default
     /// no-op keeps optional-state guards from needing an empty implementation.

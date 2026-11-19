@@ -120,6 +120,10 @@ final class RealmServiceBindings {
         bindingTabs[binding.id] = tabId
     }
 
+    func localFrontBinding(for tabId: UUID) -> RealmServiceBinding? {
+        bindings[tabId] as? RealmServiceBinding
+    }
+
     func remove(_ tabId: UUID) {
         guard let binding = bindings.removeValue(forKey: tabId) else { return }
         bindingTabs.removeValue(forKey: binding.id)
@@ -492,6 +496,9 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     private var attachmentDeliveries: [String: @Sendable (RealmServiceAttachmentResultEvent) -> Void] = [:]
     private var startup: (id: UUID, task: Task<Connection, Error>)?
     private var recovery: (id: UUID, task: Task<Connection, Error>)?
+    /// The detached old session retained while a verified Local Front
+    /// replacement attaches. Ordinary calls stay blocked until commit/rollback.
+    private var localFrontHandoff: Connection?
     private var stopped = false
 
     init(
@@ -603,11 +610,42 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         _ = try await connect()
     }
 
-    private func findService(using reference: ActrRefWrapper) async throws -> ActrBindings.ActrId? {
-        if profile.packages.contains(where: { $0.reference == profile.frontPackage && $0.localPath != nil }) {
-            return try await reference.discoverService(serviceType: serviceType)
+    /// Release the old lease only after its replacement has been verified.
+    /// The node and Actor identity remain alive so a failed replacement can
+    /// restore an authenticated session without restarting the old renderer.
+    func suspendForLocalFrontReplacement() async throws {
+        guard localFrontHandoff == nil else { return }
+        let connection = try await readyConnection()
+        localFrontHandoff = connection
+        try await connection.session.detach()
+    }
+
+    /// Re-Attach the old Front after a failed replacement. Calls remain blocked
+    /// while this is in flight, and a later retry can use the retained node.
+    func restoreAfterFailedLocalFrontReplacement() async throws {
+        guard !stopped, let handoff = localFrontHandoff else { return }
+        try? await handoff.session.detach()
+        let attached = try await attach(handoff.reference)
+        do {
+            try Task.checkCancellation()
+            guard !stopped else { throw CancellationError() }
+            let replacement = Connection(
+                reference: handoff.reference,
+                session: attached.session,
+                target: attached.target
+            )
+            startup = (UUID(), Task { replacement })
+            localFrontHandoff = nil
+        } catch {
+            try? await attached.session.detach()
+            throw error
         }
-        return try await reference.discover(targetType: serviceType, count: 1).first
+    }
+
+    private func findService(using reference: ActrRefWrapper) async throws -> ActrBindings.ActrId {
+        // Every Front, downloaded or local, must attach to the unique Service
+        // selected by the verified Realm Profile rather than an arbitrary peer.
+        try await reference.discoverService(serviceType: serviceType)
     }
 
     func subscribe(events requestedEvents: [String], generation: UInt64) async throws {
@@ -934,15 +972,20 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// task, so concurrent requests cannot Resume or re-Attach independently.
     private func readyConnection() async throws -> Connection {
         guard !stopped else { throw CancellationError() }
+        guard localFrontHandoff == nil else {
+            throw RealmServiceError(message: "The Local Front is refreshing its Service session.")
+        }
         if let recovery {
             let recovered = try await recovery.task.value
             guard !stopped else { throw CancellationError() }
             return recovered
         }
-        let connection = try await connect()
         let id = UUID()
+        // Reserve the shared slot before connect() can suspend this actor.
+        // Every reentrant caller then awaits this same Resume/re-Attach.
         let task = Task<Connection, Error> {
-            try await resumeOrReattach(connection)
+            let connection = try await self.connect()
+            return try await self.resumeOrReattach(connection)
         }
         recovery = (id, task)
         do {
@@ -1092,11 +1135,9 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             try Task.checkCancellation()
             guard !stopped else { throw CancellationError() }
             do {
-                if let target = try await findService(using: reference) {
-                    let session = try await reference.attachActrium(service: target, params: attachParams)
-                    return (target, session)
-                }
-                lastError = RealmServiceError(message: "The Realm's selected Service is not online.")
+                let target = try await findService(using: reference)
+                let session = try await reference.attachActrium(service: target, params: attachParams)
+                return (target, session)
             } catch {
                 lastError = error
             }
@@ -1157,7 +1198,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         }
         // A completed recovery owns the newest session; its reference is the
         // same runtime as the original startup connection.
-        let connection = recovered ?? base
+        let connection = recovered ?? base ?? localFrontHandoff
 
         // Unregister every attachment stream before the runtime goes down so
         // a restarting Service never sees ghost streams. Local bookkeeping is
@@ -1176,6 +1217,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             await connection.reference.waitForShutdown()
         }
         self.startup = nil
+        self.localFrontHandoff = nil
         try? FileManager.default.removeItem(at: directory)
     }
 }

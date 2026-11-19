@@ -410,13 +410,18 @@ impl Drop for FileLockGuard {
     }
 }
 
+struct ActiveGuard {
+    _lifecycle: File,
+    _ownership: File,
+}
+
 struct Inner {
     root: PathBuf,
     sessions: Option<InMemorySessionService>,
     locks: [Arc<AsyncMutex<()>>; OPERATION_LOCK_STRIPES],
-    // One shared OS lock per live instance, retained across API calls. The
-    // files close automatically if this host process crashes.
-    active_guards: Mutex<HashMap<String, File>>,
+    // One shared root lock and one exclusive per-Actor ownership lock per live
+    // instance, retained across API calls. Both close automatically on crash.
+    active_guards: Mutex<HashMap<String, ActiveGuard>>,
 }
 
 /// Local durable lifecycle manager. Clones share operation locks and the
@@ -444,6 +449,7 @@ impl LifecycleService {
     ) -> Result<Self, LifecycleError> {
         fs::create_dir_all(root.join("services"))?;
         fs::create_dir_all(root.join("creation-intents"))?;
+        fs::create_dir_all(root.join("active-locks"))?;
         Ok(Self {
             inner: Arc::new(Inner {
                 root,
@@ -527,12 +533,53 @@ impl LifecycleService {
         }
     }
 
-    fn retain_active_guard(&self, actor_id: &str, guard: File) {
-        self.inner
+    fn lock_active_instance(&self, actor_id: &str) -> Result<Option<File>, LifecycleError> {
+        let guards = self
+            .inner
             .active_guards
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(actor_id.into(), guard);
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guards.contains_key(actor_id) {
+            return Ok(None);
+        }
+        drop(guards);
+
+        let path = self
+            .inner
+            .root
+            .join("active-locks")
+            .join(format!("{}.lock", actor_id_hash(actor_id)));
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(file)),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                Err(LifecycleError::ConcurrentLifecycleOperation)
+            }
+            Err(std::fs::TryLockError::Error(error)) => Err(error.into()),
+        }
+    }
+
+    fn retain_active_guard(&self, actor_id: &str, lifecycle: File, ownership: Option<File>) {
+        let mut guards = self
+            .inner
+            .active_guards
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let ownership = ownership
+            .or_else(|| guards.remove(actor_id).map(|guard| guard._ownership))
+            .expect("an active transition must own or acquire the Actor lock");
+        guards.insert(
+            actor_id.into(),
+            ActiveGuard {
+                _lifecycle: lifecycle,
+                _ownership: ownership,
+            },
+        );
     }
 
     fn release_active_guard(&self, actor_id: &str) {
@@ -799,6 +846,7 @@ impl LifecycleService {
         let lifecycle_guard = self.lock_operation()?;
         let _start_lock = self.acquire_start_lock(actor_id)?;
         let mut instance = self.instance(actor_id)?;
+        let active_guard = self.lock_active_instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Starting)?;
         instance.desired_state = DesiredState::Running;
         instance.reachability = Reachability::Unknown;
@@ -818,7 +866,7 @@ impl LifecycleService {
         instance.attachment = AttachmentState::Idle;
         instance.last_opened_at_epoch_secs = Some(now_epoch_secs());
         self.persist_transition(&mut instance, LifecycleState::Running)?;
-        self.retain_active_guard(actor_id, lifecycle_guard);
+        self.retain_active_guard(actor_id, lifecycle_guard, active_guard);
         Ok(instance)
     }
 
@@ -827,6 +875,7 @@ impl LifecycleService {
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
+        let _active_guard = self.lock_active_instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Stopping)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
         self.persist_transition(&mut instance, LifecycleState::Stopping)?;
@@ -847,6 +896,7 @@ impl LifecycleService {
         let lifecycle_guard = self.lock_operation()?;
         let _start_lock = self.acquire_start_lock(actor_id)?;
         let mut instance = self.instance(actor_id)?;
+        let active_guard = self.lock_active_instance(actor_id)?;
         if !matches!(
             instance.lifecycle_state,
             LifecycleState::Running | LifecycleState::Suspended | LifecycleState::Stopped
@@ -869,7 +919,7 @@ impl LifecycleService {
         instance.health = Health::Unknown;
         instance.attachment = AttachmentState::Idle;
         self.persist_transition(&mut instance, LifecycleState::Starting)?;
-        self.retain_active_guard(actor_id, lifecycle_guard);
+        self.retain_active_guard(actor_id, lifecycle_guard, active_guard);
         Ok(instance)
     }
 
@@ -884,6 +934,7 @@ impl LifecycleService {
         let _guard = operation_lock.lock().await;
         let lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
+        let active_guard = self.lock_active_instance(actor_id)?;
         // Only a pending start can commit Running. In particular, do not let a
         // stale completion revive a suspended instance through the ordinary
         // Suspended -> Running transition.
@@ -900,7 +951,7 @@ impl LifecycleService {
         instance.attachment = AttachmentState::Idle;
         instance.last_opened_at_epoch_secs = Some(now_epoch_secs());
         self.persist_transition(&mut instance, LifecycleState::Running)?;
-        self.retain_active_guard(actor_id, lifecycle_guard);
+        self.retain_active_guard(actor_id, lifecycle_guard, active_guard);
         Ok(instance)
     }
 
@@ -909,12 +960,13 @@ impl LifecycleService {
         let _guard = operation_lock.lock().await;
         let lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
+        let active_guard = self.lock_active_instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Suspended)?;
         instance.desired_state = DesiredState::Running;
         instance.reachability = Reachability::Offline;
         instance.health = Health::Unknown;
         self.persist_transition(&mut instance, LifecycleState::Suspended)?;
-        self.retain_active_guard(actor_id, lifecycle_guard);
+        self.retain_active_guard(actor_id, lifecycle_guard, active_guard);
         Ok(instance)
     }
 
@@ -923,12 +975,13 @@ impl LifecycleService {
         let _guard = operation_lock.lock().await;
         let lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
+        let active_guard = self.lock_active_instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Running)?;
         instance.desired_state = DesiredState::Running;
         instance.reachability = Reachability::Online;
         instance.health = Health::Healthy;
         self.persist_transition(&mut instance, LifecycleState::Running)?;
-        self.retain_active_guard(actor_id, lifecycle_guard);
+        self.retain_active_guard(actor_id, lifecycle_guard, active_guard);
         Ok(instance)
     }
 
@@ -937,6 +990,7 @@ impl LifecycleService {
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
+        let _active_guard = self.lock_active_instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Archived)?;
         self.mark_offline(&mut instance, DesiredState::Archived);
         self.persist_transition(&mut instance, LifecycleState::Archived)?;
@@ -949,6 +1003,7 @@ impl LifecycleService {
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
+        let _active_guard = self.lock_active_instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Trashed)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
         instance.runtime_instance_id = self.invalidate_and_rotate().await?;
@@ -963,6 +1018,7 @@ impl LifecycleService {
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
+        let _active_guard = self.lock_active_instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Stopped)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
         self.persist_transition(&mut instance, LifecycleState::Stopped)?;
@@ -979,6 +1035,7 @@ impl LifecycleService {
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
+        let _active_guard = self.lock_active_instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Migrating)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
         self.persist_transition(&mut instance, LifecycleState::Migrating)?;
@@ -995,6 +1052,7 @@ impl LifecycleService {
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
         let mut instance = self.instance(actor_id)?;
+        let _active_guard = self.lock_active_instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Deleting)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
         instance.credential_state = CredentialState::Revoked;

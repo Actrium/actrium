@@ -5,11 +5,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use actr_framework::{Bytes, Context, MessageDispatcher, Workload};
+use actr_framework::{Bytes, Context, Dest, MessageDispatcher, Workload};
 use actr_hyper::actrium::ActriumAttachParams;
 use actr_hyper::test_support::TestSignalingServer;
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
-use actr_protocol::{ActrId, ActrType, DataChunk, PayloadType, RpcEnvelope, RpcRequest};
+use actr_protocol::{
+    ActrId, ActrType, DataChunk, PayloadType, RpcEnvelope, RpcRequest, prost::Message as _,
+};
 use actrium_runtime::{
     AttachmentPolicy, InMemorySessionService, ProgramRelease, ServiceConfig, ServicePolicies,
 };
@@ -32,6 +34,12 @@ pub struct EchoRequest {
 pub struct EchoResponse {
     #[prost(bytes = "vec", tag = "1")]
     pub payload: Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
+pub struct PrepareAttachmentRequest {
+    #[prost(string, tag = "8")]
+    pub result_stream_id: String,
 }
 
 impl RpcRequest for EchoRequest {
@@ -434,16 +442,20 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
 
     // The same authenticated session carries the attachment prepare RPC and
     // the stream chunks. Both paths are admitted by the receiving Guard.
+    let prepare = PrepareAttachmentRequest {
+        result_stream_id: "attachment-result".to_string(),
+    }
+    .encode_to_vec();
     let prepared = session
         .call(
             PREPARE_ATTACHMENT_ROUTE,
             READ,
-            b"prepare".to_vec(),
+            prepare.clone(),
             Duration::from_secs(30),
         )
         .await
         .expect("prepare RPC is bound to the Attach session");
-    assert_eq!(prepared, b"prepare");
+    assert_eq!(prepared, prepare);
 
     let (chunks, mut received) = tokio::sync::mpsc::unbounded_channel();
     service
@@ -481,6 +493,52 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     assert_eq!(chunk.payload, Bytes::from(chunk_payload));
     assert!(
         chunk
+            .metadata
+            .iter()
+            .any(|entry| entry.key == actr_hyper::actrium::metadata::PROOF)
+    );
+
+    // The prepare RPC reserves its result stream. A raw workload-originated
+    // terminal chunk is signed inside the trusted Host, and the Front's Guard
+    // verifies it before invoking the registered completion callback.
+    let (results, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
+    front
+        .app_context()
+        .await
+        .register_stream("attachment-result".into(), move |chunk, _| {
+            let results = results.clone();
+            Box::pin(async move {
+                results.send(chunk).unwrap();
+                Ok(())
+            })
+        })
+        .await
+        .expect("register the Front attachment result stream");
+    service
+        .app_context()
+        .await
+        .send_data_chunk(
+            &Dest::Peer(front.actor_id()),
+            DataChunk {
+                stream_id: "attachment-result".into(),
+                sequence: 0,
+                payload: Bytes::from_static(b"terminal upload result"),
+                ..Default::default()
+            },
+            PayloadType::StreamReliable,
+        )
+        .await
+        .expect("the Host signs the terminal result on the prepared session");
+    let result = tokio::time::timeout(Duration::from_secs(10), result_rx.recv())
+        .await
+        .expect("the Front Guard admits the authenticated terminal result")
+        .expect("the result receiver is open");
+    assert_eq!(
+        result.payload,
+        Bytes::from_static(b"terminal upload result")
+    );
+    assert!(
+        result
             .metadata
             .iter()
             .any(|entry| entry.key == actr_hyper::actrium::metadata::PROOF)

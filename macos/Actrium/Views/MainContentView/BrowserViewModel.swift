@@ -1837,10 +1837,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         permissions: manifest.permissions
                     )
                 }
-                guard let tabIndex = tabs.firstIndex(where: {
-                    $0.id == replacingTabId && $0.url == URL(string: address)
-                        && $0.reloadNonce == navigationNonce
-                }) else { return }
+                guard let tabIndex = currentTabIndex() else { return }
                 guard importACTRPackage(
                     from: cachedArchiveURL,
                     knownDigest: digest,
@@ -1856,10 +1853,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 persistBrowserPageSession()
                 schedulePackageCacheEviction()
             } catch {
-                guard !(error is CancellationError), tabs.contains(where: {
-                    $0.id == replacingTabId && $0.url == URL(string: address)
-                        && $0.reloadNonce == navigationNonce
-                }) else { return }
+                guard currentTabIndex() != nil, !(error is CancellationError) else { return }
                 logger.warning("⚠️ [navigateCurrentTab] Realm discovery failed: \(error)")
                 presentRealmLinkError(error)
             }
@@ -2039,10 +2033,38 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 verified.servicePublicKey, domain: servicePublisher.domain, preferences: realmPreferences
             )
         }
+        let previousBinding = RealmServiceBindings.shared.localFrontBinding(for: tabId)
+        func rollbackLocalFrontHandoff() async {
+            // Stop the new session first; otherwise restoring the old exclusive
+            // lease would race a still-attached replacement.
+            await binding.stop()
+            guard let previousBinding else { return }
+            do {
+                try await previousBinding.restoreAfterFailedLocalFrontReplacement()
+            } catch {
+                logger.error("⚠️ [LocalFront] Failed to restore the previous Service session: \(error)")
+            }
+        }
         try requireCurrentPublisherKeys()
-        try await binding.prepareLocalFront()
-        guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
-        try requireCurrentPublisherKeys()
+        do {
+            // Verification is complete before the old lease is released. The
+            // old renderer remains usable again if the replacement cannot Attach.
+            try await previousBinding?.suspendForLocalFrontReplacement()
+            try await binding.prepareLocalFront()
+        } catch {
+            await rollbackLocalFrontHandoff()
+            throw error
+        }
+        guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else {
+            await rollbackLocalFrontHandoff()
+            return
+        }
+        do {
+            try requireCurrentPublisherKeys()
+        } catch {
+            await rollbackLocalFrontHandoff()
+            throw error
+        }
 
         // New renderer identity prevents late messages from the old Guest
         // from using the new binding or inheriting its approvals.

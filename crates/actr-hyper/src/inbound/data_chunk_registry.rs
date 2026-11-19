@@ -306,6 +306,26 @@ impl DataChunkRegistry {
         true
     }
 
+    pub(crate) async fn authenticate_outgoing_chunk(
+        &self,
+        target: &ActrId,
+        chunk: &mut DataChunk,
+    ) -> ActorResult<()> {
+        let guard = self
+            .inner
+            .incoming_guard
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let Some(guard) = guard else {
+            return Ok(());
+        };
+        guard
+            .authenticate_stream(target, chunk)
+            .await
+            .map_err(|error| error.into_actr_error())
+    }
+
     /// Number of callback panics isolated so far (observability / metric hook).
     #[allow(dead_code)]
     pub(crate) fn panic_count(&self) -> u64 {

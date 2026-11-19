@@ -2,23 +2,26 @@
 //! current-policy business guard, sharing one session service and admission state.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard};
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard, Weak};
 
 use actr_protocol::{
-    ActorResult, ActrError, DataChunk, Direction, MetadataEntry, RpcEnvelope, prost::Message as _,
+    ActorResult, ActrError, ActrId, DataChunk, Direction, MetadataEntry, RpcEnvelope,
+    prost::Message as _,
 };
 use actrium_runtime::{
     AttachRequest, BusinessRequest, DetachRequest, GetStatusRequest, GuardedRequest,
     HeartbeatRequest, InMemorySessionService, MessageKind, ResumeRequest, SessionSecret,
-    TakeoverRequest, request_proof, request_signing_bytes, verify_request_proof,
+    SessionState, TakeoverRequest, request_proof, request_signing_bytes, verify_request_proof,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
 use tokio::sync::Mutex;
 
 use super::{
-    guard_error, invalid_metadata, metadata, missing_verified_channel, session_actr_error,
-    verified_channel,
+    ATTACHMENT_PREPARE_ROUTE, ATTACHMENT_UPLOAD_TRANSPORT, guard_error, invalid_metadata, metadata,
+    missing_verified_channel,
+    peer::{ActriumPeerSession, business_metadata},
+    session_actr_error, verified_channel,
 };
 use crate::lifecycle::{
     IncomingDispatchRequest, IncomingGuard, IncomingGuardError, IncomingGuardErrorCode,
@@ -33,13 +36,48 @@ pub struct TakeoverPayload {
     pub attach: AttachRequest,
 }
 
+const ATTACHMENT_RESULT_RETENTION_SECS: u64 = 300;
+const MAX_PENDING_ATTACHMENT_RESULTS: usize = 1024;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Only field 8 is needed to bind the terminal result stream. Prost skips the
+/// remaining fields while the complete request payload remains covered by the
+/// Front's prepare-RPC proof.
+#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
+struct PrepareAttachmentRequest {
+    #[prost(string, tag = "8")]
+    result_stream_id: String,
+}
+
 #[derive(Default)]
 pub(crate) struct Shared {
     admitted: Mutex<HashMap<String, Admitted>>,
+    /// Prepare RPCs bind one result stream to the same Host-owned session.
+    /// Entries expire and are consumed by the single terminal result chunk.
+    attachment_results: Mutex<HashMap<String, PendingAttachmentResult>>,
+    /// The Front side of the same exchange. Weak session handles avoid a second
+    /// secret cache: verification always reads the live outbound session state.
+    peer_attachment_results: StdMutex<HashMap<String, PeerAttachmentResult>>,
     /// Pending outbound calls waiting for their response proof. A synchronous
     /// mutex lets the RPC-owned guard reclaim its entry even when the caller
     /// drops the future while suspended.
     pending: StdMutex<HashMap<String, PendingCall>>,
+}
+
+struct PendingAttachmentResult {
+    signing: ResponseContext,
+    expires_at: u64,
+}
+
+pub(crate) struct PeerAttachmentResult {
+    session: Weak<ActriumPeerSession>,
+    expires_at: u64,
 }
 
 impl Shared {
@@ -47,6 +85,56 @@ impl Shared {
         self.pending
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn peer_attachment_results(&self) -> StdMutexGuard<'_, HashMap<String, PeerAttachmentResult>> {
+        self.peer_attachment_results
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) fn register_peer_attachment_result(
+        &self,
+        stream_id: String,
+        session: &Arc<ActriumPeerSession>,
+    ) -> Result<(), IncomingGuardError> {
+        let now = now_secs();
+        let mut results = self.peer_attachment_results();
+        results.retain(|_, entry| entry.expires_at > now && entry.session.strong_count() > 0);
+        if results.contains_key(&stream_id) || results.len() >= MAX_PENDING_ATTACHMENT_RESULTS {
+            return Err(IncomingGuardError::new(
+                IncomingGuardErrorCode::Unavailable,
+                "the attachment result stream is already pending or at capacity".to_string(),
+            ));
+        }
+        results.insert(
+            stream_id,
+            PeerAttachmentResult {
+                session: Arc::downgrade(session),
+                expires_at: now.saturating_add(ATTACHMENT_RESULT_RETENTION_SECS),
+            },
+        );
+        Ok(())
+    }
+
+    fn peer_attachment_session(&self, stream_id: &str) -> Option<Weak<ActriumPeerSession>> {
+        let now = now_secs();
+        let mut results = self.peer_attachment_results();
+        results.retain(|_, entry| entry.expires_at > now && entry.session.strong_count() > 0);
+        results.get(stream_id).map(|entry| entry.session.clone())
+    }
+
+    fn finish_peer_attachment_result(&self, stream_id: &str) {
+        self.peer_attachment_results().remove(stream_id);
+    }
+
+    pub(crate) fn drop_peer_attachment_results(&self, session: &ActriumPeerSession) {
+        self.peer_attachment_results().retain(|_, entry| {
+            entry
+                .session
+                .upgrade()
+                .is_some_and(|candidate| !std::ptr::eq(Arc::as_ptr(&candidate), session))
+        });
     }
 }
 
@@ -63,18 +151,40 @@ pub(crate) struct PendingCall {
 pub(crate) struct PendingCallGuard {
     shared: Arc<Shared>,
     request_id: String,
+    attachment_result_stream: Option<String>,
+    preserve_attachment_result: bool,
 }
 
 impl PendingCallGuard {
     pub(crate) fn new(shared: Arc<Shared>, request_id: String, pending: PendingCall) -> Self {
         shared.pending().insert(request_id.clone(), pending);
-        Self { shared, request_id }
+        Self {
+            shared,
+            request_id,
+            attachment_result_stream: None,
+            preserve_attachment_result: false,
+        }
+    }
+
+    pub(crate) fn with_attachment_result(mut self, stream_id: Option<String>) -> Self {
+        self.attachment_result_stream = stream_id;
+        self
+    }
+
+    pub(crate) fn preserve_attachment_result(mut self) -> Self {
+        self.preserve_attachment_result = true;
+        self
     }
 }
 
 impl Drop for PendingCallGuard {
     fn drop(&mut self) {
         self.shared.pending().remove(&self.request_id);
+        if !self.preserve_attachment_result
+            && let Some(stream_id) = self.attachment_result_stream.as_deref()
+        {
+            self.shared.finish_peer_attachment_result(stream_id);
+        }
     }
 }
 
@@ -128,6 +238,24 @@ impl ResponseContext {
             proof: Vec::new(),
         }
     }
+}
+
+pub(crate) fn attachment_result_stream(
+    route: &str,
+    payload: &[u8],
+) -> Result<Option<String>, IncomingGuardError> {
+    if route != ATTACHMENT_PREPARE_ROUTE {
+        return Ok(None);
+    }
+    let prepare = PrepareAttachmentRequest::decode(payload).map_err(|error| {
+        invalid_metadata(format!("invalid attachment prepare payload: {error}"))
+    })?;
+    if prepare.result_stream_id.is_empty() {
+        return Err(invalid_metadata(
+            "attachment prepare requires a result stream id",
+        ));
+    }
+    Ok(Some(prepare.result_stream_id))
 }
 
 struct Admitted {
@@ -236,6 +364,11 @@ impl SessionRegistry for ActriumServiceRegistry {
                     .map_err(session_actr_error)?;
                 self.shared
                     .admitted
+                    .lock()
+                    .await
+                    .retain(|_, entry| entry.signing.session_id != detach.session_id);
+                self.shared
+                    .attachment_results
                     .lock()
                     .await
                     .retain(|_, entry| entry.signing.session_id != detach.session_id);
@@ -449,6 +582,7 @@ impl IncomingGuard for ActriumServiceGuard {
             return Err(invalid_metadata("business requests require a request id"));
         }
         let request_signing_bytes = request_signing_bytes(&business);
+        let result_stream = attachment_result_stream(&business.route, &business.payload)?;
         let guard = self.service.guard();
         let mut admitted = self.shared.admitted.lock().await;
         if let Some(entry) = admitted.get_mut(&business.request_id) {
@@ -478,6 +612,25 @@ impl IncomingGuard for ActriumServiceGuard {
             .authorize(business.clone(), &channel)
             .await
             .map_err(guard_error)?;
+        if let Some(stream_id) = result_stream {
+            let now = now_secs();
+            let mut results = self.shared.attachment_results.lock().await;
+            results.retain(|_, entry| entry.expires_at > now);
+            if results.len() >= MAX_PENDING_ATTACHMENT_RESULTS && !results.contains_key(&stream_id)
+            {
+                return Err(IncomingGuardError::new(
+                    IncomingGuardErrorCode::Unavailable,
+                    "too many pending attachment result streams".to_string(),
+                ));
+            }
+            results.insert(
+                stream_id,
+                PendingAttachmentResult {
+                    signing: ResponseContext::from_request(&business),
+                    expires_at: now.saturating_add(ATTACHMENT_RESULT_RETENTION_SECS),
+                },
+            );
+        }
         admitted.insert(
             business.request_id.clone(),
             Admitted {
@@ -542,11 +695,111 @@ impl IncomingGuard for ActriumServiceGuard {
             .ok_or_else(missing_verified_channel)?;
         let channel = verified_channel(context)?;
         let business = chunk_request(request.chunk, request.metadata)?;
+        if let Some(session) = self
+            .shared
+            .peer_attachment_session(&request.chunk.stream_id)
+        {
+            let session = session.upgrade().ok_or_else(|| {
+                IncomingGuardError::new(
+                    IncomingGuardErrorCode::Revoked,
+                    "the Front's outbound attachment session is closed".to_string(),
+                )
+            })?;
+            session
+                .verify_incoming_stream(&business, &channel)
+                .await
+                .map_err(|error| {
+                    IncomingGuardError::new(
+                        IncomingGuardErrorCode::PermissionDenied,
+                        format!("outbound attachment result proof verification failed: {error}"),
+                    )
+                })?;
+            self.shared
+                .finish_peer_attachment_result(&request.chunk.stream_id);
+            return Ok(());
+        }
         self.service
             .guard()
             .authorize(business, &channel)
             .await
             .map_err(guard_error)?;
+        Ok(())
+    }
+
+    async fn authenticate_stream(
+        &self,
+        target: &ActrId,
+        chunk: &mut DataChunk,
+    ) -> Result<(), IncomingGuardError> {
+        let pending = {
+            let now = now_secs();
+            let mut results = self.shared.attachment_results.lock().await;
+            results.retain(|_, entry| entry.expires_at > now);
+            results.remove(&chunk.stream_id)
+        };
+        let Some(pending) = pending else {
+            return Ok(());
+        };
+        let session = self
+            .service
+            .session(&pending.signing.session_id)
+            .await
+            .filter(|session| {
+                matches!(session.state, SessionState::Active | SessionState::Grace)
+                    && session.front_actor_id == target.to_string_repr()
+            })
+            .ok_or_else(|| {
+                IncomingGuardError::new(
+                    IncomingGuardErrorCode::Revoked,
+                    "the attachment result session is closed, expired, or targets another Front"
+                        .to_string(),
+                )
+            })?;
+        let secret = self
+            .service
+            .session_secret(&pending.signing.session_id)
+            .await
+            .ok_or_else(|| {
+                IncomingGuardError::new(
+                    IncomingGuardErrorCode::Revoked,
+                    "the attachment result session is closed or expired".to_string(),
+                )
+            })?;
+
+        let now = now_secs();
+        let mut proof_input = pending
+            .signing
+            .into_request(MessageKind::StreamChunk, chunk.payload.to_vec());
+        proof_input.route = ATTACHMENT_UPLOAD_TRANSPORT.to_string();
+        proof_input.request_id = format!("{}:{}", chunk.stream_id, chunk.sequence);
+        proof_input.lease_epoch = session.lease_epoch;
+        proof_input.service_actor_id = session.service_actor_id;
+        proof_input.channel_id = session.channel_id;
+        proof_input.issued_at = now;
+        proof_input.deadline = now.saturating_add(30);
+        proof_input.idempotency_key = None;
+        proof_input.proof = request_proof(secret.as_bytes(), &proof_input);
+
+        chunk.metadata.retain(|entry| {
+            !matches!(
+                entry.key.as_str(),
+                metadata::SESSION_ID
+                    | metadata::LEASE_EPOCH
+                    | metadata::SERVICE_ACTOR_ID
+                    | metadata::CHANNEL_ID
+                    | metadata::CAPABILITY
+                    | metadata::ROUTE
+                    | metadata::ISSUED_AT
+                    | metadata::DEADLINE
+                    | metadata::IDEMPOTENCY_KEY
+                    | metadata::PROOF
+            )
+        });
+        chunk.metadata.extend(business_metadata(&proof_input));
+        chunk.metadata.push(MetadataEntry {
+            key: metadata::ROUTE.to_string(),
+            value: ATTACHMENT_UPLOAD_TRANSPORT.to_string(),
+        });
         Ok(())
     }
 }

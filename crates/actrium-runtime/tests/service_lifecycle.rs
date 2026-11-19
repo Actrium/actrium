@@ -624,6 +624,30 @@ async fn lifecycle_recovery_defers_to_live_and_restarting_services() {
 }
 
 #[tokio::test]
+async fn lifecycle_only_the_active_owner_can_stop_a_live_service() {
+    let temp = TempDir::new().unwrap();
+    let first_manager = LifecycleService::open(temp.path()).unwrap();
+    let second_manager = LifecycleService::open(temp.path()).unwrap();
+    let created = create(&first_manager, "active-owner-stop").await;
+    let actor_id = created.actor_id;
+    let running = first_manager.start(&actor_id).await.unwrap();
+
+    assert!(matches!(
+        second_manager.stop(&actor_id).await.unwrap_err(),
+        LifecycleError::ConcurrentLifecycleOperation
+    ));
+    let unchanged = second_manager.instance(&actor_id).unwrap();
+    assert_eq!(unchanged.lifecycle_state, LifecycleState::Running);
+    assert_eq!(unchanged.runtime_instance_id, running.runtime_instance_id);
+
+    first_manager.stop(&actor_id).await.unwrap();
+    // The ownership lock is released with the transition, so another manager
+    // can subsequently start and stop the durable instance normally.
+    second_manager.start(&actor_id).await.unwrap();
+    second_manager.stop(&actor_id).await.unwrap();
+}
+
+#[tokio::test]
 async fn lifecycle_trash_retains_private_state_and_restore_reuses_identity() {
     let temp = TempDir::new().unwrap();
     let service = LifecycleService::open(temp.path()).unwrap();

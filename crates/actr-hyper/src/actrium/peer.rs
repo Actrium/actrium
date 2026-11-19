@@ -24,8 +24,8 @@ use actr_protocol::{
 use actrium_runtime::{
     AttachRequest, AttachResponse, BusinessRequest, DetachRequest, HeartbeatOutcome,
     HeartbeatRequest, LeaseMode, MessageKind, ProgramRelease, ResumeRequest, SessionSecret,
-    TakeoverRequest, attach_request_digest, resume_digest, resume_proof, sign_attach_request,
-    takeover_signing_bytes, verify_attach_response,
+    TakeoverRequest, VerifiedChannel, attach_request_digest, resume_digest, resume_proof,
+    sign_attach_request, takeover_signing_bytes, verify_attach_response, verify_request_proof,
 };
 use bytes::Bytes;
 use tokio::sync::Mutex;
@@ -33,7 +33,9 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use super::metadata;
-use super::service::{PendingCall, PendingCallGuard, Shared as PeerShared, TakeoverPayload};
+use super::service::{
+    PendingCall, PendingCallGuard, Shared as PeerShared, TakeoverPayload, attachment_result_stream,
+};
 use crate::actr_ref::ActrRef;
 use crate::outbound::PeerGate;
 use crate::transport::{PeerTransport, RpcDeadline, VerifiedPeerContext};
@@ -380,19 +382,30 @@ impl ActriumPeerSession {
     /// Call a peer Service route with a session-signed request. The response
     /// proof is verified by the shared inbound guard before this future resolves.
     pub async fn call(
-        &self,
+        self: &Arc<Self>,
         route: &str,
         capability: &str,
         payload: Vec<u8>,
         timeout: Duration,
     ) -> ActorResult<Vec<u8>> {
+        let result_stream =
+            attachment_result_stream(route, &payload).map_err(|error| error.into_actr_error())?;
         let (envelope, pending) = self
             .business_envelope(route, capability, MessageKind::Request, payload, timeout)
             .await?;
         let request_id = envelope.request_id.clone();
         let deadline = RpcDeadline::from_timeout_ms(envelope.timeout_ms)?;
-        let _pending = PendingCallGuard::new(self.runtime.shared.clone(), request_id, pending);
-        self.runtime
+        if let Some(stream_id) = result_stream.as_ref() {
+            self.runtime
+                .shared
+                .register_peer_attachment_result(stream_id.clone(), self)
+                .map_err(|error| error.into_actr_error())?;
+        }
+        let preserve_result = result_stream.is_some();
+        let mut pending = PendingCallGuard::new(self.runtime.shared.clone(), request_id, pending)
+            .with_attachment_result(result_stream);
+        let result = self
+            .runtime
             .gate
             .send_request_with_type_until(
                 &self.service,
@@ -401,7 +414,11 @@ impl ActriumPeerSession {
                 deadline,
             )
             .await
-            .map(|bytes| bytes.to_vec())
+            .map(|bytes| bytes.to_vec());
+        if result.is_ok() && preserve_result {
+            pending = pending.preserve_attachment_result();
+        }
+        result
     }
 
     /// Fire-and-forget tell with a session-signed request. No response proof
@@ -495,6 +512,37 @@ impl ActriumPeerSession {
             .await
     }
 
+    /// Verify a Service-originated terminal attachment result against the live
+    /// outbound session. The shared Guard holds only a Weak handle to self, so
+    /// the secret and channel generation are never copied into a second cache.
+    pub(crate) async fn verify_incoming_stream(
+        &self,
+        request: &BusinessRequest,
+        channel: &VerifiedChannel,
+    ) -> ActorResult<()> {
+        let now = now_secs();
+        let state = self.state.lock().await.clone();
+        Self::ensure_usable(&state, now)?;
+        let valid = request.session_id == state.session_id
+            && request.lease_epoch == state.lease_epoch
+            && request.service_actor_id == self.service_actor_id
+            && request.channel_id == state.channel.channel_id
+            && channel.channel_id == state.channel.channel_id
+            && channel.peer_actor_id == self.service_actor_id
+            && request.route == super::ATTACHMENT_UPLOAD_TRANSPORT
+            && request.kind == MessageKind::StreamChunk
+            && request.issued_at <= now.saturating_add(60)
+            && request.deadline >= now
+            && verify_request_proof(state.secret.as_bytes(), request, &request.proof);
+        if valid {
+            Ok(())
+        } else {
+            Err(ActrError::PermissionDenied(
+                "the attachment result does not match the current outbound session".to_string(),
+            ))
+        }
+    }
+
     /// Resume the lease over a freshly authenticated channel after a
     /// reconnect. No-op when the current channel generation is unchanged.
     pub async fn resume(&self) -> ActorResult<()> {
@@ -585,6 +633,7 @@ impl ActriumPeerSession {
         if let Some(handle) = self.heartbeat.lock().await.take() {
             handle.abort();
         }
+        self.runtime.shared.drop_peer_attachment_results(self);
         Ok(())
     }
 }

@@ -565,14 +565,18 @@ impl RuntimeContext {
             .await?;
         deadline.ensure_remaining()?;
 
+        let gate = self.select_gate(target)?;
+        let target_id = self.extract_target_id(target);
+        let mut chunk = chunk;
+        self.data_chunk_registry
+            .authenticate_outgoing_chunk(target_id, &mut chunk)
+            .await?;
+
         use actr_protocol::prost::Message as ProstMessage;
 
         let payload = chunk.encode_to_vec();
         let stream_id = chunk.stream_id.as_str();
         let operation_id = crate::outbound::data_chunk_operation_id(stream_id, chunk.sequence);
-
-        let gate = self.select_gate(target)?;
-        let target_id = self.extract_target_id(target);
 
         gate.send_data_chunk(
             target_id,
@@ -1071,9 +1075,18 @@ impl Context for RuntimeContext {
             .await?;
         deadline.ensure_remaining()?;
 
+        // 1. Select the target and attach any Host-owned session proof before
+        // serializing the chunk.
+        let gate = self.select_gate(target)?;
+        let target_id = self.extract_target_id(target);
+        let mut chunk = chunk;
+        self.data_chunk_registry
+            .authenticate_outgoing_chunk(target_id, &mut chunk)
+            .await?;
+
         use actr_protocol::prost::Message as ProstMessage;
 
-        // 1. Serialize DataChunk to bytes
+        // 2. Serialize DataChunk to bytes
         let payload = chunk.encode_to_vec();
         let stream_id = chunk.stream_id.as_str();
         let operation_id = crate::outbound::data_chunk_operation_id(stream_id, chunk.sequence);
@@ -1084,10 +1097,6 @@ impl Context for RuntimeContext {
             chunk.sequence,
             payload.len()
         );
-
-        // 2. Select gate based on Dest
-        let gate = self.select_gate(target)?;
-        let target_id = self.extract_target_id(target);
 
         // 3. Send via Gate with the caller-specified PayloadType
         gate.send_data_chunk(
