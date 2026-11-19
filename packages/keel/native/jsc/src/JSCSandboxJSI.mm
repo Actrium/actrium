@@ -717,7 +717,7 @@ void JSCSandboxContext::inject(jsi::Runtime &rt, const std::string &name,
 
   @autoreleasepool {
     JSContext *ctx = (__bridge JSContext *)jsContext_;
-    NSString *nsName = [NSString stringWithUTF8String:name.c_str()];
+    NSString *nsName = checkedHostString(rt, name);
 
     // Handle functions specially - create a wrapper function in JS that calls
     // our block This ensures typeof returns "function" instead of "object"
@@ -737,18 +737,8 @@ void JSCSandboxContext::inject(jsi::Runtime &rt, const std::string &name,
       void *jsValue = jsiToJSValue(rt, value);
       JSValue *jsVal = (__bridge JSValue *)jsValue;
 
-      // Use a temp name to store value, then assign to both ctx and globalThis
-      static int nonFuncCounter = 0;
-      NSString *tempName =
-          [NSString stringWithFormat:@"__jsc_tmp_%d__", ++nonFuncCounter];
-      ctx[tempName] = jsVal;
+      // JSContext subscripting writes the global object without interpreting the name as code.
       ctx[nsName] = jsVal;
-
-      // Set on globalThis using temp name which is accessible
-      NSString *globalThisScript = [NSString
-          stringWithFormat:@"(function() { globalThis['%@'] = %@; })()", nsName,
-                           tempName];
-      [ctx evaluateScript:globalThisScript];
     }
   }
 }
@@ -763,7 +753,7 @@ jsi::Value JSCSandboxContext::extract(jsi::Runtime &rt,
 
   @autoreleasepool {
     JSContext *ctx = (__bridge JSContext *)jsContext_;
-    NSString *nsName = [NSString stringWithUTF8String:name.c_str()];
+    NSString *nsName = checkedHostString(rt, name);
     JSValue *value = ctx[nsName];
     return jsValueToJSI(rt, (__bridge void *)value);
   }

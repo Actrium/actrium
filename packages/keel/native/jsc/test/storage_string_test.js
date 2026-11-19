@@ -93,6 +93,17 @@
   }
   check(propertyWrites === 1, 'malformed field names never reach the Host');
   check(propertyRecords.A === 'saved', 'malformed field names leave existing records intact');
+  context.inject('namedGlobal', 'plain');
+  context.inject('namedGlobal\0extra', 'separate');
+  check(context.eval('globalThis.namedGlobal') === 'plain', 'injected global names do not collide at NUL');
+  check(context.eval("globalThis['namedGlobal\\u0000extra']") === 'separate' &&
+    context.extract('namedGlobal\0extra') === 'separate', 'global names survive injection and extraction');
+  let quotedNameWorks = false;
+  try {
+    context.inject("quoted'name", 3);
+    quotedNameWorks = context.eval('globalThis["quoted\'name"]') === 3;
+  } catch (_) {}
+  check(quotedNameWorks, 'injected names are data rather than interpolated source');
   context.dispose();
   runtime.dispose();
   console.log(`Storage string regressions: ${checks - failures}/${checks} passed`);
