@@ -103,11 +103,11 @@ final class RendererProcessPool: ObservableObject {
         return currentFingerprint == canonicalFingerprint(requestedFingerprint)
     }
 
-    /// A result may reach the renderer only while the tab is still on the
-    /// epoch captured when the upload was prepared. A tab that has never
-    /// released a renderer has no stored epoch, which is the same as epoch 0;
-    /// both reads must apply that default or the tab's first result is dropped.
-    nonisolated static func attachmentResultIsCurrent(
+    /// A captured renderer operation is valid only while the tab remains on
+    /// the same epoch. A tab that has never released a renderer has no stored
+    /// epoch, which is the same as epoch 0; both reads must apply that default
+    /// or the first attachment result or event subscription is dropped.
+    nonisolated static func rendererEpochIsCurrent(
         capturedEpoch: Int,
         currentEpoch: Int?
     ) -> Bool {
@@ -759,7 +759,10 @@ final class RendererProcessPool: ObservableObject {
                     // state; the same worker can later host a new renderer
                     // generation for this tab.
                     guard let self, let worker, self.worker(for: tabId) === worker,
-                          self.rendererEpoch[tabId] == requestEpoch else { return }
+                          Self.rendererEpochIsCurrent(
+                              capturedEpoch: requestEpoch,
+                              currentEpoch: self.rendererEpoch[tabId]
+                          ) else { return }
                     let reply: RealmServiceEventReply
                     do {
                         try await RealmServiceBindings.shared.subscribe(request, tabId: tabId)
@@ -769,8 +772,11 @@ final class RendererProcessPool: ObservableObject {
                             id: request.id, failure: RealmServiceFailure(serviceError: error)
                         )
                     }
-                    guard let self, let worker, self.worker(for: tabId) === worker,
-                          self.rendererEpoch[tabId] == requestEpoch,
+                    guard self.worker(for: tabId) === worker,
+                          Self.rendererEpochIsCurrent(
+                              capturedEpoch: requestEpoch,
+                              currentEpoch: self.rendererEpoch[tabId]
+                          ),
                           let data = try? JSONEncoder().encode(reply) else { return }
                     try? worker.connection.sendHostEvent(
                         name: RealmServiceEventSubscription.responseEvent,
@@ -880,7 +886,7 @@ final class RendererProcessPool: ObservableObject {
         return { [weak self] event in
             Task { @MainActor in
                 guard let self,
-                      Self.attachmentResultIsCurrent(
+                      Self.rendererEpochIsCurrent(
                           capturedEpoch: epoch,
                           currentEpoch: self.rendererEpoch[tabId]
                       ),
