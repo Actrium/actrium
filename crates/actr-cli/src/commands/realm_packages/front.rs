@@ -2,7 +2,7 @@ use actr_protocol::realm_membership::{MembershipOp, MembershipRequest};
 use actr_protocol::realm_profile::{FrontUpdate, PackageSelectionChange};
 
 use super::*;
-use crate::commands::realm_members::Member;
+use crate::commands::realm_members::{Member, SendError};
 
 #[derive(Serialize, Deserialize)]
 struct Release {
@@ -79,7 +79,7 @@ pub async fn release(
         output,
         requested,
         &|url, limit| async move { download(&url, limit).await },
-        |request| member.send(request),
+        |request| member.send_with_outcome(request),
     )
     .await
 }
@@ -96,7 +96,7 @@ where
     F: Fn(String, usize) -> Fut,
     Fut: Future<Output = Result<Vec<u8>>>,
     S: FnOnce(MembershipRequest) -> Reply,
-    Reply: Future<Output = Result<Value>>,
+    Reply: Future<Output = std::result::Result<Value, SendError>>,
 {
     std::fs::create_dir_all(output)?;
     let lock = File::options()
@@ -256,9 +256,18 @@ where
         ?kind,
         "publishing package selection"
     );
-    let output = send(request)
-        .await
-        .with_context(|| format!("package release {}", pending.update.operation_id))?;
+    let output = match send(request).await {
+        Ok(output) => output,
+        Err(error) => {
+            let context = format!("package release {}", pending.update.operation_id);
+            if matches!(&error, SendError::Refused(_)) {
+                journal.pending = None;
+                write_atomic(&path, &serde_json::to_vec(&journal)?)
+                    .context("clear the rejected package release")?;
+            }
+            return Err(anyhow::Error::from(error)).context(context);
+        }
+    };
     let receipt: Receipt =
         serde_json::from_value(output.clone()).context("invalid package release receipt")?;
     ensure!(

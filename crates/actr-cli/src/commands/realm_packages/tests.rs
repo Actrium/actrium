@@ -1,4 +1,5 @@
 use super::*;
+use crate::commands::realm_members::SendError;
 use actr_pack::{
     ActorDependency, ActorPackOptions, KEEL_GUEST_PROFILE_V1, PackageFileEntry, pack_actor_package,
     verify_actor_package,
@@ -205,6 +206,8 @@ async fn front_release_resumes_after_a_lost_reply_and_rolls_back() -> Result<()>
         .packages
         .insert("view".into(), serde_json::from_value(front)?);
     let output = tempfile::tempdir()?;
+    let journal_path = output.path().join("package-release.json");
+    let refuse_first = Cell::new(true);
     let lose_reply = Cell::new(true);
     let replies = RefCell::new(BTreeMap::<String, Value>::new());
     let get = |url, _| {
@@ -216,7 +219,12 @@ async fn front_release_resumes_after_a_lost_reply_and_rolls_back() -> Result<()>
         )
     };
     let send = |request: MembershipRequest| {
-        std::future::ready((|| {
+        if refuse_first.replace(false) {
+            return std::future::ready(Err(SendError::Refused(anyhow::anyhow!(
+                "Issuer rejected the selection"
+            ))));
+        }
+        let result = (|| {
             assert_eq!(request.op, MembershipOp::UpdateFront);
             let update = request.front_update.unwrap();
             if let Some(reply) = replies.borrow().get(&update.operation_id) {
@@ -246,12 +254,21 @@ async fn front_release_resumes_after_a_lost_reply_and_rolls_back() -> Result<()>
                 bail!("reply lost after publication");
             }
             Ok(reply)
-        })())
+        })();
+        std::future::ready(result.map_err(SendError::Unknown))
     };
     let update = |selection| {
         front::release_with(REALM, "afp.example", output.path(), selection, &get, &send)
     };
+    let read_pending = || -> Result<Value> {
+        let journal: Value = serde_json::from_slice(&std::fs::read(&journal_path)?)?;
+        Ok(journal["pending"].clone())
+    };
+    let refused = update(Some(selection.clone())).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("Issuer rejected the selection"));
+    assert!(read_pending()?.is_null());
     assert!(update(Some(selection.clone())).await.is_err());
+    assert!(read_pending()?.is_object());
     assert_eq!(update(Some(selection)).await?["sequence"], 2);
     assert_eq!(replies.borrow().len(), 1);
     assert_eq!(update(None).await?["sequence"], 3);

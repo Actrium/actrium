@@ -148,7 +148,7 @@ async fn realm_front_release_fixture() -> Result<()> {
                     &request.output,
                     Some(incompatible),
                     &get,
-                    |_| async { bail!("incompatible package selection attempted publication") },
+                    |_| async { panic!("incompatible package selection attempted publication") },
                 )
                 .await
                 .unwrap_err();
@@ -174,7 +174,7 @@ async fn realm_front_release_fixture() -> Result<()> {
                 &request.output,
                 selection,
                 &get,
-                |operation| owner.send(operation),
+                |operation| owner.send_with_outcome(operation),
             )
             .await?;
         }

@@ -532,7 +532,7 @@ struct WorkspaceMainView: View {
                             shouldAutoFocus: $viewModel.shouldAutoFocusAddressBar,
                             refreshAction: { viewModel.reloadCurrentTab() },
                             onNavigate: { input in
-                                viewModel.navigateCurrentTab(to: input)
+                                viewModel.navigateCurrentTab(to: input, fromAddressBar: true)
                                 isAddressBarFirstResponder = false
                             },
                             bookmarkPopoverContent: {
@@ -797,13 +797,14 @@ struct WorkspaceMainView: View {
                 viewModel.actrUriNotice = nil
             }
         }
-        // ━━━━ Invite-code redeem sheet (temporary flow) ━━━━
-        .sheet(item: $viewModel.pendingInviteRedeem) { pending in
+        // Confirm and Cancel apply to the displayed request, even across tab changes.
+        .sheet(item: Binding(get: { viewModel.pendingInviteRedeem }, set: { _ in })) { pending in
             InviteCodeRedeemSheet(
                 pending: pending,
-                onConfirm: { code in viewModel.confirmInviteRedeem(code: code) },
-                onCancel: { viewModel.cancelInviteRedeem() }
+                onConfirm: { code in viewModel.confirmInviteRedeem(pending, code: code) },
+                onCancel: { viewModel.cancelInviteRedeem(pending) }
             )
+            .interactiveDismissDisabled()
         }
     }
 

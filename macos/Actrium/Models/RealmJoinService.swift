@@ -5,14 +5,9 @@ import ActrBindings
 
 /// The outcome of a successful invite redemption.
 struct RealmJoinResult {
-    /// Canonical Realm name `<realm_id>@<domain>`.
-    let realmName: String
     let memberId: String
     let role: String
     let keyId: String
-    /// `actr://<domain>/<realm_id>` — feed it to the existing open-instance
-    /// flow (URI parsing → authority → profile → package).
-    let instanceURL: URL
 }
 
 /// Enroll this installation's device identity with a verified Realm.
@@ -45,30 +40,12 @@ enum RealmJoinService {
         guard profile.isOpen else {
             throw joinError("This Realm requires an invite.")
         }
-        _ = try await join(profile.info, inviteText: "", label: label, allowInsecureDevelopment: false)
+        _ = try await join(profile.info, inviteText: "", label: label)
     }
 
-    /// Redeem `inviteText` (an `ri_…` invite) and join as a new device.
-    ///
-    /// - Parameters:
-    ///   - inviteText: the `ri_…` invite as received out of band.
-    ///   - label: a human-readable client label (length-limited by the Issuer).
-    ///   - allowInsecureDevelopment: opt-in HTTP/plaintext for dev stacks only.
-    /// - Throws: `CoreError` for decode/verification failures, and
-    ///   `RealmMembershipError` for redemption failures (`Rejected` carries
-    ///   the stable codes `invite_used` / `invite_expired` / `invite_revoked`
-    ///   / `invite_realm_mismatch`; `Uncertain` means the same key may retry
-    ///   the same invite).
-    static func joinWithInvite(
-        inviteText: String,
-        label: String,
-        allowInsecureDevelopment: Bool = false
-    ) async throws -> RealmJoinResult {
-        // 1. Decode the invite locally: learn the Realm name. The secret
-        //    stays inside the invite text; `join` consumes it in Rust.
-        let invite = try ActriumCore.decodeActrInvite(inviteText: inviteText)
-        let realmName = invite.realmName
-
+    /// Resolve a standalone invite to its Realm address without including the code.
+    static func address(forInvite inviteText: String) throws -> String {
+        let realmName = try inviteRealm(inviteText)
         guard let at = realmName.firstIndex(of: "@") else {
             throw joinError("The invite names a malformed Realm.")
         }
@@ -78,40 +55,18 @@ enum RealmJoinService {
             throw joinError("The invite names a malformed Realm.")
         }
 
-        // 2. Realm discovery: the authority descriptor for the Realm domain.
-        guard let discoveryURL = URL(string: "https://\(domain)/.well-known/actr") else {
-            throw joinError("The Realm domain in the invite is invalid.")
-        }
-        let descriptorBody = try await fetchBoundedDocument(discoveryURL)
-        guard let descriptorText = String(data: descriptorBody, encoding: .utf8) else {
-            throw joinError("The authority information is not valid text.")
-        }
-        let descriptor = try ActriumCore.acceptAuthorityDescriptor(
-            body: descriptorText,
-            domain: domain
-        )
+        return "actr://\(domain)/\(realmId)"
+    }
 
-        // 3. Realm Profile: verify it with the keys accepted in step 2 and
-        //    learn the membership endpoints (issuer, provider id).
-        var profilePath = descriptor.realmsHref
-        if profilePath.hasSuffix("/") { profilePath.removeLast() }
-        profilePath += "/\(realmId)"
-        guard let profileURL = URL(string: profilePath) else {
-            throw joinError("The Realm Profile location is invalid.")
+    /// Redeem an explicit invite against the verified Profile for this navigation.
+    static func joinWithInvite(
+        _ profile: VerifiedProfile, inviteText: String, label: String
+    ) async throws -> RealmJoinResult {
+        guard try inviteRealm(inviteText) == profile.info.realmName else {
+            throw joinError("This invite belongs to another Realm.")
         }
-        let profileBody = try await fetchBoundedDocument(profileURL)
-        let profile = try VerifiedProfile(
-            body: profileBody, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson
-        ).info
 
-        // 4. Device identity (created and persisted on first use) and the
-        //    invite exchange. The same signer later registers the Host.
-        let memberJSON = try await join(
-            profile, inviteText: inviteText, label: label,
-            allowInsecureDevelopment: allowInsecureDevelopment
-        )
-
-        // 5. Surface the redemption result and the instance address.
+        let memberJSON = try await join(profile.info, inviteText: inviteText, label: label)
         guard let member = try JSONSerialization.jsonObject(with: Data(memberJSON.utf8))
                 as? [String: Any],
             let memberId = member["member_id"] as? String,
@@ -119,31 +74,27 @@ enum RealmJoinService {
             let keyId = member["key_id"] as? String else {
             throw joinError("The join response could not be read.")
         }
-        guard let instanceURL = URL(string: "actr://\(domain)/\(realmId)") else {
-            throw joinError("The instance address could not be built.")
-        }
-        return RealmJoinResult(
-            realmName: profile.realmName,
-            memberId: memberId,
-            role: role,
-            keyId: keyId,
-            instanceURL: instanceURL
-        )
+        return RealmJoinResult(memberId: memberId, role: role, keyId: keyId)
     }
 
     // MARK: - Helpers
 
+    private static func inviteRealm(_ inviteText: String) throws -> String {
+        guard let invite = try? ActriumCore.decodeActrInvite(inviteText: inviteText) else {
+            throw joinError("The Realm invite code is invalid.")
+        }
+        return invite.realmName
+    }
+
     private static func join(
         _ profile: RealmProfileInfo,
         inviteText: String,
-        label: String,
-        allowInsecureDevelopment: Bool
+        label: String
     ) async throws -> String {
         let membership = try RealmIdentityStore().membership(
             realm: profile.realmName,
             providerId: profile.providerId,
-            issuer: profile.issuerUrl,
-            allowInsecureDevelopment: allowInsecureDevelopment
+            issuer: profile.issuerUrl
         )
         return try await membership.join(invite: inviteText, label: label)
     }
@@ -153,46 +104,5 @@ enum RealmJoinService {
             domain: "ActrJoin", code: 1,
             userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
                 message, comment: "Actr join error")])
-    }
-
-    private static func requireSuccess(_ response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse,
-              (200 ..< 300).contains(http.statusCode) else {
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw NSError(
-                domain: "ActrJoin", code: 2,
-                userInfo: [NSLocalizedDescriptionKey: String(
-                    format: NSLocalizedString(
-                        "The request failed (HTTP %ld).",
-                        comment: "Actr join fetch failure"),
-                    status)])
-        }
-    }
-
-    private static func requireHTTPS(_ response: URLResponse) throws {
-        guard response.url?.scheme?.lowercased() == "https" else {
-            throw NSError(
-                domain: "ActrJoin", code: 3,
-                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                    "The Realm information was served over an insecure connection.",
-                    comment: "Actr join insecure transport error")])
-        }
-    }
-
-    /// Bounded fetch for the join flow's discovery documents: HTTPS, 2xx, and
-    /// a size cap so a hostile endpoint cannot exhaust memory.
-    private static func fetchBoundedDocument(_ url: URL) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(from: url)
-        try requireHTTPS(response)
-        try requireSuccess(response)
-        let maxBytes = 4 * 1024 * 1024
-        guard data.count <= maxBytes else {
-            throw NSError(
-                domain: "ActrJoin", code: 4,
-                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                    "The Realm information exceeds the size limit.",
-                    comment: "Actr join document size error")])
-        }
-        return data
     }
 }

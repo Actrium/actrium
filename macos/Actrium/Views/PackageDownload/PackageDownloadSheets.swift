@@ -308,9 +308,7 @@ struct ActrUriNoticeSheet: View {
     }
 }
 
-/// Invite-code redeem sheet (temporary flow): an actr:// link entered in the
-/// address bar first presents this sheet for the invite code; "Redeem" hands
-/// over to the Rust-provided method for the follow-up flow.
+/// Prompts for the invite required by the initiating Realm navigation.
 struct InviteCodeRedeemSheet: View {
     let pending: PendingInviteRedeem
     let onConfirm: (String) -> Void

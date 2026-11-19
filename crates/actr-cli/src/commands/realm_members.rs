@@ -142,12 +142,19 @@ impl Member {
     }
 
     pub(super) async fn send(&self, request: MembershipRequest) -> Result<Value> {
+        self.send_with_outcome(request).await.map_err(Into::into)
+    }
+
+    pub(super) async fn send_with_outcome(
+        &self,
+        request: MembershipRequest,
+    ) -> std::result::Result<Value, SendError> {
         let timeout = match request.op {
             MembershipOp::UpdateFront | MembershipOp::SwitchService => PACKAGE_RELEASE_TIMEOUT,
             _ => REQUEST_TIMEOUT,
         };
-        let client = http_client_with_timeout(timeout)?;
-        Ok(send_with(&client, &self.file.issuer, &request.sign(&self.key)).await?)
+        let client = http_client_with_timeout(timeout).map_err(SendError::Unknown)?;
+        send_with(&client, &self.file.issuer, &request.sign(&self.key)).await
     }
 }
 
@@ -170,7 +177,7 @@ fn url_authority(url: &str) -> Result<String> {
 }
 
 /// Why a membership request got no reply.
-enum SendError {
+pub(super) enum SendError {
     /// The Actr Facility Provider answered with an error: nothing changed.
     Refused(anyhow::Error),
     /// No usable answer: the request may or may not have taken effect.
