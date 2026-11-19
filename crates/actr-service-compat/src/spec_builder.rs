@@ -275,7 +275,7 @@ mod tests {
     #[test]
     fn signed_exports_preserve_unicode_spelling_and_fingerprints() {
         let proto_files = [
-            ("Écho.proto", PROTO_A),
+            ("\u{c9}cho.proto", PROTO_A),
             ("e\u{301}cho_other.proto", PROTO_B),
         ]
         .into_iter()
@@ -296,7 +296,7 @@ mod tests {
             build_self_contained_service_spec_from_files("echo", proto_files.clone()).unwrap();
         assert_eq!(signed.fingerprint, legacy.fingerprint);
         assert_eq!(signed.protobufs, legacy.protobufs);
-        assert_eq!(signed.protobufs[0].package, "Écho");
+        assert_eq!(signed.protobufs[0].package, "\u{c9}cho");
         assert_eq!(signed.protobufs[1].package, "e\u{301}cho_other");
 
         let mut reordered = proto_files;
@@ -315,11 +315,11 @@ mod tests {
             ["Echo.proto", "echo.proto"],
             ["ECHO.proto", "echo.proto"],
             ["echo.proto.proto", "Echo.proto"],
-            ["Écho.proto", "écho.proto"],
-            ["écho.proto", "e\u{301}cho.proto"],
-            ["Écho.proto.proto", "e\u{301}cho.proto"],
-            ["Σ.proto", "ς.proto"],
-            ["Straße.proto", "STRASSE.proto"],
+            ["\u{c9}cho.proto", "\u{e9}cho.proto"],
+            ["\u{e9}cho.proto", "e\u{301}cho.proto"],
+            ["\u{c9}cho.proto.proto", "e\u{301}cho.proto"],
+            ["\u{3a3}.proto", "\u{3c2}.proto"],
+            ["Stra\u{df}e.proto", "STRASSE.proto"],
         ] {
             let proto_files = names
                 .into_iter()

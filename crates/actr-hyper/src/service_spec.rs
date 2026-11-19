@@ -303,10 +303,10 @@ service Other { rpc Call(Request) returns (Request); }
             ["echo.proto", "Echo.proto"],
             ["echo.proto", "ECHO.proto"],
             ["echo.proto", "echo.proto.proto"],
-            ["écho.proto", "e\u{301}cho.proto"],
-            ["Écho.proto.proto", "e\u{301}cho.proto"],
-            ["Σ.proto", "ς.proto"],
-            ["Straße.proto", "STRASSE.proto"],
+            ["\u{e9}cho.proto", "e\u{301}cho.proto"],
+            ["\u{c9}cho.proto.proto", "e\u{301}cho.proto"],
+            ["\u{3a3}.proto", "\u{3c2}.proto"],
+            ["Stra\u{df}e.proto", "STRASSE.proto"],
         ] {
             let first_path = format!("contracts/first/{first}");
             let second_path = format!("contracts/second/{second}");
