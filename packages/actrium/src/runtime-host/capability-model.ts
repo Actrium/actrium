@@ -69,7 +69,7 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     requiresGrant: 'none',
     requiresBroker: false,
     requiresSandbox: true,
-    implemented: false,
+    implemented: true,
   },
   'service.attachmentUpload': {
     name: 'service.attachmentUpload',
