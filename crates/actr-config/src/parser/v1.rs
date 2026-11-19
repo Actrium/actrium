@@ -202,6 +202,40 @@ impl ParserV1 {
             })
             .transpose()?;
 
+        let actrium = match raw.actrium {
+            Some(actrium) => {
+                let front_package = actrium
+                    .front_package
+                    .ok_or(ConfigError::MissingField("actrium.front_package"))?;
+                let lease_duration = actrium
+                    .lease_duration_secs
+                    .map(std::time::Duration::from_secs)
+                    .unwrap_or(crate::config::ActriumConfig::DEFAULT_LEASE_DURATION);
+                let heartbeat_interval = actrium
+                    .heartbeat_interval_secs
+                    .map(std::time::Duration::from_secs)
+                    .unwrap_or(crate::config::ActriumConfig::DEFAULT_HEARTBEAT_INTERVAL);
+                let grace_period = actrium
+                    .grace_period_secs
+                    .map(std::time::Duration::from_secs)
+                    .unwrap_or(crate::config::ActriumConfig::DEFAULT_GRACE_PERIOD);
+                if lease_duration.is_zero() || heartbeat_interval.is_zero() {
+                    return Err(ConfigError::InvalidConfig(
+                        "`actrium.lease_duration_secs` and \
+                         `actrium.heartbeat_interval_secs` must be positive"
+                            .to_string(),
+                    ));
+                }
+                Some(crate::config::ActriumConfig {
+                    front_package: self.resolve_manifest_path(&front_package),
+                    lease_duration,
+                    heartbeat_interval,
+                    grace_period,
+                })
+            }
+            None => None,
+        };
+
         Ok(RuntimeConfig {
             package,
             signaling_url,
@@ -234,6 +268,7 @@ impl ParserV1 {
             storage_root,
             wasi_data_dir,
             wasi_data_access: hyper.wasi_data_access,
+            actrium,
         })
     }
 
@@ -1176,6 +1211,64 @@ realm = "k7m2q9xh@example.com"
             let invalid = RUNTIME_BASE.replace("k7m2q9xh@example.com", realm);
             assert!(parse_runtime_str(path, &invalid).is_err(), "{realm}");
         }
+    }
+
+    #[test]
+    fn test_runtime_actrium_section() {
+        let path = Path::new("/etc/actrium/actr.toml");
+        let body = format!(
+            "{RUNTIME_BASE}\n[actrium]\nfront_package = \"dist/front.actr\"\n\
+             lease_duration_secs = 120\nheartbeat_interval_secs = 10\ngrace_period_secs = 5\n"
+        );
+        let config = parse_runtime_str(path, &body).unwrap();
+        let actrium = config.actrium.expect("the [actrium] section is parsed");
+        assert_eq!(
+            actrium.front_package,
+            Path::new("/etc/actrium/dist/front.actr")
+        );
+        assert_eq!(actrium.lease_duration, std::time::Duration::from_secs(120));
+        assert_eq!(
+            actrium.heartbeat_interval,
+            std::time::Duration::from_secs(10)
+        );
+        assert_eq!(actrium.grace_period, std::time::Duration::from_secs(5));
+
+        // Defaults apply when only the Front package is configured.
+        let defaults = parse_runtime_str(
+            path,
+            &format!("{RUNTIME_BASE}\n[actrium]\nfront_package = \"f.actr\"\n"),
+        )
+        .unwrap()
+        .actrium
+        .expect("[actrium] is present");
+        assert_eq!(
+            defaults.lease_duration,
+            crate::config::ActriumConfig::DEFAULT_LEASE_DURATION
+        );
+        assert_eq!(
+            defaults.heartbeat_interval,
+            crate::config::ActriumConfig::DEFAULT_HEARTBEAT_INTERVAL
+        );
+        assert_eq!(
+            defaults.grace_period,
+            crate::config::ActriumConfig::DEFAULT_GRACE_PERIOD
+        );
+
+        // A missing Front package and non-positive lease timings are errors.
+        assert!(matches!(
+            parse_runtime_str(path, &format!("{RUNTIME_BASE}\n[actrium]\n")),
+            Err(ConfigError::MissingField("actrium.front_package"))
+        ));
+        assert!(
+            parse_runtime_str(
+                path,
+                &format!(
+                    "{RUNTIME_BASE}\n[actrium]\nfront_package = \"f.actr\"\n\
+                     lease_duration_secs = 0\n"
+                ),
+            )
+            .is_err()
+        );
     }
 
     #[test]

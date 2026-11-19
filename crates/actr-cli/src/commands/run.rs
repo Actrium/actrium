@@ -126,6 +126,11 @@ impl RunCommand {
         let package_bytes = tokio::fs::read(&package_path).await.map_err(|e| {
             ActrCliError::command_error(format!("Failed to read package file: {}", e))
         })?;
+        // The Service package digest is part of the Attach compatibility tuple.
+        let service_package_digest = {
+            use sha2::Digest as _;
+            sha2::Sha256::digest(&package_bytes).to_vec()
+        };
         let package = WorkloadPackage::new(package_bytes);
 
         // 3. Parse package manifest
@@ -146,7 +151,8 @@ impl RunCommand {
         })?;
 
         // 7. Initialize Hyper
-        let hyper = self.init_hyper(&config, &package_path, &hyper_dir).await?;
+        let trust = self.build_trust_provider(&config, &package_path).await?;
+        let hyper = self.init_hyper(&config, &hyper_dir, trust.clone()).await?;
         info!("✅ Hyper initialized");
 
         // 8. Node typestate chain: from_hyper → attach → register → start
@@ -169,6 +175,16 @@ impl RunCommand {
             ))
         })?;
         info!("✅ Issuer registration successful");
+
+        let registered = self
+            .install_actrium_service(
+                registered,
+                &config,
+                &manifest,
+                &service_package_digest,
+                trust,
+            )
+            .await?;
 
         let actr_ref = registered
             .start()
@@ -257,13 +273,10 @@ impl RunCommand {
     async fn init_hyper(
         &self,
         config: &actr_config::RuntimeConfig,
-        package_path: &Path,
         hyper_dir: &Path,
+        trust: Arc<dyn actr_hyper::TrustProvider>,
     ) -> Result<actr_hyper::Hyper> {
-        use actr_hyper::{
-            ChainTrust, Hyper, HyperConfig, RegistryTrust, StaticTrust, TrustProvider,
-        };
-        use std::sync::Arc;
+        use actr_hyper::{Hyper, HyperConfig};
 
         // Honour `[hyper].storage_root` from the runtime config (already resolved
         // to an absolute path by the parser); otherwise HyperConfig defaults to
@@ -275,20 +288,28 @@ impl RunCommand {
             cfg
         };
 
+        Hyper::new(configure_hyper(HyperConfig::new(hyper_dir, trust)))
+            .await
+            .map_err(|e| ActrCliError::command_error(format!("Failed to initialize Hyper: {}", e)))
+    }
+
+    /// Build the trust chain used for both the Service package and the Front
+    /// package configured under `[actrium]`.
+    async fn build_trust_provider(
+        &self,
+        config: &actr_config::RuntimeConfig,
+        package_path: &Path,
+    ) -> Result<Arc<dyn actr_hyper::TrustProvider>> {
+        use actr_hyper::{ChainTrust, RegistryTrust, StaticTrust, TrustProvider};
+
         if config.trust.is_empty() {
             // Fallback: when no `[[trust]]` anchors are configured, auto-load
             // the package's sidecar `public-key.json` as a StaticTrust anchor.
             // Lets `actr init` scaffolds "just work" without boilerplate.
             let public_key = self.load_public_key(package_path).await?;
-            let trust: Arc<dyn TrustProvider> =
-                Arc::new(StaticTrust::new(public_key).map_err(|e| {
-                    ActrCliError::command_error(format!("Invalid public key: {}", e))
-                })?);
-            return Hyper::new(configure_hyper(HyperConfig::new(hyper_dir, trust)))
-                .await
-                .map_err(|e| {
-                    ActrCliError::command_error(format!("Failed to initialize Hyper: {}", e))
-                });
+            return Ok(Arc::new(StaticTrust::new(public_key).map_err(|e| {
+                ActrCliError::command_error(format!("Invalid public key: {}", e))
+            })?));
         }
 
         let mut providers: Vec<Arc<dyn TrustProvider>> = Vec::with_capacity(config.trust.len());
@@ -311,15 +332,102 @@ impl RunCommand {
             providers.push(p);
         }
 
-        let trust: Arc<dyn TrustProvider> = if providers.len() == 1 {
+        Ok(if providers.len() == 1 {
             providers.into_iter().next().unwrap()
         } else {
             Arc::new(ChainTrust::new(providers))
+        })
+    }
+
+    /// Install the Actrium v1 Attach server on a packaged Service host when the
+    /// runtime config has an `[actrium]` section.
+    ///
+    /// v1 compatibility is exact: the Service accepts Attach from one Front
+    /// package. The configured Front archive is verified with the same trust
+    /// chain as the Service package, and its Guest digest, routes, Service
+    /// protocol fingerprint and Actor type become the Attach requirements.
+    /// Without `[actrium]`, the node behaves exactly as before and accepts no
+    /// Actrium sessions.
+    async fn install_actrium_service(
+        &self,
+        node: actr_hyper::Node<actr_hyper::Registered>,
+        config: &actr_config::RuntimeConfig,
+        service_manifest: &actr_pack::RuntimePackageManifest,
+        service_package_digest: &[u8],
+        trust: Arc<dyn actr_hyper::TrustProvider>,
+    ) -> Result<actr_hyper::Node<actr_hyper::Registered>> {
+        let Some(actrium) = config.actrium.as_ref() else {
+            return Ok(node);
         };
 
-        Hyper::new(configure_hyper(HyperConfig::new(hyper_dir, trust)))
+        let front_bytes = tokio::fs::read(&actrium.front_package).await.map_err(|e| {
+            ActrCliError::command_error(format!(
+                "Failed to read Actrium Front package {}: {}",
+                actrium.front_package.display(),
+                e
+            ))
+        })?;
+        let verified = trust
+            .verify_package_bounded(&front_bytes, actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES)
             .await
-            .map_err(|e| ActrCliError::command_error(format!("Failed to initialize Hyper: {}", e)))
+            .map_err(|e| {
+                ActrCliError::command_error(format!("Failed to verify Actrium Front package: {e}"))
+            })?;
+        let actr_pack::RuntimePackageManifest::V2(front_manifest) = verified.manifest else {
+            return Err(ActrCliError::command_error(
+                "The Actrium Front package must use the v2 actor package format".to_string(),
+            ));
+        };
+        let metadata = actr_hyper::actrium::front_session_metadata(
+            &front_bytes,
+            &front_manifest,
+            &service_manifest.actor_type(),
+            service_package_digest,
+        )
+        .map_err(|e| {
+            ActrCliError::command_error(format!("Failed to derive Attach metadata: {e}"))
+        })?;
+        let signing_key = node.actrium_actor_signing_key().map_err(|e| {
+            ActrCliError::command_error(format!("Failed to load the node Actor key: {e}"))
+        })?;
+
+        let service_config = actrium_runtime::ServiceConfig {
+            service_actor_id: node.actor_id().to_string_repr(),
+            runtime_instance_id: actr_hyper::process_runtime_instance_id().to_owned(),
+            service_signing_key: signing_key,
+            allowed_front_actor_types: std::collections::BTreeSet::from([metadata
+                .front_actor_type
+                .to_string_repr()]),
+            program: actrium_runtime::ProgramRelease {
+                publisher: metadata.service_type.publisher.clone(),
+                name: metadata.service_type.name.clone(),
+                version: metadata.service_type.version.clone(),
+            },
+            package_digest: metadata.package_digest.clone(),
+            guest_digest: metadata.guest_digest.clone(),
+            protocol_fingerprint: metadata.protocol_fingerprint.clone(),
+            supported_runtimes: vec![metadata.runtime.clone()],
+            program_capabilities: metadata.program_capabilities.clone(),
+            routes: metadata.routes.clone(),
+            attachment_policy: actrium_runtime::AttachmentPolicy::Exclusive,
+            lease_duration: actrium.lease_duration,
+            heartbeat_interval: actrium.heartbeat_interval,
+            grace_period: actrium.grace_period,
+            replay_retention: actrium_runtime::ServiceConfig::DEFAULT_REPLAY_RETENTION,
+            max_replay_entries: actrium_runtime::ServiceConfig::DEFAULT_MAX_REPLAY_ENTRIES,
+            max_completed_sessions: actrium_runtime::ServiceConfig::DEFAULT_MAX_COMPLETED_SESSIONS,
+        };
+        let policies = actr_hyper::actrium::allow_all_service_policies(&service_config);
+        let service = actrium_runtime::InMemorySessionService::new(service_config, policies)
+            .map_err(|e| {
+                ActrCliError::command_error(format!("Invalid Actrium Service config: {e}"))
+            })?;
+        info!(
+            "🔗 Accepting Attach from {} ({})",
+            metadata.front_actor_type.to_string_repr(),
+            actrium.front_package.display()
+        );
+        Ok(node.with_actrium_service(service))
     }
 
     async fn load_static_pubkey(

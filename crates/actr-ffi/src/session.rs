@@ -106,110 +106,6 @@ impl ActriumServiceConfig {
     }
 }
 
-struct AllowAllPolicies {
-    capabilities: BTreeSet<String>,
-}
-
-#[async_trait::async_trait]
-impl actrium_runtime::MembershipProvider for AllowAllPolicies {
-    async fn principal(
-        &self,
-        _front_actor_id: &str,
-        member: &str,
-        client_key: &str,
-    ) -> Result<Option<actrium_runtime::Principal>, actrium_runtime::SessionError> {
-        Ok(Some(actrium_runtime::Principal {
-            member: member.to_string(),
-            client_key: client_key.to_string(),
-            role: actrium_runtime::MemberRole::Owner,
-            capabilities: self.capabilities.clone(),
-        }))
-    }
-}
-
-#[async_trait::async_trait]
-impl actrium_runtime::AuthorizeAttach for AllowAllPolicies {
-    async fn authorize_attach(
-        &self,
-        context: actrium_runtime::AttachAuthorization,
-    ) -> Result<actrium_runtime::AuthorizeAttachDecision, actrium_runtime::SessionError> {
-        let allowed_capabilities = if context.requested_capabilities.is_empty() {
-            self.capabilities.iter().cloned().collect()
-        } else {
-            context.requested_capabilities
-        };
-        Ok(actrium_runtime::AuthorizeAttachDecision {
-            allowed: true,
-            denial_reason: None,
-            allowed_capabilities,
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl actrium_runtime::AuthorizeTakeover for AllowAllPolicies {
-    async fn authorize_takeover(
-        &self,
-        _context: actrium_runtime::TakeoverContext,
-    ) -> Result<bool, actrium_runtime::SessionError> {
-        Ok(true)
-    }
-}
-
-#[async_trait::async_trait]
-impl actrium_runtime::AuthorizeRequest for AllowAllPolicies {
-    async fn authorize_request(
-        &self,
-        _context: actrium_runtime::RequestContext,
-    ) -> Result<actrium_runtime::RequestAuthorizationDecision, actrium_runtime::SessionError> {
-        Ok(actrium_runtime::RequestAuthorizationDecision {
-            allowed: true,
-            denial_reason: None,
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl actrium_runtime::PrivacyPolicy for AllowAllPolicies {
-    async fn evaluate(
-        &self,
-        context: actrium_runtime::PrivacyContext,
-    ) -> Result<actrium_runtime::PrivacyDecision, actrium_runtime::SessionError> {
-        Ok(actrium_runtime::PrivacyDecision {
-            state: actrium_runtime::PrivacyState {
-                actor_state_digest: vec![0; 32],
-                application_state_digest: vec![0; 32],
-                assurance_digest: vec![0; 32],
-                expires_at_epoch_secs: u64::MAX,
-            },
-            allowed_capabilities: context.requested_capabilities,
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl actrium_runtime::ResourceQuota for AllowAllPolicies {
-    async fn check_attach(
-        &self,
-        _context: actrium_runtime::AttachQuotaContext,
-    ) -> Result<actrium_runtime::QuotaDecision, actrium_runtime::SessionError> {
-        Ok(actrium_runtime::QuotaDecision {
-            allowed: true,
-            denial_reason: None,
-        })
-    }
-
-    async fn check_request(
-        &self,
-        _context: actrium_runtime::RequestQuotaContext,
-    ) -> Result<actrium_runtime::QuotaDecision, actrium_runtime::SessionError> {
-        Ok(actrium_runtime::QuotaDecision {
-            allowed: true,
-            denial_reason: None,
-        })
-    }
-}
-
 /// FFI wrapper for service session policies.
 ///
 /// v1 exposes a simple allow-all bundle for hosts that delegate policy to
@@ -234,22 +130,7 @@ impl ActriumServicePolicies {
         &self,
         config: &actrium_runtime::ServiceConfig,
     ) -> actrium_runtime::ServicePolicies {
-        let mut capabilities = config.program_capabilities.clone();
-        capabilities.extend(
-            config
-                .routes
-                .values()
-                .flat_map(|route| route.iter().cloned()),
-        );
-        let policies = Arc::new(AllowAllPolicies { capabilities });
-        actrium_runtime::ServicePolicies {
-            membership: policies.clone(),
-            authorize_attach: policies.clone(),
-            authorize_takeover: policies.clone(),
-            authorize_request: policies.clone(),
-            privacy: policies.clone(),
-            quota: policies,
-        }
+        actr_hyper::actrium::allow_all_service_policies(config)
     }
 }
 
@@ -290,18 +171,6 @@ pub struct ActriumSessionMetadata {
     pub routes: Vec<ActriumRoute>,
 }
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FrontCapabilityManifest {
-    keel_api: String,
-    host_modules: BTreeMap<String, FrontHostModule>,
-}
-
-#[derive(serde::Deserialize)]
-struct FrontHostModule {
-    rpc: Option<Vec<String>>,
-}
-
 fn invalid_session_metadata(message: impl Into<String>) -> ActrError {
     ActrError::InvalidArgument {
         msg: format!("invalid Actrium Front session metadata: {}", message.into()),
@@ -319,12 +188,6 @@ pub fn actrium_session_metadata_for_front(
     service_type: ActrType,
     service_package_digest_hex: String,
 ) -> ActrResult<ActriumSessionMetadata> {
-    use sha2::Digest as _;
-
-    const ACTRIUM_VERSION_V1: &str = "1.0.0";
-    const FRONT_HOST_API_V1: &str = "1.0";
-    const SERVICE_CAPABILITY: &str = "service";
-
     let key_bytes: [u8; 32] = trusted_front_key
         .as_slice()
         .try_into()
@@ -340,134 +203,37 @@ pub fn actrium_session_metadata_for_front(
 
     let package_digest = hex::decode(service_package_digest_hex)
         .map_err(|error| invalid_session_metadata(format!("Service digest: {error}")))?;
-    if package_digest.len() != 32 {
-        return Err(invalid_session_metadata(
-            "Service digest must contain 32 bytes",
-        ));
-    }
-
-    let service_version = semver::Version::parse(&service_type.version)
-        .map_err(|error| invalid_session_metadata(format!("Service version: {error}")))?;
-    let dependency = inspected
-        .manifest
-        .dependencies
-        .get("service")
-        .ok_or_else(|| invalid_session_metadata("[dependencies.service] is required"))?;
-    let expected_actor = format!("{}/{}", service_type.publisher, service_type.name);
-    if !dependency.required || dependency.actor != expected_actor {
-        return Err(invalid_session_metadata(format!(
-            "the selected Service {expected_actor} does not match the Front dependency"
-        )));
-    }
-    let dependency_requirement = semver::VersionReq::parse(&dependency.version)
-        .map_err(|error| invalid_session_metadata(format!("Service dependency: {error}")))?;
-    if !dependency_requirement.matches(&service_version) {
-        return Err(invalid_session_metadata(format!(
-            "Service version {service_version} does not satisfy {}",
-            dependency.version
-        )));
-    }
-
-    // The manifest carries a version requirement, whereas Attach carries the
-    // concrete Host implementation version selected by this v1 native Host.
-    let host_requirement = semver::VersionReq::parse(&inspected.manifest.host.api)
-        .map_err(|error| invalid_session_metadata(format!("Host API requirement: {error}")))?;
-    if !host_requirement.matches(&semver::Version::parse("1.0.0").expect("valid Host version")) {
-        return Err(invalid_session_metadata(format!(
-            "Host API {FRONT_HOST_API_V1} does not satisfy {}",
-            inspected.manifest.host.api
-        )));
-    }
-
-    let guest = actr_pack::read_actor_workload(&front_archive, &inspected)
-        .map_err(|error| invalid_session_metadata(error.to_string()))?;
-    let guest_digest = sha2::Sha256::digest(&guest).to_vec();
-
-    let capabilities_path = inspected
-        .manifest
-        .workload
-        .keel
-        .as_ref()
-        .and_then(|keel| keel.capabilities.as_deref())
-        .ok_or_else(|| invalid_session_metadata("the Keel capability manifest is required"))?;
-    let capability_bytes = actr_pack::read_actor_package_file(
+    let metadata = actr_hyper::actrium::front_session_metadata(
         &front_archive,
-        &inspected,
-        capabilities_path,
-        actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
+        &inspected.manifest,
+        &service_type.into(),
+        &package_digest,
     )
     .map_err(|error| invalid_session_metadata(error.to_string()))?;
-    let capabilities: FrontCapabilityManifest = serde_json::from_slice(&capability_bytes)
-        .map_err(|error| invalid_session_metadata(format!("capability manifest: {error}")))?;
-    let rpc_routes = capabilities
-        .host_modules
-        .get(SERVICE_CAPABILITY)
-        .or_else(|| capabilities.host_modules.get("host:service"))
-        .and_then(|module| module.rpc.as_ref())
-        .ok_or_else(|| invalid_session_metadata("hostModules.service.rpc is required"))?;
-    let routes: BTreeSet<String> = rpc_routes.iter().cloned().collect();
-    if routes.is_empty() || routes.iter().any(|route| route.is_empty()) {
-        return Err(invalid_session_metadata(
-            "hostModules.service.rpc must contain nonempty routes",
-        ));
-    }
-    let routes = routes
-        .into_iter()
-        .map(|route| ActriumRoute {
-            route,
-            capabilities: vec![SERVICE_CAPABILITY.to_owned()],
-        })
-        .collect();
-
-    let contract_path = dependency
-        .contract
-        .as_deref()
-        .ok_or_else(|| invalid_session_metadata("the Service Proto contract is required"))?;
-    let contract_bytes = actr_pack::read_actor_package_file(
-        &front_archive,
-        &inspected,
-        contract_path,
-        actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
-    )
-    .map_err(|error| invalid_session_metadata(error.to_string()))?;
-    let contract = String::from_utf8(contract_bytes).map_err(|error| {
-        invalid_session_metadata(format!("Service Proto is not UTF-8: {error}"))
-    })?;
-    let contract_name = contract_path
-        .rsplit('/')
-        .next()
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| invalid_session_metadata("the Service Proto basename is empty"))?;
-    let fingerprint = actr_service_compat::Fingerprint::calculate_service_semantic_fingerprint(&[
-        actr_service_compat::ProtoFile {
-            name: contract_name.to_owned(),
-            content: contract,
-            path: None,
-        },
-    ])
-    .map_err(|error| invalid_session_metadata(error.to_string()))?;
-    let fingerprint_hex = fingerprint
-        .strip_prefix("service_semantic:")
-        .ok_or_else(|| invalid_session_metadata("unexpected Service fingerprint encoding"))?;
-    let protocol_fingerprint = hex::decode(fingerprint_hex)
-        .map_err(|error| invalid_session_metadata(format!("Service fingerprint: {error}")))?;
 
     Ok(ActriumSessionMetadata {
         program: ProgramRelease {
-            publisher: service_type.publisher,
-            name: service_type.name,
-            version: service_type.version,
+            publisher: metadata.service_type.publisher,
+            name: metadata.service_type.name,
+            version: metadata.service_type.version,
         },
-        package_digest,
-        guest_digest,
-        protocol_fingerprint,
+        package_digest: metadata.package_digest,
+        guest_digest: metadata.guest_digest,
+        protocol_fingerprint: metadata.protocol_fingerprint,
         runtime: ActriumRuntime {
-            actrium_version: ACTRIUM_VERSION_V1.to_owned(),
-            front_host_api: FRONT_HOST_API_V1.to_owned(),
-            keel_api: capabilities.keel_api,
+            actrium_version: metadata.runtime.actrium_version,
+            front_host_api: metadata.runtime.front_host_api,
+            keel_api: metadata.runtime.keel_api,
         },
-        program_capabilities: vec![SERVICE_CAPABILITY.to_owned()],
-        routes,
+        program_capabilities: metadata.program_capabilities.into_iter().collect(),
+        routes: metadata
+            .routes
+            .into_iter()
+            .map(|(route, capabilities)| ActriumRoute {
+                route,
+                capabilities: capabilities.into_iter().collect(),
+            })
+            .collect(),
     })
 }
 

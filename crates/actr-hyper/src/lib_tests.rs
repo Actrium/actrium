@@ -617,6 +617,7 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
         storage_root: None,
         wasi_data_dir: None,
         wasi_data_access: actr_config::WasiDataAccess::default(),
+        actrium: None,
     }
 }
 
