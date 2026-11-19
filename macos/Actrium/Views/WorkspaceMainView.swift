@@ -488,6 +488,10 @@ struct WorkspaceMainView: View {
                             .frame(width: addressBarWidth, height: 28)
                     } else {
                         let leftIconState: AddressBarLeftIconState = {
+                            // URI-carried invites join without a sheet, so the
+                            // address bar carries the only visible progress
+                            // while discovery + redemption run.
+                            if viewModel.inviteRedemptionInFlight { return .loading }
                             guard let tab = viewModel.currentTab else { return .none }
                             switch tab.contentType {
                             case .reactNative: return .menu

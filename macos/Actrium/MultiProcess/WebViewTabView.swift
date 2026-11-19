@@ -171,13 +171,24 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// Tracks the last URL seen by KVO (avoids using change.oldValue which can dangle)
     private var lastKnownURL: URL?
 
+    private struct TrustedLinkActivation {
+        let url: URL
+        let sourceURL: URL?
+        let sourceIsMainFrame: Bool
+        let expiresAt: ContinuousClock.Instant
+    }
+
+    private static let linkActivationMessage = "actriumLinkActivation"
+    private static let linkActivationWorld = WKContentWorld.world(name: "ActriumLinkActivation")
+    private var trustedLinkActivation: TrustedLinkActivation?
+
     /// Callback when navigation finishes with title and URL
     var onNavigationFinished: ((String?, URL?) -> Void)?
 
     /// Callback when URL changes (including History.pushState/replaceState)
     var onURLChanged: ((URL?) -> Void)?
 
-    /// Callback when a clicked link is allowed to navigate this tab's main frame.
+    /// Callback when a user-activated link can navigate this tab's main frame.
     var onMainFrameLinkActivated: (() -> Void)?
 
     /// Callback when loading state changes
@@ -251,6 +262,20 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         userContentController.add(self, name: "actriumPasswordCapture")
         userContentController.add(self, name: "actriumAutofillSuggestion")
         userContentController.add(self, name: "actriumAutofillDismiss")
+
+        // WebKit also reports scripted anchor.click() as a link activation.
+        // Observe trusted DOM clicks in an isolated world so page scripts cannot
+        // send their own activation messages. Match the click in the delegate.
+        userContentController.add(self, contentWorld: Self.linkActivationWorld, name: Self.linkActivationMessage)
+        userContentController.addUserScript(WKUserScript(source: """
+            window.addEventListener("click", event => {
+                const link = event.composedPath().find(node =>
+                    (node instanceof HTMLAnchorElement || node instanceof HTMLAreaElement) && node.hasAttribute("href"));
+                if (link) {
+                    window.webkit.messageHandlers.actriumLinkActivation.postMessage(event.isTrusted ? link.href : null);
+                }
+            }, true);
+            """, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Self.linkActivationWorld))
 
         // Inject script to observe theme color
         let script = """
@@ -853,6 +878,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// Handle navigation action with download attribute or Option+click
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         let url = navigationAction.request.url
+        let isTrustedLink = consumeTrustedLinkActivation(for: navigationAction)
         NSLog("📥 WebViewHolder: decidePolicyFor action - URL: %@, shouldDownload: %d, navigationType: %ld",
               url?.absoluteString ?? "nil",
               navigationAction.shouldPerformDownload ? 1 : 0,
@@ -880,11 +906,20 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             return
         }
 
-        if navigationAction.navigationType == .linkActivated,
-           navigationAction.targetFrame?.isMainFrame == true {
+        if isTrustedLink, navigationAction.targetFrame?.isMainFrame == true {
             onMainFrameLinkActivated?()
         }
         decisionHandler(.allow)
+    }
+
+    private func consumeTrustedLinkActivation(for action: WKNavigationAction) -> Bool {
+        guard action.navigationType == .linkActivated else { return false }
+        defer { trustedLinkActivation = nil }
+        guard let click = trustedLinkActivation else { return false }
+        return click.expiresAt > ContinuousClock.now
+            && click.url == action.request.url
+            && click.sourceURL == action.sourceFrame.request.url
+            && click.sourceIsMainFrame == action.sourceFrame.isMainFrame
     }
 
     /// Handle navigation response becoming a download
@@ -1724,7 +1759,16 @@ struct FocusedWebOverlay: View {
 
 extension WebViewHolder: WKScriptMessageHandler {
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        if message.name == "actriumThemeColor", let colorHex = message.body as? String {
+        if message.name == Self.linkActivationMessage {
+            trustedLinkActivation = (message.body as? String).flatMap { URL(string: $0) }.map { url in
+                TrustedLinkActivation(
+                    url: url,
+                    sourceURL: message.frameInfo.request.url,
+                    sourceIsMainFrame: message.frameInfo.isMainFrame,
+                    expiresAt: ContinuousClock.now + .seconds(1)
+                )
+            }
+        } else if message.name == "actriumThemeColor", let colorHex = message.body as? String {
             if colorHex.hasPrefix("#") {
                 Task { @MainActor [weak self] in
                     self?.onThemeColorChanged?(colorHex)

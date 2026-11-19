@@ -84,6 +84,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// actr:// link awaiting invite-code redemption (temporary-flow sheet presented).
     @Published var pendingInviteRedeem: PendingInviteRedeem?
 
+    /// Blocks duplicate link deliveries during a single-use invite exchange.
+    @Published private(set) var inviteRedemptionInFlight = false
+
     private enum RealmNavigation {
         case loading(UUID)
         case invite(PendingInviteRedeem)
@@ -833,6 +836,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     /// Navigation Current Tab To Assign URL Or apply ID
     func openURLInNewTab(_ url: URL) {
+        // Drop duplicate actr:// deliveries before they create a tab: the
+        // navigation entry ignores them while a redemption is in flight, and
+        // an orphaned blank tab would be the only trace.
+        if inviteRedemptionInFlight, url.scheme?.lowercased() == "actr" { return }
         // These flows manage their own tabs when they recover an instance or import a package.
         if !ActrInstanceAddress.isLocalInstanceURL(url), !ActrPackageLinkPolicy.isPackageDownloadURL(url) {
             addNewTab(focusAddressBar: false)
@@ -847,6 +854,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// - Load if input is a local file path ACTR Apply
     /// - Otherwise, as app id Process
     func navigateCurrentTab(to input: String) {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isRealmLink = trimmed.lowercased().hasPrefix("actr://")
+        // A duplicate delivery must leave the active redemption's load intact.
+        if isRealmLink, inviteRedemptionInFlight { return }
+
         // Address-bar navigation must always land somewhere: create a tab
         // when the window has none (e.g. right after a relaunch).
         if currentTabId == nil || tabs.firstIndex(where: { $0.id == currentTabId }) == nil {
@@ -859,20 +871,23 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
 
         invalidateRealmNavigation(for: currentTabId)
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // 0. actr:// Realm links — the core parser owns the decision
         // (case-insensitive scheme, format rules, local-Realm ownership).
         // Only actr-scheme input enters this branch; every other input falls
         // through to the existing navigation handlers below (local paths,
         // about:, web, package direct links).
-        if trimmed.lowercased().hasPrefix("actr://") {
+        if isRealmLink {
+            // Only the sanitized address may reach the tab, session, or history.
+            let address = ActrLinkInvite.strippingInviteArgs(from: trimmed)
             do {
                 let info = try ActriumCore.parseActrUri(
-                    uri: trimmed,
+                    uri: address,
                     installationId: InstallationIdProvider.getOrCreate()
                 )
-                handleResolvedRealmLink(info, input: trimmed, tabIndex: index)
+                handleResolvedRealmLink(
+                    info, address: address, tabIndex: index, inviteCode: ActrLinkInvite.invite(from: trimmed)
+                )
                 return
             } catch {
                 logger.warning("⚠️ [navigateCurrentTab] actr:// input rejected: \(error)")
@@ -1098,23 +1113,31 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         guard pendingRealmInvite(for: pending.tabId)?.id == pending.id else { return }
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedCode.isEmpty else { return }
+        redeemInvite(code: trimmedCode, address: pending.uri, tabId: pending.tabId)
+    }
+
+    /// Redeem a code from either the invite sheet or a verified Realm link.
+    private func redeemInvite(code: String, address: String, tabId: UUID) {
+        guard !inviteRedemptionInFlight else { return }
+        inviteRedemptionInFlight = true
         let load = UUID()
-        realmNavigations[pending.tabId] = .loading(load)
-        presentCurrentTabInvite()
+        realmNavigations[tabId] = .loading(load)
+        if currentTabId == tabId { presentCurrentTabInvite() }
 
         Task { @MainActor in
             defer {
-                if isCurrentRealmLoad(load, for: pending.tabId) { invalidateRealmNavigation(for: pending.tabId) }
+                inviteRedemptionInFlight = false
+                if isCurrentRealmLoad(load, for: tabId) { invalidateRealmNavigation(for: tabId) }
             }
-            guard isCurrentRealmLoad(load, for: pending.tabId) else { return }
+            guard isCurrentRealmLoad(load, for: tabId) else { return }
             do {
                 // The invite must name the same Realm as the requested link:
                 // join sends this device's public key and the invite secret to
                 // the Realm's issuer, so a mismatched code would leak both to
                 // the wrong Realm before any server-side check fires.
-                let invite = try ActriumCore.decodeActrInvite(inviteText: trimmedCode)
+                let invite = try ActriumCore.decodeActrInvite(inviteText: code)
                 let requested = try ActriumCore.parseActrUri(
-                    uri: pending.uri,
+                    uri: address,
                     installationId: InstallationIdProvider.getOrCreate()
                 )
                 let requestedRealm = [requested.realmId, requested.domain]
@@ -1127,16 +1150,16 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                             comment: "Actr join realm mismatch error")])
                 }
 
-                let result = try await joinRealmWithInvite(trimmedCode)
+                let result = try await joinRealmWithInvite(code)
                 markRedeemed(result.realmName)
                 logger.notice("🎟️ [InviteRedeem] joined \(result.realmName): member=\(result.memberId), role=\(result.role), key=\(result.keyId)")
-                guard isCurrentRealmLoad(load, for: pending.tabId),
-                      let index = tabs.firstIndex(where: { $0.id == pending.tabId }) else { return }
+                guard isCurrentRealmLoad(load, for: tabId),
+                      let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
                 let address = result.instanceURL.absoluteString
                 let info = try ActriumCore.parseActrUri(uri: address, installationId: InstallationIdProvider.getOrCreate())
-                handleResolvedRealmLink(info, input: address, tabIndex: index)
+                handleResolvedRealmLink(info, address: address, tabIndex: index)
             } catch {
-                guard isCurrentRealmLoad(load, for: pending.tabId) else { return }
+                guard isCurrentRealmLoad(load, for: tabId) else { return }
                 logger.warning("⚠️ [InviteRedeem] redemption failed: \(error)")
                 presentRealmLinkError(error)
             }
@@ -1364,8 +1387,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// resolved address.
     private func handleResolvedRealmLink(
         _ info: ActrUriInfo,
-        input: String,
-        tabIndex: Int
+        address: String,
+        tabIndex: Int,
+        inviteCode: String? = nil
     ) {
         // The core parser guarantees a RealmId for every resolved link.
         guard let realmId = info.realmId else { return }
@@ -1381,17 +1405,17 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         // 04 §3: a local instance address opens the same instance — focus it
         // when already open, otherwise recover it through the instance store.
         if info.isLocal {
-            if let existing = tabs.first(where: { $0.url?.absoluteString == input }) {
+            if let existing = tabs.first(where: { $0.url?.absoluteString == address }) {
                 switchToTab(id: existing.id)
                 return
             }
-            guard let address = URL(string: input) else { return }
+            guard let localURL = URL(string: address) else { return }
             if serviceInstanceStore.resolveActorId(byAddressLabel: realmId) != nil {
-                restoreInstanceTab(address: address, title: realmDisplay, isActiveTab: true)
+                restoreInstanceTab(address: localURL, title: realmDisplay, isActiveTab: true)
             } else {
-                logger.error("❌ [navigateCurrentTab] local instance not found: \(input)")
+                logger.error("❌ [navigateCurrentTab] local instance not found for \(realmDisplay)")
                 actrUriNotice = ActrUriNotice(
-                    uri: input,
+                    uri: address,
                     domain: info.domain,
                     detail: "The local instance was not found or has been cleared (SERVICE_NOT_FOUND); the address cannot be opened."
                 )
@@ -1404,7 +1428,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 url: url,
                 domain: info.domain,
                 realmId: realmId,
-                address: input,
+                address: address,
+                inviteCode: inviteCode,
                 title: realmDisplay,
                 replacing: tabs[tabIndex]
             )
@@ -1444,6 +1469,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         domain: String,
         realmId: String,
         address: String,
+        inviteCode: String?,
         title: String,
         replacing tab: Tab
     ) {
@@ -1517,10 +1543,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     // load. Open joins reuse an existing member.
                     try await joinOpenRealm(admission)
                 } else if !redeemedRealms.contains(profile.realmName) {
-                    realmNavigations[replacingTabId] = .invite(
-                        PendingInviteRedeem(tabId: replacingTabId, uri: address, domain: domain)
-                    )
-                    if currentTabId == replacingTabId { presentCurrentTabInvite() }
+                    if let inviteCode {
+                        redeemInvite(code: inviteCode, address: address, tabId: replacingTabId)
+                    } else {
+                        realmNavigations[replacingTabId] = .invite(
+                            PendingInviteRedeem(tabId: replacingTabId, uri: address, domain: domain)
+                        )
+                        if currentTabId == replacingTabId { presentCurrentTabInvite() }
+                    }
                     return
                 }
                 guard let startingIndex = currentTabIndex() else { return }
@@ -2370,19 +2400,21 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 restoredTabIds.append(tab.id)
                 tabId = tab.id
             case "actr":
+                let address = ActrLinkInvite.strippingInviteArgs(from: url.absoluteString)
+                guard let realmURL = URL(string: address) else { continue }
                 if let info = try? ActriumCore.parseActrUri(
-                    uri: url.absoluteString, installationId: InstallationIdProvider.getOrCreate()
+                    uri: address, installationId: InstallationIdProvider.getOrCreate()
                 ), !info.isLocal, let realm = info.realmId,
                    redeemedRealms.contains("\(realm)@\(info.domain)") {
-                    let tab = Tab(title: sessionTab.title, url: url)
+                    let tab = Tab(title: sessionTab.title, url: realmURL)
                     tabs.append(tab)
                     tabSlotPositions[tab.id] = tabs.count - 1
                     restoredTabIds.append(tab.id)
                     tabId = tab.id
-                    handleResolvedRealmLink(info, input: url.absoluteString, tabIndex: tabs.count - 1)
+                    handleResolvedRealmLink(info, address: address, tabIndex: tabs.count - 1)
                 } else {
                     tabId = nil
-                    restoreInstanceTab(address: url, title: sessionTab.title, isActiveTab: index == session.activeTabIndex)
+                    restoreInstanceTab(address: realmURL, title: sessionTab.title, isActiveTab: index == session.activeTabIndex)
                 }
             case "actro":
                 // Package address: reuse the existing package load chain.
@@ -2668,8 +2700,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let appURL = ActriumAppURLScheme.appURL(filePath: sourceURL.path) ?? sourceURL
 
         // Same-tab replace (actr:// discovery funnel, 15-B B6): update the
-        // originating tab in place so the address bar replaces instead of a
-        // second tab appearing. Falls through to append when the tab is gone.
+        // originating tab in place and preserve the current selection.
         if let replacingTabId,
            let index = tabs.firstIndex(where: { $0.id == replacingTabId }) {
             tabs[index].title = title
@@ -2694,7 +2725,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             leftPanelVisibility[tabs[index].id] = leftPanelDefaultVisible
             // Force the renderer to pick up the replaced content.
             tabs[index].reloadNonce &+= 1
-            currentTabId = tabs[index].id
 
             logger.notice(" Loaded .actr (replaced tab): \(title)")
             if recordHistoryVisit {

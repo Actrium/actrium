@@ -308,6 +308,7 @@ export class CapabilityAuthorizer {
   private snapshot: NativeCapabilitySnapshot;
   private readonly requestGrant: (capability: FrontCapability) => void;
   private readonly waiters = new Map<FrontCapability, GrantWaiter[]>();
+  private readonly revocationListeners = new Map<FrontCapability, Set<() => void>>();
   private disposed = false;
 
   constructor(
@@ -350,6 +351,26 @@ export class CapabilityAuthorizer {
         }
       }
     }
+    this.notifyRevocations();
+  }
+
+  /** Stop a long-lived operation as soon as its current snapshot is revoked. */
+  onRevoked(capability: FrontCapability, listener: () => void): () => void {
+    if (
+      this.disposed ||
+      !evaluateCapabilityAccess(capability, this.snapshot).allowed
+    ) {
+      listener();
+      return () => {};
+    }
+    const listeners = this.revocationListeners.get(capability) ?? new Set();
+    listeners.add(listener);
+    this.revocationListeners.set(capability, listeners);
+    return () => {
+      const current = this.revocationListeners.get(capability);
+      current?.delete(listener);
+      if (current?.size === 0) this.revocationListeners.delete(capability);
+    };
   }
 
   async authorize(capability: FrontCapability): Promise<void> {
@@ -381,6 +402,21 @@ export class CapabilityAuthorizer {
       }
     }
     this.waiters.clear();
+    this.notifyRevocations();
+    this.revocationListeners.clear();
+  }
+
+  private notifyRevocations(): void {
+    for (const [capability, listeners] of [...this.revocationListeners]) {
+      if (
+        !this.disposed &&
+        evaluateCapabilityAccess(capability, this.snapshot).allowed
+      ) {
+        continue;
+      }
+      this.revocationListeners.delete(capability);
+      for (const listener of listeners) listener();
+    }
   }
 
   private waitForGrant(capability: FrontCapability): Promise<void> {
