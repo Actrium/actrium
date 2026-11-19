@@ -517,9 +517,11 @@ dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
  "rand 0.8.8",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.21",
  "uniffi 0.29.5",
  "url",
@@ -3581,6 +3583,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 name = "loran-admin"
 version = "0.10.7"
 dependencies = [
+ "actr-protocol",
  "chrono",
  "hex",
  "loran-issuer",

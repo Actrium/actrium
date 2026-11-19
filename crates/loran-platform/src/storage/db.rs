@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const LORAN_SCHEMA_VERSION: i64 = 12;
+const LORAN_SCHEMA_VERSION: i64 = 15;
 const LORAN_SCHEMA_VERSION_WITH_REALM_CLIENT_KEYS: i64 = 10;
 
 /// Database manager
@@ -53,7 +53,7 @@ impl Database {
             .await?;
         if matches!(
             version,
-            LORAN_SCHEMA_VERSION_WITH_REALM_CLIENT_KEYS | 11 | LORAN_SCHEMA_VERSION
+            LORAN_SCHEMA_VERSION_WITH_REALM_CLIENT_KEYS | 11 | 12 | 13 | 14 | LORAN_SCHEMA_VERSION
         ) {
             return Ok(version);
         }
@@ -220,6 +220,33 @@ impl Database {
                 document TEXT NOT NULL,
                 accepted_at INTEGER NOT NULL,
                 FOREIGN KEY(realm) REFERENCES realm(name) ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Preserve Front release receipts when enabling managed Service releases.
+        if version == 13 {
+            sqlx::query("ALTER TABLE realm_front_update RENAME TO realm_package_release")
+                .execute(&mut *tx)
+                .await?;
+        }
+        if matches!(version, 13 | 14) {
+            sqlx::query(
+                "ALTER TABLE realm_package_release ADD COLUMN rollback INTEGER NOT NULL DEFAULT 0",
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_package_release (
+                realm TEXT NOT NULL REFERENCES realm(name) ON DELETE CASCADE,
+                operation_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                previous_document TEXT NOT NULL,
+                document TEXT NOT NULL,
+                rollback INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(realm, operation_id)
             )",
         )
         .execute(&mut *tx)

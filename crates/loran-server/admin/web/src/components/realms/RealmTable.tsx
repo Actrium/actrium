@@ -1,6 +1,6 @@
 import type { RealmInfo } from "../../lib/api";
 import { cn } from "../../lib/utils";
-import { Archive, Pause, Play, Settings, UserPlus, Users } from "lucide-react";
+import { Archive, Package, Pause, Play, Settings, UserPlus, Users } from "lucide-react";
 
 interface RealmTableProps {
   realms: RealmInfo[];
@@ -9,6 +9,7 @@ interface RealmTableProps {
   onIssueOwnerInvite: (realm: string) => void;
   onRetire: (realm: string) => void;
   onEditAdmission: (realm: RealmInfo) => void;
+  onEditPackages: (realm: string) => void;
   onShowMembers: (realm: string) => void;
 }
 
@@ -36,6 +37,7 @@ export function RealmTable({
   onRetire,
   onShowMembers,
   onEditAdmission,
+  onEditPackages,
 }: RealmTableProps) {
   if (realms.length === 0) {
     return (
@@ -82,6 +84,11 @@ export function RealmTable({
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
+                    <button title="Edit packages" aria-label={`Edit packages for ${realm.realm}`}
+                      disabled={!canWrite || !realm.admission_writable || realm.status !== "active"}
+                      onClick={() => onEditPackages(realm.realm)} className={cn(actionClass, "hover:bg-gray-100 hover:text-gray-600")}>
+                      <Package className="h-4 w-4" />
+                    </button>
                     <button title="Edit admission" aria-label={`Edit admission for ${realm.realm}`}
                       disabled={!canWrite || !realm.admission_writable}
                       onClick={() => onEditAdmission(realm)} className={actionClass}>

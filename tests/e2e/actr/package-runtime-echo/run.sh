@@ -82,6 +82,12 @@ esac
 if [[ "$BACKEND" == "v2-component" && ( "$MODE" != "runtime" || "$REALM_STAGE" != "full" ) ]]; then
     fail "The v2-component backend requires MODE=runtime and REALM_STAGE=full"
 fi
+if [[ ( "${REALM_FRONT_RELEASE:-0}" == 1 || "${REALM_SERVICE_SWITCH:-0}" == 1 ) && ( "$REALM_MODE" != provider || "${REALM_HTTPS:-0}" != 1 || "$BACKEND" != v2-component ) ]]; then
+    fail "package release scenarios require REALM_MODE=provider, REALM_HTTPS=1 and --backend v2-component"
+fi
+if [[ "${REALM_FRONT_RELEASE:-0}" == 1 && "${REALM_SERVICE_SWITCH:-0}" == 1 ]]; then
+    fail "run the Front release and Service switch scenarios separately"
+fi
 
 for cmd in cargo curl jq sqlite3 python3 perl rustc lsof timeout; do
     require_cmd "$cmd"
@@ -123,6 +129,7 @@ RUNTIME_LAUNCHER=(python3 "$SCRIPT_DIR/lib/runtime-isolation.py" --private-dir "
 LORAN_PID=""
 HTTPS_PID=""
 SERVER_PID=""
+CANDIDATE_SERVICE_PID=""
 CLIENT_PID=""
 ACTR_CLI_BIN=""
 ADMIN_TOKEN=""
@@ -142,6 +149,9 @@ cleanup() {
     fi
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
         kill "$SERVER_PID" 2>/dev/null || true
+    fi
+    if [ -n "$CANDIDATE_SERVICE_PID" ] && kill -0 "$CANDIDATE_SERVICE_PID" 2>/dev/null; then
+        kill "$CANDIDATE_SERVICE_PID" 2>/dev/null || true
     fi
     if [ -n "$LORAN_PID" ] && kill -0 "$LORAN_PID" 2>/dev/null; then
         kill "$LORAN_PID" 2>/dev/null || true
@@ -185,7 +195,7 @@ build_local_actr_cli() {
 # discovery and has no fixture override, including in all-features builds.
 build_local_loran() {
     if [ -n "${LORAN_BIN:-}" ] && [ -x "$LORAN_BIN" ]; then
-        "$LORAN_BIN" --list | grep -q '^package_runtime_fixture: test$' ||
+        "$LORAN_BIN" --list | grep -Fx 'package_runtime_fixture: test' >/dev/null ||
             fail "LORAN_BIN must be the loran test binary containing package_runtime_fixture"
         success "Using caller-provided loran test fixture: $LORAN_BIN"
         return 0
@@ -691,9 +701,10 @@ PY
 # Poll for successful startup ("ActrNode started").
 expect_server_started() {
     local log_name="${1:-server.log}"
+    local server_pid="${2:-$SERVER_PID}"
     local attempt=0
     while [ $attempt -lt 30 ]; do
-        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        if ! kill -0 "$server_pid" 2>/dev/null; then
             cat "$LOG_DIR/$log_name" >&2 || true
             fail "Server host exited before becoming ready (expected success)"
         fi
@@ -776,6 +787,11 @@ mode_runtime() {
         registrations="$(sqlite3 "$LORAN_DB" "SELECT count(*) FROM issued_actor_identity
             WHERE actor_type = '$PUBLISHER/EchoService@$SERVICE_VERSION' AND target IS NULL AND auth_mode = 1;")"
         [ "$registrations" -gt 0 ] || fail "Issuer did not record a target-less package registration"
+    fi
+    if [[ "${REALM_FRONT_RELEASE:-0}" = 1 || "${REALM_SERVICE_SWITCH:-0}" = 1 ]]; then
+        run_package_release_roundtrips
+        stop_server
+        return
     fi
     # Dependency installation resolves the service over signaling, so the
     # service must also be online before the client guest lockfile is

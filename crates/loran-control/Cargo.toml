@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Admin control-plane implementation for loran nodes"
 
 [dependencies]
+actr-protocol = { workspace = true }
 tonic = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 

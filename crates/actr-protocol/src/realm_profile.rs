@@ -5,8 +5,8 @@
 //! Realm signing key listed in the domain's `realm_signing_keys` member.
 
 use crate::authority::{
-    AuthorityDescriptor, DetachedSignature, KeyStatus, RealmSigningKey, RealmSigningKeys,
-    SIGNATURE_ALGORITHM,
+    AuthorityDescriptor, DetachedSignature, KeyStatus, PinnedKey, PinnedStatus, RealmSigningKey,
+    RealmSigningKeys, SIGNATURE_ALGORITHM,
 };
 use crate::uri::ActrUri;
 use base64::Engine as _;
@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 mod selection;
-pub use selection::RealmPackageSelection;
+pub use selection::{FrontUpdate, PackageSelectionChange, RealmPackageSelection};
 pub const MAX_REALM_PROFILE_BYTES: usize = 64 * 1024;
 
 pub const REALM_PROFILE_SCHEMA: &str = "actr.realm/v1";
@@ -412,7 +412,7 @@ fn parse_realm_name(name: &str) -> Result<ActrUri, String> {
 }
 
 /// Realm Profile URLs for `realm_name`, in document order (section 3): each
-/// `realms` link with protocol `actr-realm-profile/1`, a trailing `/` removed,
+/// `realms` or legacy `realm` link with protocol `actr-realm-profile/1`, a trailing `/` removed,
 /// followed by `/<realm_id>`. Links with a query or fragment are skipped.
 pub fn realm_profile_urls(
     descriptor: &AuthorityDescriptor,
@@ -424,7 +424,7 @@ pub fn realm_profile_urls(
         .services
         .iter()
         .filter(|link| {
-            link.rel == "realms"
+            matches!(link.rel.as_str(), "realms" | "realm")
                 && link.protocol.as_deref() == Some(REALM_PROFILE_PROTOCOL)
                 && link.href.starts_with("https://")
                 && !link.href.contains(['?', '#'])
@@ -468,10 +468,39 @@ impl RealmProfile {
         keys: &RealmSigningKeys,
         stored: bool,
     ) -> Result<Self, RealmProfileError> {
-        let invalid = RealmProfileError::Invalid;
         keys.validate()
             .map_err(|error| RealmProfileError::KeysInvalid(error.to_string()))?;
+        Self::verify_with_listed_keys(document, realm_name, &keys.keys, stored)
+    }
 
+    /// Authenticate a discarded snapshot with its historical pin. This checks
+    /// saved state integrity without making a revoked Profile usable again.
+    pub fn verify_revoked_snapshot(
+        document: &[u8],
+        realm_name: &str,
+        pinned: &PinnedKey,
+    ) -> Result<(), RealmProfileError> {
+        if pinned.status != PinnedStatus::Removed {
+            return Err(RealmProfileError::Invalid(
+                "snapshot signer is not revoked".into(),
+            ));
+        }
+        let key = RealmSigningKey {
+            id: pinned.id.clone(),
+            public_key: pinned.public_key.clone(),
+            algorithm: SIGNATURE_ALGORITHM.into(),
+            status: KeyStatus::Retired,
+        };
+        Self::verify_with_listed_keys(document, realm_name, &[key], false).map(|_| ())
+    }
+
+    fn verify_with_listed_keys(
+        document: &[u8],
+        realm_name: &str,
+        keys: &[RealmSigningKey],
+        stored: bool,
+    ) -> Result<Self, RealmProfileError> {
+        let invalid = RealmProfileError::Invalid;
         if document.len() > MAX_REALM_PROFILE_BYTES {
             return Err(invalid("Realm Profile exceeds 64 KiB".into()));
         }
@@ -495,7 +524,7 @@ impl RealmProfile {
             members.remove("signature");
         }
         let signed_payload = jcs(&value);
-        verify_signature(&keys.keys, &profile.signature, signed_payload.as_bytes())?;
+        verify_signature(keys, &profile.signature, signed_payload.as_bytes())?;
         Ok(Self {
             signed_payload,
             document: document.to_vec(),
@@ -1228,6 +1257,18 @@ mod tests {
                 "https://acme.com/double//k7m2q9xh",
                 "https://p.example:8443/r/k7m2q9xh"
             ]
+        );
+        descriptor.services = vec![
+            ServiceLink::new("realm", "https://acme.com/realm/")
+                .with_protocol(REALM_PROFILE_PROTOCOL),
+        ];
+        descriptor
+            .validate_for(&parse_realm_name(NAME).unwrap())
+            .unwrap();
+        assert_eq!(descriptor.require_service("realms").unwrap().rel, "realm");
+        assert_eq!(
+            realm_profile_urls(&descriptor, NAME).unwrap(),
+            vec!["https://acme.com/realm/k7m2q9xh"]
         );
         descriptor.services.clear();
         assert!(realm_profile_urls(&descriptor, NAME).unwrap().is_empty());

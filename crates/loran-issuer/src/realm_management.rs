@@ -22,7 +22,9 @@ use platform::net::FetchError;
 use platform::realm::domain::member_from_descriptor;
 use platform::realm::management::use_nonce;
 use platform::realm::membership::{self, BY_HOLDER};
-use platform::realm::{Realm, RealmDomain, RealmError, RealmProfileRecord, RealmStatus};
+use platform::realm::{
+    Realm, RealmDomain, RealmError, RealmPackageReleaseRecord, RealmProfileRecord, RealmStatus,
+};
 use serde_json::{Value, json};
 use std::future::Future;
 use std::sync::Arc;
@@ -164,7 +166,9 @@ where
             Ok(membership::admission_info(&request.realm, config.max_members_per_realm()).await?)
         }
         ManagementOp::CreateRealm => create_realm(profiles, config, &request).await,
-        ManagementOp::PublishProfile => publish_profile(profiles, &request, &keys).await,
+        ManagementOp::PublishProfile | ManagementOp::PublishFrontProfile => {
+            publish_profile(profiles, &request, &keys).await
+        }
         ManagementOp::ReissueOwnerInvite => {
             let invite = membership::issue_owner_invite(&request.realm, BY_HOLDER)
                 .await
@@ -407,6 +411,14 @@ async fn publish_profile(
             profile.provider.id
         )));
     }
+    if let Some(update) = &request.front_update {
+        let selection = profile.selection.as_ref().ok_or_else(|| {
+            ManagementError::Invalid("publish_front_profile needs an active selection".into())
+        })?;
+        if let Some(receipt) = RealmPackageReleaseRecord::get(name, update, selection).await? {
+            return Ok(receipt.reply(name, update)?);
+        }
+    }
     if profile.realm.status == ProfileStatus::Active {
         // An active Realm Profile names exactly this Actr Facility Provider's Issuer,
         // the Realm's issuer key and this Actr Facility Provider's endpoints.
@@ -440,14 +452,30 @@ async fn publish_profile(
         }
     }
 
-    let (stored, _, owner_invite) = RealmProfileRecord::store(
-        &profile,
-        &document,
-        record.as_ref().map(|record| record.digest.as_str()),
-        Some(BY_HOLDER),
-        None,
-    )
-    .await?;
+    let digest = record.as_ref().map(|record| record.digest.as_str());
+    if let Some(update) = &request.front_update {
+        let previous = previous.as_ref().ok_or_else(|| {
+            ManagementError::Conflict("Front update needs an accepted Profile baseline".into())
+        })?;
+        if profile.realm.display_name != previous.realm.display_name
+            || profile.policy != previous.policy
+        {
+            return Err(ManagementError::Invalid(
+                "a Front update only changes the selection".into(),
+            ));
+        }
+        let receipt =
+            RealmProfileRecord::store_front_update(&profile, &document, digest, None, update)
+                .await?;
+        platform::recording::info!(
+            "Realm {name}: Front operation {} accepted at sequence {}",
+            update.operation_id,
+            receipt.sequence
+        );
+        return Ok(receipt.reply(name, update)?);
+    }
+    let (stored, _, owner_invite) =
+        RealmProfileRecord::store(&profile, &document, digest, Some(BY_HOLDER), None).await?;
     let mut reply = json!({
         "realm": name,
         "status": stored.status.to_string(),

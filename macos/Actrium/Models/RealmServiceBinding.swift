@@ -3,6 +3,7 @@ import ActrBindings
 import ActriumCore
 import ActriumIPC
 import Foundation
+import SwiftProtobuf
 
 struct RealmServiceError: LocalizedError {
     let message: String
@@ -110,6 +111,10 @@ final class RealmServiceBindings {
     private var bindingEventGenerations: [UUID: UInt64] = [:]
     var eventHandler: ((UUID, RealmServiceEvent) -> Void)?
 
+    func binding(for tabId: UUID) -> RealmServiceBinding? {
+        bindings[tabId] as? RealmServiceBinding
+    }
+
     private func updateRoutingSnapshot() {
         routingSnapshot.replace(with: subscriptions)
     }
@@ -122,6 +127,39 @@ final class RealmServiceBindings {
 
     func localFrontBinding(for tabId: UUID) -> RealmServiceBinding? {
         bindings[tabId] as? RealmServiceBinding
+    }
+
+    /// Keep established Guest subscriptions when only the Realm connection changes.
+    func replaceConnection(
+        _ active: any RealmServiceBindingHandle,
+        with replacement: any RealmServiceBindingHandle,
+        tabId: UUID,
+        isCurrent: () throws -> Bool
+    ) async throws -> Bool {
+        func eventRoutes() -> [UUID: Set<String>] {
+            subscriptions.filter { $0.value.bindingId == active.id }.mapValues { $0.events }
+        }
+
+        guard bindings[tabId] === active, !pendingSubscriptions.values.contains(tabId) else { return false }
+        let routes = eventRoutes()
+        var generation: UInt64?
+        if !routes.isEmpty {
+            eventGeneration &+= 1
+            let nextGeneration = eventGeneration
+            try await replacement.subscribe(events: Array(Set(routes.values.joined())), generation: nextGeneration)
+            generation = nextGeneration
+        }
+        try Task.checkCancellation()
+        guard bindings[tabId] === active, !pendingSubscriptions.values.contains(tabId),
+              eventRoutes() == routes, try isCurrent() else { return false }
+
+        attach(replacement, to: tabId)
+        for (id, events) in routes {
+            subscriptions[id] = (replacement.id, events)
+        }
+        bindingEventGenerations[replacement.id] = generation
+        updateRoutingSnapshot()
+        return true
     }
 
     func remove(_ tabId: UUID) {
@@ -454,9 +492,33 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         let provider: Provider
     }
 
+    struct Connection: Equatable, Sendable {
+        let realm: String
+        let providerId: String
+        let issuerURL: String
+        let signalingURL: String
+        let stunURLs: [String]
+        let turnURLs: [String]
+
+        init(profile: RealmProfileInfo, verifiedProfileBody: Data) throws {
+            let provider = try JSONDecoder().decode(ProfileDocument.self, from: verifiedProfileBody).provider
+            guard let signaling = provider.signaling.sorted(by: { $0.priority < $1.priority }).first,
+                  URL(string: signaling.url)?.scheme?.lowercased() == "wss" else {
+                throw RealmServiceError(message: "The verified Realm profile has invalid signaling information.")
+            }
+            let iceURLs = provider.ice.flatMap(\.urls)
+            realm = profile.realmName
+            providerId = profile.providerId
+            issuerURL = profile.issuerUrl
+            signalingURL = signaling.url
+            stunURLs = iceURLs.filter { $0.hasPrefix("stun:") || $0.hasPrefix("stuns:") }
+            turnURLs = iceURLs.filter { $0.hasPrefix("turn:") || $0.hasPrefix("turns:") }
+        }
+    }
+
     /// The running Front node plus its verified Attach session. Both live for
     /// as long as the tab; the session heartbeat runs inside the peer runtime.
-    struct Connection: Sendable {
+    struct RuntimeConnection: Sendable {
         let reference: ActrRefWrapper
         let session: ActrPeerSessionWrapper
         let target: ActrBindings.ActrId
@@ -473,7 +535,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     let id: UUID
     private let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("actrium-front-" + UUID().uuidString, isDirectory: true)
-    private let profile: RealmProfileInfo
+    nonisolated let connection: Connection
     private let front: Data
     private let metadata: ActriumSessionMetadata
     private let trustedFrontKey: Data
@@ -494,11 +556,11 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// caller-supplied attachment id may be reused by a retry, so it cannot
     /// identify a delivery on its own.
     private var attachmentDeliveries: [String: @Sendable (RealmServiceAttachmentResultEvent) -> Void] = [:]
-    private var startup: (id: UUID, task: Task<Connection, Error>)?
-    private var recovery: (id: UUID, task: Task<Connection, Error>)?
+    private var startup: (id: UUID, task: Task<RuntimeConnection, Error>)?
+    private var recovery: (id: UUID, task: Task<RuntimeConnection, Error>)?
     /// The detached old session retained while a verified Local Front
     /// replacement attaches. Ordinary calls stay blocked until commit/rollback.
-    private var localFrontHandoff: Connection?
+    private var localFrontHandoff: RuntimeConnection?
     private var stopped = false
 
     init(
@@ -510,70 +572,100 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         capabilitiesJSON: String,
         permissions: [String]
     ) throws {
-        let document = try JSONDecoder().decode(ProfileDocument.self, from: verifiedProfileBody)
-        let provider = document.provider
-        guard let signaling = provider.signaling.sorted(by: { $0.priority < $1.priority }).first,
-              URL(string: signaling.url)?.scheme?.lowercased() == "wss" else {
-            throw RealmServiceError(message: "The verified Realm profile has invalid signaling information.")
-        }
-        self.profile = profile
-        self.front = front
-        self.metadata = metadata
-        self.trustedFrontKey = trustedFrontKey
-        self.serviceType = ActrBindings.ActrType(
-            publisher: metadata.program.publisher,
-            name: metadata.program.name,
-            version: metadata.program.version
-        )
+        let connection = try Connection(profile: profile, verifiedProfileBody: verifiedProfileBody)
+        let capabilities = try JSONDecoder().decode(Capabilities.self, from: Data(capabilitiesJSON.utf8))
+        let services = ["service", "host:service"].compactMap { capabilities.hostModules[$0] }
         // Verified session metadata owns Attach routes and capabilities. The
         // signed capability manifest additionally declares Service events.
         let declaredRoutes = Set(metadata.routes.map(\.route))
-        let capabilities = try JSONDecoder().decode(Capabilities.self, from: Data(capabilitiesJSON.utf8))
-        let services = ["service", "host:service"].compactMap { capabilities.hostModules[$0] }
-        self.events = Set(services.flatMap { $0.events ?? [] })
-        self.attachmentUploadAllowed = RealmServiceAttachmentUploadPolicy.isPermitted(
-            permissions: permissions,
-            declaredRoutes: declaredRoutes
+        try self.init(
+            connection: connection,
+            front: front,
+            metadata: metadata,
+            serviceType: ActrBindings.ActrType(
+                publisher: metadata.program.publisher,
+                name: metadata.program.name,
+                version: metadata.program.version
+            ),
+            trustedFrontKey: trustedFrontKey,
+            routes: RealmServiceAttachmentUploadPolicy.businessRoutes(declaredRoutes),
+            events: Set(services.flatMap { $0.events ?? [] }),
+            attachmentUploadAllowed: RealmServiceAttachmentUploadPolicy.isPermitted(
+                permissions: permissions, declaredRoutes: declaredRoutes
+            )
         )
-        // The attachment transport is verified separately and must never be
-        // reachable through the generic RealmService.call business routes.
-        self.routes = RealmServiceAttachmentUploadPolicy.businessRoutes(declaredRoutes)
-        self.routeCapabilities = metadata.routes.reduce(into: [String: String]()) { capabilities, route in
-            capabilities[route.route] = route.capabilities.first
-        }
+    }
+
+    private init(
+        connection: Connection,
+        front: Data,
+        metadata: ActriumSessionMetadata,
+        serviceType: ActrBindings.ActrType,
+        trustedFrontKey: Data,
+        routes: Set<String>,
+        events: Set<String>,
+        attachmentUploadAllowed: Bool
+    ) throws {
+        self.connection = connection
         let bindingId = UUID()
         self.id = bindingId
         self.eventRelay = RealmServiceEventRelay(bindingId: bindingId)
+        self.front = front
+        self.metadata = metadata
+        self.serviceType = serviceType
+        self.trustedFrontKey = trustedFrontKey
+        self.routes = routes
+        self.routeCapabilities = metadata.routes.reduce(into: [String: String]()) { capabilities, route in
+            capabilities[route.route] = route.capabilities.first
+        }
+        self.events = events
+        self.attachmentUploadAllowed = attachmentUploadAllowed
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
         func literal<T: Encodable>(_ value: T) throws -> String {
             try String(decoding: encoder.encode(value), as: UTF8.self)
         }
-        let iceURLs = provider.ice.flatMap(\.urls)
         self.configuration = try """
         edition = 1
         [signaling]
-        url = \(literal(signaling.url))
+        url = \(literal(connection.signalingURL))
         [issuer_endpoint]
-        url = \(literal(profile.issuerUrl))
+        url = \(literal(connection.issuerURL))
         [deployment]
-        realm = \(literal(profile.realmName))
+        realm = \(literal(connection.realm))
         [hyper]
         data_dir = \(literal(directory.path))
         [discovery]
         visible = false
         [webrtc]
-        stun_urls = \(literal(iceURLs.filter { $0.hasPrefix("stun:") || $0.hasPrefix("stuns:") }))
-        turn_urls = \(literal(iceURLs.filter { $0.hasPrefix("turn:") || $0.hasPrefix("turns:") }))
+        stun_urls = \(literal(connection.stunURLs))
+        turn_urls = \(literal(connection.turnURLs))
         [[acl.rules]]
         permission = "allow"
-        type = \(literal(profile.serviceType))
+        type = \(literal("\(serviceType.publisher)/\(serviceType.name)@\(serviceType.version)"))
         realm = "self"
         [[trust]]
         kind = "static"
         pubkey_b64 = \(literal(trustedFrontKey.base64EncodedString()))
         """
+    }
+
+    func replacingConnection(_ connection: Connection) throws -> RealmServiceBinding {
+        guard !stopped else { throw CancellationError() }
+        return try RealmServiceBinding(
+            connection: connection, front: front, metadata: metadata, serviceType: serviceType,
+            trustedFrontKey: trustedFrontKey, routes: routes, events: events,
+            attachmentUploadAllowed: attachmentUploadAllowed
+        )
+    }
+
+    /// Prepare a replacement binding without sending a business RPC.
+    func prepareForSwitch() async throws {
+        try Task.checkCancellation()
+        _ = try await connect()
+        guard !stopped else { throw CancellationError() }
+        try Task.checkCancellation()
     }
 
     func call(_ request: RealmServiceCall) async throws -> Data {
@@ -629,7 +721,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         do {
             try Task.checkCancellation()
             guard !stopped else { throw CancellationError() }
-            let replacement = Connection(
+            let replacement = RuntimeConnection(
                 reference: handoff.reference,
                 session: attached.session,
                 target: attached.target
@@ -970,7 +1062,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// Return a connection whose session is valid on the current verified
     /// channel. Actor reentrancy is serialized through one shared recovery
     /// task, so concurrent requests cannot Resume or re-Attach independently.
-    private func readyConnection() async throws -> Connection {
+    private func readyConnection() async throws -> RuntimeConnection {
         guard !stopped else { throw CancellationError() }
         guard localFrontHandoff == nil else {
             throw RealmServiceError(message: "The Local Front is refreshing its Service session.")
@@ -983,7 +1075,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         let id = UUID()
         // Reserve the shared slot before connect() can suspend this actor.
         // Every reentrant caller then awaits this same Resume/re-Attach.
-        let task = Task<Connection, Error> {
+        let task = Task<RuntimeConnection, Error> {
             let connection = try await self.connect()
             return try await self.resumeOrReattach(connection)
         }
@@ -1011,7 +1103,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             .contains(where: { message.contains($0) })
     }
 
-    private func resumeOrReattach(_ connection: Connection) async throws -> Connection {
+    private func resumeOrReattach(_ connection: RuntimeConnection) async throws -> RuntimeConnection {
         do {
             try await connection.session.resume()
             try Task.checkCancellation()
@@ -1021,7 +1113,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             guard Self.requiresReattach(error) else { throw error }
             try? await connection.session.detach()
             let attached = try await attach(connection.reference)
-            let replacement = Connection(
+            let replacement = RuntimeConnection(
                 reference: connection.reference,
                 session: attached.session,
                 target: attached.target
@@ -1038,16 +1130,16 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     }
 
     private func retarget(
-        _ connection: Connection,
+        _ connection: RuntimeConnection,
         to target: ActrBindings.ActrId
-    ) async throws -> Connection {
+    ) async throws -> RuntimeConnection {
         try? await connection.session.detach()
         guard !stopped else { throw CancellationError() }
         let session = try await connection.reference.attachActrium(
             service: target,
             params: attachParams
         )
-        let replacement = Connection(
+        let replacement = RuntimeConnection(
             reference: connection.reference,
             session: session,
             target: target
@@ -1065,7 +1157,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
 
     /// Internal for the shutdown-race tests: a stopped binding must reject
     /// before it creates or reuses a startup task.
-    func connect() async throws -> Connection {
+    func connect() async throws -> RuntimeConnection {
         // A caller may have been suspended on another actor (for example while
         // registering an upload session) when `stop()` ran. Re-check on this
         // actor before starting or reusing a startup task so teardown can
@@ -1075,7 +1167,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         let id = UUID()
         let task = Task {
             let membership = try RealmIdentityStore().membership(
-                realm: profile.realmName, providerId: profile.providerId, issuer: profile.issuerUrl
+                realm: connection.realm, providerId: connection.providerId, issuer: connection.issuerURL
             )
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             let configURL = directory.appendingPathComponent("actr.toml")
@@ -1102,7 +1194,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                     try? await attached.session.detach()
                     throw error
                 }
-                return Connection(
+                return RuntimeConnection(
                     reference: reference, session: attached.session, target: attached.target
                 )
             } catch {
@@ -1188,11 +1280,11 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         startup?.task.cancel()
         recovery?.task.cancel()
 
-        var base: Connection?
+        var base: RuntimeConnection?
         if let startup {
             base = try? await startup.task.value
         }
-        var recovered: Connection?
+        var recovered: RuntimeConnection?
         if let recovery {
             recovered = try? await recovery.task.value
         }

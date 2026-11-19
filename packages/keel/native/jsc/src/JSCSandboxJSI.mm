@@ -274,6 +274,24 @@ static NSString *safeExceptionMessage(JSValue *exception) {
 
 // MARK: - JSCSandboxContext Implementation
 
+static std::string checkedGuestUtf8(jsi::Runtime &rt, NSString *string) {
+  const char *utf8 = [string UTF8String];
+  if (!utf8) {
+    throw jsi::JSError(rt, "Guest string cannot be converted losslessly to UTF-8.");
+  }
+  return std::string(utf8, [string lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+}
+
+static NSString *checkedHostString(jsi::Runtime &rt, const std::string &utf8) {
+  NSString *string = [[NSString alloc] initWithBytes:utf8.data()
+                                            length:utf8.size()
+                                          encoding:NSUTF8StringEncoding];
+  if (!string) {
+    throw jsi::JSError(rt, "Host string cannot be converted losslessly from UTF-8.");
+  }
+  return string;
+}
+
 struct JSCSandboxContext::ConversionState {
   // Host objects on the current conversion path, paired with the guest value
   // already materialized for them. Identity is compared with
@@ -699,7 +717,7 @@ void JSCSandboxContext::inject(jsi::Runtime &rt, const std::string &name,
 
   @autoreleasepool {
     JSContext *ctx = (__bridge JSContext *)jsContext_;
-    NSString *nsName = [NSString stringWithUTF8String:name.c_str()];
+    NSString *nsName = checkedHostString(rt, name);
 
     // Handle functions specially - create a wrapper function in JS that calls
     // our block This ensures typeof returns "function" instead of "object"
@@ -719,18 +737,8 @@ void JSCSandboxContext::inject(jsi::Runtime &rt, const std::string &name,
       void *jsValue = jsiToJSValue(rt, value);
       JSValue *jsVal = (__bridge JSValue *)jsValue;
 
-      // Use a temp name to store value, then assign to both ctx and globalThis
-      static int nonFuncCounter = 0;
-      NSString *tempName =
-          [NSString stringWithFormat:@"__jsc_tmp_%d__", ++nonFuncCounter];
-      ctx[tempName] = jsVal;
+      // JSContext subscripting writes the global object without interpreting the name as code.
       ctx[nsName] = jsVal;
-
-      // Set on globalThis using temp name which is accessible
-      NSString *globalThisScript = [NSString
-          stringWithFormat:@"(function() { globalThis['%@'] = %@; })()", nsName,
-                           tempName];
-      [ctx evaluateScript:globalThisScript];
     }
   }
 }
@@ -745,7 +753,7 @@ jsi::Value JSCSandboxContext::extract(jsi::Runtime &rt,
 
   @autoreleasepool {
     JSContext *ctx = (__bridge JSContext *)jsContext_;
-    NSString *nsName = [NSString stringWithUTF8String:name.c_str()];
+    NSString *nsName = checkedHostString(rt, name);
     JSValue *value = ctx[nsName];
     return jsValueToJSI(rt, (__bridge void *)value);
   }
@@ -1073,25 +1081,6 @@ void *JSCSandboxContext::wrapFunctionForSandbox(jsi::Runtime &rt,
               result = it->second->call(*hostRt);
             } else {
               NSLog(@"[JSCSandbox] fn_%d: calling Host function with %zu args, hostRt=%p", funcId, jsiArgs.size(), (void*)hostRt);
-              
-              // DEBUG: Try JSON.stringify on the first arg to see what Host Runtime sees
-              try {
-                jsi::Function stringify = hostRt->global()
-                    .getPropertyAsObject(*hostRt, "JSON")
-                    .getPropertyAsFunction(*hostRt, "stringify");
-                jsi::Value jsonStr = stringify.call(*hostRt, jsiArgs[0]);
-                if (jsonStr.isString()) {
-                  std::string str = jsonStr.asString(*hostRt).utf8(*hostRt);
-                  // Truncate to avoid log spam
-                  if (str.length() > 500) {
-                    str = str.substr(0, 500) + "...";
-                  }
-                  NSLog(@"[JSCSandbox] fn_%d: JSON.stringify(arg[0])=%s", funcId, str.c_str());
-                }
-              } catch (const std::exception& e) {
-                NSLog(@"[JSCSandbox] fn_%d: JSON.stringify failed: %s", funcId, e.what());
-              }
-              
               result = it->second->call(
                   *hostRt, (const jsi::Value *)jsiArgs.data(), jsiArgs.size());
             }
@@ -1103,6 +1092,10 @@ void *JSCSandboxContext::wrapFunctionForSandbox(jsi::Runtime &rt,
             void *jsResult = self->jsiToJSValue(*hostRt, result);
             NSLog(@"[JSCSandbox] fn_%d: jsiToJSValue completed, returning to Guest", funcId);
             return (__bridge id)jsResult;
+          } catch (const jsi::JSError &e) {
+            JSContext *context = (__bridge JSContext *)self->jsContext_;
+            context.exception = (__bridge JSValue *)self->sandboxRejectionReason(*hostRt, e);
+            return nil;
           } catch (const std::exception &e) {
             os_log_error(OS_LOG_DEFAULT, "[JSCSandbox] fn_%d exception: %{public}s", funcId, e.what());
             return nil;
@@ -1190,10 +1183,10 @@ void *JSCSandboxContext::tryMakeSandboxError(jsi::Runtime &rt,
   std::string stack = readString("stack");
 
   JSContext *ctx = (__bridge JSContext *)jsContext_;
-  NSString *nsCtorName = [NSString stringWithUTF8String:ctorName.c_str()];
-  NSString *nsName = [NSString stringWithUTF8String:name.c_str()];
-  NSString *nsMessage = [NSString stringWithUTF8String:message.c_str()];
-  NSString *nsStack = [NSString stringWithUTF8String:stack.c_str()];
+  NSString *nsCtorName = checkedHostString(rt, ctorName);
+  NSString *nsName = checkedHostString(rt, name);
+  NSString *nsMessage = checkedHostString(rt, message);
+  NSString *nsStack = checkedHostString(rt, stack);
   JSValue *factory = (__bridge JSValue *)errorFactory_;
   JSValue *guestError = factory ? [factory callWithArguments:@[
     nsCtorName ?: @"Error", nsName ?: @"", nsMessage ?: @"", nsStack ?: @""
@@ -1231,17 +1224,15 @@ void *JSCSandboxContext::tryMakeSandboxError(jsi::Runtime &rt,
         if (!keyValue.isString()) {
           continue;
         }
-        std::string key = keyValue.asString(rt).utf8(rt);
+        jsi::String propertyName = keyValue.asString(rt);
+        std::string key = propertyName.utf8(rt);
         if (key == "name" || key == "message" || key == "stack" ||
             key == "__proto__") {
           continue;
         }
-        NSString *nsKey = [NSString stringWithUTF8String:key.c_str()];
-        if (!nsKey) {
-          continue;
-        }
         try {
-          jsi::Value fieldValue = obj.getProperty(rt, key.c_str());
+          NSString *nsKey = checkedHostString(rt, key);
+          jsi::Value fieldValue = obj.getProperty(rt, propertyName);
           void *jsField = jsiToJSValueImpl(rt, fieldValue, true, state);
           if (jsField) {
             guestError[nsKey] = (__bridge JSValue *)jsField;
@@ -1324,7 +1315,7 @@ void *JSCSandboxContext::jsiToJSValueImpl(jsi::Runtime &rt,
   }
   if (value.isString()) {
     std::string str = value.asString(rt).utf8(rt);
-    NSString *nsStr = [NSString stringWithUTF8String:str.c_str()];
+    NSString *nsStr = checkedHostString(rt, str);
     return (__bridge void *)[JSValue valueWithObject:nsStr inContext:ctx];
   }
   // Handle Symbols
@@ -1479,9 +1470,9 @@ void *JSCSandboxContext::jsiToJSValueImpl(jsi::Runtime &rt,
     ConversionScope conversionScope(state, rt, obj, (__bridge void *)jsObj);
 
     for (size_t i = 0; i < len; i++) {
-      std::string key = propNames.getValueAtIndex(rt, i).asString(rt).utf8(rt);
-      NSString *nsKey = [NSString stringWithUTF8String:key.c_str()];
-      jsi::Value propVal = obj.getProperty(rt, key.c_str());
+      jsi::String propertyName = propNames.getValueAtIndex(rt, i).asString(rt);
+      NSString *nsKey = checkedHostString(rt, propertyName.utf8(rt));
+      jsi::Value propVal = obj.getProperty(rt, propertyName);
 
       // Convert all values including functions
       JSValue *jsVal = (__bridge JSValue *)jsiToJSValueImpl(
@@ -1754,8 +1745,7 @@ jsi::Value JSCSandboxContext::jsValueToJSI(jsi::Runtime &rt, void *jsValue,
     return jsi::Value([value toDouble]);
   }
   if ([value isString]) {
-    NSString *str = [value toString];
-    return jsi::String::createFromUtf8(rt, [str UTF8String]);
+    return jsi::String::createFromUtf8(rt, checkedGuestUtf8(rt, [value toString]));
   }
 
   // Depth guard for extremely deep (non-circular) structures
@@ -1901,6 +1891,12 @@ jsi::Value JSCSandboxContext::jsValueToJSI(jsi::Runtime &rt, void *jsValue,
         if (![key isKindOfClass:[NSString class]])
           continue;
 
+        const std::string utf8 = checkedGuestUtf8(rt, key);
+        auto propertyName = jsi::PropNameID::forUtf8(rt, utf8);
+        if (propertyName.utf8(rt) != utf8) {
+          throw jsi::JSError(rt, "Host runtime cannot preserve Guest property names losslessly.");
+        }
+
         JSValue *propVal = value[key];
         if (!propVal || [propVal isUndefined])
           continue;
@@ -1926,7 +1922,7 @@ jsi::Value JSCSandboxContext::jsValueToJSI(jsi::Runtime &rt, void *jsValue,
                 depth, jsiPropVal.isUndefined(), jsiPropVal.isObject());
         }
         
-        jsiObj.setProperty(rt, [key UTF8String], std::move(jsiPropVal));
+        jsiObj.setProperty(rt, propertyName, std::move(jsiPropVal));
       }
     }
 

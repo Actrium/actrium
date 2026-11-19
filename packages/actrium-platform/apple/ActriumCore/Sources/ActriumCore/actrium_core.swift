@@ -561,6 +561,165 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 }
 
 
+
+
+/**
+ * A profile database. Callers supply an origin from the authorized Host document.
+ */
+public protocol GuestLocalStorageProtocol: AnyObject, Sendable {
+
+    func getItem(origin: String, key: String) throws  -> String?
+
+    func removeItem(origin: String, key: String) throws
+
+    func setItem(origin: String, key: String, value: String) throws
+
+}
+/**
+ * A profile database. Callers supply an origin from the authorized Host document.
+ */
+open class GuestLocalStorage: GuestLocalStorageProtocol, @unchecked Sendable {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_actrium_core_fn_clone_guestlocalstorage(self.pointer, $0) }
+    }
+public convenience init(path: String) {
+    let pointer =
+        try! rustCall() {
+    uniffi_actrium_core_fn_constructor_guestlocalstorage_new(
+        FfiConverterString.lower(path),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_actrium_core_fn_free_guestlocalstorage(pointer, $0) }
+    }
+
+
+
+
+open func getItem(origin: String, key: String)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_get_item(self.uniffiClonePointer(),
+        FfiConverterString.lower(origin),
+        FfiConverterString.lower(key),$0
+    )
+})
+}
+
+open func removeItem(origin: String, key: String)throws   {try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_remove_item(self.uniffiClonePointer(),
+        FfiConverterString.lower(origin),
+        FfiConverterString.lower(key),$0
+    )
+}
+}
+
+open func setItem(origin: String, key: String, value: String)throws   {try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_set_item(self.uniffiClonePointer(),
+        FfiConverterString.lower(origin),
+        FfiConverterString.lower(key),
+        FfiConverterString.lower(value),$0
+    )
+}
+}
+
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGuestLocalStorage: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = GuestLocalStorage
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> GuestLocalStorage {
+        return GuestLocalStorage(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: GuestLocalStorage) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GuestLocalStorage {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: GuestLocalStorage, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGuestLocalStorage_lift(_ pointer: UnsafeMutableRawPointer) throws -> GuestLocalStorage {
+    return try FfiConverterTypeGuestLocalStorage.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGuestLocalStorage_lower(_ value: GuestLocalStorage) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeGuestLocalStorage.lower(value)
+}
+
+
+
+
 public struct ActiveTabInfo {
     public var id: String
     public var name: String
@@ -5052,6 +5211,146 @@ public func FfiConverterTypePackageIntegrityPlanInfo_lower(_ value: PackageInteg
 }
 
 
+public struct PinnedAuthorityInfo {
+    public var descriptor: AuthorityDiscoveryInfo
+    public var pinsJson: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(descriptor: AuthorityDiscoveryInfo, pinsJson: String) {
+        self.descriptor = descriptor
+        self.pinsJson = pinsJson
+    }
+}
+
+#if compiler(>=6)
+extension PinnedAuthorityInfo: Sendable {}
+#endif
+
+
+extension PinnedAuthorityInfo: Equatable, Hashable {
+    public static func ==(lhs: PinnedAuthorityInfo, rhs: PinnedAuthorityInfo) -> Bool {
+        if lhs.descriptor != rhs.descriptor {
+            return false
+        }
+        if lhs.pinsJson != rhs.pinsJson {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(descriptor)
+        hasher.combine(pinsJson)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePinnedAuthorityInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PinnedAuthorityInfo {
+        return
+            try PinnedAuthorityInfo(
+                descriptor: FfiConverterTypeAuthorityDiscoveryInfo.read(from: &buf),
+                pinsJson: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PinnedAuthorityInfo, into buf: inout [UInt8]) {
+        FfiConverterTypeAuthorityDiscoveryInfo.write(value.descriptor, into: &buf)
+        FfiConverterString.write(value.pinsJson, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePinnedAuthorityInfo_lift(_ buf: RustBuffer) throws -> PinnedAuthorityInfo {
+    return try FfiConverterTypePinnedAuthorityInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePinnedAuthorityInfo_lower(_ value: PinnedAuthorityInfo) -> RustBuffer {
+    return FfiConverterTypePinnedAuthorityInfo.lower(value)
+}
+
+
+public struct PinnedPublisherInfo {
+    public var profile: PublisherProfileInfo
+    public var pinsJson: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(profile: PublisherProfileInfo, pinsJson: String) {
+        self.profile = profile
+        self.pinsJson = pinsJson
+    }
+}
+
+#if compiler(>=6)
+extension PinnedPublisherInfo: Sendable {}
+#endif
+
+
+extension PinnedPublisherInfo: Equatable, Hashable {
+    public static func ==(lhs: PinnedPublisherInfo, rhs: PinnedPublisherInfo) -> Bool {
+        if lhs.profile != rhs.profile {
+            return false
+        }
+        if lhs.pinsJson != rhs.pinsJson {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(profile)
+        hasher.combine(pinsJson)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePinnedPublisherInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PinnedPublisherInfo {
+        return
+            try PinnedPublisherInfo(
+                profile: FfiConverterTypePublisherProfileInfo.read(from: &buf),
+                pinsJson: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PinnedPublisherInfo, into buf: inout [UInt8]) {
+        FfiConverterTypePublisherProfileInfo.write(value.profile, into: &buf)
+        FfiConverterString.write(value.pinsJson, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePinnedPublisherInfo_lift(_ buf: RustBuffer) throws -> PinnedPublisherInfo {
+    return try FfiConverterTypePinnedPublisherInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePinnedPublisherInfo_lower(_ value: PinnedPublisherInfo) -> RustBuffer {
+    return FfiConverterTypePinnedPublisherInfo.lower(value)
+}
+
+
 /**
  * A package signing key from a verified Publisher Profile.
  */
@@ -5319,12 +5618,14 @@ public func FfiConverterTypePublisherProfileInfo_lower(_ value: PublisherProfile
 public struct RealmAuthorityAcceptance {
     public var descriptor: AuthorityDiscoveryInfo
     public var pinsJson: String
+    public var signedKeysJson: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(descriptor: AuthorityDiscoveryInfo, pinsJson: String) {
+    public init(descriptor: AuthorityDiscoveryInfo, pinsJson: String, signedKeysJson: String) {
         self.descriptor = descriptor
         self.pinsJson = pinsJson
+        self.signedKeysJson = signedKeysJson
     }
 }
 
@@ -5341,12 +5642,16 @@ extension RealmAuthorityAcceptance: Equatable, Hashable {
         if lhs.pinsJson != rhs.pinsJson {
             return false
         }
+        if lhs.signedKeysJson != rhs.signedKeysJson {
+            return false
+        }
         return true
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(descriptor)
         hasher.combine(pinsJson)
+        hasher.combine(signedKeysJson)
     }
 }
 
@@ -5360,13 +5665,15 @@ public struct FfiConverterTypeRealmAuthorityAcceptance: FfiConverterRustBuffer {
         return
             try RealmAuthorityAcceptance(
                 descriptor: FfiConverterTypeAuthorityDiscoveryInfo.read(from: &buf),
-                pinsJson: FfiConverterString.read(from: &buf)
+                pinsJson: FfiConverterString.read(from: &buf),
+                signedKeysJson: FfiConverterString.read(from: &buf)
         )
     }
 
     public static func write(_ value: RealmAuthorityAcceptance, into buf: inout [UInt8]) {
         FfiConverterTypeAuthorityDiscoveryInfo.write(value.descriptor, into: &buf)
         FfiConverterString.write(value.pinsJson, into: &buf)
+        FfiConverterString.write(value.signedKeysJson, into: &buf)
     }
 }
 
@@ -5681,6 +5988,7 @@ public struct RealmProfileInfo {
     public var serviceSha256: String
     public var serviceType: String
     /**
+     * Serial number of the signed Service Actor in realm_name.
      * Issuer endpoint that serves Actor credentials.
      */
     public var issuerUrl: String
@@ -5711,6 +6019,7 @@ public struct RealmProfileInfo {
          * Service package: deployed and verified by the Service Host.
          */serviceHref: String, serviceSha256: String, serviceType: String,
         /**
+         * Serial number of the signed Service Actor in realm_name.
          * Issuer endpoint that serves Actor credentials.
          */issuerUrl: String,
         /**
@@ -5867,6 +6176,100 @@ public func FfiConverterTypeRealmProfileInfo_lift(_ buf: RustBuffer) throws -> R
 #endif
 public func FfiConverterTypeRealmProfileInfo_lower(_ value: RealmProfileInfo) -> RustBuffer {
     return FfiConverterTypeRealmProfileInfo.lower(value)
+}
+
+
+public struct RealmProfileUpdateInfo {
+    public var profile: RealmProfileInfo?
+    public var stateJson: String
+    public var serviceSelectionKey: String
+    public var frontSelectionKey: String
+    public var signingKeyId: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(profile: RealmProfileInfo?, stateJson: String, serviceSelectionKey: String, frontSelectionKey: String, signingKeyId: String) {
+        self.profile = profile
+        self.stateJson = stateJson
+        self.serviceSelectionKey = serviceSelectionKey
+        self.frontSelectionKey = frontSelectionKey
+        self.signingKeyId = signingKeyId
+    }
+}
+
+#if compiler(>=6)
+extension RealmProfileUpdateInfo: Sendable {}
+#endif
+
+
+extension RealmProfileUpdateInfo: Equatable, Hashable {
+    public static func ==(lhs: RealmProfileUpdateInfo, rhs: RealmProfileUpdateInfo) -> Bool {
+        if lhs.profile != rhs.profile {
+            return false
+        }
+        if lhs.stateJson != rhs.stateJson {
+            return false
+        }
+        if lhs.serviceSelectionKey != rhs.serviceSelectionKey {
+            return false
+        }
+        if lhs.frontSelectionKey != rhs.frontSelectionKey {
+            return false
+        }
+        if lhs.signingKeyId != rhs.signingKeyId {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(profile)
+        hasher.combine(stateJson)
+        hasher.combine(serviceSelectionKey)
+        hasher.combine(frontSelectionKey)
+        hasher.combine(signingKeyId)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRealmProfileUpdateInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RealmProfileUpdateInfo {
+        return
+            try RealmProfileUpdateInfo(
+                profile: FfiConverterOptionTypeRealmProfileInfo.read(from: &buf),
+                stateJson: FfiConverterString.read(from: &buf),
+                serviceSelectionKey: FfiConverterString.read(from: &buf),
+                frontSelectionKey: FfiConverterString.read(from: &buf),
+                signingKeyId: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RealmProfileUpdateInfo, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeRealmProfileInfo.write(value.profile, into: &buf)
+        FfiConverterString.write(value.stateJson, into: &buf)
+        FfiConverterString.write(value.serviceSelectionKey, into: &buf)
+        FfiConverterString.write(value.frontSelectionKey, into: &buf)
+        FfiConverterString.write(value.signingKeyId, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRealmProfileUpdateInfo_lift(_ buf: RustBuffer) throws -> RealmProfileUpdateInfo {
+    return try FfiConverterTypeRealmProfileUpdateInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRealmProfileUpdateInfo_lower(_ value: RealmProfileUpdateInfo) -> RustBuffer {
+    return FfiConverterTypeRealmProfileUpdateInfo.lower(value)
 }
 
 
@@ -7751,6 +8154,106 @@ extension CoreError: Foundation.LocalizedError {
 
 
 
+
+public enum GuestLocalStorageError: Swift.Error {
+
+
+
+    case InvalidKey(message: String)
+
+    case InvalidValue(message: String)
+
+    case QuotaExceeded(message: String)
+
+    case DatabaseFailure(message: String)
+
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGuestLocalStorageError: FfiConverterRustBuffer {
+    typealias SwiftType = GuestLocalStorageError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GuestLocalStorageError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+
+
+
+        case 1: return .InvalidKey(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 2: return .InvalidValue(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 3: return .QuotaExceeded(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 4: return .DatabaseFailure(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: GuestLocalStorageError, into buf: inout [UInt8]) {
+        switch value {
+
+
+
+
+        case .InvalidKey(_ /* message is ignored*/):
+            writeInt(&buf, Int32(1))
+        case .InvalidValue(_ /* message is ignored*/):
+            writeInt(&buf, Int32(2))
+        case .QuotaExceeded(_ /* message is ignored*/):
+            writeInt(&buf, Int32(3))
+        case .DatabaseFailure(_ /* message is ignored*/):
+            writeInt(&buf, Int32(4))
+
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGuestLocalStorageError_lift(_ buf: RustBuffer) throws -> GuestLocalStorageError {
+    return try FfiConverterTypeGuestLocalStorageError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGuestLocalStorageError_lower(_ value: GuestLocalStorageError) -> RustBuffer {
+    return FfiConverterTypeGuestLocalStorageError.lower(value)
+}
+
+
+extension GuestLocalStorageError: Equatable, Hashable {}
+
+
+
+
+extension GuestLocalStorageError: Foundation.LocalizedError {
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+}
+
+
+
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -8483,6 +8986,18 @@ public func acceptRealmProfileSuccessor(body: String, realmName: String, signing
         FfiConverterString.lower(realmName),
         FfiConverterString.lower(signingKeysJson),
         FfiConverterSequenceString.lower(previousDocuments),$0
+    )
+})
+}
+public func acceptRealmProfileUpdate(body: String, realmName: String, signingKeysJson: String, previousStateJson: String?, authorityPinsJson: String?, installedProfileJson: String?)throws  -> RealmProfileUpdateInfo  {
+    return try  FfiConverterTypeRealmProfileUpdateInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actrium_core_fn_func_accept_realm_profile_update(
+        FfiConverterString.lower(body),
+        FfiConverterString.lower(realmName),
+        FfiConverterString.lower(signingKeysJson),
+        FfiConverterOptionString.lower(previousStateJson),
+        FfiConverterOptionString.lower(authorityPinsJson),
+        FfiConverterOptionString.lower(installedProfileJson),$0
     )
 })
 }
@@ -10431,6 +10946,24 @@ public func parseVoskResultText(json: String) -> String  {
     )
 })
 }
+public func pinRealmAuthority(body: String, domain: String, previousPinsJson: String?)throws  -> PinnedAuthorityInfo  {
+    return try  FfiConverterTypePinnedAuthorityInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actrium_core_fn_func_pin_realm_authority(
+        FfiConverterString.lower(body),
+        FfiConverterString.lower(domain),
+        FfiConverterOptionString.lower(previousPinsJson),$0
+    )
+})
+}
+public func pinRealmFrontPublisher(body: String, domain: String, previousPinsJson: String?)throws  -> PinnedPublisherInfo  {
+    return try  FfiConverterTypePinnedPublisherInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actrium_core_fn_func_pin_realm_front_publisher(
+        FfiConverterString.lower(body),
+        FfiConverterString.lower(domain),
+        FfiConverterOptionString.lower(previousPinsJson),$0
+    )
+})
+}
 /**
  * Build final Chinese ASR text from platform-provided segmentation terms.
  */
@@ -11038,6 +11571,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_actrium_core_checksum_func_accept_realm_profile_successor() != 18494) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_actrium_core_checksum_func_accept_realm_profile_update() != 40113) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_actrium_core_checksum_func_active_tab_from_row() != 51323) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11605,6 +12141,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_actrium_core_checksum_func_parse_vosk_result_text() != 55653) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_actrium_core_checksum_func_pin_realm_authority() != 19265) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_func_pin_realm_front_publisher() != 57787) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_actrium_core_checksum_func_post_process_zh_asr_segments() != 19640) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11822,6 +12364,18 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_func_verify_realm_package_publisher() != 59675) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_get_item() != 63346) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_remove_item() != 23454) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_set_item() != 45632) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_constructor_guestlocalstorage_new() != 18051) {
         return InitializationResult.apiChecksumMismatch
     }
 

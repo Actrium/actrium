@@ -82,7 +82,7 @@ enum SystemTabType: String, Codable {
 }
 
 struct Tab: Identifiable {
-    let id = UUID()
+    let id: UUID
     var title: String
     var url: URL?
     var appId: String?
@@ -132,6 +132,7 @@ struct Tab: Identifiable {
 
     /// Raw capability manifest from the verified package payload.
     var capabilityManifestJSON: String?
+    var localStorageOrigin: String?
 
     /// Incremented when the Native capability snapshot changes.
     var capabilityRevision: Int
@@ -161,6 +162,7 @@ struct Tab: Identifiable {
 
     init(
         title: String,
+        id: UUID = UUID(),
         url: URL? = nil,
         appId: String? = nil,
         serviceCallUrl: String? = nil,
@@ -175,6 +177,7 @@ struct Tab: Identifiable {
         guestExtractedPath: String? = nil,
         guestEntry: String? = nil,
         capabilityManifestJSON: String? = nil,
+        localStorageOrigin: String? = nil,
         capabilityRevision: Int = 0,
         contractName: String? = nil,
         contractVersion: Int? = nil,
@@ -185,6 +188,7 @@ struct Tab: Identifiable {
         backgroundColor: String? = nil,
         appIcon: String? = nil
     ) {
+        self.id = id
         self.title = title
         self.url = url
         self.appId = appId
@@ -200,6 +204,7 @@ struct Tab: Identifiable {
         self.guestExtractedPath = guestExtractedPath
         self.guestEntry = guestEntry
         self.capabilityManifestJSON = capabilityManifestJSON
+        self.localStorageOrigin = localStorageOrigin
         self.capabilityRevision = capabilityRevision
         self.contractName = contractName
         self.contractVersion = contractVersion

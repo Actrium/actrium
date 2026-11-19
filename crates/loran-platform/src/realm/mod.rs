@@ -23,6 +23,6 @@ pub use domain::RealmDomain;
 pub use error::RealmError;
 pub use issuer_key::{IssuerKeyState, RealmIssuerKey};
 pub use model::{Realm, RealmStatus};
-pub use profile::RealmProfileRecord;
+pub use profile::{PackageRelease, RealmPackageReleaseRecord, RealmProfileRecord};
 pub use turn_secret::realm_turn_secret;
 pub use validation::RealmValidationError;
