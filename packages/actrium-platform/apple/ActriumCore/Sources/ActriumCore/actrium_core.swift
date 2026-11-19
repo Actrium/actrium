@@ -5257,6 +5257,146 @@ public func FfiConverterTypePackageIntegrityPlanInfo_lower(_ value: PackageInteg
 }
 
 
+public struct PinnedAuthorityInfo {
+    public var descriptor: AuthorityDiscoveryInfo
+    public var pinsJson: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(descriptor: AuthorityDiscoveryInfo, pinsJson: String) {
+        self.descriptor = descriptor
+        self.pinsJson = pinsJson
+    }
+}
+
+#if compiler(>=6)
+extension PinnedAuthorityInfo: Sendable {}
+#endif
+
+
+extension PinnedAuthorityInfo: Equatable, Hashable {
+    public static func ==(lhs: PinnedAuthorityInfo, rhs: PinnedAuthorityInfo) -> Bool {
+        if lhs.descriptor != rhs.descriptor {
+            return false
+        }
+        if lhs.pinsJson != rhs.pinsJson {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(descriptor)
+        hasher.combine(pinsJson)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePinnedAuthorityInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PinnedAuthorityInfo {
+        return
+            try PinnedAuthorityInfo(
+                descriptor: FfiConverterTypeAuthorityDiscoveryInfo.read(from: &buf),
+                pinsJson: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PinnedAuthorityInfo, into buf: inout [UInt8]) {
+        FfiConverterTypeAuthorityDiscoveryInfo.write(value.descriptor, into: &buf)
+        FfiConverterString.write(value.pinsJson, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePinnedAuthorityInfo_lift(_ buf: RustBuffer) throws -> PinnedAuthorityInfo {
+    return try FfiConverterTypePinnedAuthorityInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePinnedAuthorityInfo_lower(_ value: PinnedAuthorityInfo) -> RustBuffer {
+    return FfiConverterTypePinnedAuthorityInfo.lower(value)
+}
+
+
+public struct PinnedPublisherInfo {
+    public var profile: PublisherProfileInfo
+    public var pinsJson: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(profile: PublisherProfileInfo, pinsJson: String) {
+        self.profile = profile
+        self.pinsJson = pinsJson
+    }
+}
+
+#if compiler(>=6)
+extension PinnedPublisherInfo: Sendable {}
+#endif
+
+
+extension PinnedPublisherInfo: Equatable, Hashable {
+    public static func ==(lhs: PinnedPublisherInfo, rhs: PinnedPublisherInfo) -> Bool {
+        if lhs.profile != rhs.profile {
+            return false
+        }
+        if lhs.pinsJson != rhs.pinsJson {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(profile)
+        hasher.combine(pinsJson)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePinnedPublisherInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PinnedPublisherInfo {
+        return
+            try PinnedPublisherInfo(
+                profile: FfiConverterTypePublisherProfileInfo.read(from: &buf),
+                pinsJson: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PinnedPublisherInfo, into buf: inout [UInt8]) {
+        FfiConverterTypePublisherProfileInfo.write(value.profile, into: &buf)
+        FfiConverterString.write(value.pinsJson, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePinnedPublisherInfo_lift(_ buf: RustBuffer) throws -> PinnedPublisherInfo {
+    return try FfiConverterTypePinnedPublisherInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePinnedPublisherInfo_lower(_ value: PinnedPublisherInfo) -> RustBuffer {
+    return FfiConverterTypePinnedPublisherInfo.lower(value)
+}
+
+
 /**
  * A package signing key from a verified Publisher Profile.
  */
@@ -5532,12 +5672,14 @@ public func FfiConverterTypePublisherProfileInfo_lower(_ value: PublisherProfile
 public struct RealmAuthorityAcceptance {
     public var descriptor: AuthorityDiscoveryInfo
     public var pinsJson: String
+    public var signedKeysJson: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(descriptor: AuthorityDiscoveryInfo, pinsJson: String) {
+    public init(descriptor: AuthorityDiscoveryInfo, pinsJson: String, signedKeysJson: String) {
         self.descriptor = descriptor
         self.pinsJson = pinsJson
+        self.signedKeysJson = signedKeysJson
     }
 }
 
@@ -5554,12 +5696,16 @@ extension RealmAuthorityAcceptance: Equatable, Hashable {
         if lhs.pinsJson != rhs.pinsJson {
             return false
         }
+        if lhs.signedKeysJson != rhs.signedKeysJson {
+            return false
+        }
         return true
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(descriptor)
         hasher.combine(pinsJson)
+        hasher.combine(signedKeysJson)
     }
 }
 
@@ -5573,13 +5719,15 @@ public struct FfiConverterTypeRealmAuthorityAcceptance: FfiConverterRustBuffer {
         return
             try RealmAuthorityAcceptance(
                 descriptor: FfiConverterTypeAuthorityDiscoveryInfo.read(from: &buf),
-                pinsJson: FfiConverterString.read(from: &buf)
+                pinsJson: FfiConverterString.read(from: &buf),
+                signedKeysJson: FfiConverterString.read(from: &buf)
         )
     }
 
     public static func write(_ value: RealmAuthorityAcceptance, into buf: inout [UInt8]) {
         FfiConverterTypeAuthorityDiscoveryInfo.write(value.descriptor, into: &buf)
         FfiConverterString.write(value.pinsJson, into: &buf)
+        FfiConverterString.write(value.signedKeysJson, into: &buf)
     }
 }
 
@@ -5894,6 +6042,7 @@ public struct RealmProfileInfo {
     public var serviceSha256: String
     public var serviceType: String
     /**
+     * Serial number of the signed Service Actor in realm_name.
      * Issuer endpoint that serves Actor credentials.
      */
     public var issuerUrl: String
@@ -5924,6 +6073,7 @@ public struct RealmProfileInfo {
          * Service package: deployed and verified by the Service Host.
          */serviceHref: String, serviceSha256: String, serviceType: String,
         /**
+         * Serial number of the signed Service Actor in realm_name.
          * Issuer endpoint that serves Actor credentials.
          */issuerUrl: String,
         /**
@@ -6080,6 +6230,100 @@ public func FfiConverterTypeRealmProfileInfo_lift(_ buf: RustBuffer) throws -> R
 #endif
 public func FfiConverterTypeRealmProfileInfo_lower(_ value: RealmProfileInfo) -> RustBuffer {
     return FfiConverterTypeRealmProfileInfo.lower(value)
+}
+
+
+public struct RealmProfileUpdateInfo {
+    public var profile: RealmProfileInfo?
+    public var stateJson: String
+    public var serviceSelectionKey: String
+    public var frontSelectionKey: String
+    public var signingKeyId: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(profile: RealmProfileInfo?, stateJson: String, serviceSelectionKey: String, frontSelectionKey: String, signingKeyId: String) {
+        self.profile = profile
+        self.stateJson = stateJson
+        self.serviceSelectionKey = serviceSelectionKey
+        self.frontSelectionKey = frontSelectionKey
+        self.signingKeyId = signingKeyId
+    }
+}
+
+#if compiler(>=6)
+extension RealmProfileUpdateInfo: Sendable {}
+#endif
+
+
+extension RealmProfileUpdateInfo: Equatable, Hashable {
+    public static func ==(lhs: RealmProfileUpdateInfo, rhs: RealmProfileUpdateInfo) -> Bool {
+        if lhs.profile != rhs.profile {
+            return false
+        }
+        if lhs.stateJson != rhs.stateJson {
+            return false
+        }
+        if lhs.serviceSelectionKey != rhs.serviceSelectionKey {
+            return false
+        }
+        if lhs.frontSelectionKey != rhs.frontSelectionKey {
+            return false
+        }
+        if lhs.signingKeyId != rhs.signingKeyId {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(profile)
+        hasher.combine(stateJson)
+        hasher.combine(serviceSelectionKey)
+        hasher.combine(frontSelectionKey)
+        hasher.combine(signingKeyId)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRealmProfileUpdateInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RealmProfileUpdateInfo {
+        return
+            try RealmProfileUpdateInfo(
+                profile: FfiConverterOptionTypeRealmProfileInfo.read(from: &buf),
+                stateJson: FfiConverterString.read(from: &buf),
+                serviceSelectionKey: FfiConverterString.read(from: &buf),
+                frontSelectionKey: FfiConverterString.read(from: &buf),
+                signingKeyId: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RealmProfileUpdateInfo, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeRealmProfileInfo.write(value.profile, into: &buf)
+        FfiConverterString.write(value.stateJson, into: &buf)
+        FfiConverterString.write(value.serviceSelectionKey, into: &buf)
+        FfiConverterString.write(value.frontSelectionKey, into: &buf)
+        FfiConverterString.write(value.signingKeyId, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRealmProfileUpdateInfo_lift(_ buf: RustBuffer) throws -> RealmProfileUpdateInfo {
+    return try FfiConverterTypeRealmProfileUpdateInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRealmProfileUpdateInfo_lower(_ value: RealmProfileUpdateInfo) -> RustBuffer {
+    return FfiConverterTypeRealmProfileUpdateInfo.lower(value)
 }
 
 
@@ -8831,6 +9075,18 @@ public func acceptRealmProfileSuccessor(body: String, realmName: String, signing
     )
 })
 }
+public func acceptRealmProfileUpdate(body: String, realmName: String, signingKeysJson: String, previousStateJson: String?, authorityPinsJson: String?, installedProfileJson: String?)throws  -> RealmProfileUpdateInfo  {
+    return try  FfiConverterTypeRealmProfileUpdateInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actrium_core_fn_func_accept_realm_profile_update(
+        FfiConverterString.lower(body),
+        FfiConverterString.lower(realmName),
+        FfiConverterString.lower(signingKeysJson),
+        FfiConverterOptionString.lower(previousStateJson),
+        FfiConverterOptionString.lower(authorityPinsJson),
+        FfiConverterOptionString.lower(installedProfileJson),$0
+    )
+})
+}
 /**
  * Convert a persisted active-tab row into the platform active-tab model.
  */
@@ -10776,6 +11032,24 @@ public func parseVoskResultText(json: String) -> String  {
     )
 })
 }
+public func pinRealmAuthority(body: String, domain: String, previousPinsJson: String?)throws  -> PinnedAuthorityInfo  {
+    return try  FfiConverterTypePinnedAuthorityInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actrium_core_fn_func_pin_realm_authority(
+        FfiConverterString.lower(body),
+        FfiConverterString.lower(domain),
+        FfiConverterOptionString.lower(previousPinsJson),$0
+    )
+})
+}
+public func pinRealmFrontPublisher(body: String, domain: String, previousPinsJson: String?)throws  -> PinnedPublisherInfo  {
+    return try  FfiConverterTypePinnedPublisherInfo_lift(try rustCallWithError(FfiConverterTypeCoreError_lift) {
+    uniffi_actrium_core_fn_func_pin_realm_front_publisher(
+        FfiConverterString.lower(body),
+        FfiConverterString.lower(domain),
+        FfiConverterOptionString.lower(previousPinsJson),$0
+    )
+})
+}
 /**
  * Build final Chinese ASR text from platform-provided segmentation terms.
  */
@@ -11383,6 +11657,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_actrium_core_checksum_func_accept_realm_profile_successor() != 18494) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_actrium_core_checksum_func_accept_realm_profile_update() != 40113) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_actrium_core_checksum_func_active_tab_from_row() != 51323) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11948,6 +12225,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_func_parse_vosk_result_text() != 55653) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_func_pin_realm_authority() != 19265) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_func_pin_realm_front_publisher() != 57787) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_func_post_process_zh_asr_segments() != 19640) {

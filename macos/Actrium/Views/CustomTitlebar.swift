@@ -935,7 +935,7 @@ private struct ToolbarContentView: View {
     private func submitAddress() {
         let input = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty else { return }
-        viewModel.navigateCurrentTab(to: input)
+        viewModel.navigateCurrentTab(to: input, fromAddressBar: true)
         exitEditingMode()
     }
 

@@ -32,7 +32,7 @@ final class LocalRealmFrontEchoTests: XCTestCase {
         viewModel.navigateCurrentTab(to: address)
         let first = try await waitForFront(in: viewModel, replacing: initial) {
             let invite = try String(contentsOf: directory.appendingPathComponent("viewer-invite"), encoding: .utf8)
-            viewModel.confirmInviteRedeem(code: invite)
+            viewModel.confirmInviteRedeem(try XCTUnwrap(viewModel.pendingInviteRedeem), code: invite)
         }
         XCTAssertEqual(first.url?.absoluteString, address)
         try await echo("original", tabId: first.id)
@@ -111,7 +111,7 @@ final class LocalRealmFrontEchoTests: XCTestCase {
         }
         XCTAssertEqual(viewModel.pendingInviteRedeem?.uri, address)
         XCTAssertNil(viewModel.currentTab?.appId)
-        viewModel.cancelInviteRedeem()
+        viewModel.cancelInviteRedeem(try XCTUnwrap(viewModel.pendingInviteRedeem))
     }
 
     @MainActor

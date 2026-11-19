@@ -45,6 +45,29 @@ struct RendererStorageAdaptationTests {
         } catch CoreError.AuthorityDescriptorInvalid { }
     }
 
+    @Test func publisherEnrollmentPreservesTheDurableTrustBaselineAfterPreferencesAreCleared() async throws {
+        let suite = "storage-durable-trust-\(UUID().uuidString)"
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let body = try PublisherStorageFixture.profile(rotated: false)
+        let pins = try ActriumCore.acceptRealmPackagePublisher(
+            body: body, domain: "publisher.example", previousPinsJson: nil
+        ).pinsJson
+        let database = GuestStorageDatabase(database: GuestLocalStorage(path: ":memory:"))
+        do {
+            _ = try await RealmProfileStore.acceptPublisher(
+                body: PublisherStorageFixture.profile(rotated: true, chained: false),
+                domain: "publisher.example", preferences: preferences, database: database, fallbackPins: pins
+            )
+            Issue.record("Storage enrollment discarded durable Publisher trust.")
+        } catch GuestLocalStorageError.IdentityChanged { }
+        let profile = try await RealmProfileStore.acceptPublisher(
+            body: PublisherStorageFixture.profile(rotated: true), domain: "publisher.example",
+            preferences: preferences, database: database, fallbackPins: pins
+        )
+        #expect(profile.storageIdentity != nil)
+    }
+
     @Test func expiryDuringIdentityValidationStillPreventsTheMutation() async throws {
         let store = ValidationStorage(path: ":memory:")
         let broker = RendererLocalStorage(database: store)

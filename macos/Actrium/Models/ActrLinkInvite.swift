@@ -25,15 +25,15 @@ enum ActrLinkInvite {
     }
 
     /// `uri` without its `args` parameter; other parameters are preserved.
-    /// Returns `uri` unchanged when it carries no `args` or cannot be parsed.
-    static func strippingInviteArgs(from uri: String) -> String {
-        guard var components = URLComponents(string: uri),
-              let items = components.queryItems,
-              items.contains(where: { $0.name == argsName })
-        else { return uri }
+    /// A link that cannot be parsed cannot supply a safe address.
+    static func strippingInviteArgs(from uri: String) -> String? {
+        guard var components = URLComponents(string: uri), components.url != nil else { return nil }
+        guard components.percentEncodedQuery != nil else { return uri }
+        guard let items = components.queryItems else { return nil }
+        guard items.contains(where: { $0.name == argsName }) else { return uri }
         let remaining = items.filter { $0.name != argsName }
         components.queryItems = remaining.isEmpty ? nil : remaining
-        return components.url?.absoluteString ?? uri
+        return components.url?.absoluteString
     }
 
     /// Only the first `args` item counts, matching query-string precedence.

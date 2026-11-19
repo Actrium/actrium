@@ -86,13 +86,15 @@ struct PublisherStorageIdentityTests {
         let profile = try ActriumCore.acceptRealmProfile(
             body: fixture.realm_profile, realmName: fixture.realm_name, signingKeysJson: fixture.realm_keys
         )
-        let signer = try await PublisherPackageVerifier.verify(archive: fixture.archive, profile: profile, publisher: publisher)
+        let keys = publisher.fixedArchiveVerificationKeys
+        #expect(keys.first != fixture.signer)
+        let signer = keys.first {
+            (try? ActriumCore.verifyRealmFrontPackage(archive: fixture.archive, trustedPublicKey: $0, profile: profile)) != nil
+        }
         #expect(signer == fixture.signer)
-        #expect(Data(base64Encoded: publisher.packageSigningKeys[0].publicKeyBase64) != signer)
-        do {
-            _ = try await PublisherPackageVerifier.verify(archive: fixture.archive + Data([0]), profile: profile, publisher: publisher)
-            Issue.record("Changed archive bytes were accepted.")
-        } catch is ActrPackageVerificationError { }
+        #expect(keys.allSatisfy {
+            (try? ActriumCore.verifyRealmFrontPackage(archive: fixture.archive + Data([0]), trustedPublicKey: $0, profile: profile)) == nil
+        })
     }
 
     private func document(_ config: [String: Any]) throws -> UUID {

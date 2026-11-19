@@ -73,7 +73,7 @@ pub enum RealmCommand {
     /// Create an invite: a new member (owner, `--role`) or a new client of a
     /// member (`--member`).
     Invite(InviteArgs),
-    /// Replace the selection of a Realm under its Provider domain as its owner
+    /// Update or roll back the package selection under the Realm's Provider domain
     Update(realm_members::UpdateArgs),
     /// Download and verify the selected Service and Front into a new directory
     FetchPackages(super::realm_packages::FetchArgs),
@@ -151,6 +151,9 @@ pub struct SignProfileArgs {
     /// Expected selection for first activation, or a complete replacement for an update
     #[arg(long, value_name = "FILE")]
     pub selection: Option<PathBuf>,
+    /// Operation ID (32 lowercase hex digits) for a conditional Front-only publish.
+    #[arg(long, requires = "selection", conflicts_with = "display_name")]
+    pub front_operation: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -245,7 +248,16 @@ impl Command for RealmArgs {
             RealmCommand::SignProfile(args) => {
                 let selection = args.selection.as_deref().map(read_selection).transpose()?;
                 let profile = read_profile(&args.profile)?;
-                sign_profile(&args.key, profile, args.display_name.as_deref(), selection)?
+                if let Some(operation_id) = &args.front_operation {
+                    sign_front_profile(
+                        &args.key,
+                        profile,
+                        selection.context("missing selection")?,
+                        operation_id,
+                    )?
+                } else {
+                    sign_profile(&args.key, profile, args.display_name.as_deref(), selection)?
+                }
             }
             RealmCommand::Retire(args) => retire(&args.key, read_profile(&args.profile)?)?,
             RealmCommand::ReissueRequest(args) => {
@@ -513,6 +525,46 @@ fn sign_profile(
         .map_err(anyhow::Error::msg)?;
     let mut request = new_request(ManagementOp::PublishProfile, &realm, &provider);
     request.profile = Some(profile);
+    Ok(request.sign(&key_id, &key))
+}
+
+fn sign_front_profile(
+    key_path: &Path,
+    profile: Value,
+    selection: RealmPackageSelection,
+    operation_id: &str,
+) -> Result<Value> {
+    use actr_protocol::realm_profile::FrontUpdate;
+    anyhow::ensure!(
+        profile.get("signature").is_some(),
+        "use the current signed Realm Profile"
+    );
+    let previous: RealmProfile = serde_json::from_value(profile.clone())?;
+    let previous_selection = previous
+        .selection
+        .as_ref()
+        .context("Profile has no selection")?;
+    previous_selection
+        .check_unchanged_service(&selection)
+        .map_err(anyhow::Error::msg)?;
+    previous_selection
+        .check_successor(&selection)
+        .map_err(anyhow::Error::msg)?;
+    let update = FrontUpdate {
+        operation_id: operation_id.to_owned(),
+        expected_sequence: previous.sequence,
+        rollback: false,
+    };
+    update.check().map_err(anyhow::Error::msg)?;
+    let signed = sign_profile(key_path, profile, None, Some(selection))?;
+    let mut request = new_request(
+        ManagementOp::PublishFrontProfile,
+        &previous.realm.name,
+        &previous.provider.id,
+    );
+    request.profile = Some(signed["profile"].clone());
+    request.front_update = Some(update);
+    let (key_id, key) = RealmKeyFile::load(key_path)?;
     Ok(request.sign(&key_id, &key))
 }
 

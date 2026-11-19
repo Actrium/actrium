@@ -39,11 +39,18 @@ enum RealmProfileStore {
     static func acceptAuthority(
         body: String, domain: String, realmName: String, preferences: UserDefaults
     ) throws -> AuthorityDiscoveryInfo {
+        try acceptPinnedAuthority(body: body, domain: domain, realmName: realmName, preferences: preferences).descriptor
+    }
+
+    static func acceptPinnedAuthority(
+        body: String, domain: String, realmName: String, preferences: UserDefaults,
+        fallbackPins: String? = nil
+    ) throws -> RealmAuthorityAcceptance {
         let key = authorityKey(domain)
         let previous = preferences.dictionary(forKey: key)
         let legacy = preferences.dictionary(forKey: realmKey(realmName))?["signingKeys"] as? String
         let accepted = try ActriumCore.acceptRealmAuthority(
-            body: body, domain: domain, previousPinsJson: previous?["pins"] as? String,
+            body: body, domain: domain, previousPinsJson: previous?["pins"] as? String ?? fallbackPins,
             legacySigningKeysJson: legacy
         )
         let keyIds = accepted.descriptor.signingKeys.map(\.id)
@@ -60,7 +67,7 @@ enum RealmProfileStore {
             )
             reconcileRevokedSigners(domain: domain, authority: accepted.descriptor, preferences: preferences)
         }
-        return accepted.descriptor
+        return accepted
     }
 
     static func acceptRealm(
@@ -209,11 +216,11 @@ enum RealmProfileStore {
     }
 
     static func acceptPublisher(
-        body: String, domain: String, preferences: UserDefaults
+        body: String, domain: String, preferences: UserDefaults, fallbackPins: String? = nil
     ) throws -> PublisherProfileInfo {
         let key = publisherKey(domain)
         let saved = preferences.dictionary(forKey: key)
-        let pins = saved?["pins"] as? String ?? preferences.string(forKey: key)
+        let pins = saved?["pins"] as? String ?? preferences.string(forKey: key) ?? fallbackPins
         let accepted = try ActriumCore.acceptRealmPackagePublisher(
             body: body, domain: domain, previousPinsJson: pins
         )
@@ -241,7 +248,8 @@ enum RealmProfileStore {
 
     /// Keep main's verification snapshot while the shared database owns storage identity/history.
     static func acceptPublisher(
-        body: String, domain: String, preferences: UserDefaults, database: GuestStorageDatabase
+        body: String, domain: String, preferences: UserDefaults, database: GuestStorageDatabase,
+        fallbackPins: String? = nil
     ) async throws -> PublisherProfileInfo {
         let key = publisherKey(domain)
         let saved = preferences.dictionary(forKey: key)
@@ -249,7 +257,9 @@ enum RealmProfileStore {
         if preferences.object(forKey: key) != nil && pins == nil {
             throw CoreError.AuthorityDescriptorInvalid(message: "Saved Publisher trust could not be read; it was not reset.")
         }
-        let accepted = try await database.acceptPublisherProfile(body: body, domain: domain, previousPins: pins)
+        let accepted = try await database.acceptPublisherProfile(
+            body: body, domain: domain, previousPins: pins ?? fallbackPins
+        )
         preferences.set(["body": body, "pins": accepted.pinsJson], forKey: key)
         return accepted.profile
     }

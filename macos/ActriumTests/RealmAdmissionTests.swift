@@ -9,6 +9,12 @@ import XCTest
 
 final class RealmAdmissionTests: XCTestCase {
     private let realmName = "echo@realm.example"
+    private let realmTrustDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+
+    deinit {
+        try? FileManager.default.removeItem(at: realmTrustDirectory)
+    }
+
 
     @MainActor
     func testSignedOpenPolicyAllowsInviteFreeAdmission() throws {
@@ -185,13 +191,14 @@ final class RealmAdmissionTests: XCTestCase {
         let fallback = try profile(membership: "invite-only", sequence: 3, signer: remaining, keyId: "remaining")
         _ = try accept((fallback.0, authority.signingKeysJson), preferences: preferences)
 
-        let otherWindow = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
-        let trustedWindow = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
+        let otherWindow = BrowserViewModel(realmPreferences: preferences, realmTrustDirectory: realmTrustDirectory, saveBrowserSession: { _, _ in })
+        let trustedWindow = BrowserViewModel(realmPreferences: preferences, realmTrustDirectory: realmTrustDirectory, saveBrowserSession: { _, _ in })
         let invite = try inviteCode()
         var failedProfileFetches = 0
         var redeemedProfile: RealmProfileInfo?
         let refreshingWindow = BrowserViewModel(
             realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
             fetchRealmDocument: { url, _ in
                 if url.host == "publisher.example" { throw CancellationError() }
                 if url.path == "/.well-known/actr" { return Data(updated.utf8) }
@@ -206,6 +213,7 @@ final class RealmAdmissionTests: XCTestCase {
                 redeemedProfile = profile
                 return #"{"member_id":"test-member","role":"viewer","key_id":"test-client"}"#
             },
+            confirmRealmMembership: { _ in false },
             saveBrowserSession: { _, _ in }
         )
         let link = try XCTUnwrap(URL(string: "actr://realm.example/echo"))
@@ -220,10 +228,12 @@ final class RealmAdmissionTests: XCTestCase {
 
         let movedWindow = BrowserViewModel(
             realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
             fetchRealmDocument: { url, _ in
                 if url.path == "/.well-known/actr" { return Data(updated.utf8) }
                 throw URLError(.resourceUnavailable)
             },
+            confirmRealmMembership: { _ in false },
             saveBrowserSession: { _, _ in }
         )
         let transfer = Tab(
@@ -259,7 +269,7 @@ final class RealmAdmissionTests: XCTestCase {
         )
 
         let fetchesBeforeRedeeming = failedProfileFetches
-        refreshingWindow.confirmInviteRedeem(code: invite)
+        refreshingWindow.confirmInviteRedeem(try XCTUnwrap(refreshingWindow.pendingInviteRedeem), code: invite)
         let redeemedDeadline = ContinuousClock.now + .seconds(2)
         func didRedeem() -> Bool {
             preferences.stringArray(forKey: "actr.redeemedRealms")?.contains(realmName) == true
@@ -327,6 +337,7 @@ final class RealmAdmissionTests: XCTestCase {
         var savedAddresses: [String] = []
         let viewModel = BrowserViewModel(
             realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
             fetchRealmDocument: { url, _ in
                 if url.host == "publisher.example" { throw CancellationError() }
                 return url.path == "/.well-known/actr" ? Data(authority.utf8) : body
@@ -337,6 +348,7 @@ final class RealmAdmissionTests: XCTestCase {
                 exchanges += 1
                 return #"{"member_id":"test-member","role":"viewer","key_id":"test-client"}"#
             },
+            confirmRealmMembership: { _ in false },
             saveBrowserSession: { tabs, _ in
                 savedAddresses.append(contentsOf: tabs.compactMap { $0.url?.absoluteString })
             }
@@ -364,8 +376,8 @@ final class RealmAdmissionTests: XCTestCase {
     @MainActor
     func testCrossWindowMoveStopsTheSourceRealmBinding() async throws {
         let preferences = try makePreferences()
-        let source = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
-        let destination = BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
+        let source = BrowserViewModel(realmPreferences: preferences, realmTrustDirectory: realmTrustDirectory, saveBrowserSession: { _, _ in })
+        let destination = BrowserViewModel(realmPreferences: preferences, realmTrustDirectory: realmTrustDirectory, saveBrowserSession: { _, _ in })
         let sourceId = try XCTUnwrap(source.currentTabId)
         let link = try XCTUnwrap(URL(string: "actr://realm.example/echo"))
         source.tabs[0].url = link
@@ -417,11 +429,13 @@ final class RealmAdmissionTests: XCTestCase {
         var profileRequests: [String] = []
         let destination = BrowserViewModel(
             realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
             fetchRealmDocument: { url, _ in
                 if url.path == "/.well-known/actr" { return Data(descriptor.utf8) }
                 profileRequests.append(url.path)
                 return try XCTUnwrap(profiles[url.path])
             },
+            confirmRealmMembership: { _ in false },
             saveBrowserSession: { _, _ in }
         )
         let first = Tab(title: "Echo", url: URL(string: "actr://realm.example/echo"), guestScript: "copied Front")
@@ -449,13 +463,13 @@ final class RealmAdmissionTests: XCTestCase {
         try await waitForInvite()
         XCTAssertEqual(destination.pendingInviteRedeem?.tabId, second.id)
         XCTAssertEqual(profileRequests, ["/realm/echo", "/realm/echo-second"])
-        destination.cancelInviteRedeem()
+        destination.cancelInviteRedeem(try XCTUnwrap(destination.pendingInviteRedeem))
 
         destination.switchToTab(id: first.id)
         try await waitForInvite()
         XCTAssertEqual(destination.pendingInviteRedeem?.tabId, first.id)
         XCTAssertEqual(profileRequests, ["/realm/echo", "/realm/echo-second", "/realm/echo"])
-        destination.cancelInviteRedeem()
+        destination.cancelInviteRedeem(try XCTUnwrap(destination.pendingInviteRedeem))
     }
 
     @MainActor
@@ -487,19 +501,21 @@ final class RealmAdmissionTests: XCTestCase {
                 return nil
             },
             realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
             fetchRealmDocument: { url, _ in
                 let key = (url.host ?? "") + url.path
                 requests.append(key)
                 return try XCTUnwrap(documents[key])
             },
+            confirmRealmMembership: { _ in true },
             saveBrowserSession: { _, _ in }
         )
         let webAddress = "https://web.example/"
         let realmAddress = "actr://realm.example/echo"
         viewModel.restoreSessionIfNeeded {
             BrowserDataRepository.RestoredSession(tabs: [
-                .init(title: "Web", address: webAddress),
-                .init(title: "Echo", address: realmAddress)
+                .init(id: UUID(), title: "Web", address: webAddress),
+                .init(id: UUID(), title: "Echo", address: realmAddress)
             ], activeTabIndex: 0)
         }
         defer { viewModel.invalidateRealmLoadsForWindowClose() }
@@ -529,7 +545,7 @@ final class RealmAdmissionTests: XCTestCase {
         let active = try profile(membership: "open", sequence: 2, signer: signer)
         _ = try accept(active, preferences: preferences)
         let windows = (0..<2).map { _ in
-            BrowserViewModel(realmPreferences: preferences, saveBrowserSession: { _, _ in })
+            BrowserViewModel(realmPreferences: preferences, realmTrustDirectory: realmTrustDirectory, saveBrowserSession: { _, _ in })
         }
         for window in windows {
             window.tabs[0].url = URL(string: "actr://realm.example/echo")

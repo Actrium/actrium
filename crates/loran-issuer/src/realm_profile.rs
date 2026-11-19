@@ -26,7 +26,8 @@ use platform::net::FetchError;
 use platform::realm::domain::member_from_descriptor;
 use platform::realm::membership::Signer;
 use platform::realm::{
-    IssuerKeyState, Realm, RealmDomain, RealmError, RealmIssuerKey, RealmProfileRecord, RealmStatus,
+    IssuerKeyState, PackageRelease, Realm, RealmDomain, RealmError, RealmIssuerKey,
+    RealmPackageReleaseRecord, RealmProfileRecord, RealmStatus,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -36,6 +37,8 @@ use std::time::Duration;
 use tokio::sync::{Mutex, OnceCell};
 
 use crate::signer_client_wrapper::SignerClientWrapper;
+
+mod package_verification;
 
 /// Signer key name, and descriptor key id, of a domain's Realm signing key.
 pub fn realm_signing_key_id(domain: &str) -> String {
@@ -142,6 +145,8 @@ pub struct ProfileChange {
     /// The owner who requested the change. The Profile is stored only if,
     /// in the storing transaction, it still is the owner.
     pub owner: Option<Signer>,
+    pub front_update: Option<actr_protocol::realm_profile::FrontUpdate>,
+    pub service_update: Option<actr_protocol::realm_profile::FrontUpdate>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -167,7 +172,7 @@ pub struct RealmProfiles {
     /// Longest Actor credential lifetime, which a retired issuer key
     /// outlives.
     credential_ttl_secs: u64,
-    /// Where the credential validator's key cache lives.
+    /// SQLite data directory for the credential key cache and Publisher trust records.
     sqlite_path: std::path::PathBuf,
     /// Signer key id and the self-signed `realm_signing_keys` member.
     member: OnceCell<(u32, RealmSigningKeys)>,
@@ -241,6 +246,53 @@ impl RealmProfiles {
                 "Realm signing key is not ready".to_string(),
             ));
         };
+        let release = change
+            .front_update
+            .as_ref()
+            .map(PackageRelease::Front)
+            .or_else(|| change.service_update.as_ref().map(PackageRelease::Service));
+        if let Some(release) = release {
+            let update = release.update();
+            update.check().map_err(ProfileError::Invalid)?;
+            let selection = change.selection.as_ref().ok_or_else(|| {
+                ProfileError::Invalid("a package release needs a complete selection".into())
+            })?;
+            selection.check().map_err(ProfileError::Invalid)?;
+            let baseline = RealmProfileRecord::get(realm)
+                .await?
+                .filter(|record| {
+                    u64::try_from(record.sequence).ok() == Some(update.expected_sequence)
+                })
+                .ok_or_else(|| RealmError::Conflict("package release baseline changed".into()))?
+                .verify_for_update(keys)?;
+            let current = baseline.selection.as_ref().ok_or_else(|| {
+                RealmError::Conflict("the baseline has no complete package selection".into())
+            })?;
+            if current
+                .release_change(selection)
+                .map_err(RealmError::Conflict)?
+                != Some(release.kind())
+            {
+                return Err(RealmError::Conflict(
+                    "package release does not match the selection change".into(),
+                )
+                .into());
+            }
+            if update.rollback
+                && RealmPackageReleaseRecord::rollback_selection(realm, current)
+                    .await?
+                    .as_ref()
+                    != Some(selection)
+            {
+                return Err(RealmError::Conflict(
+                    "the last package release is no longer available for rollback".into(),
+                )
+                .into());
+            }
+            // Downloads run before taking the signing lock. The store below
+            // still checks the expected sequence and the owner's authority.
+            package_verification::verify(&self.sqlite_path, selection, release).await?;
+        }
         let _signing = self.signing.lock().await;
 
         let current = Realm::get(realm).await?.ok_or(RealmError::NotFound)?;
@@ -252,6 +304,20 @@ impl RealmProfiles {
             .as_ref()
             .map(|record| record.verify_for_update(keys))
             .transpose()?;
+        if change.owner.is_some()
+            && change.front_update.is_none()
+            && change.service_update.is_none()
+            && let Some(proposed) = &change.selection
+            && previous
+                .as_ref()
+                .and_then(|profile| profile.selection.as_ref())
+                != Some(proposed)
+        {
+            return Err(ProfileError::Invalid(
+                "package changes require a guarded release; use the current realm update command"
+                    .into(),
+            ));
+        }
 
         let selection = if change.retire {
             None
@@ -294,6 +360,17 @@ impl RealmProfiles {
             previous.check_successor(&profile)?;
         }
         let digest = record.as_ref().map(|record| record.digest.as_str());
+        if let Some(release) = release {
+            RealmProfileRecord::store_package_release(
+                &profile,
+                &document,
+                digest,
+                change.owner.as_ref(),
+                release,
+            )
+            .await?;
+            return Ok(current);
+        }
         let (realm, _, _) =
             RealmProfileRecord::store_issued(&profile, &document, digest, change.owner.as_ref())
                 .await?;

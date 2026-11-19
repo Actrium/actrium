@@ -48,6 +48,9 @@ namespace actrium_core {
     [Throws=CoreError]
     RealmAuthorityAcceptance accept_realm_authority(string body, string domain, string? previous_pins_json, string? legacy_signing_keys_json);
 
+    [Throws=CoreError]
+    PinnedAuthorityInfo pin_realm_authority(string body, string domain, string? previous_pins_json);
+
     /// Validate a Realm Profile response for `realm_name` and extract the
     /// package target.
     ///
@@ -60,6 +63,12 @@ namespace actrium_core {
     RealmProfileAcceptance accept_realm_profile_successor(string body, string realm_name, string signing_keys_json, sequence<string> previous_documents);
     [Throws=CoreError]
     RealmProfileAcceptance? recover_realm_profile_baseline(string realm_name, string signing_keys_json, sequence<string> previous_documents);
+
+    [Throws=CoreError]
+    RealmProfileUpdateInfo accept_realm_profile_update(string body, string realm_name, string signing_keys_json, string? previous_state_json, string? authority_pins_json, string? installed_profile_json);
+
+    [Throws=CoreError]
+    PinnedPublisherInfo pin_realm_front_publisher(string body, string domain, string? previous_pins_json);
 
     /// Validate the descriptor served by a publisher domain and verify its
     /// inline Publisher Profile; extract the package signing keys that
@@ -1062,6 +1071,24 @@ dictionary AuthorityDiscoveryInfo {
     string signing_keys_json;
 };
 
+dictionary PinnedAuthorityInfo {
+    AuthorityDiscoveryInfo descriptor;
+    string pins_json;
+};
+
+dictionary RealmProfileUpdateInfo {
+    RealmProfileInfo? profile;
+    string state_json;
+    string service_selection_key;
+    string front_selection_key;
+    string signing_key_id;
+};
+
+dictionary PinnedPublisherInfo {
+    PublisherProfileInfo profile;
+    string pins_json;
+};
+
 /// A verified Realm Profile: the package target and endpoints that feed
 /// package acquisition.
 dictionary RealmDependencyInfo {
@@ -1103,6 +1130,7 @@ dictionary RealmProfileInfo {
     string service_href;
     string service_sha256;
     string service_type;
+    /// Serial number of the signed Service Actor in realm_name.
     /// Issuer endpoint that serves Actor credentials.
     string issuer_url;
     /// Actr Facility Provider ID; a membership client binds to it.
@@ -1112,6 +1140,7 @@ dictionary RealmProfileInfo {
 dictionary RealmAuthorityAcceptance {
     AuthorityDiscoveryInfo descriptor;
     string pins_json;
+    string signed_keys_json;
 };
 
 dictionary RealmProfileAcceptance {

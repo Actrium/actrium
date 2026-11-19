@@ -204,6 +204,8 @@ pub enum MembershipOp {
     TransferOwner,
     Leave,
     UpdateRealm,
+    UpdateFront,
+    SwitchService,
 }
 
 /// A membership request (section 4).
@@ -247,6 +249,11 @@ pub struct MembershipRequest {
         deserialize_with = "RealmPackageSelection::deserialize_optional"
     )]
     pub selection: Option<RealmPackageSelection>,
+    /// Conditional publication and receipt for a Front-only change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub front_update: Option<crate::realm_profile::FrontUpdate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_update: Option<crate::realm_profile::FrontUpdate>,
     /// `update_realm`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
@@ -355,6 +362,8 @@ impl MembershipRequest {
             key_id: None,
             previous_owner_role: None,
             selection: None,
+            front_update: None,
+            service_update: None,
             display_name: None,
             status: None,
             nonce: nonce.to_string(),
@@ -380,6 +389,18 @@ impl MembershipRequest {
         let (request, signed_payload): (Self, String) = parse_envelope(document)?;
         if request.signature.is_none() {
             return Err(invalid("request is not signed"));
+        }
+        match (request.op, &request.front_update) {
+            (MembershipOp::UpdateFront, Some(update)) => update.check().map_err(invalid)?,
+            (MembershipOp::UpdateFront, None) => return Err(invalid("missing front_update")),
+            (_, Some(_)) => return Err(invalid("front_update requires update_front")),
+            _ => {}
+        }
+        match (request.op, &request.service_update) {
+            (MembershipOp::SwitchService, Some(update)) => update.check().map_err(invalid)?,
+            (MembershipOp::SwitchService, None) => return Err(invalid("missing service_update")),
+            (_, Some(_)) => return Err(invalid("service_update requires switch_service")),
+            _ => {}
         }
         Ok(Self {
             signed_payload,

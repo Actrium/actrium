@@ -24,6 +24,11 @@ use tempfile::NamedTempFile;
 
 use super::realm_members::resolve_profile;
 
+mod front;
+mod probe;
+pub(super) use front::release;
+use probe::ServiceProbeArgs;
+
 const DOCUMENT_LIMIT: usize = actr_protocol::realm_profile::MAX_REALM_PROFILE_BYTES;
 const ARCHIVE_LIMIT: usize = 64 * 1024 * 1024;
 
@@ -40,7 +45,7 @@ pub struct FetchArgs {
     pub output: PathBuf,
 }
 
-/// Validate manually selected archives before creating or updating a Realm.
+/// Validate selected archives and optionally check a deployed Service.
 #[derive(Args, Debug)]
 pub struct CheckArgs {
     /// JSON file with primary_package, front_package and the complete packages map
@@ -49,6 +54,14 @@ pub struct CheckArgs {
     /// Directory for verified archives and Publisher trust pins
     #[arg(long, value_name = "DIR")]
     pub output: PathBuf,
+    /// Durable directory for Publisher trust pins when the archive output is temporary.
+    #[arg(long, value_name = "DIR")]
+    pub trust_dir: Option<PathBuf>,
+    /// Verify the current Realm Profile and probe the selected Service type.
+    #[arg(long, value_name = "REALM", requires = "probe_config")]
+    pub probe_realm: Option<String>,
+    #[command(flatten)]
+    pub probe: ServiceProbeArgs,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -92,7 +105,11 @@ async fn download(address: &str, limit: usize) -> Result<Vec<u8>> {
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))
             .build()?;
-        let mut response = client.get(url.clone()).send().await?;
+        let mut response = client
+            .get(url.clone())
+            .header(reqwest::header::CACHE_CONTROL, "no-cache")
+            .send()
+            .await?;
         if response.status().is_redirection() {
             let location = response
                 .headers()
@@ -305,18 +322,25 @@ where
     Fut: Future<Output = Result<Vec<u8>>>,
 {
     let selection = super::realm::read_selection(&args.selection)?;
+    let probe = args.probe.probe();
+    ensure!(
+        args.probe_realm.is_some() == probe.is_some(),
+        "readiness checks require --probe-realm, --probe-config and --probe-route together"
+    );
     std::fs::create_dir_all(&args.output)?;
+    let trust_dir = args.trust_dir.as_deref().unwrap_or(&args.output);
+    std::fs::create_dir_all(trust_dir)?;
     let lock = File::options()
         .write(true)
         .create(true)
         .truncate(false)
-        .open(args.output.join(".lock"))?;
+        .open(trust_dir.join(".lock"))?;
     let _lock = tokio::task::spawn_blocking(move || {
         lock.lock()?;
         std::io::Result::Ok(lock)
     })
     .await??;
-    let path = args.output.join("selection-state.json");
+    let path = trust_dir.join("selection-state.json");
     let mut cache: Cache = match std::fs::read(&path) {
         Ok(bytes) => serde_json::from_slice(&bytes)?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Cache::default(),
@@ -325,6 +349,15 @@ where
     let roots = selection.packages.keys().cloned().collect();
     let mut result =
         prepare_selection(&selection, &args.output, &mut cache, &path, roots, &get).await?;
+    if let Some((realm, probe)) = args.probe_realm.as_ref().zip(probe) {
+        let (profile, _, _) =
+            resolve_profile(realm, None, |url| get(url, DOCUMENT_LIMIT), None).await?;
+        ensure!(
+            profile.realm.status == RealmStatus::Active,
+            "Realm is retired"
+        );
+        probe.check_ready(&profile, &selection, &result).await?;
+    }
     result["selection"] = serde_json::to_value(&selection)?;
     Ok(result)
 }

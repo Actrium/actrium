@@ -373,6 +373,7 @@ final class BrowserDataRepository {
     }
 
     struct RestoredSessionTab {
+        let id: UUID
         let title: String
         let address: String
     }
@@ -386,7 +387,7 @@ final class BrowserDataRepository {
     func restoreSession() -> RestoredSession? {
         guard let snapshot = database?.loadSession(), !snapshot.tabs.isEmpty else { return nil }
         return RestoredSession(
-            tabs: snapshot.tabs.map { RestoredSessionTab(title: $0.title, address: $0.address) },
+            tabs: snapshot.tabs.map { RestoredSessionTab(id: UUID(uuidString: $0.id) ?? UUID(), title: $0.title, address: $0.address) },
             activeTabIndex: max(0, Int(snapshot.activeTabIndex))
         )
     }
