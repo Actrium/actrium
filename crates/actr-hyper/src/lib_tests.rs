@@ -953,6 +953,137 @@ fn dynclib_cache_path_uses_hash_and_platform_suffix() {
 
 #[cfg(feature = "dynclib-engine")]
 #[test]
+fn v2_dynclib_cache_replaces_corrupted_bytes() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("cached.so");
+    std::fs::write(&path, b"invalid data").unwrap();
+    ensure_v2_dynclib_cache_file(&path, b"signed bytes").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"signed bytes");
+    ensure_v2_dynclib_cache_file(&path, b"signed bytes").unwrap();
+}
+
+#[cfg(all(feature = "dynclib-engine", unix))]
+#[test]
+fn v2_dynclib_cache_does_not_follow_a_symlink() {
+    let dir = TempDir::new().unwrap();
+    let target = dir.path().join("target");
+    let path = dir.path().join("cached.so");
+    std::fs::write(&target, b"signed bytes").unwrap();
+    std::os::unix::fs::symlink(&target, &path).unwrap();
+    ensure_v2_dynclib_cache_file(&path, b"signed bytes").unwrap();
+    assert!(!std::fs::symlink_metadata(&path).unwrap().is_symlink());
+    assert_eq!(std::fs::read(&target).unwrap(), b"signed bytes");
+}
+
+fn fake_v2_native_package(
+    key: &SigningKey,
+    configure: impl FnOnce(&mut actr_pack::ActorPackageManifest),
+) -> WorkloadPackage {
+    use actr_pack::{ActorPackOptions, ActorPackageManifest};
+    use std::collections::BTreeMap;
+
+    let mut manifest = ActorPackageManifest::from_toml(include_str!(
+        "../../actr-pack/tests/fixtures/registration-v2.toml"
+    ))
+    .unwrap();
+    manifest.workload.profile = "actr.native/1".into();
+    manifest.workload.entry = "bin/test.so".into();
+    manifest.files[0].path = manifest.workload.entry.clone();
+    manifest.files[0].media_type = "application/octet-stream".into();
+    configure(&mut manifest);
+    WorkloadPackage::new(
+        actr_pack::pack_actor_package(&ActorPackOptions {
+            manifest,
+            payloads: BTreeMap::from([("bin/test.so".into(), b"not a library".to_vec())]),
+            signing_key: key.clone(),
+        })
+        .unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn v2_native_package_loading_is_gated_by_dynclib_engine() {
+    let dir = TempDir::new().unwrap();
+    let key = SigningKey::generate(&mut OsRng);
+    let package = fake_v2_native_package(&key, |_| {});
+    let trust = StaticTrust::new(key.verifying_key().to_bytes()).unwrap();
+    let config = HyperConfig::new(dir.path().join("hyper"), Arc::new(trust));
+    let hyper = Hyper::new(config).await.unwrap();
+    let error = match Node::from_hyper(hyper, linked_runtime_config(&dir))
+        .attach(&package)
+        .await
+    {
+        Ok(_) => panic!("a non-library must not load"),
+        Err(error) => error.to_string(),
+    };
+    let expected = if cfg!(feature = "dynclib-engine") {
+        "failed to load native package"
+    } else {
+        "native package requires the `dynclib-engine` feature"
+    };
+    assert!(error.contains(expected), "unexpected error: {error}");
+}
+
+#[tokio::test]
+async fn v2_native_package_rejects_untrusted_signature_before_loading() {
+    let dir = TempDir::new().unwrap();
+    let key = SigningKey::generate(&mut OsRng);
+    let other_key = SigningKey::generate(&mut OsRng);
+    let package = fake_v2_native_package(&other_key, |_| {});
+    let trust = StaticTrust::new(key.verifying_key().to_bytes()).unwrap();
+    let config = HyperConfig::new(dir.path(), Arc::new(trust));
+    let hyper = Hyper::new(config).await.unwrap();
+    let error = hyper.load_workload_package(&package).await.err().unwrap();
+    assert!(
+        matches!(error, HyperError::SignatureVerificationFailed(_)),
+        "unexpected error: {error}"
+    );
+    assert!(!dir.path().join("dynclib-cache").exists());
+}
+
+#[tokio::test]
+async fn v2_native_package_rejects_unsupported_host_requirements_before_loading() {
+    for (api, required, optional, expected) in [
+        (
+            ">=2.0.0",
+            None,
+            None,
+            "native host API 1.0.0 does not satisfy",
+        ),
+        (
+            "^1.0.0",
+            Some("wasi.data.read-write"),
+            None,
+            "actr.native/1 does not support host capabilities",
+        ),
+        (
+            "^1.0.0",
+            None,
+            Some("wasi.data.read-only"),
+            "actr.native/1 does not support host capabilities",
+        ),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let key = SigningKey::generate(&mut OsRng);
+        let package = fake_v2_native_package(&key, |manifest| {
+            manifest.host.api = api.into();
+            manifest.host.required_capabilities = required.into_iter().map(String::from).collect();
+            manifest.host.optional_capabilities = optional.into_iter().map(String::from).collect();
+        });
+        let trust = StaticTrust::new(key.verifying_key().to_bytes()).unwrap();
+        let config = HyperConfig::new(dir.path(), Arc::new(trust));
+        let hyper = Hyper::new(config).await.unwrap();
+        let error = hyper.load_workload_package(&package).await.err().unwrap();
+        assert!(
+            matches!(error, HyperError::InvalidManifest(_)) && error.to_string().contains(expected),
+            "unexpected error: {error}"
+        );
+        assert!(!dir.path().join("dynclib-cache").exists());
+    }
+}
+
+#[cfg(feature = "dynclib-engine")]
+#[test]
 fn ensure_dynclib_cache_path_preserves_existing_file() {
     let dir = TempDir::new().unwrap();
     let initial_binary_bytes = b"initial dylib bytes";

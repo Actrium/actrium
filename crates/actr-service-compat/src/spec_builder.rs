@@ -77,22 +77,43 @@ pub fn build_self_contained_service_spec(
     name: &str,
     proto: ProtoFile,
 ) -> Result<actr_protocol::ServiceSpec> {
-    let hash = self_contained_proto_hash(&proto.content).map_err(|source| {
-        CompatibilityError::ProtoParseError {
+    build_self_contained_service_spec_from_files(name, vec![proto])
+}
+
+/// Build a spec from authenticated RPC exports without resolving any imports.
+///
+/// Every file must be self-contained. Service fingerprints use the same sorted
+/// name/hash aggregation as the legacy builder. Conflicting published names are
+/// rejected rather than allowing one exported Proto to overwrite another.
+pub fn build_self_contained_service_spec_from_files(
+    name: &str,
+    proto_files: Vec<ProtoFile>,
+) -> Result<actr_protocol::ServiceSpec> {
+    let mut names = std::collections::BTreeSet::new();
+    let mut hashes = Vec::with_capacity(proto_files.len());
+    let mut protobufs = Vec::with_capacity(proto_files.len());
+    for proto in &proto_files {
+        let hash = if names.insert(proto.name.trim_end_matches(".proto")) {
+            self_contained_proto_hash(&proto.content)
+        } else {
+            Err(anyhow::anyhow!(
+                "duplicate published Proto name `{}`",
+                proto.name
+            ))
+        }
+        .map_err(|source| CompatibilityError::ProtoParseError {
             file_name: proto.name.clone(),
             source,
-        }
-    })?;
-    let fingerprint = format!(
-        "service_semantic:{:x}",
-        Sha256::digest(format!("{}:{hash}", proto.name))
-    );
+        })?;
+        protobufs.push(make_protobuf(proto, format!("semantic:{hash}")));
+        hashes.push((proto.name.clone(), hash));
+    }
     Ok(assemble_spec(
         name,
         None,
         vec![],
-        fingerprint,
-        vec![make_protobuf(&proto, format!("semantic:{hash}"))],
+        Fingerprint::service_fingerprint_from_hashes(hashes),
+        protobufs,
     ))
 }
 
@@ -193,6 +214,48 @@ mod tests {
         let mut imported = proto;
         imported.content.push_str("\nimport \"other.proto\";");
         assert!(build_self_contained_service_spec("echo", imported).is_err());
+    }
+
+    #[test]
+    fn signed_exports_keep_the_legacy_aggregate_and_reject_name_conflicts() {
+        let proto_files = vec![
+            ProtoFile {
+                name: "ping.proto".into(),
+                content: PROTO_A.into(),
+                path: None,
+            },
+            ProtoFile {
+                name: "pong.proto".into(),
+                content: PROTO_B.into(),
+                path: None,
+            },
+        ];
+        let legacy = build_service_spec(ServiceSpecInput {
+            name: "echo",
+            description: None,
+            tags: vec![],
+            proto_files: proto_files.clone(),
+        })
+        .unwrap();
+        let signed =
+            build_self_contained_service_spec_from_files("echo", proto_files.clone()).unwrap();
+        assert_eq!(signed.fingerprint, legacy.fingerprint);
+        assert_eq!(signed.protobufs, legacy.protobufs);
+
+        let mut reordered = proto_files.clone();
+        reordered.reverse();
+        assert_eq!(
+            signed.fingerprint,
+            build_self_contained_service_spec_from_files("echo", reordered)
+                .unwrap()
+                .fingerprint
+        );
+
+        for duplicate in ["ping.proto", "ping.proto.proto"] {
+            let mut conflicting = proto_files.clone();
+            conflicting[1].name = duplicate.into();
+            assert!(build_self_contained_service_spec_from_files("echo", conflicting).is_err());
+        }
     }
 
     #[test]

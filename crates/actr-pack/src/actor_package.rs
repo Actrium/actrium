@@ -258,8 +258,15 @@ impl ActorPackageManifest {
         Ok(contract)
     }
 
-    /// RPC Proto exports inferred from files that are not dependency contracts.
-    pub(crate) fn local_rpc_contracts(&self) -> impl Iterator<Item = &PackageFileEntry> {
+    /// Infer local RPC Proto exports from the declared file table.
+    ///
+    /// Includes `.proto` files with role `contract`, excluding every path used
+    /// by a dependency's `contract`. This profile-neutral iterator preserves
+    /// `files` order and does not apply the Component-only `workload.rpc-contract`
+    /// selector; use [`Self::component_rpc_contract`] for Component selection.
+    /// Authenticate the manifest first, then read entries from the same verified
+    /// archive with [`Self::read_declared_file`].
+    pub fn local_rpc_contracts(&self) -> impl Iterator<Item = &PackageFileEntry> {
         self.files.iter().filter(|file| {
             file.role == "contract"
                 && file.path.ends_with(".proto")
