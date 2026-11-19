@@ -785,8 +785,8 @@ struct WorkspaceMainView: View {
         .sheet(item: $viewModel.pendingInviteRedeem) { pending in
             InviteCodeRedeemSheet(
                 pending: pending,
-                onConfirm: { code in viewModel.confirmInviteRedeem(code: code) },
-                onCancel: { viewModel.cancelInviteRedeem() }
+                onConfirm: { code in viewModel.confirmInviteRedeem(pending, code: code) },
+                onCancel: { viewModel.cancelInviteRedeem(pending) }
             )
         }
     }

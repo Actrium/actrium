@@ -80,6 +80,7 @@ struct ActrUriNotice: Identifiable {
 /// Rust-provided method takes over the follow-up flow.
 struct PendingInviteRedeem: Identifiable {
     let id = UUID()
+    let tabId: UUID
     let uri: String
     let domain: String
 }
