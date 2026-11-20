@@ -43,7 +43,7 @@ pub struct RunCommand {
     #[arg(short = 'd', long = "detach")]
     pub detach: bool,
 
-    /// Join an open Realm using a local Service key and a Realm deployment grant.
+    /// Join an open Realm and register a Service declared by its Realm Profile.
     #[arg(long, conflicts_with = "web")]
     pub open_join: bool,
 

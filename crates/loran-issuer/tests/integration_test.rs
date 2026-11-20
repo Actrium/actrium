@@ -1419,6 +1419,181 @@ async fn test_register_route_package_with_publisher_identity_succeeds() {
 
 #[tokio::test]
 #[serial]
+async fn open_service_registers_and_reissues_without_a_deployment_grant() {
+    use platform::realm::acl::ActorAcl;
+
+    let mut env = setup_test_environment().await;
+    let realm = "direct-open-service@example.com";
+    seed_realm(realm, None).await;
+    let pool = platform::storage::db::get_database().get_pool();
+    sqlx::query(
+        "INSERT INTO realm_admission (realm, policy) VALUES (?, ?)
+         ON CONFLICT(realm) DO UPDATE SET policy = excluded.policy",
+    )
+    .bind(realm)
+    .bind(r#"{"membership":"open"}"#)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let publisher = "open-service.example";
+    let service_type = "open-service.example/echo@1.0.0";
+    let front_type = "acme.com/ui@1.0.0";
+    let mut profile = package_selection(service_type);
+    profile["packages"]["helper"] = serde_json::json!({
+        "href": "https://cdn.example/helper.actr", "sha256": "ef".repeat(32),
+        "type": "open-service.example/helper@1.0.0"
+    });
+    profile["packages"]["self-signed"] = serde_json::json!({
+        "href": "https://cdn.example/self-signed.actr", "sha256": "aa".repeat(32),
+        "type": "dev-service.example/echo@1.0.0"
+    });
+    profile["packages"]["front-alias"] = profile["packages"]["ui"].clone();
+    sqlx::query("INSERT INTO realm_profile (realm, sequence, digest, document, accepted_at) VALUES (?, 1, 'profile', ?, 0)")
+        .bind(realm).bind(profile.to_string()).execute(pool).await.unwrap();
+
+    let first_client = "open-service-first";
+    let second_client = "open-service-second";
+    for label in [first_client, second_client] {
+        let key = key_for(label).verifying_key().to_bytes();
+        let member = membership::join_open(realm, &key, label, limits())
+            .await
+            .unwrap();
+        assert_eq!(member["role"], "viewer");
+    }
+    let target = "wasm32-wasip1";
+    let (_, package_key) =
+        signed_package_with_generated_key(publisher, "echo", "1.0.0", target).await;
+    let mut request =
+        signed_package_request(publisher, "echo", "1.0.0", realm, target, &package_key);
+    let app = create_test_router(&env).await;
+    let normal = post_register(app.clone(), request.clone(), Some(first_client)).await;
+    assert_eq!(error_code(&normal), Some(403));
+
+    let mode = Some(RegisterAuthMode::OpenService as i32);
+    request.auth_mode = mode;
+    request.acl = Some(Acl {
+        rules: vec![AclRule {
+            permission: acl_rule::Permission::Allow as i32,
+            from_type: ActrType::from_program_identity(front_type).unwrap(),
+            source_realm: None,
+        }],
+    });
+    let register_response::Result::Success(first) =
+        post_register(app.clone(), request.clone(), Some(first_client))
+            .await
+            .result
+            .unwrap()
+    else {
+        panic!("the first Open Service should register")
+    };
+    let mut second_request = request.clone();
+    second_request.acl = Some(Acl::default());
+    let register_response::Result::Success(second) =
+        post_register(app.clone(), second_request, Some(second_client))
+            .await
+            .result
+            .unwrap()
+    else {
+        panic!("the second Open Service should register")
+    };
+    assert_ne!(first.actr_id, second.actr_id);
+    assert!(
+        ActorAcl::can_discover_actor(realm, front_type, &first.actr_id, service_type)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !ActorAcl::can_discover_actor(realm, front_type, &second.actr_id, service_type)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !ActorAcl::can_discover(realm, realm, front_type, service_type)
+            .await
+            .unwrap()
+    );
+
+    let mut helper =
+        signed_package_request(publisher, "helper", "1.0.0", realm, target, &package_key);
+    helper.auth_mode = mode;
+    assert!(matches!(
+        post_register(app.clone(), helper, Some(first_client))
+            .await
+            .result,
+        Some(register_response::Result::Success(_))
+    ));
+    for actor_type in ["open-service.example/echo@1.0.1", front_type] {
+        let mut rejected = request.clone();
+        rejected.actr_type = ActrType::from_program_identity(actor_type).unwrap();
+        let response = post_register(app.clone(), rejected, Some(first_client)).await;
+        assert!(
+            matches!(response.result, Some(register_response::Result::Error(error))
+            if error.message.starts_with("open_service_not_allowed:"))
+        );
+    }
+    let mut untrusted = signed_package_request(
+        "dev-service.example",
+        "echo",
+        "1.0.0",
+        realm,
+        target,
+        &key_for("untrusted-service-package"),
+    );
+    untrusted.auth_mode = mode;
+    assert_eq!(
+        error_code(&post_register(app.clone(), untrusted, Some(first_client)).await),
+        Some(403)
+    );
+
+    let mut reissue = ReissueCredentialRequest {
+        actr_id: first.actr_id.clone(),
+        registration: request.clone(),
+        renewal_proof: first.renewal_token,
+        attempt_id: control_attempt_id(),
+    };
+    let register_response::Result::Success(reissued) =
+        post_reissue(app.clone(), reissue.clone(), Some(first_client))
+            .await
+            .result
+            .unwrap()
+    else {
+        panic!("the Open Service should reissue its credentials")
+    };
+    assert_eq!(reissued.actr_id, first.actr_id);
+
+    sqlx::query("UPDATE realm_admission SET policy = ? WHERE realm = ?")
+        .bind(r#"{"membership":"invite-only"}"#)
+        .bind(realm)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        error_code(&post_register(app.clone(), request, Some(first_client)).await),
+        Some(403)
+    );
+
+    let renew = RenewCredentialRequest {
+        actr_id: reissued.actr_id,
+        renewal_token: reissued.renewal_token.clone().unwrap(),
+        attempt_id: control_attempt_id(),
+    }
+    .encode_to_vec();
+    let proof = proof(ProofOp::Renew, realm, &renew, &key_for(first_client));
+    let (_, denied) = post_renew_with(app.clone(), &renew, proof).await;
+    assert!(renew_message(&denied).contains("open_service_not_allowed"));
+
+    reissue.renewal_proof = reissued.renewal_token;
+    reissue.attempt_id = control_attempt_id();
+    assert_eq!(
+        error_code(&post_reissue(app, reissue, Some(first_client)).await),
+        Some(403)
+    );
+    env.shutdown_signer().await;
+}
+
+#[tokio::test]
+#[serial]
 async fn test_register_accepts_canonical_digit_and_long_publisher_domains() {
     let env = setup_test_environment().await;
     let realm = "publisher-domain-validation@example.com";

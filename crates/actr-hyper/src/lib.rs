@@ -1384,7 +1384,7 @@ impl Node<Attached> {
             .await
     }
 
-    /// Register a package-backed Service using an authorized Open Join client.
+    /// Register a package-backed Service declared by the Open Realm's Profile.
     pub async fn register_open_service(
         self,
         issuer_endpoint: &str,

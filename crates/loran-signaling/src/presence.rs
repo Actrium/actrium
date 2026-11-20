@@ -329,10 +329,10 @@ impl PresenceManager {
         to_actor: &ActrId,
         to_type: &ActrType,
     ) -> Result<bool, RealmError> {
-        ActorAcl::can_discover(
+        ActorAcl::can_discover_actor(
             &from_actor.realm,
-            &to_actor.realm,
             &from_type.to_string_repr(),
+            to_actor,
             &to_type.to_string_repr(),
         )
         .await

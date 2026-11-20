@@ -441,7 +441,6 @@ Discovery, Section 4.3):
 | `publish_profile` | Submit a signed Realm Profile in `profile`. The first submission activates the pending Realm and the response carries an owner invite (`owner_invite`) once; later submissions with a higher sequence are updates (including retirement). |
 | `reissue_owner_invite` | Issue a new owner invite (response `owner_invite`) and invalidate the Realm's earlier unused owner invites; used to recover when the owner has lost all its clients (Actr Realm Membership, Section 5). |
 | `get_admission` | A domain-signed request for one Realm returns its policy, active-member count, effective member cap and invite-free joins per minute. |
-| `set_open_service_authorization` | Set `open_service` with `public_key` (base64 Ed25519 Realm client key), `actor_type` (exact selected Service type) and `enabled` (boolean). An enabled authorization applies to an active Open Realm. Revoking it disables Actors already registered under it. |
 | `draft_profile` | For Realms outside the AFP domain, return a draft at the accepted sequence plus one. The unsigned draft retains the accepted selection, `display_name` and `policy`, and uses the AFP's current `issuer` and `provider` (Section 6.1). Publication is a separate operation. |
 
 Realm management requests are used only for Realms outside the Actr Facility

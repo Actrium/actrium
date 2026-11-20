@@ -491,14 +491,14 @@ pub(super) async fn join_open_service(
         .selection
         .as_ref()
         .context("the Realm has no package selection")?;
+    let (_, front) = selection.selected().map_err(anyhow::Error::msg)?;
     let actor_type = actor_type.to_string_repr();
     let digest = hex::encode(Sha256::digest(archive));
     ensure!(
-        selection.packages.iter().any(|(reference, entry)| {
-            reference != &selection.front_package
-                && entry.r#type == actor_type
-                && entry.fixed_digest() == Some(digest.as_str())
-        }),
+        front.r#type != actor_type
+            && selection.packages.values().any(|entry| {
+                entry.r#type == actor_type && entry.fixed_digest() == Some(digest.as_str())
+            }),
         "the package does not match a Service selected by the verified Realm Profile"
     );
 
@@ -527,11 +527,6 @@ pub(super) async fn join_open_service(
         force: false,
     })
     .await?;
-    let (client, _) = RealmClientKeyFile::read(&path)?;
-    eprintln!(
-        "Open Service client key_id={} public_key={}",
-        client.key_id, client.public_key
-    );
     Ok((profile, path))
 }
 

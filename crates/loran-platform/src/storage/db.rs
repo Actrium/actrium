@@ -334,18 +334,6 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
-        // Service deployment grants are separate from Realm membership roles.
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS realm_open_service (
-                realm TEXT NOT NULL REFERENCES realm(name) ON DELETE CASCADE,
-                actor_type TEXT NOT NULL,
-                public_key BLOB NOT NULL CHECK(length(public_key) = 32),
-                PRIMARY KEY(realm, actor_type, public_key)
-            )",
-        )
-        .execute(&mut *tx)
-        .await?;
-
         // Realm invites; only the SHA-256 of the secret is kept. `role` for
         // a new member, or `member_id` for a new client of a member.
         // `created_by` is the signing key id, or `holder` / `operator`.
@@ -495,6 +483,20 @@ impl Database {
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_issued_actor_identity_client_key
              ON issued_actor_identity(realm, client_key_id)",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Open Services can configure connections to their own Actor instance.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS actor_instance_acl (
+                realm TEXT NOT NULL,
+                serial_number INTEGER NOT NULL,
+                acl BLOB NOT NULL,
+                PRIMARY KEY(realm, serial_number),
+                FOREIGN KEY(realm, serial_number) REFERENCES issued_actor_identity(realm, serial_number)
+                    ON DELETE CASCADE
+            )",
         )
         .execute(&mut *tx)
         .await?;

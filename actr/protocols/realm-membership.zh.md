@@ -163,12 +163,15 @@ Issuer 只在以下条件都满足时签发：
 3. 注册时，Issuer 从已验证的 Profile 解析 `packages[primary_package]`。主包引用无效时 **MUST** 拒绝注册。
    常规注册中，当前及曾被选为主 Service 的程序都只允许 owner 注册，所有版本均适用。
    这样切换后，旧客户端和回滚继续使用由 owner 管理的 ACL。续期与重签不再检查角色，owner 转让不影响运行中的 Service。
-4. 包以 `OpenService` 模式注册时，Realm 必须是 Open。Realm 管理授权把已认证的客户端公钥绑定到所选 Service 的精确包类型。
-   Issuer 验包签名，并在注册事务中复核授权。续期和重签沿用同一模式，撤销授权会使该授权注册的 Actor 失效。
+4. 在 `OpenService` 模式下，已启用的 Open Realm 的有效成员可注册 Profile 中声明的精确 Service 类型，
+   包括辅助 Service，排除选定的 Front 类型。CLI 根据 Profile 的 SHA-256 校验包文件。Issuer 用认可的 Publisher key
+   校验包声明的签名，在注册事务中复核当前 Realm 策略和包选择。续期和重签沿用注册模式，并复核当前包选择和加入策略。
+   同一 Service 类型可以注册多个实例。
 
 包选择不改变成员权限和 Actor 准入规则。
 
-注册携带的连接 ACL 只作用于所注册 Actor 自己的类型。Owner 和获准 OpenService 注册的客户端可写所注册 Service 类型的 ACL。
+普通注册携带的连接 ACL 作用于所注册 Actor 的类型。`OpenService` 注册可为该 Actor 实例设置连接 ACL，
+匹配的类型拒绝规则也会阻止访问该实例。没有实例 ACL 的 Actor 使用对应类型的连接 ACL。
 一个程序切为主 Service 前，它各版本已有的 ACL 都须由当前 owner 的
 有效 key 写入。撤销 Actor 后，按类型保存的 ACL 仍在。旧 ACL 没有授权记录时，owner
 可以带 ACL 重新注册来确认规则。

@@ -99,11 +99,14 @@ impl Authenticator for CredentialAuth {
     }
 
     async fn authorize_pair(&self, source: &Principal, target: &Principal) -> bool {
+        let Ok(target_id) = ActrId::from_string_repr(&target.endpoint) else {
+            return false;
+        };
         self.authorize(source, target)
-            && platform::realm::acl::ActorAcl::can_discover(
+            && platform::realm::acl::ActorAcl::can_discover_actor(
                 &source.namespace,
-                &target.namespace,
                 &source.authorization_context,
+                &target_id,
                 &target.authorization_context,
             )
             .await

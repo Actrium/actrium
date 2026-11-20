@@ -230,18 +230,21 @@ The Issuer issues only when all of the following hold:
    clients still using it and for rollback.
    Renewal and reissue do not check the role again, so an ownership transfer
    does not affect a running Service.
-4. In package-backed `OpenService` registration, the Realm must be open.
-   A Realm management authorization binds the authenticated client public key
-   to the exact package type of a selected Service. Issuer verifies the package
-   signature and rechecks the authorization in the registration transaction.
-   Actors registered this way retain their mode across renewal and reissue.
-   Revocation disables the Actors registered under that authorization.
+4. In `OpenService` mode, any active member can register an instance of an
+   exact Service type declared by the current Profile of an active Open Realm.
+   This includes auxiliary Service types and excludes the selected Front type.
+   The CLI checks the whole archive against the Profile SHA-256. Issuer verifies
+   the manifest signature against an accepted Publisher key and rechecks the
+   Realm policy and Service selection in the registration transaction. Renewal
+   and reissue keep the registration mode and recheck the current selection and
+   membership policy. Multiple instances of an exact Service type can register.
 
 Package selection does not change membership or Actor-admission rules.
 
-A connection ACL carried by a registration applies only to the registering
-Actor's own type. The owner and clients granted OpenService authorization can
-write the ACL for the Service types they register.
+A connection ACL carried by ordinary registration applies to the registering
+Actor's type. An `OpenService` registration can set a connection ACL for its
+own Actor instance. A matching type-wide deny rule also denies access to that
+instance. Actors without instance rules use their type's connection ACL.
 Before a program becomes the primary Service, existing ACL rules for all its
 versions must have been written by a still-active key of the current owner.
 Actor revocation leaves its type-wide policy in place. Legacy ACL rules do

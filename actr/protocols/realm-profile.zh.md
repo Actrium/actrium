@@ -342,7 +342,6 @@ Authority Discovery 第 4.3 节）接受以下 Realm 管理请求：
 | `publish_profile` | 在 `profile` 中提交已签名的 Realm Profile：首次提交激活 pending Realm，响应一次性携带 owner 邀请（`owner_invite`）；之后提交 sequence 更高的版本即更新（含退役）。 |
 | `reissue_owner_invite` | 签发新的 owner 邀请（响应 `owner_invite`），并使该 Realm 此前未用的 owner 邀请失效；用于 owner 丢失全部客户端时的恢复（Actr Realm Membership 第 5 节）。 |
 | `get_admission` | 由 Realm 域签名查询指定 Realm 的加入策略、活跃成员数、实际成员上限和每分钟免邀请加入上限。 |
-| `set_open_service_authorization` | 在 `open_service` 中提交 `public_key`（Base64 Ed25519 Realm 客户端公钥）、`actor_type`（所选 Service 的精确类型）和布尔值 `enabled`。授权适用于已激活的 Open Realm。撤销授权会使已用该授权注册的 Actor 失效。 |
 | `draft_profile` | 对 AFP 域外的 Realm，返回 `sequence` 加一的草稿。未签名草稿沿用已接受的包选择、`display_name` 和 `policy`，使用 AFP 当前的 `issuer` 和 `provider`（§6.1）。发布须单独执行。 |
 
 Realm 管理请求只用于 Actr Facility Provider 域名以外的 Realm（第 7.3 节）。每个请求都是 Actr 管理信封：
