@@ -791,7 +791,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             // stream registration may take seconds, and a renderer
             // cancellation during that window must find this upload instead
             // of letting it start afterwards.
-            try await sessions.registerPreparing(call, checksum: checksum)
+            let attemptId = try await sessions.registerPreparing(call, checksum: checksum)
             do {
                 let connection = try await readyConnection()
                 let reference = connection.reference
@@ -807,7 +807,13 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                 attachmentDeliveries[call.streamId] = deliver
                 let callback = RealmServiceAttachmentResultCallback { [weak self] chunk in
                     let payload = chunk.payload
-                    Task { await self?.receiveAttachmentResult(streamId: chunk.streamId, payload: payload) }
+                    Task {
+                        await self?.receiveAttachmentResult(
+                            streamId: chunk.streamId,
+                            attemptId: attemptId,
+                            payload: payload
+                        )
+                    }
                 }
                 do {
                     try await reference.registerStream(streamId: call.resultStreamId, callback: callback)
@@ -974,8 +980,10 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// Decodes one result-stream chunk. Anything that is not a decodable
     /// terminal `Ask_AttachmentUploadResult` becomes an explicit FAILED
     /// event so JS settles instead of waiting for its own timeout.
-    private func receiveAttachmentResult(streamId: String, payload: Data) async {
-        guard let session = await sessions.session(forResultStreamId: streamId) else { return }
+    private func receiveAttachmentResult(streamId: String, attemptId: UUID, payload: Data) async {
+        guard let session = await sessions.claimResult(streamId: streamId, attemptId: attemptId) else {
+            return
+        }
         let failedStatus = Int32(Ask_AttachmentUploadStatus.failed.rawValue)
         let event: RealmServiceAttachmentResultEvent
         if let result = try? Ask_AttachmentUploadResult(serializedBytes: payload) {
@@ -1029,10 +1037,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         // on this stream may settle the upload; a duplicate chunk that races
         // through actor reentrancy would otherwise deliver twice.
         let deliver = attachmentDeliveries.removeValue(forKey: session.chunkStreamId)
-        await cleanupAttachmentSession(
-            attachmentId: session.attachmentId,
-            streamId: session.chunkStreamId
-        )
+        await unregisterAttachmentStreams(session)
         deliver?(event)
     }
 
@@ -1045,6 +1050,12 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             return
         }
         attachmentDeliveries.removeValue(forKey: session.chunkStreamId)
+        await unregisterAttachmentStreams(session)
+    }
+
+    /// Unregisters transport state for a session already claimed or removed
+    /// from the store. No lookup by reusable public stream ID is involved.
+    private func unregisterAttachmentStreams(_ session: RealmServiceAttachmentSession) async {
         guard let reference = await startedReference else { return }
         try? await reference.unregisterStream(streamId: session.resultStreamId)
         try? await reference.unregisterStream(streamId: session.chunkStreamId)

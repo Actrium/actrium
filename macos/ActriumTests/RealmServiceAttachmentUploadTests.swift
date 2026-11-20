@@ -339,6 +339,21 @@ struct RealmServiceAttachmentUploadTests {
         #expect(await store3.session(forResultStreamId: call3.resultStreamId)?.attachmentId == call3.attachmentId)
     }
 
+    @Test func lateCallbackCannotClaimAReplacementWithTheSameResultStream() async throws {
+        let store = RealmServiceAttachmentSessionStore()
+        let call = makePrepareCall()
+        let firstAttempt = try await store.registerPreparing(call, checksum: md5)
+        _ = await store.unregister(streamId: call.streamId)
+        let secondAttempt = try await store.registerPreparing(call, checksum: md5)
+        #expect(firstAttempt != secondAttempt)
+
+        #expect(await store.claimResult(streamId: call.resultStreamId, attemptId: firstAttempt) == nil)
+        #expect(await store.session(forResultStreamId: call.resultStreamId)?.attemptId == secondAttempt)
+        let claimed = await store.claimResult(streamId: call.resultStreamId, attemptId: secondAttempt)
+        #expect(claimed?.attemptId == secondAttempt)
+        #expect(await store.session(forResultStreamId: call.resultStreamId) == nil)
+    }
+
     // MARK: - Binding wiring
 
     private func makeBinding(

@@ -7,6 +7,7 @@
 use std::{
     collections::HashMap,
     fs::{self, File},
+    future::Future,
     io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -878,15 +879,35 @@ impl LifecycleService {
     }
 
     pub async fn stop(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
+        self.stop_with(actor_id, self.invalidate_and_rotate()).await
+    }
+
+    async fn stop_with<F>(
+        &self,
+        actor_id: &str,
+        invalidate: F,
+    ) -> Result<ServiceInstance, LifecycleError>
+    where
+        F: Future<Output = Result<String, LifecycleError>> + Send,
+    {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
         let _active_guard = self.lock_active_instance(actor_id)?;
         let mut instance = self.instance(actor_id)?;
-        ensure_transition(&instance, LifecycleState::Stopping)?;
-        self.mark_offline(&mut instance, DesiredState::Stopped);
-        self.persist_transition(&mut instance, LifecycleState::Stopping)?;
-        let runtime_instance_id = self.invalidate_and_rotate().await?;
+        // Stopping is a committed, resumable checkpoint. The owner retains its
+        // active guard across an interrupted invalidation, so only that owner
+        // can finish the transition and release the lease for recovery.
+        if instance.lifecycle_state == LifecycleState::Stopped {
+            self.release_active_guard(actor_id);
+            return Ok(instance);
+        }
+        if instance.lifecycle_state != LifecycleState::Stopping {
+            ensure_transition(&instance, LifecycleState::Stopping)?;
+            self.mark_offline(&mut instance, DesiredState::Stopped);
+            self.persist_transition(&mut instance, LifecycleState::Stopping)?;
+        }
+        let runtime_instance_id = invalidate.await?;
         instance.runtime_instance_id = runtime_instance_id;
         self.persist_transition(&mut instance, LifecycleState::Stopped)?;
         self.release_active_guard(actor_id);
@@ -906,13 +927,18 @@ impl LifecycleService {
         let mut instance = self.instance(actor_id)?;
         if !matches!(
             instance.lifecycle_state,
-            LifecycleState::Running | LifecycleState::Suspended | LifecycleState::Stopped
+            LifecycleState::Running
+                | LifecycleState::Suspended
+                | LifecycleState::Stopped
+                | LifecycleState::Stopping
         ) {
             return Err(invalid_transition(&instance, LifecycleState::Starting));
         }
         if instance.lifecycle_state != LifecycleState::Stopped {
-            self.mark_offline(&mut instance, DesiredState::Stopped);
-            self.persist_transition(&mut instance, LifecycleState::Stopping)?;
+            if instance.lifecycle_state != LifecycleState::Stopping {
+                self.mark_offline(&mut instance, DesiredState::Stopped);
+                self.persist_transition(&mut instance, LifecycleState::Stopping)?;
+            }
             let runtime_instance_id = self.invalidate_and_rotate().await?;
             instance.runtime_instance_id = runtime_instance_id;
             self.persist_transition(&mut instance, LifecycleState::Stopped)?;
@@ -1474,6 +1500,68 @@ mod tests {
             service.stop("not-created").await.unwrap_err(),
             LifecycleError::ConcurrentLifecycleOperation
         ));
+    }
+
+    #[tokio::test]
+    async fn interrupted_stop_is_resumable_by_the_active_owner() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let service = LifecycleService::open(temp.path()).unwrap();
+        let other = LifecycleService::open(temp.path()).unwrap();
+        let created = service
+            .create(CreateInstanceRequest {
+                idempotency_key: "interrupted-stop".into(),
+                package_sources: vec!["signed-catalog://actrium/documents/1.0.0".into()],
+                program_release: ProgramRelease {
+                    publisher: "actrium".into(),
+                    name: "documents".into(),
+                    version: "1.0.0".into(),
+                },
+                service_package_digest: "sha256:service-v1".into(),
+                front_package_digest: None,
+                privacy_contract_digest: None,
+                realm_name: "notes@acme.com".into(),
+                workspace: None,
+                metadata: None,
+                requested_permissions: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let actor_id = created.actor_id;
+        service.start(&actor_id).await.unwrap();
+
+        let interrupted = tokio::spawn({
+            let service = service.clone();
+            let actor_id = actor_id.clone();
+            async move {
+                service
+                    .stop_with(
+                        &actor_id,
+                        std::future::pending::<Result<String, LifecycleError>>(),
+                    )
+                    .await
+            }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if service.instance(&actor_id).unwrap().lifecycle_state == LifecycleState::Stopping
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the interrupted stop persists its Stopping checkpoint");
+        interrupted.abort();
+        let _ = interrupted.await;
+
+        assert!(matches!(
+            other.stop(&actor_id).await.unwrap_err(),
+            LifecycleError::ConcurrentLifecycleOperation
+        ));
+        let stopped = service.stop(&actor_id).await.unwrap();
+        assert_eq!(stopped.lifecycle_state, LifecycleState::Stopped);
+        other.recover().await.unwrap();
     }
 
     #[test]

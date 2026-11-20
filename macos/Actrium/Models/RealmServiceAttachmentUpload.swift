@@ -201,6 +201,7 @@ struct RealmServiceAttachmentSession: Equatable {
         case uploading
     }
 
+    let attemptId: UUID
     let attachmentId: String
     let chunkStreamId: String
     let resultStreamId: String
@@ -232,7 +233,8 @@ actor RealmServiceAttachmentSessionStore {
 
     /// Registers a session before the result stream goes live. Fails when
     /// either stream id collides with a live session of this binding.
-    func registerPreparing(_ call: RealmServiceAttachmentPrepareCall, checksum: String) throws {
+    @discardableResult
+    func registerPreparing(_ call: RealmServiceAttachmentPrepareCall, checksum: String) throws -> UUID {
         guard sessions[call.attachmentId] == nil else {
             throw RealmServiceAttachmentUploadError.sessionConflict(
                 "attachmentId \(call.attachmentId) already has an active upload.")
@@ -245,7 +247,9 @@ actor RealmServiceAttachmentSessionStore {
             throw RealmServiceAttachmentUploadError.sessionConflict(
                 "resultStreamId \(call.resultStreamId) is already in use by another upload.")
         }
+        let attemptId = UUID()
         sessions[call.attachmentId] = RealmServiceAttachmentSession(
+            attemptId: attemptId,
             attachmentId: call.attachmentId,
             chunkStreamId: call.streamId,
             resultStreamId: call.resultStreamId,
@@ -259,6 +263,7 @@ actor RealmServiceAttachmentSessionStore {
         )
         chunkStreams[call.streamId] = call.attachmentId
         resultStreams[call.resultStreamId] = call.attachmentId
+        return attemptId
     }
 
     /// True while `streamId` is still the chunk stream of the live session for
@@ -345,6 +350,15 @@ actor RealmServiceAttachmentSessionStore {
     func session(forResultStreamId streamId: String) -> RealmServiceAttachmentSession? {
         guard let attachmentId = resultStreams[streamId] else { return nil }
         return sessions[attachmentId]
+    }
+
+    /// Atomically claims the terminal result for one callback registration.
+    /// A queued callback from an abandoned registration cannot claim or remove
+    /// a replacement that reuses the same public result-stream ID.
+    func claimResult(streamId: String, attemptId: UUID) -> RealmServiceAttachmentSession? {
+        guard let session = session(forResultStreamId: streamId),
+              session.attemptId == attemptId else { return nil }
+        return remove(attachmentId: session.attachmentId)
     }
 
     /// Terminal cleanup after a COMPLETED/FAILED result. Returns the removed
