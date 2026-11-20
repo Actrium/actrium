@@ -188,6 +188,7 @@ async fn record_service_switch(
     realm: &str,
     previous: &RealmPackage,
     next: &RealmPackage,
+    check_rollback_policy: bool,
 ) -> Result<(), RealmError> {
     if previous.same_program(next).map_err(RealmError::Conflict)? {
         return Ok(());
@@ -221,11 +222,16 @@ async fn record_service_switch(
     }
     super::acl::ActorAcl::require_owner_policy(tx, realm, &program).await?;
     let previous = previous.actr_type().map_err(RealmError::Conflict)?;
+    let outgoing_program = format!("{}/{}", previous.publisher, previous.name);
+    if check_rollback_policy {
+        // A forward release records this program as the rollback target.
+        super::acl::ActorAcl::require_owner_policy(tx, realm, &outgoing_program).await?;
+    }
     sqlx::query(
         "INSERT OR IGNORE INTO realm_previous_service_program (realm, program) VALUES (?, ?)",
     )
     .bind(realm)
-    .bind(format!("{}/{}", previous.publisher, previous.name))
+    .bind(outgoing_program)
     .execute(tx)
     .await?;
     Ok(())
@@ -475,6 +481,7 @@ impl RealmProfileRecord {
                 name,
                 old.selected().map_err(RealmError::Conflict)?.0,
                 new.selected().map_err(RealmError::Conflict)?.0,
+                !update.rollback,
             )
             .await?;
             let inserted = sqlx::query(
@@ -518,7 +525,7 @@ impl RealmProfileRecord {
                 accepted
                     .check_successor(selection)
                     .map_err(RealmError::Conflict)?;
-                record_service_switch(&mut tx, name, old, new).await?;
+                record_service_switch(&mut tx, name, old, new, false).await?;
             } else {
                 old.check_primary_successor(new).map_err(|_| {
                     RealmError::Conflict(

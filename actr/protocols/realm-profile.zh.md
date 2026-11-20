@@ -285,6 +285,7 @@ Actr Facility Provider 由 Actr Host、用户或 key 持有方的策略选定。
 
 由 Provider 签名的 Realm 通过受保护的 Service 发布更换主程序或依赖链。
 签名清单、依赖锁和 RPC 契约都允许时，可以沿用原 Service 包并更换依赖。
+前向发布更换 Service 程序前，当前 owner 须确认原程序的 ACL，才能把原选包作为回滚目标。
 回滚用更高的序号恢复上一次发布前的整组选包。恢复 Local Front 时，Host 在用户授权打开后校验包和 RPC 契约。
 运行中的 Service 由部署应用选包。
 
