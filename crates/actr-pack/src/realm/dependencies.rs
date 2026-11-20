@@ -61,7 +61,7 @@ pub fn check_realm_package_dependencies(
 /// The scoped digests come from each verified source package's Privacy Contract and lock.
 /// Callers obtain the dependency closure before calling; cycles need no ordering.
 /// Unfetched, unrelated entries in the Profile are not asserted to be verified.
-/// An unavailable local Front defers its export check to the user-authorized Host.
+/// An unavailable local Front's export check can run once its archive is supplied.
 /// Its incoming aliases, selected types, locks and source contracts are still checked.
 pub fn check_realm_dependencies(
     selection: &RealmPackageSelection,

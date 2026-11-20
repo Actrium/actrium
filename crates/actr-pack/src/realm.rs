@@ -27,7 +27,10 @@ pub fn verify_realm_archive(
             reference.r#type
         )));
     }
-    if sha256_hex(bytes) != reference.sha256 {
+    if reference
+        .fixed_digest()
+        .is_some_and(|digest| sha256_hex(bytes) != digest)
+    {
         return Err(PackError::InvalidPackage(format!(
             "{} does not match the selected SHA-256.",
             reference.r#type
@@ -42,7 +45,13 @@ pub fn verify_realm_archive(
     };
     let key = keys
         .iter()
-        .find(|k| k.id == verified.manifest.signature.key_id)
+        .find(|key| {
+            key.id == verified.manifest.signature.key_id
+                && reference
+                    .local_path
+                    .as_ref()
+                    .is_none_or(|local| local.matches_signing_key(key))
+        })
         .ok_or_else(untrusted_key)?;
     let key = key.verification_key().map_err(|_| untrusted_key())?;
     verified.verify_signature(&key).map_err(|_| {

@@ -74,7 +74,7 @@ actr realm sign-profile --key realm-key.json --selection selection.json draft-re
 actr realm fetch-packages --realm echo@realm.example --output ./echo-cache
 ```
 
-`fetch-packages` verifies the signed Profile, both archives and their RPC contract. Its JSON output gives the local Service and Front paths. Reuse the same directory to retain trust and version pins. Add `--package <reference>` for a selected auxiliary. For Provider-domain Realms, an owner can replace the complete selection with `actr realm update --key client.json --selection selection.json`.
+`fetch-packages` verifies the signed Profile, the downloadable archives, and the RPC contract of a downloadable Front and its Service. Its JSON output gives the verified archive paths. For a local Front, the command verifies its declaration and Publisher key and returns `"front": null`. Reuse the same directory to retain trust and version pins. Add `--package <reference>` for a selected auxiliary. For Provider-domain Realms, an owner can replace the complete selection with `actr realm update --key client.json --selection selection.json`.
 
 For package releases under the Provider's domain, use the same output directory for the update and rollback.
 
@@ -83,7 +83,7 @@ actr realm update --key client.json --selection selection.json --output ./echo-c
 actr realm update --rollback --key client.json --output ./echo-cache
 ```
 
-The CLI compares the complete selection with the signed Profile. It verifies the Service and Front archives, their dependencies, and their RPC contract before publishing. An identical selection keeps the current sequence. Rollback republishes the previous selection at a higher Profile sequence. If publication times out, retry the same command and selection to recover the recorded result.
+The CLI compares the complete selection with the signed Profile and applies the same package verification used by `fetch-packages`. Both updates and rollback support local Front declarations. An identical selection keeps the current sequence. Rollback republishes the previous selection at a higher Profile sequence. If publication times out, retry the same command and selection to recover the recorded result.
 
 For another Realm domain, the signing key holder runs `check-selection` before `sign-profile --front-operation <32-lowercase-hex-digits> --key realm-key.json --selection selection.json current-profile.json`. Submit the resulting `publish_front_profile` envelope to the Provider. Keep its `previous_selection` for rollback. When hosting the public Profile externally, confirm the receipt's sequence is still current with the Provider, then publish its signed `profile`.
 
@@ -95,7 +95,7 @@ actr realm check-selection --selection next-selection.json --output ./realm-cach
   --probe-route example.Health.Ready
 ```
 
-Use a read-only RPC that succeeds when the Service is ready. Pass `--probe-request` for an encoded request body. The probe config must use a Realm member key, trust the Front package, and allow calls to the target Service. The check discovers the exact versioned Service type.
+Use a read-only RPC that succeeds when the Service is ready. Pass `--probe-request` for an encoded request body. The probe config must use a Realm member key, trust the Front package, and allow calls to the target Service. The check discovers the exact versioned Service type. For a local Front selection, choose the archive with `--local-front /path/to/front.actr`. This option also works without a readiness probe to verify that archive and compare the RPC contracts.
 
 ## Browser Host Realm client key
 

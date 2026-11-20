@@ -2237,43 +2237,18 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
         guard isCurrent() else { return nil }
 
-        let servicePublisher = profile.serviceType.hasPrefix(publisher.domain + "/")
-            ? publisher : try await realmPublisher(for: profile.serviceType)
-        let serviceKeys = servicePublisher.fixedArchiveVerificationKeys
-        let staging = FileManager.default.temporaryDirectory
-            .appendingPathComponent("realm-local-front-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: staging) }
-        let serviceCache = ActrPackageCache.archiveURL(forDigest: service.sha256)
-        let cachedService = try? LocalRealmFrontFile(selectedURL: serviceCache).readArchive()
-        let download: URL?
-        let serviceBytes: Data
-        if let cachedService, Self.realmArchiveDigest(cachedService) == service.sha256 {
-            download = nil
-            serviceBytes = cachedService
-        } else {
-            guard let href = URL(string: service.href) else {
-                throw RealmServiceError(message: "The Service package location is invalid.")
-            }
-            let url = try await ActrPackageDownloadService.download(from: href, in: staging)
-            download = url
-            serviceBytes = try Data(contentsOf: url)
-        }
-        guard isCurrent() else { return nil }
-        let snapshot = try await Task.detached {
-            let info = try ActriumCore.verifyLocalRealmFrontPackage(
-                archive: archive, trustedPublicKey: trustedKey, profile: profile,
-                serviceArchive: serviceBytes, servicePublicKeys: serviceKeys
+        let (verified, digest) = try await Task.detached {
+            let info = try ActriumCore.verifyRealmFrontPackage(
+                archive: archive, trustedPublicKey: trustedKey, profile: profile
             )
             return (info, Self.realmArchiveDigest(archive))
         }.value
         guard isCurrent() else { return nil }
-        if let download {
-            _ = try ActrPackageCache.installArchive(at: download, digest: service.sha256, replacingRejectedArchive: true)
-        }
 
-        let (verified, digest) = snapshot
-        let guest = verified.front.workloadBytes
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("realm-local-front-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: staging) }
         let stage = staging.appendingPathComponent("front.actr")
         try archive.write(to: stage, options: .atomic)
         let cached = try ActrPackageCache.installArchive(at: stage, digest: digest)
@@ -2281,7 +2256,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             try self.validateExtractedPackage(at: $0, requireSignature: true, additionalTrustedKeys: [trustedKey])
         }
         let manifest = try readPackageManifest(fromRoot: root, requireSignature: true, additionalTrustedKeys: [trustedKey])
-        guard let entry = manifest.unifiedScript, let script = String(data: guest, encoding: .utf8),
+        guard let entry = manifest.unifiedScript,
+              let script = String(data: verified.workloadBytes, encoding: .utf8),
               let capabilities = manifest.capabilityManifestJSON else {
             throw RealmServiceError(message: "The local Front needs a Keel Guest and capability manifest.")
         }
@@ -2296,25 +2272,19 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         )
         var installed = false
         defer { if !installed { Task { await binding.stop() } } }
-        func requireCurrentPublisherKeys() async throws {
-            try await RealmProfileStore.requirePublisherKeys([
-                .init(publicKey: trustedKey, domain: publisher.domain, localFront: policy),
-                .init(publicKey: verified.servicePublicKey, domain: servicePublisher.domain)
-            ], database: .shared)
-        }
+        let publisherKeys: [RealmProfileStore.KeyRequirement] = [
+            .init(publicKey: trustedKey, domain: publisher.domain, localFront: policy)
+        ]
         guard let storageIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return nil }
         let preparedStorage = try await RendererProcessPool.shared.prepareLocalStorage(
             tabId: tabId, reloadKey: tabs[storageIndex].reloadNonce,
             origin: manifest.storageOrigin(devDirectory: nil), publisherIdentity: publisher.storageIdentity,
             manifest: capabilities, permissions: manifest.permissions
         )
-        try await requireCurrentPublisherKeys()
+        try await RealmProfileStore.requirePublisherKeys(publisherKeys, database: .shared)
         guard isCurrent() else { return nil }
         try await binding.prepareLocalFront()
-        return try await RealmProfileStore.withPublisherKeys([
-            .init(publicKey: trustedKey, domain: publisher.domain, localFront: policy),
-            .init(publicKey: verified.servicePublicKey, domain: servicePublisher.domain)
-        ], database: .shared) {
+        return try await RealmProfileStore.withPublisherKeys(publisherKeys, database: .shared) {
             guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else { return nil }
 
             // New renderer identity prevents late messages from the old Guest

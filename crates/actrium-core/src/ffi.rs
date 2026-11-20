@@ -1747,8 +1747,9 @@ pub fn decode_actr_invite(invite_text: String) -> Result<ActrInviteInfo, CoreErr
     })
 }
 
-/// Verify a Front archive and its dependency selections before the native shell loads it.
-/// The Profile metadata must come from `accept_realm_profile`.
+/// Verify a downloaded or user-authorized Front archive against its dependency selections.
+/// The Profile metadata must come from `accept_realm_profile`. Supply local bytes
+/// only after obtaining the user's file grant.
 pub fn verify_realm_front_package(
     archive: Vec<u8>,
     trusted_public_key: Vec<u8>,
@@ -1832,7 +1833,7 @@ fn verify_realm_front(
     };
     selection.check().map_err(invalid)?;
     let reference = &selection.packages[&selection.front_package];
-    if reference.local_path.is_some() != local_service.is_some() {
+    if local_service.is_some() && reference.local_path.is_none() {
         return Err(
             invalid("Front archive source differs from the verified Realm Profile".into()).into(),
         );
@@ -1846,17 +1847,14 @@ fn verify_realm_front(
         );
     }
     let verified = actr_pack::verify_actor_package(&archive, &public_key)?;
+    if let Some(local) = &reference.local_path
+        && verified.manifest.signature.key_id != local.signing_key_id
+    {
+        return Err(
+            invalid("Front signing key differs from the verified Realm Profile".into()).into(),
+        );
+    }
     let service_key = if let Some((service_bytes, service_public_keys)) = local_service {
-        let local = reference
-            .local_path
-            .as_ref()
-            .expect("local Front source checked");
-        if verified.manifest.signature.key_id != local.signing_key_id {
-            return Err(invalid(
-                "Front signing key differs from the verified Realm Profile".into(),
-            )
-            .into());
-        }
         let service = &selection.packages[&selection.primary_package];
         if hex_digest(&service_bytes) != service.sha256 {
             return Err(invalid(
@@ -6269,7 +6267,7 @@ mod tests {
     }
 
     #[test]
-    fn ffi_local_front_verifies_the_deferred_service_contract() {
+    fn ffi_local_front_verification_and_optional_service_pairing() {
         use actr_pack::{ActorDependency, ActorPackOptions, PackageFileEntry};
         use base64::{Engine as _, engine::general_purpose::STANDARD};
         use serde_json::json;
@@ -6361,12 +6359,12 @@ mod tests {
             "keys":[{"id":"realm-test","algorithm":"Ed25519","status":"active","public_key":STANDARD.encode(public)}]
         });
         actr_protocol::realm_profile::sign_document(&mut keys, "realm-test", &key);
-        let verify = |service_bytes: Vec<u8>| {
+        let profile_for = |service_digest: String| {
             let mut document = vectors["profiles"]["active"]["document"].clone();
             document["packages"]["notes"] = json!({
                 "type":"demo.example/service@1.0.0",
                 "href":"https://demo.example/service.actr",
-                "sha256":hex_digest(&service_bytes),
+                "sha256":service_digest,
                 "dependencies":{"frontend":"ui"}
             });
             document["packages"]["ui"] = json!({
@@ -6376,16 +6374,39 @@ mod tests {
                 "dependencies":{"service":"notes"}
             });
             actr_protocol::realm_profile::sign_document(&mut document, "realm-test", &key);
-            let profile = accept_realm_profile(
+            accept_realm_profile(
                 document.to_string(),
                 document["realm"]["name"].as_str().unwrap().into(),
                 keys.to_string(),
             )
+            .unwrap()
+        };
+        let mut local_profile = profile_for("0".repeat(64));
+        let verified = verify_realm_front_package(
+            front_archive.clone(),
+            public_bytes.clone(),
+            local_profile.clone(),
+        )
+        .unwrap();
+        assert_eq!(verified.workload_bytes, b"globalThis.echo = true;");
+        let local = local_profile
+            .packages
+            .iter_mut()
+            .find_map(|package| package.local_path.as_mut())
             .unwrap();
+        local.signing_key_id = "actr-pub-0000000000000000".into();
+        assert!(
+            verify_realm_front_package(front_archive.clone(), public_bytes.clone(), local_profile)
+                .unwrap_err()
+                .to_string()
+                .contains("Front signing key differs")
+        );
+
+        let verify = |service_bytes: Vec<u8>| {
             verify_local_realm_front_package(
                 front_archive.clone(),
                 public_bytes.clone(),
-                profile,
+                profile_for(hex_digest(&service_bytes)),
                 service_bytes,
                 vec![public_bytes.clone()],
             )
