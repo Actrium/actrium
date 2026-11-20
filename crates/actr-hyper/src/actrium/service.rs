@@ -55,6 +55,18 @@ struct PrepareAttachmentRequest {
     result_stream_id: String,
 }
 
+/// A successful RPC transport does not imply that the application accepted the
+/// upload. Only a well-formed zero-status Prepare response retains its stream.
+#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
+struct PrepareAttachmentResponse {
+    #[prost(int32, tag = "2")]
+    status_code: i32,
+}
+
+pub(crate) fn attachment_prepare_accepted(payload: &[u8]) -> bool {
+    PrepareAttachmentResponse::decode(payload).is_ok_and(|response| response.status_code == 0)
+}
+
 #[derive(Default)]
 pub(crate) struct Shared {
     admitted: Mutex<HashMap<String, Admitted>>,
@@ -124,7 +136,7 @@ impl Shared {
         results.get(stream_id).map(|entry| entry.session.clone())
     }
 
-    fn finish_peer_attachment_result(&self, stream_id: &str) {
+    pub(crate) fn finish_peer_attachment_result(&self, stream_id: &str) {
         self.peer_attachment_results().remove(stream_id);
     }
 
@@ -267,6 +279,8 @@ struct Admitted {
     /// Cached signing bytes of the admitted request, used for the dequeue
     /// byte-identical recheck.
     request_signing_bytes: Vec<u8>,
+    /// Prepare reservations are released when the application rejects the RPC.
+    attachment_result_stream: Option<String>,
 }
 
 /// Dispatches the exact `actrium.session.v1` system routes into the session
@@ -612,11 +626,11 @@ impl IncomingGuard for ActriumServiceGuard {
             .authorize(business.clone(), &channel)
             .await
             .map_err(guard_error)?;
-        if let Some(stream_id) = result_stream {
+        if let Some(stream_id) = result_stream.as_ref() {
             let now = now_secs();
             let mut results = self.shared.attachment_results.lock().await;
             results.retain(|_, entry| entry.expires_at > now);
-            if results.len() >= MAX_PENDING_ATTACHMENT_RESULTS && !results.contains_key(&stream_id)
+            if results.len() >= MAX_PENDING_ATTACHMENT_RESULTS && !results.contains_key(stream_id)
             {
                 return Err(IncomingGuardError::new(
                     IncomingGuardErrorCode::Unavailable,
@@ -624,7 +638,7 @@ impl IncomingGuard for ActriumServiceGuard {
                 ));
             }
             results.insert(
-                stream_id,
+                stream_id.clone(),
                 PendingAttachmentResult {
                     signing: ResponseContext::from_request(&business),
                     expires_at: now.saturating_add(ATTACHMENT_RESULT_RETENTION_SECS),
@@ -637,6 +651,7 @@ impl IncomingGuard for ActriumServiceGuard {
                 guarded: Some(guarded),
                 signing: ResponseContext::from_request(&business),
                 request_signing_bytes,
+                attachment_result_stream: result_stream,
             },
         );
         Ok(())
@@ -654,7 +669,15 @@ impl IncomingGuard for ActriumServiceGuard {
             return Ok(());
         };
         let signing = entry.signing.clone();
+        let attachment_result_stream = entry.attachment_result_stream.clone();
         drop(admitted);
+        if let Some(stream_id) = attachment_result_stream {
+            let accepted = response.error.is_none()
+                && attachment_prepare_accepted(response.payload.as_deref().unwrap_or_default());
+            if !accepted {
+                self.shared.attachment_results.lock().await.remove(&stream_id);
+            }
+        }
         let secret = self
             .service
             .session_secret(&signing.session_id)

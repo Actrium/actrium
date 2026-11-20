@@ -34,7 +34,8 @@ use uuid::Uuid;
 
 use super::metadata;
 use super::service::{
-    PendingCall, PendingCallGuard, Shared as PeerShared, TakeoverPayload, attachment_result_stream,
+    PendingCall, PendingCallGuard, Shared as PeerShared, TakeoverPayload,
+    attachment_prepare_accepted, attachment_result_stream,
 };
 use crate::actr_ref::ActrRef;
 use crate::outbound::PeerGate;
@@ -415,7 +416,11 @@ impl ActriumPeerSession {
             )
             .await
             .map(|bytes| bytes.to_vec());
-        if result.is_ok() && preserve_result {
+        if preserve_result
+            && result
+                .as_ref()
+                .is_ok_and(|bytes| attachment_prepare_accepted(bytes))
+        {
             let _pending = pending.preserve_attachment_result();
         }
         result
@@ -639,6 +644,19 @@ impl ActriumPeerSession {
 }
 
 impl ActrRef {
+    /// Unregister a local stream and release any pending Actrium attachment
+    /// result reservation with the same ID. Explicit upload cancellation uses
+    /// this path so the stream can immediately be prepared again.
+    pub async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
+        if let Some(runtime) = self.shared.peer_runtime.as_ref() {
+            runtime.shared.finish_peer_attachment_result(stream_id);
+        }
+        self.app_context()
+            .await
+            .unregister_stream(stream_id)
+            .await
+    }
+
     /// Connect to a peer Service over the verified Actor channel and Attach.
     /// Requires `Node<Attached>::with_actrium_service` before registration.
     pub async fn attach_actrium(

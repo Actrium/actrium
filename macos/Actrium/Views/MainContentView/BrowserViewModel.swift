@@ -2243,15 +2243,21 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
         let previousBinding = RealmServiceBindings.shared.localFrontBinding(for: tabId)
         func rollbackLocalFrontHandoff() async {
+            // An unstructured task does not inherit cancellation from the switch.
             // Stop the new session first; otherwise restoring the old exclusive
-            // lease would race a still-attached replacement.
-            await binding.stop()
-            guard let previousBinding else { return }
-            do {
-                try await previousBinding.restoreAfterFailedLocalFrontReplacement()
-            } catch {
-                logger.error("⚠️ [LocalFront] Failed to restore the previous Service session: \(error)")
-            }
+            // lease would race a still-attached replacement. A newer switch may
+            // have replaced the registry entry while this rollback was suspended.
+            await Task {
+                await binding.stop()
+                guard let previousBinding,
+                      RealmServiceBindings.shared.localFrontBinding(for: tabId) === previousBinding
+                else { return }
+                do {
+                    try await previousBinding.restoreAfterFailedLocalFrontReplacement()
+                } catch {
+                    logger.error("⚠️ [LocalFront] Failed to restore the previous Service session: \(error)")
+                }
+            }.value
         }
         try requireCurrentPublisherKeys()
         do {

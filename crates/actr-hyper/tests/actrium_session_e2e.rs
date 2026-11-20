@@ -38,8 +38,16 @@ pub struct EchoResponse {
 
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
 pub struct PrepareAttachmentRequest {
+    #[prost(string, tag = "1")]
+    pub id: String,
     #[prost(string, tag = "8")]
     pub result_stream_id: String,
+}
+
+#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
+pub struct PrepareAttachmentResponse {
+    #[prost(int32, tag = "2")]
+    pub status_code: i32,
 }
 
 impl RpcRequest for EchoRequest {
@@ -68,7 +76,22 @@ impl MessageDispatcher for EchoDispatcher {
         _ctx: &C,
     ) -> actr_protocol::ActorResult<Bytes> {
         match envelope.route_key.as_str() {
-            "echo" | PREPARE_ATTACHMENT_ROUTE => Ok(envelope.payload.unwrap_or_default()),
+            "echo" => Ok(envelope.payload.unwrap_or_default()),
+            PREPARE_ATTACHMENT_ROUTE => {
+                let payload = envelope.payload.unwrap_or_default();
+                let request = PrepareAttachmentRequest::decode(payload.clone()).map_err(|error| {
+                    actr_protocol::ActrError::InvalidArgument(format!(
+                        "invalid attachment prepare payload: {error}"
+                    ))
+                })?;
+                if request.id == "reject" {
+                    Ok(Bytes::from(
+                        PrepareAttachmentResponse { status_code: 13 }.encode_to_vec(),
+                    ))
+                } else {
+                    Ok(payload)
+                }
+            }
             other => Err(actr_protocol::ActrError::InvalidArgument(format!(
                 "unknown route: {other}"
             ))),
@@ -443,6 +466,7 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     // The same authenticated session carries the attachment prepare RPC and
     // the stream chunks. Both paths are admitted by the receiving Guard.
     let prepare = PrepareAttachmentRequest {
+        id: String::new(),
         result_stream_id: "attachment-result".to_string(),
     }
     .encode_to_vec();
@@ -456,6 +480,60 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
         .await
         .expect("prepare RPC is bound to the Attach session");
     assert_eq!(prepared, prepare);
+
+    // An application-level rejection is still a successful, authenticated RPC.
+    // It must release the Front reservation immediately; explicit cancellation
+    // through unregister_stream must do the same for an accepted Prepare.
+    let rejected = session
+        .call(
+            PREPARE_ATTACHMENT_ROUTE,
+            READ,
+            PrepareAttachmentRequest {
+                id: "reject".into(),
+                result_stream_id: "reused-attachment-result".into(),
+            }
+            .encode_to_vec(),
+            Duration::from_secs(30),
+        )
+        .await
+        .expect("the rejected Prepare response is authenticated");
+    assert_eq!(
+        PrepareAttachmentResponse::decode(rejected.as_slice())
+            .unwrap()
+            .status_code,
+        13
+    );
+    let accepted = PrepareAttachmentRequest {
+        id: String::new(),
+        result_stream_id: "reused-attachment-result".into(),
+    }
+    .encode_to_vec();
+    session
+        .call(
+            PREPARE_ATTACHMENT_ROUTE,
+            READ,
+            accepted.clone(),
+            Duration::from_secs(30),
+        )
+        .await
+        .expect("a rejected Prepare releases its result stream for immediate reuse");
+    front
+        .unregister_stream("reused-attachment-result")
+        .await
+        .expect("explicit cancellation unregisters the result stream");
+    session
+        .call(
+            PREPARE_ATTACHMENT_ROUTE,
+            READ,
+            accepted,
+            Duration::from_secs(30),
+        )
+        .await
+        .expect("explicit cancellation releases its result stream for immediate reuse");
+    front
+        .unregister_stream("reused-attachment-result")
+        .await
+        .expect("clean up the reused result stream");
 
     let (chunks, mut received) = tokio::sync::mpsc::unbounded_channel();
     service

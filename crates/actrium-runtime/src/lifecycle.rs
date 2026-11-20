@@ -845,8 +845,8 @@ impl LifecycleService {
         let _guard = operation_lock.lock().await;
         let lifecycle_guard = self.lock_operation()?;
         let _start_lock = self.acquire_start_lock(actor_id)?;
-        let mut instance = self.instance(actor_id)?;
         let active_guard = self.lock_active_instance(actor_id)?;
+        let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Starting)?;
         instance.desired_state = DesiredState::Running;
         instance.reachability = Reachability::Unknown;
@@ -874,8 +874,8 @@ impl LifecycleService {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
-        let mut instance = self.instance(actor_id)?;
         let _active_guard = self.lock_active_instance(actor_id)?;
+        let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Stopping)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
         self.persist_transition(&mut instance, LifecycleState::Stopping)?;
@@ -895,8 +895,8 @@ impl LifecycleService {
         let _guard = operation_lock.lock().await;
         let lifecycle_guard = self.lock_operation()?;
         let _start_lock = self.acquire_start_lock(actor_id)?;
-        let mut instance = self.instance(actor_id)?;
         let active_guard = self.lock_active_instance(actor_id)?;
+        let mut instance = self.instance(actor_id)?;
         if !matches!(
             instance.lifecycle_state,
             LifecycleState::Running | LifecycleState::Suspended | LifecycleState::Stopped
@@ -933,8 +933,8 @@ impl LifecycleService {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
         let lifecycle_guard = self.lock_operation()?;
-        let mut instance = self.instance(actor_id)?;
         let active_guard = self.lock_active_instance(actor_id)?;
+        let mut instance = self.instance(actor_id)?;
         // Only a pending start can commit Running. In particular, do not let a
         // stale completion revive a suspended instance through the ordinary
         // Suspended -> Running transition.
@@ -959,8 +959,8 @@ impl LifecycleService {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
         let lifecycle_guard = self.lock_operation()?;
-        let mut instance = self.instance(actor_id)?;
         let active_guard = self.lock_active_instance(actor_id)?;
+        let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Suspended)?;
         instance.desired_state = DesiredState::Running;
         instance.reachability = Reachability::Offline;
@@ -974,8 +974,8 @@ impl LifecycleService {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
         let lifecycle_guard = self.lock_operation()?;
-        let mut instance = self.instance(actor_id)?;
         let active_guard = self.lock_active_instance(actor_id)?;
+        let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Running)?;
         instance.desired_state = DesiredState::Running;
         instance.reachability = Reachability::Online;
@@ -989,8 +989,8 @@ impl LifecycleService {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
-        let mut instance = self.instance(actor_id)?;
         let _active_guard = self.lock_active_instance(actor_id)?;
+        let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Archived)?;
         self.mark_offline(&mut instance, DesiredState::Archived);
         self.persist_transition(&mut instance, LifecycleState::Archived)?;
@@ -1002,8 +1002,8 @@ impl LifecycleService {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
-        let mut instance = self.instance(actor_id)?;
         let _active_guard = self.lock_active_instance(actor_id)?;
+        let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Trashed)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
         instance.runtime_instance_id = self.invalidate_and_rotate().await?;
@@ -1017,8 +1017,8 @@ impl LifecycleService {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
-        let mut instance = self.instance(actor_id)?;
         let _active_guard = self.lock_active_instance(actor_id)?;
+        let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Stopped)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
         self.persist_transition(&mut instance, LifecycleState::Stopped)?;
@@ -1034,8 +1034,8 @@ impl LifecycleService {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
-        let mut instance = self.instance(actor_id)?;
         let _active_guard = self.lock_active_instance(actor_id)?;
+        let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Migrating)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
         self.persist_transition(&mut instance, LifecycleState::Migrating)?;
@@ -1051,8 +1051,8 @@ impl LifecycleService {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
-        let mut instance = self.instance(actor_id)?;
         let _active_guard = self.lock_active_instance(actor_id)?;
+        let mut instance = self.instance(actor_id)?;
         ensure_transition(&instance, LifecycleState::Deleting)?;
         self.mark_offline(&mut instance, DesiredState::Stopped);
         instance.credential_state = CredentialState::Revoked;

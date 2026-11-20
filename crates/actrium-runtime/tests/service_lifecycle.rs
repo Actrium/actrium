@@ -645,6 +645,25 @@ async fn lifecycle_only_the_active_owner_can_stop_a_live_service() {
     // can subsequently start and stop the durable instance normally.
     second_manager.start(&actor_id).await.unwrap();
     second_manager.stop(&actor_id).await.unwrap();
+
+    // Once another manager completes a transition, a later operation must
+    // validate the newly persisted source state rather than overwrite it from
+    // a record read before acquiring ownership.
+    second_manager.trash(&actor_id).await.unwrap();
+    assert!(matches!(
+        first_manager
+            .migrate(&actor_id, Placement::Remote)
+            .await
+            .unwrap_err(),
+        LifecycleError::InvalidTransition {
+            from: LifecycleState::Trashed,
+            to: LifecycleState::Migrating,
+        }
+    ));
+    assert_eq!(
+        first_manager.instance(&actor_id).unwrap().lifecycle_state,
+        LifecycleState::Trashed
+    );
 }
 
 #[tokio::test]

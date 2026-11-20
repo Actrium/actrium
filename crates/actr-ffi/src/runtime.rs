@@ -845,11 +845,7 @@ impl ActrRefWrapper {
 
     /// Unregister a DataChunk callback for a stream ID.
     pub async fn unregister_stream(&self, stream_id: String) -> ActrResult<()> {
-        self.inner
-            .app_context()
-            .await
-            .unregister_stream(&stream_id)
-            .await?;
+        self.inner.unregister_stream(&stream_id).await?;
         Ok(())
     }
 
