@@ -5,9 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use actr_protocol::{
-    ActrId, ActrType, Direction, MetadataEntry, RpcEnvelope, prost::Message as _,
-};
+use actr_protocol::{ActrId, ActrType, Direction, MetadataEntry, RpcEnvelope, prost::Message as _};
 use actrium_runtime::{
     AttachAuthorization, AttachQuotaContext, AttachRequest, AttachResponse, AttachmentPolicy,
     AuthorizeAttachDecision, BusinessRequest, DetachRequest, GetStatusRequest, HeartbeatRequest,
@@ -352,13 +350,7 @@ fn signed_business_request(
 }
 
 fn business_call(response: &AttachResponse, secret: &SessionSecret) -> RpcEnvelope {
-    signed_business_request(
-        response,
-        secret,
-        ROUTE,
-        "call-1",
-        b"read document".to_vec(),
-    )
+    signed_business_request(response, secret, ROUTE, "call-1", b"read document".to_vec())
 }
 
 async fn cancel_attachment(
@@ -374,13 +366,8 @@ async fn cancel_attachment(
         prepare_request_id: prepare_request_id.to_string(),
     })
     .unwrap();
-    let envelope = signed_business_request(
-        attach,
-        secret,
-        ATTACHMENT_CANCEL_ROUTE,
-        request_id,
-        payload,
-    );
+    let envelope =
+        signed_business_request(attach, secret, ATTACHMENT_CANCEL_ROUTE, request_id, payload);
     registry
         .dispatch(
             crate::lifecycle::SessionMethod::CancelAttachmentResult,
@@ -497,7 +484,10 @@ async fn attachment_cancellation_releases_only_its_own_service_reservation() {
             .expect("Prepare reserves its result stream");
         guard.finish(request_id).await.unwrap();
         assert_eq!(
-            shared.attachment_result_request_id("result").await.as_deref(),
+            shared
+                .attachment_result_request_id("result")
+                .await
+                .as_deref(),
             Some(request_id)
         );
     }
@@ -512,7 +502,10 @@ async fn attachment_cancellation_releases_only_its_own_service_reservation() {
     )
     .await;
     assert_eq!(
-        shared.attachment_result_request_id("result").await.as_deref(),
+        shared
+            .attachment_result_request_id("result")
+            .await
+            .as_deref(),
         Some("prepare-new"),
         "a late cancellation cannot remove the newer Prepare"
     );

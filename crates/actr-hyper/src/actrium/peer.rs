@@ -32,11 +32,11 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use super::{ATTACHMENT_CANCEL_ROUTE, ATTACHMENT_UPLOAD_TRANSPORT, metadata};
 use super::service::{
     AttachmentResultCancellation, PendingCall, PendingCallGuard, Shared as PeerShared,
     TakeoverPayload, attachment_prepare_accepted, attachment_result_stream,
 };
+use super::{ATTACHMENT_CANCEL_ROUTE, metadata};
 use crate::actr_ref::ActrRef;
 use crate::outbound::PeerGate;
 use crate::transport::{PeerTransport, RpcDeadline, VerifiedPeerContext};
@@ -399,7 +399,12 @@ impl ActriumPeerSession {
         if let Some(stream_id) = result_stream.as_ref() {
             self.runtime
                 .shared
-                .register_peer_attachment_result(stream_id.clone(), request_id.clone(), self)
+                .register_peer_attachment_result(
+                    stream_id.clone(),
+                    request_id.clone(),
+                    capability.to_string(),
+                    self,
+                )
                 .map_err(|error| error.into_actr_error())?;
         }
         let preserve_result = result_stream.is_some();
@@ -455,6 +460,7 @@ impl ActriumPeerSession {
         &self,
         stream_id: &str,
         prepare_request_id: String,
+        capability: &str,
     ) -> ActorResult<()> {
         let payload = serde_json::to_vec(&AttachmentResultCancellation {
             stream_id: stream_id.to_string(),
@@ -464,7 +470,7 @@ impl ActriumPeerSession {
         let (envelope, pending_call) = self
             .business_envelope(
                 ATTACHMENT_CANCEL_ROUTE,
-                ATTACHMENT_UPLOAD_TRANSPORT,
+                capability,
                 MessageKind::Request,
                 payload,
                 Duration::from_secs(30),
@@ -690,12 +696,12 @@ impl ActrRef {
     /// the Service acknowledgement so the stream can immediately be prepared again.
     pub async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
         let cancellation = if let Some(runtime) = self.shared.peer_runtime.as_ref()
-            && let Some((session, request_id)) =
+            && let Some((session, request_id, capability)) =
                 runtime.shared.take_peer_attachment_result(stream_id)
             && let Some(session) = session.upgrade()
         {
             session
-                .cancel_attachment_result(stream_id, request_id)
+                .cancel_attachment_result(stream_id, request_id, &capability)
                 .await
         } else {
             Ok(())

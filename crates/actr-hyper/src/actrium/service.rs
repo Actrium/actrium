@@ -98,6 +98,7 @@ struct PendingAttachmentResult {
 pub(crate) struct PeerAttachmentResult {
     session: Weak<ActriumPeerSession>,
     request_id: String,
+    capability: String,
     expires_at: u64,
 }
 
@@ -118,6 +119,7 @@ impl Shared {
         &self,
         stream_id: String,
         request_id: String,
+        capability: String,
         session: &Arc<ActriumPeerSession>,
     ) -> Result<(), IncomingGuardError> {
         let now = now_secs();
@@ -134,6 +136,7 @@ impl Shared {
             PeerAttachmentResult {
                 session: Arc::downgrade(session),
                 request_id,
+                capability,
                 expires_at: now.saturating_add(ATTACHMENT_RESULT_RETENTION_SECS),
             },
         );
@@ -168,10 +171,10 @@ impl Shared {
     pub(crate) fn take_peer_attachment_result(
         &self,
         stream_id: &str,
-    ) -> Option<(Weak<ActriumPeerSession>, String)> {
+    ) -> Option<(Weak<ActriumPeerSession>, String, String)> {
         self.peer_attachment_results()
             .remove(stream_id)
-            .map(|entry| (entry.session, entry.request_id))
+            .map(|entry| (entry.session, entry.request_id, entry.capability))
     }
 
     async fn finish_attachment_result_for_request(
@@ -469,8 +472,7 @@ impl SessionRegistry for ActriumServiceRegistry {
                             "invalid attachment cancellation payload: {error}"
                         ))
                     })?;
-                if cancellation.stream_id.is_empty() || cancellation.prepare_request_id.is_empty()
-                {
+                if cancellation.stream_id.is_empty() || cancellation.prepare_request_id.is_empty() {
                     return Err(ActrError::InvalidArgument(
                         "attachment cancellation requires a stream and Prepare request id"
                             .to_string(),
@@ -963,10 +965,11 @@ mod attachment_reservation_tests {
     #[tokio::test]
     async fn cleanup_only_removes_the_prepare_that_owns_the_reservation() {
         let shared = Shared::default();
-        shared.attachment_results.lock().await.insert(
-            "result".to_string(),
-            pending("new-prepare", "new-session"),
-        );
+        shared
+            .attachment_results
+            .lock()
+            .await
+            .insert("result".to_string(), pending("new-prepare", "new-session"));
 
         shared
             .finish_attachment_result_for_request("result", "old-prepare", "old-session")
@@ -983,17 +986,30 @@ mod attachment_reservation_tests {
         shared
             .finish_attachment_result_for_request("result", "new-prepare", "old-session")
             .await;
-        assert!(shared.attachment_results.lock().await.contains_key("result"));
+        assert!(
+            shared
+                .attachment_results
+                .lock()
+                .await
+                .contains_key("result")
+        );
         shared
             .finish_attachment_result_for_request("result", "new-prepare", "new-session")
             .await;
-        assert!(!shared.attachment_results.lock().await.contains_key("result"));
+        assert!(
+            !shared
+                .attachment_results
+                .lock()
+                .await
+                .contains_key("result")
+        );
 
         shared.peer_attachment_results().insert(
             "result".to_string(),
             PeerAttachmentResult {
                 session: Weak::new(),
                 request_id: "new-prepare".to_string(),
+                capability: "documents.read".to_string(),
                 expires_at: u64::MAX,
             },
         );

@@ -685,10 +685,7 @@ async fn lifecycle_unknown_actors_do_not_allocate_active_lock_files() {
         LifecycleError::NotFound(_)
     ));
     assert!(matches!(
-        service
-            .mark_running(actor_id, "runtime")
-            .await
-            .unwrap_err(),
+        service.mark_running(actor_id, "runtime").await.unwrap_err(),
         LifecycleError::NotFound(_)
     ));
     assert!(matches!(
