@@ -224,17 +224,24 @@ The Issuer issues only when all of the following hold:
    renewal token;
 3. at registration, resolve `packages[primary_package]` from the verified Profile.
    The Issuer **MUST** reject an invalid primary reference. Registration of any
-   version of the Realm's current or previous primary Service program requires
+   version of the Realm's current or previous primary Service program through
+   ordinary registration requires
    an owner key. This keeps the outgoing Service's ACL under owner control for
    clients still using it and for rollback.
    Renewal and reissue do not check the role again, so an ownership transfer
    does not affect a running Service.
+4. In package-backed `OpenService` registration, the Realm must be open.
+   A Realm management authorization binds the authenticated client public key
+   to the exact package type of a selected Service. Issuer verifies the package
+   signature and rechecks the authorization in the registration transaction.
+   Actors registered this way retain their mode across renewal and reissue.
+   Revocation disables the Actors registered under that authorization.
 
 Package selection does not change membership or Actor-admission rules.
 
 A connection ACL carried by a registration applies only to the registering
-Actor's own type; since only the owner can register the Service's program,
-other members cannot rewrite the Service's ACL.
+Actor's own type. The owner and clients granted OpenService authorization can
+write the ACL for the Service types they register.
 Before a program becomes the primary Service, existing ACL rules for all its
 versions must have been written by a still-active key of the current owner.
 Actor revocation leaves its type-wide policy in place. Legacy ACL rules do

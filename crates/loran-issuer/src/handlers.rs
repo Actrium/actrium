@@ -10,7 +10,7 @@ use crate::{
 };
 use actr_protocol::realm_membership::{CLIENT_PROOF_HEADER, ClientProof, ProofOp, Role};
 use actr_protocol::{
-    ErrorResponse, RegisterRequest, RegisterResponse, ReissueCredentialRequest,
+    ErrorResponse, RegisterAuthMode, RegisterRequest, RegisterResponse, ReissueCredentialRequest,
     RenewCredentialRequest, RenewCredentialResponse, register_response, renew_credential_response,
 };
 use axum::{
@@ -350,6 +350,24 @@ async fn check_realm_registration<'e>(
     request: &RegisterRequest,
     signer: &Signer,
 ) -> Result<(), ErrorResponse> {
+    if request.auth_mode == Some(RegisterAuthMode::OpenService as i32) {
+        let allowed = platform::realm::open_service::allowed(
+            db,
+            &request.realm,
+            &signer.key_id,
+            &request.actr_type,
+        )
+        .await
+        .map_err(|error| membership_error("unavailable", error))?;
+        return if allowed {
+            Ok(())
+        } else {
+            Err(membership_error(
+                "service_client_not_authorized",
+                "the Realm does not authorize this key to register the selected Service",
+            ))
+        };
+    }
     let program = format!("{}/{}", request.actr_type.publisher, request.actr_type.name);
     let record: Option<(String, bool)> = sqlx::query_as(
         "SELECT document, EXISTS (
@@ -1474,6 +1492,134 @@ mod tests {
                 .unwrap();
             assert_eq!(rows, 0, "{statement}");
         }
+    }
+
+    #[tokio::test]
+    async fn open_service_authorization_is_scoped_and_revocable() {
+        use platform::realm::open_service;
+
+        crate::idempotency::tests::setup_db().await;
+        let realm = "open-service@example.com";
+        RealmEntity::create(realm.to_string()).await.unwrap();
+        let owner = crate::test_support::owner_of(realm, 1).await;
+        let service = crate::test_support::member_of(&owner, Role::Viewer, 2).await;
+        let other = crate::test_support::member_of(&owner, Role::Viewer, 3).await;
+        let public_key = membership::client_key(realm, &service.key_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .public_key;
+        let pool = platform::storage::db::get_database().get_pool();
+        sqlx::query(
+            "INSERT INTO realm_admission (realm, policy) VALUES (?, ?)
+             ON CONFLICT(realm) DO UPDATE SET policy = excluded.policy",
+        )
+        .bind(realm)
+        .bind(r#"{"membership":"open"}"#)
+        .execute(pool)
+        .await
+        .unwrap();
+        let profile = json!({
+            "primary_package": "service",
+            "front_package": "front",
+            "packages": {
+                "service": {"type": "acme.com/echo@1.0.0", "href": "https://cdn.example/service.actr", "sha256": "ab".repeat(32)},
+                "helper": {"type": "acme.com/indexer@1.0.0", "href": "https://cdn.example/helper.actr", "sha256": "ef".repeat(32)},
+                "front": {"type": "acme.com/ui@1.0.0", "href": "https://cdn.example/front.actr", "sha256": "cd".repeat(32)}
+            }
+        });
+        sqlx::query("INSERT INTO realm_profile (realm, sequence, digest, document, accepted_at) VALUES (?, 1, 'profile', ?, 0)")
+            .bind(realm).bind(profile.to_string()).execute(pool).await.unwrap();
+        let mut request = RegisterRequest {
+            realm: realm.to_owned(),
+            actr_type: ActrType::from_program_identity("acme.com/echo@1.0.0").unwrap(),
+            auth_mode: Some(RegisterAuthMode::OpenService as i32),
+            ..Default::default()
+        };
+        assert!(
+            check_realm_registration(pool, &request, &service)
+                .await
+                .is_err()
+        );
+
+        open_service::set_authorization(realm, &request.actr_type, &public_key, true)
+            .await
+            .unwrap();
+        assert!(
+            check_realm_registration(pool, &request, &service)
+                .await
+                .is_ok()
+        );
+        assert!(
+            check_realm_registration(pool, &request, &other)
+                .await
+                .is_err()
+        );
+
+        let mut standard = request.clone();
+        standard.auth_mode = Some(RegisterAuthMode::Package as i32);
+        assert!(
+            check_realm_registration(pool, &standard, &service)
+                .await
+                .is_err()
+        );
+        assert!(
+            check_realm_registration(pool, &standard, &owner)
+                .await
+                .is_ok()
+        );
+
+        request.actr_type = ActrType::from_program_identity("acme.com/indexer@1.0.0").unwrap();
+        assert!(
+            check_realm_registration(pool, &request, &service)
+                .await
+                .is_err()
+        );
+        open_service::set_authorization(realm, &request.actr_type, &public_key, true)
+            .await
+            .unwrap();
+        assert!(
+            check_realm_registration(pool, &request, &service)
+                .await
+                .is_ok()
+        );
+
+        let front = ActrType::from_program_identity("acme.com/ui@1.0.0").unwrap();
+        assert!(
+            open_service::set_authorization(realm, &front, &public_key, true)
+                .await
+                .is_err()
+        );
+        sqlx::query("UPDATE realm_admission SET policy = ? WHERE realm = ?")
+            .bind(r#"{"membership":"invite-only"}"#)
+            .bind(realm)
+            .execute(pool)
+            .await
+            .unwrap();
+        assert!(
+            check_realm_registration(pool, &request, &service)
+                .await
+                .is_err()
+        );
+
+        let actor = actr_protocol::ActrId {
+            realm: realm.to_owned(),
+            serial_number: 7,
+        };
+        sqlx::query("INSERT INTO issued_actor_identity (realm, serial_number, actor_type, auth_mode, member_id, client_key_id, issued_at) VALUES (?, ?, ?, ?, ?, ?, 0)")
+            .bind(realm).bind(7i64).bind(request.actr_type.to_string_repr())
+            .bind(request.auth_mode).bind(&service.member_id).bind(&service.key_id)
+            .execute(pool).await.unwrap();
+        open_service::set_authorization(realm, &request.actr_type, &public_key, false)
+            .await
+            .unwrap();
+        assert!(membership::actor_disabled(&actor).await.unwrap());
+        assert!(
+            membership::client_key(realm, &service.key_id)
+                .await
+                .unwrap()
+                .is_some_and(|key| !key.revoked)
+        );
     }
 
     #[tokio::test]

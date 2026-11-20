@@ -31,6 +31,17 @@ pub enum ManagementOp {
     RegisterPublisher,
     DraftProfile,
     GetAdmission,
+    SetOpenServiceAuthorization,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenServiceAuthorization {
+    /// The Service machine's base64 Ed25519 Realm client public key.
+    pub public_key: String,
+    /// Exact Publisher package type in the Realm Profile.
+    pub actor_type: String,
+    pub enabled: bool,
 }
 
 /// A Realm management request.
@@ -58,6 +69,8 @@ pub struct ManagementRequest {
     /// Conditional publication and receipt for a Front-only change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub front_update: Option<crate::realm_profile::FrontUpdate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_service: Option<OpenServiceAuthorization>,
     /// Actr Facility Provider ID of the receiver.
     pub provider_id: String,
     /// Opaque id of whom the key holder's signing service signs for.
@@ -99,6 +112,7 @@ impl ManagementRequest {
             policy: None,
             profile: None,
             front_update: None,
+            open_service: None,
             provider_id: provider_id.to_string(),
             requester: None,
             nonce: nonce.to_string(),
@@ -133,6 +147,13 @@ impl ManagementRequest {
             }
             (_, Some(_)) => return Err(invalid("front_update requires publish_front_profile")),
             _ => {}
+        }
+        if (request.op == ManagementOp::SetOpenServiceAuthorization)
+            != request.open_service.is_some()
+        {
+            return Err(invalid(
+                "open_service is required only for set_open_service_authorization",
+            ));
         }
         if let Value::Object(members) = &mut value {
             members.remove("signature");

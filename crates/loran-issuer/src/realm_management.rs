@@ -13,8 +13,9 @@
 use actr_protocol::realm_management::{ManagementOp, ManagementRequest};
 use actr_protocol::realm_profile::{RealmProfile, RealmStatus as ProfileStatus};
 use actr_protocol::uri::ActrUri;
-use actr_protocol::{AuthorityDescriptor, PublisherProfile};
+use actr_protocol::{ActrType, AuthorityDescriptor, PublisherProfile};
 use axum::http::StatusCode;
+use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::Utc;
 use loran_publisher_registry::{PublisherRegistryError, PublisherRegistryManager};
 use platform::config::RealmConfig;
@@ -164,6 +165,34 @@ where
     match request.op {
         ManagementOp::GetAdmission => {
             Ok(membership::admission_info(&request.realm, config.max_members_per_realm()).await?)
+        }
+        ManagementOp::SetOpenServiceAuthorization => {
+            let grant = request
+                .open_service
+                .as_ref()
+                .expect("parsed management action");
+            let public_key: [u8; 32] = STANDARD
+                .decode(&grant.public_key)
+                .ok()
+                .and_then(|bytes| bytes.try_into().ok())
+                .ok_or_else(|| {
+                    ManagementError::Invalid("expected a base64 Ed25519 public key".into())
+                })?;
+            let actor_type = ActrType::from_program_identity(&grant.actor_type)
+                .map_err(|error| invalid(&error))?;
+            platform::realm::open_service::set_authorization(
+                &request.realm,
+                &actor_type,
+                &public_key,
+                grant.enabled,
+            )
+            .await?;
+            Ok(json!({
+                "realm": request.realm,
+                "actor_type": grant.actor_type,
+                "key_id": actr_protocol::realm_membership::client_key_id(&public_key),
+                "enabled": grant.enabled
+            }))
         }
         ManagementOp::CreateRealm => create_realm(profiles, config, &request).await,
         ManagementOp::PublishProfile | ManagementOp::PublishFrontProfile => {

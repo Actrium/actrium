@@ -17,6 +17,8 @@ pub struct RuntimeRecord {
     pub log_path: PathBuf,
     pub started_at: DateTime<Utc>,
     pub stopped_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub open_join: bool,
 }
 
 impl RuntimeRecord {
@@ -37,6 +39,7 @@ impl RuntimeRecord {
             log_path,
             started_at,
             stopped_at: None,
+            open_join: false,
         }
     }
 }
@@ -51,6 +54,8 @@ struct RawRuntimeRecord {
     log_path: PathBuf,
     started_at: DateTime<Utc>,
     stopped_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    open_join: bool,
 }
 
 impl RawRuntimeRecord {
@@ -81,6 +86,7 @@ impl RawRuntimeRecord {
             log_path: self.log_path,
             started_at: self.started_at,
             stopped_at: self.stopped_at,
+            open_join: self.open_join,
         })
     }
 }

@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const LORAN_SCHEMA_VERSION: i64 = 17;
+const LORAN_SCHEMA_VERSION: i64 = 18;
 
 /// Database manager
 #[derive(Clone)]
@@ -52,7 +52,7 @@ impl Database {
             .await?;
         if matches!(
             version,
-            10 | 11 | 12 | 13 | 14 | 15 | 16 | LORAN_SCHEMA_VERSION
+            10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | LORAN_SCHEMA_VERSION
         ) {
             return Ok(version);
         }
@@ -329,6 +329,18 @@ impl Database {
                 UNIQUE(realm, public_key),
                 FOREIGN KEY(realm, member_id) REFERENCES realm_member(realm, member_id)
                     ON DELETE CASCADE
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Service deployment grants are separate from Realm membership roles.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_open_service (
+                realm TEXT NOT NULL REFERENCES realm(name) ON DELETE CASCADE,
+                actor_type TEXT NOT NULL,
+                public_key BLOB NOT NULL CHECK(length(public_key) = 32),
+                PRIMARY KEY(realm, actor_type, public_key)
             )",
         )
         .execute(&mut *tx)
