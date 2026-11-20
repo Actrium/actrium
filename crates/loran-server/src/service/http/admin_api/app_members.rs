@@ -3,6 +3,7 @@
 //! Local invitation delivery and strict redemption use the membership store.
 
 mod invitations;
+mod owner_device;
 use super::{AdminApiState, realm_writes_disabled_response};
 use actr_protocol::realm_membership::{
     MembershipOp, MembershipRequest, RealmInvite, Role, body_sha256, client_key_id, invite_id,
@@ -26,6 +27,9 @@ use issuer::{
     handlers::IssuerState,
     realm_profile::RealmProfiles,
     signer_client_wrapper::{SignerClientWrapper, create_signer_client},
+};
+pub(super) use owner_device::{
+    ack_owner_device, issue_owner_device, join_owner_device, owner_device_status,
 };
 use platform::{
     config::{LoranConfig, realm::DevJoinMode},
@@ -618,11 +622,24 @@ pub(super) async fn action(
     let issued = if req.op == MembershipOp::CreateInvite {
         let request = admin.checked_request(&req, signer, &key.key_id).await?;
         request.verify(&key.public_key).map_err(|_| unavailable())?;
-        invitations::issue(db, &admin.delivery, &operation, &request, admin.limits).await?
+        invitations::issue(
+            db,
+            &admin.delivery,
+            &operation,
+            &request,
+            admin.limits,
+            false,
+        )
+        .await?
     } else {
         let first = {
             let mut conn = db.acquire().await?;
-            operation.reserve(&mut conn, Utc::now().timestamp()).await?
+            operation
+                .reserve(
+                    &mut conn,
+                    Utc::now().timestamp() + invitations::RECEIPT_SECS,
+                )
+                .await?
         };
         if first {
             let result = admin.send(req, signer, &key.key_id, peer).await?;

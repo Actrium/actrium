@@ -72,7 +72,7 @@ impl Operation<'_> {
         Ok(())
     }
 
-    pub(super) async fn reserve(&self, conn: &mut SqliteConnection, now: i64) -> Result<bool> {
+    pub(super) async fn reserve(&self, conn: &mut SqliteConnection, expires: i64) -> Result<bool> {
         Ok(sqlx::query(
             "INSERT OR IGNORE INTO admin_operations(id,provider,realm,key_id,fingerprint,expires)
              VALUES(?,?,?,?,?,?)",
@@ -82,7 +82,7 @@ impl Operation<'_> {
         .bind(self.realm)
         .bind(self.key_id)
         .bind(self.fingerprint)
-        .bind(now + RECEIPT_SECS)
+        .bind(expires)
         .execute(conn)
         .await?
         .rows_affected()
@@ -119,10 +119,23 @@ pub(super) async fn issue(
     operation: &Operation<'_>,
     request: &MembershipRequest,
     limits: membership::Limits,
+    owner_device_only: bool,
 ) -> Result<Option<Value>> {
     let mut tx = db.begin_with("BEGIN IMMEDIATE").await?;
     let now = Utc::now().timestamp();
-    if !operation.reserve(&mut tx, now).await? {
+    let expires_at = request
+        .invite_expires_at
+        .as_deref()
+        .and_then(|time| DateTime::parse_from_rfc3339(time).ok())
+        .map(|time| time.timestamp())
+        .filter(|&time| now < time && time <= now + MAX_INVITE_SECS)
+        .ok_or_else(|| invalid("The invitation must expire within 30 days"))?;
+    let receipt_until = if owner_device_only {
+        expires_at
+    } else {
+        now + RECEIPT_SECS
+    };
+    if !operation.reserve(&mut tx, receipt_until).await? {
         return Ok(None);
     }
     let signer = membership::check_key_on(&mut tx, operation.realm, operation.key_id).await?;
@@ -135,7 +148,7 @@ pub(super) async fn issue(
         return Err(conflict("The App is not active"));
     }
     match (request.role, request.member_id.as_deref()) {
-        (Some(Role::Editor | Role::Viewer), None) => {}
+        (Some(Role::Editor | Role::Viewer), None) if !owner_device_only => {}
         (None, Some(member_id)) if member_id == signer.member_id => {}
         _ => {
             return Err(invalid(
@@ -143,13 +156,6 @@ pub(super) async fn issue(
             ));
         }
     }
-    let expires_at = request
-        .invite_expires_at
-        .as_deref()
-        .and_then(|time| DateTime::parse_from_rfc3339(time).ok())
-        .map(|time| time.timestamp())
-        .filter(|&time| now < time && time <= now + MAX_INVITE_SECS)
-        .ok_or_else(|| invalid("The invitation must expire within 30 days"))?;
     let open: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM realm_invite
          WHERE realm=? AND used_at IS NULL AND revoked_at IS NULL AND expires_at>?",
@@ -169,8 +175,8 @@ pub(super) async fn issue(
     let hash = invite_secret_hash(&secret).map_err(|_| unavailable())?;
     sqlx::query(
         "INSERT INTO realm_invite
-            (realm,invite_id,secret_hash,role,member_id,created_by,created_at,expires_at)
-         VALUES(?,?,?,?,?,?,?,?)",
+            (realm,invite_id,secret_hash,role,member_id,created_by,created_at,expires_at,owner_device_only)
+         VALUES(?,?,?,?,?,?,?,?,?)",
     )
     .bind(operation.realm)
     .bind(&invite_id)
@@ -180,6 +186,7 @@ pub(super) async fn issue(
     .bind(operation.key_id)
     .bind(now)
     .bind(expires_at)
+    .bind(owner_device_only)
     .execute(&mut *tx)
     .await?;
 
@@ -263,7 +270,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            issue(db, &delivery, &operation, &request, limits)
+            issue(db, &delivery, &operation, &request, limits, false)
                 .await
                 .is_err()
         );
@@ -276,12 +283,12 @@ mod tests {
             .execute(db)
             .await
             .unwrap();
-        let result = issue(db, &delivery, &operation, &request, limits)
+        let result = issue(db, &delivery, &operation, &request, limits, false)
             .await
             .unwrap()
             .unwrap();
         assert!(
-            issue(db, &delivery, &operation, &request, limits)
+            issue(db, &delivery, &operation, &request, limits, false)
                 .await
                 .unwrap()
                 .is_none()

@@ -244,6 +244,7 @@ async fn get_admin_capabilities(State(state): State<Arc<AdminApiState>>) -> impl
             "max_members_per_realm": state.service.platform_member_limit(),
             "superv_managed": !state.realm_writes_enabled,
             "provider_id":state.provider,
+            "owner_device_registration":state.app_management.is_some(),
             "package_verifier_available":package_verifier_available,
         })),
     )
@@ -1155,6 +1156,18 @@ pub fn build_admin_api_router(
         .route(
             "/admin/api/realms/{realm}/member-actions",
             post(app_members::action),
+        )
+        .route(
+            "/admin/api/realms/{realm}/owner-device/join",
+            post(app_members::join_owner_device),
+        )
+        .route(
+            "/admin/api/realms/{realm}/owner-device/status/{key_id}",
+            get(app_members::owner_device_status),
+        )
+        .route(
+            "/admin/api/realms/{realm}/owner-device/invites",
+            post(app_members::issue_owner_device).delete(app_members::ack_owner_device),
         )
         .route(
             "/admin/api/realms/{realm}/operations/{id}/reveal",
