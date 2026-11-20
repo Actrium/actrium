@@ -304,6 +304,92 @@ fn publish_profile(docs: &Documents, signer: &SigningKey, profile: &mut Value, s
 }
 
 #[tokio::test]
+async fn releases_and_rolls_back_a_compatible_service_dependency() -> Result<()> {
+    use actr_protocol::realm_membership::{MembershipOp, MembershipRequest};
+
+    let (docs, signer, mut initial, publisher) = fixture(PROTO);
+    initial["packages"]["svc"]["dependencies"] = json!({"upstream": "view"});
+    publish_profile(&docs, &signer, &mut initial, 1);
+    let baseline: RealmPackageSelection = serde_json::from_value(initial)?;
+    let output = tempfile::tempdir()?;
+    let get =
+        |url, _| std::future::ready(docs.borrow().get(&url).cloned().context("missing fixture"));
+    let mut target = baseline.clone();
+    target.packages.get_mut("svc").unwrap().dependencies =
+        BTreeMap::from([("upstream".into(), "upstream".into())]);
+    let mut selection_with_dependency = |version: &str| -> Result<RealmPackageSelection> {
+        let (mut package, bytes) =
+            package_version(KEEL_GUEST_PROFILE_V1, PROTO, &publisher, version);
+        let url = format!("https://cdn.example/upstream-{version}.actr");
+        package["href"] = json!(&url);
+        docs.borrow_mut().insert(url, bytes);
+        target
+            .packages
+            .insert("upstream".into(), serde_json::from_value(package)?);
+        Ok(target.clone())
+    };
+
+    let incompatible = selection_with_dependency("2.0.0")?;
+    let error = front::release_with(
+        REALM,
+        "afp.example",
+        output.path(),
+        Some(incompatible),
+        &get,
+        |_| async { panic!("an incompatible dependency reached publication") },
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.to_string().contains(
+            "publisher.example/echo@1.0.0 needs publisher.example/echo-ui ^1.0 for upstream, but publisher.example/echo-ui@2.0.0 is selected."
+        ),
+        "{error:#}"
+    );
+
+    let compatible = selection_with_dependency("1.1.0")?;
+    for (selection, expected) in [(Some(compatible.clone()), &compatible), (None, &baseline)] {
+        let rollback = selection.is_none();
+        front::release_with(
+            REALM,
+            "afp.example",
+            output.path(),
+            selection,
+            &get,
+            |request: MembershipRequest| {
+                let result = (|| {
+                    assert_eq!(request.op, MembershipOp::SwitchService);
+                    let update = request.service_update.unwrap();
+                    assert_eq!(update.rollback, rollback);
+                    let selected = request.selection.unwrap();
+                    assert_eq!(selected, *expected);
+                    let mut current: Value = serde_json::from_slice(&docs.borrow()[REALM_URL])?;
+                    let previous: RealmPackageSelection = serde_json::from_value(current.clone())?;
+                    assert_eq!(current["sequence"], update.expected_sequence);
+                    current["packages"] = serde_json::to_value(selected.packages)?;
+                    let sequence = update.expected_sequence + 1;
+                    publish_profile(&docs, &signer, &mut current, sequence);
+                    Ok(json!({
+                        "operation_id": update.operation_id,
+                        "sequence": sequence,
+                        "previous_selection": previous,
+                    }))
+                })();
+                std::future::ready(result.map_err(SendError::Unknown))
+            },
+        )
+        .await?;
+    }
+    let restored: Value = serde_json::from_slice(&docs.borrow()[REALM_URL])?;
+    assert_eq!(restored["sequence"], 3);
+    assert_eq!(
+        serde_json::from_value::<RealmPackageSelection>(restored)?,
+        baseline
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn service_release_rejects_mismatched_rpc_contract() -> Result<()> {
     let publisher = SigningKey::from_bytes(&rand::random());
     let (docs, _, profile) = fixture_with_publisher(PROTO, &publisher);
@@ -334,7 +420,7 @@ async fn service_release_rejects_mismatched_rpc_contract() -> Result<()> {
     .await
     .unwrap_err();
     assert!(
-        error.to_string().contains("RPC contracts differ"),
+        error.to_string().contains("RPC definitions in"),
         "{error:#}"
     );
     Ok(())
@@ -391,7 +477,7 @@ async fn fetches_a_signed_pair_and_rechecks_cached_archives() {
             .await
             .unwrap_err()
             .to_string()
-            .contains("digest mismatch")
+            .contains("does not match the selected SHA-256")
     );
     publish_profile(&docs, &rk, &mut profile, 0);
     assert!(
@@ -430,7 +516,9 @@ async fn pins_an_unrequested_package_across_removal_and_reintroduction() {
     let error = from_fixture(&args, &docs).await.unwrap_err();
     assert_eq!(
         error.to_string(),
-        format!("PACKAGE_EQUIVOCATION for {EXTRA_TYPE}")
+        format!(
+            "{EXTRA_TYPE} is already published with different contents. Publish a new version."
+        )
     );
     assert_eq!(std::fs::read(&state).unwrap(), accepted);
 
@@ -461,7 +549,11 @@ async fn recovers_missing_pins_before_replacing_a_cached_profile() {
         .to_owned();
     let archive = docs.borrow_mut().remove(&url).unwrap();
     let error = from_fixture(&args, &docs).await.unwrap_err();
-    assert_eq!(error.to_string(), format!("unexpected fetch {url}"));
+    assert!(
+        error
+            .to_string()
+            .contains("Could not download publisher.example/echo@1.0.0")
+    );
     let mut cache = read_cache();
     assert_eq!(
         cache.digests.remove(EXTRA_TYPE).as_deref(),
@@ -491,7 +583,7 @@ async fn rejects_incompatible_signed_contracts_and_altered_package_bytes() {
             .await
             .unwrap_err()
             .to_string()
-            .contains("RPC contracts differ")
+            .contains("RPC definitions in")
     );
     let dir = tempfile::tempdir().unwrap();
     let args = FetchArgs {
@@ -505,7 +597,7 @@ async fn rejects_incompatible_signed_contracts_and_altered_package_bytes() {
             .await
             .unwrap_err()
             .to_string()
-            .contains("digest mismatch")
+            .contains("does not match the selected SHA-256")
     );
 }
 

@@ -172,7 +172,7 @@ where
         journal
             .previous
             .clone()
-            .context("no previous selection in this directory")?
+            .context("There is no previous selection to roll back to in this directory.")?
     };
     let kind = if let Some(pending) = &journal.pending {
         pending
@@ -196,7 +196,7 @@ where
                 .digests
                 .get(&package.r#type)
                 .is_none_or(|old| old == digest),
-            "PACKAGE_EQUIVOCATION for {}",
+            "{} is already published with different contents. Publish a new version.",
             package.r#type
         );
     }

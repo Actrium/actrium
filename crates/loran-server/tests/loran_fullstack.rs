@@ -5375,7 +5375,7 @@ async fn admin_api_manages_many_realms_by_name() {
             .text()
             .await
             .unwrap()
-            .contains("digest changed for immutable package")
+            .contains("is already published with different contents. Publish a new version.")
     );
 
     // The operator sees the members, read-only.

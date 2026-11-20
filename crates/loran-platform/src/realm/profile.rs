@@ -4,11 +4,11 @@
 //! bytes are the signed bytes. A retired Profile stays as served proof that
 //! the Realm is gone.
 
-use actr_protocol::RealmSigningKeys;
 use actr_protocol::realm_profile::{
-    FrontUpdate, PackageSelectionChange, RealmPackageSelection, RealmProfile, RealmProfileError,
-    RealmStatus,
+    FrontUpdate, PackageSelectionChange, RealmPackage, RealmPackageSelection, RealmProfile,
+    RealmProfileError, RealmStatus,
 };
+use actr_protocol::{ActrId, RealmSigningKeys};
 use chrono::Utc;
 
 use super::domain::digest;
@@ -53,6 +53,13 @@ impl PackageRelease<'_> {
             Self::Service(_) => PackageSelectionChange::Service,
         }
     }
+}
+
+enum ProfileWrite<'a> {
+    Publish,
+    Fetch,
+    Issue,
+    Release(PackageRelease<'a>),
 }
 
 impl RealmPackageReleaseRecord {
@@ -133,6 +140,103 @@ fn read_selection(document: &str) -> Result<RealmPackageSelection, RealmError> {
         .map_err(|e| RealmError::DatabaseError(format!("invalid stored package selection: {e}")))
 }
 
+enum StoredSelection {
+    Complete(RealmPackageSelection),
+    Legacy(RealmPackage),
+}
+
+impl StoredSelection {
+    fn primary(&self) -> Result<&RealmPackage, RealmError> {
+        match self {
+            Self::Complete(selection) => selection
+                .selected()
+                .map(|(service, _)| service)
+                .map_err(RealmError::Conflict),
+            Self::Legacy(primary) => Ok(primary),
+        }
+    }
+}
+
+fn read_stored_selection(document: &str) -> Result<StoredSelection, RealmError> {
+    #[derive(serde::Deserialize)]
+    struct StoredPackages {
+        #[serde(
+            flatten,
+            deserialize_with = "RealmPackageSelection::deserialize_optional"
+        )]
+        selection: Option<RealmPackageSelection>,
+        package: Option<serde_json::Value>,
+    }
+
+    let previous: StoredPackages = serde_json::from_str(document)
+        .map_err(|e| RealmError::DatabaseError(format!("invalid stored Realm packages: {e}")))?;
+    if let Some(selection) = previous.selection {
+        return Ok(StoredSelection::Complete(selection));
+    }
+    let value = previous.package.ok_or_else(|| {
+        RealmError::Conflict("the accepted Profile has no primary Service".into())
+    })?;
+    let primary = serde_json::from_value(value)
+        .map_err(|e| RealmError::DatabaseError(format!("invalid stored primary Service: {e}")))?;
+    Ok(StoredSelection::Legacy(primary))
+}
+
+/// Check existing Actor ownership before changing the primary program and
+/// reserve the outgoing program's registration and ACLs for the owner.
+async fn record_service_switch(
+    tx: &mut sqlx::SqliteConnection,
+    realm: &str,
+    previous: &RealmPackage,
+    next: &RealmPackage,
+    check_rollback_policy: bool,
+) -> Result<(), RealmError> {
+    if previous.same_program(next).map_err(RealmError::Conflict)? {
+        return Ok(());
+    }
+    let next = next.actr_type().map_err(RealmError::Conflict)?;
+    let program = format!("{}/{}", next.publisher, next.name);
+    let serial: Option<i64> = sqlx::query_scalar(
+        "SELECT i.serial_number FROM issued_actor_identity i
+         JOIN realm_member m ON m.realm = i.realm AND m.member_id = i.member_id
+         WHERE i.realm = ?1 AND substr(i.actor_type, 1, length(?2) + 1) = (?2 || '@')
+           AND m.status = 'active' AND m.role <> 'owner'
+           AND NOT EXISTS (
+               SELECT 1 FROM revoked_actor r
+               WHERE r.realm = i.realm AND r.serial_number = i.serial_number
+           )
+         ORDER BY i.serial_number LIMIT 1",
+    )
+    .bind(realm)
+    .bind(&program)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(serial) = serial {
+        let actor = ActrId {
+            realm: realm.to_owned(),
+            serial_number: serial as u64,
+        };
+        return Err(RealmError::Conflict(format!(
+            "Actor {} for {program} belongs to a non-owner. Revoke it before switching the Service.",
+            actor.to_string_repr()
+        )));
+    }
+    super::acl::ActorAcl::require_owner_policy(tx, realm, &program).await?;
+    let previous = previous.actr_type().map_err(RealmError::Conflict)?;
+    let outgoing_program = format!("{}/{}", previous.publisher, previous.name);
+    if check_rollback_policy {
+        // A forward release records this program as the rollback target.
+        super::acl::ActorAcl::require_owner_policy(tx, realm, &outgoing_program).await?;
+    }
+    sqlx::query(
+        "INSERT OR IGNORE INTO realm_previous_service_program (realm, program) VALUES (?, ?)",
+    )
+    .bind(realm)
+    .bind(outgoing_program)
+    .execute(tx)
+    .await?;
+    Ok(())
+}
+
 impl RealmProfileRecord {
     pub async fn get(realm: &str) -> Result<Option<Self>, RealmError> {
         Ok(sqlx::query_as::<_, Self>(
@@ -185,10 +289,53 @@ impl RealmProfileRecord {
             previous_digest,
             owner_invite_by,
             owner,
-            false,
-            None,
+            ProfileWrite::Publish,
         )
         .await
+    }
+
+    /// Store an already verified Profile from the external Realm authority
+    /// against the accepted record the refresh read. Returns the digest of
+    /// the Profile that was written.
+    pub async fn store_fetched(
+        profile: &RealmProfile,
+        document: &str,
+        previous_digest: &str,
+    ) -> Result<String, RealmError> {
+        Self::store_inner(
+            profile,
+            document,
+            Some(previous_digest),
+            None,
+            None,
+            ProfileWrite::Fetch,
+        )
+        .await?;
+        Ok(digest(document.as_bytes()))
+    }
+
+    /// Suspend a Realm only while the Profile that caused the suspension is
+    /// still current. A concurrent replacement keeps its own enabled state.
+    pub async fn suspend_if_current(
+        realm: &str,
+        expected_digest: &str,
+    ) -> Result<bool, RealmError> {
+        let suspended = sqlx::query(
+            "UPDATE realm SET enabled = FALSE, updated_at = ?3
+             WHERE name = ?1 AND enabled AND status <> 'retired'
+               AND EXISTS (SELECT 1 FROM realm_profile WHERE realm = ?1 AND digest = ?2)",
+        )
+        .bind(realm)
+        .bind(expected_digest)
+        .bind(Utc::now().timestamp())
+        .execute(get_database().get_pool())
+        .await?
+        .rows_affected()
+            != 0;
+        if suspended {
+            super::changes::announce(realm);
+        }
+        Ok(suspended)
     }
 
     /// Store a locally signed Profile only if its issuer keys still match the
@@ -200,7 +347,15 @@ impl RealmProfileRecord {
         previous_digest: Option<&str>,
         owner: Option<&Signer>,
     ) -> Result<(Realm, bool, Option<IssuedInvite>), RealmError> {
-        Self::store_inner(profile, document, previous_digest, None, owner, true, None).await
+        Self::store_inner(
+            profile,
+            document,
+            previous_digest,
+            None,
+            owner,
+            ProfileWrite::Issue,
+        )
+        .await
     }
 
     pub async fn store_front_update(
@@ -240,8 +395,7 @@ impl RealmProfileRecord {
             previous_digest,
             None,
             owner,
-            owner.is_some() || matches!(release, PackageRelease::Service(_)),
-            Some(release),
+            ProfileWrite::Release(release),
         )
         .await
         {
@@ -260,8 +414,7 @@ impl RealmProfileRecord {
         previous_digest: Option<&str>,
         owner_invite_by: Option<&str>,
         owner: Option<&Signer>,
-        check_issuer_ledger: bool,
-        release: Option<PackageRelease<'_>>,
+        write: ProfileWrite<'_>,
     ) -> Result<(Realm, bool, Option<IssuedInvite>), RealmError> {
         let name = profile.realm.name.as_str();
         let now = Utc::now().timestamp();
@@ -279,7 +432,7 @@ impl RealmProfileRecord {
         if let Some(owner) = owner {
             require_owner(&check_key_on(&mut tx, name, &owner.key_id).await?)?;
         }
-        if let Some(release) = release {
+        if let ProfileWrite::Release(release) = write {
             let update = release.update();
             update.check().map_err(RealmError::Conflict)?;
             if current.status != super::model::RealmStatus::Active
@@ -298,8 +451,11 @@ impl RealmProfileRecord {
             .bind(previous_digest)
             .fetch_optional(&mut *tx)
             .await?;
-            let previous = previous
-                .ok_or_else(|| RealmError::Conflict("package release baseline changed".into()))?;
+            let previous = previous.ok_or_else(|| {
+                RealmError::Conflict(
+                    "The Profile changed. Reload the selection and try again.".into(),
+                )
+            })?;
             let old = read_selection(&previous)?;
             let new = profile.selection.as_ref().ok_or_else(|| {
                 RealmError::Conflict("a package release needs a complete selection".into())
@@ -317,9 +473,17 @@ impl RealmProfileRecord {
                     != Some(new)
             {
                 return Err(RealmError::Conflict(
-                    "the last package release is no longer available for rollback".into(),
+                    "There is no previous selection to roll back to.".into(),
                 ));
             }
+            record_service_switch(
+                &mut tx,
+                name,
+                old.selected().map_err(RealmError::Conflict)?.0,
+                new.selected().map_err(RealmError::Conflict)?.0,
+                !update.rollback,
+            )
+            .await?;
             let inserted = sqlx::query(
                 "INSERT INTO realm_package_release
                  (realm, operation_id, sequence, previous_document, document, rollback)
@@ -339,7 +503,42 @@ impl RealmProfileRecord {
                     "Package release operation ID already used".into(),
                 ));
             }
+        } else if let (Some(digest), Some(selection)) = (previous_digest, &profile.selection) {
+            // The accepted row also anchors ordinary writes when its original
+            // signing key is no longer listed.
+            let previous: Option<String> = sqlx::query_scalar(
+                "SELECT document FROM realm_profile WHERE realm = ? AND digest = ?",
+            )
+            .bind(name)
+            .bind(digest)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let previous = previous
+                .ok_or_else(|| RealmError::Conflict("Realm Profile baseline changed".into()))?;
+            let previous = read_stored_selection(&previous)?;
+            let old = previous.primary()?;
+            let new = selection.selected().map_err(RealmError::Conflict)?.0;
+            if let (ProfileWrite::Fetch, StoredSelection::Complete(accepted)) = (&write, &previous)
+            {
+                // Signer removal resets the refresh's sequence baseline.
+                // A stored selection still constrains a Service program change.
+                accepted
+                    .check_successor(selection)
+                    .map_err(RealmError::Conflict)?;
+                record_service_switch(&mut tx, name, old, new, false).await?;
+            } else {
+                old.check_primary_successor(new).map_err(|_| {
+                    RealmError::Conflict(
+                        "Use a package release to change the Service publisher or name.".into(),
+                    )
+                })?;
+            }
         }
+        let check_issuer_ledger = match write {
+            ProfileWrite::Issue | ProfileWrite::Release(PackageRelease::Service(_)) => true,
+            ProfileWrite::Release(PackageRelease::Front(_)) => owner.is_some(),
+            _ => false,
+        };
         if check_issuer_ledger {
             let keys = sqlx::query_as::<_, super::issuer_key::RealmIssuerKey>(
                 "SELECT * FROM realm_issuer_key WHERE realm = ?",
@@ -404,7 +603,7 @@ impl RealmProfileRecord {
                 .rows_affected();
                 if count == 0 {
                     return Err(RealmError::Conflict(format!(
-                        "immutable package {} changed digest",
+                        "{} is already published with different contents. Publish a new version.",
                         package.r#type
                     )));
                 }
@@ -557,6 +756,18 @@ mod tests {
         second["packages"]["ui"]["type"] = json!("acme.com/ui@1.1.0");
         second["packages"]["ui"]["sha256"] = json!("12".repeat(32));
 
+        let mut unguarded = second.clone();
+        unguarded["packages"]["service"]["type"] = json!("acme.com/new-notes@1.0.0");
+        sign_document(&mut unguarded, "rs-1", &key);
+        let unguarded = unguarded.to_string();
+        let switched = RealmProfile::verify(unguarded.as_bytes(), NAME, &keys)?;
+        initial.check_successor(&switched)?;
+        assert!(matches!(
+            RealmProfileRecord::store(&switched, &unguarded, Some(&original.digest), None, None)
+                .await,
+            Err(RealmError::Conflict(message)) if message.contains("Use a package release")
+        ));
+
         let mut changed_service = second.clone();
         changed_service["packages"]["service"]["type"] = json!("acme.com/notes@2.0.0");
         sign_document(&mut changed_service, "rs-1", &key);
@@ -623,6 +834,165 @@ mod tests {
             .verify(&keys)?;
         assert_eq!(restored.sequence, 3);
         assert_eq!(restored.selection, Some(prior));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn service_switch_and_rollback_check_existing_actor_owners() -> anyhow::Result<()> {
+        use super::super::acl::ActorAcl;
+        use actr_protocol::realm_profile::sign_document;
+
+        setup_test_db().await?;
+        let key = SigningKey::from_bytes(&[1; 32]);
+        let keys = verify_member(&signed_member(1, &[("rs-1", &key, KeyStatus::Active)]))?;
+        Realm {
+            name: NAME.into(),
+            status: Lifecycle::Pending,
+            ..Default::default()
+        }
+        .insert(None)
+        .await?;
+        let pool = get_database().get_pool();
+        sqlx::query(
+            "INSERT INTO realm_issuer_key
+                (realm, key_id, signer_name, public_key, state, created_at)
+             VALUES (?, 7, 'test-issuer', ?, 'current', 0)",
+        )
+        .bind(NAME)
+        .bind(BASE64.encode([2u8; 32]))
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO realm_member (realm, member_id, role, status, created_at)
+             VALUES (?1, 'owner', 'owner', 'active', 0),
+                    (?1, 'viewer', 'viewer', 'active', 0)",
+        )
+        .bind(NAME)
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO realm_client_key (realm, key_id, public_key, member_id, registered_at)
+             VALUES (?1, 'owner-key', zeroblob(32), 'owner', 0),
+                    (?1, 'viewer-key', randomblob(32), 'viewer', 0)",
+        )
+        .bind(NAME)
+        .execute(pool)
+        .await?;
+
+        let first = document(1, "active", &key);
+        let initial = RealmProfile::verify(first.as_bytes(), NAME, &keys)?;
+        RealmProfileRecord::store(&initial, &first, None, None, None).await?;
+        let mut candidate: Value = serde_json::from_str(&first)?;
+        candidate["packages"]["service"]["type"] = "acme.com/notes-next@1.0.0".into();
+        candidate["packages"]["ui"]["type"] = "acme.com/ui@1.1.0".into();
+        sqlx::query(
+            "INSERT INTO issued_actor_identity
+                (realm, serial_number, actor_type, member_id, client_key_id, issued_at)
+             VALUES (?1, 10, 'acme.com/notes-next@1.0.0', 'owner', 'owner-key', 0),
+                    (?1, 11, 'acme.com/notes-next-other@1.0.0', 'viewer', 'viewer-key', 0)",
+        )
+        .bind(NAME)
+        .execute(pool)
+        .await?;
+
+        for (expected_sequence, serial, actor_type, mut target) in [
+            (1, 12, "acme.com/notes-next@2.0.0", candidate),
+            (2, 13, "acme.com/notes@1.0.0", serde_json::from_str(&first)?),
+        ] {
+            // The Viewer registered another version before the switch, or
+            // the original type after it was no longer the selected Service.
+            sqlx::query(
+                "INSERT INTO issued_actor_identity
+                    (realm, serial_number, actor_type, member_id, client_key_id, issued_at)
+                 VALUES (?, ?, ?, 'viewer', 'viewer-key', 0)",
+            )
+            .bind(NAME)
+            .bind(serial)
+            .bind(actor_type)
+            .execute(pool)
+            .await?;
+            if expected_sequence == 1 {
+                let rules = [ActorAcl::new(
+                    NAME.into(),
+                    "acme.com/ui@1.1.0".into(),
+                    actor_type.into(),
+                    true,
+                )];
+                let mut tx = pool.begin().await?;
+                let viewer = check_key_on(&mut tx, NAME, "viewer-key").await?;
+                ActorAcl::replace_registration_policy(&mut tx, actor_type, &rules, &viewer).await?;
+                tx.commit().await?;
+            }
+
+            target["sequence"] = json!(expected_sequence + 1);
+            sign_document(&mut target, "rs-1", &key);
+            let target = target.to_string();
+            let profile = RealmProfile::verify(target.as_bytes(), NAME, &keys)?;
+            let previous = RealmProfileRecord::get(NAME).await?.unwrap();
+            let update = FrontUpdate {
+                operation_id: format!("{serial:032x}"),
+                expected_sequence,
+                rollback: expected_sequence == 2,
+            };
+            let release = PackageRelease::Service(&update);
+            assert!(matches!(
+                RealmProfileRecord::store_package_release(
+                    &profile, &target, Some(&previous.digest), None, release,
+                ).await,
+                Err(RealmError::Conflict(message)) if message.contains("belongs to a non-owner")
+            ));
+            assert_eq!(
+                RealmProfileRecord::get(NAME).await?.unwrap().digest,
+                previous.digest
+            );
+
+            sqlx::query(
+                "INSERT INTO revoked_actor (realm, serial_number, revoked_at) VALUES (?, ?, 1)",
+            )
+            .bind(NAME)
+            .bind(serial)
+            .execute(pool)
+            .await?;
+            if expected_sequence == 1 {
+                assert!(matches!(
+                    RealmProfileRecord::store_package_release(
+                        &profile, &target, Some(&previous.digest), None, release,
+                    ).await,
+                    Err(RealmError::Conflict(message))
+                        if message.contains(actor_type) && message.contains("needs approval from the current Realm owner")
+                ));
+                assert_eq!(
+                    RealmProfileRecord::get(NAME).await?.unwrap().digest,
+                    previous.digest
+                );
+                let rules = [ActorAcl::new(
+                    NAME.into(),
+                    "acme.com/ui@1.1.0".into(),
+                    actor_type.into(),
+                    true,
+                )];
+                let mut tx = pool.begin().await?;
+                let owner = check_key_on(&mut tx, NAME, "owner-key").await?;
+                ActorAcl::replace_registration_policy(&mut tx, actor_type, &rules, &owner).await?;
+                tx.commit().await?;
+            }
+            RealmProfileRecord::store_package_release(
+                &profile,
+                &target,
+                Some(&previous.digest),
+                None,
+                release,
+            )
+            .await?;
+        }
+
+        let restored = RealmProfileRecord::get(NAME)
+            .await?
+            .unwrap()
+            .verify(&keys)?;
+        assert_eq!(restored.sequence, 3);
+        assert_eq!(restored.selection, initial.selection);
         Ok(())
     }
 

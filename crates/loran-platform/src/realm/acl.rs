@@ -6,7 +6,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use super::super::RealmError;
+use super::membership::Signer;
 use crate::storage::db::get_database;
+use actr_protocol::realm_membership::Role;
 
 const ANONYMOUS_ACTOR_TYPE: &str = "ANONCLNT";
 const VOICE_ACTOR_TYPE: &str = "VOICE";
@@ -83,7 +85,8 @@ impl ActorAcl {
             // Update existing record
             sqlx::query(
                 "UPDATE actoracl
-                 SET realm = ?, source_realm = ?, from_type = ?, to_type = ?, access = ?
+                 SET realm = ?, source_realm = ?, from_type = ?, to_type = ?, access = ?,
+                     owner_key_id = NULL
                  WHERE rowid = ?",
             )
             .bind(&self.realm)
@@ -102,7 +105,7 @@ impl ActorAcl {
             let new_rowid: i64 = sqlx::query_scalar(
                 "INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
                  VALUES (?, ?, ?, ?, ?)
-                 ON CONFLICT DO UPDATE SET access = excluded.access
+                 ON CONFLICT DO UPDATE SET access = excluded.access, owner_key_id = NULL
                  RETURNING rowid",
             )
             .bind(&self.realm)
@@ -240,6 +243,28 @@ impl ActorAcl {
         to_type: &str,
         rules: &[Self],
     ) -> Result<(), RealmError> {
+        Self::replace_rules(transaction, realm, to_type, rules, None).await
+    }
+
+    /// Store the registration's policy with the owner key, when the caller
+    /// has rechecked the signer in this transaction.
+    pub async fn replace_registration_policy(
+        transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        to_type: &str,
+        rules: &[Self],
+        signer: &Signer,
+    ) -> Result<(), RealmError> {
+        let owner_key = (signer.role == Role::Owner).then_some(signer.key_id.as_str());
+        Self::replace_rules(transaction, &signer.realm, to_type, rules, owner_key).await
+    }
+
+    async fn replace_rules(
+        transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        realm: &str,
+        to_type: &str,
+        rules: &[Self],
+        owner_key_id: Option<&str>,
+    ) -> Result<(), RealmError> {
         if rules
             .iter()
             .any(|rule| rule.realm != realm || rule.to_type != to_type)
@@ -258,19 +283,52 @@ impl ActorAcl {
         for rule in rules {
             sqlx::query(
                 "INSERT INTO actoracl
-                    (realm, source_realm, from_type, to_type, access)
-                 VALUES (?, ?, ?, ?, ?)
-                 ON CONFLICT DO UPDATE SET access = excluded.access",
+                    (realm, source_realm, from_type, to_type, access, owner_key_id)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT DO UPDATE SET access = excluded.access,
+                                           owner_key_id = excluded.owner_key_id",
             )
             .bind(&rule.realm)
             .bind(&rule.source_realm)
             .bind(&rule.from_type)
             .bind(&rule.to_type)
             .bind(if rule.access { 1 } else { 0 })
+            .bind(owner_key_id)
             .execute(&mut **transaction)
             .await?;
         }
 
+        Ok(())
+    }
+
+    /// All versions of a program become owner-only on promotion. Their
+    /// stored rules must be approved by a still-active key of the current
+    /// owner. An empty policy keeps the default deny.
+    pub(crate) async fn require_owner_policy(
+        conn: &mut sqlx::SqliteConnection,
+        realm: &str,
+        program: &str,
+    ) -> Result<(), RealmError> {
+        let unapproved: Option<String> = sqlx::query_scalar(
+            "SELECT a.to_type FROM actoracl a
+             WHERE a.realm = ?1 AND substr(a.to_type, 1, length(?2) + 1) = (?2 || '@')
+               AND NOT EXISTS (
+                   SELECT 1 FROM realm_client_key k
+                   JOIN realm_member m ON m.realm = k.realm AND m.member_id = k.member_id
+                   WHERE k.realm = a.realm AND k.key_id = a.owner_key_id
+                     AND k.revoked_at IS NULL AND m.status = 'active' AND m.role = 'owner'
+               )
+             ORDER BY a.to_type LIMIT 1",
+        )
+        .bind(realm)
+        .bind(program)
+        .fetch_optional(conn)
+        .await?;
+        if let Some(actor_type) = unapproved {
+            return Err(RealmError::Conflict(format!(
+                "The ACL for {actor_type} needs approval from the current Realm owner. Register it with its ACL as the owner and try again."
+            )));
+        }
         Ok(())
     }
 
@@ -429,6 +487,102 @@ mod tests {
     use crate::realm::Realm;
     use crate::util::test_utils::utils::setup_test_db;
     use serial_test::serial;
+
+    #[tokio::test]
+    #[serial]
+    async fn service_acl_requires_an_active_owner_at_write_and_promotion() -> anyhow::Result<()> {
+        use super::super::membership::check_key_on;
+
+        setup_test_db().await?;
+        let realm = "acl-approval@example.com";
+        Realm::create(realm.into()).await?;
+        let program = "acme.com/echo";
+        let target = "acme.com/echo@1.0.0";
+        let rules = [ActorAcl::new(
+            realm.into(),
+            "acme.com/ui@1.0.0".into(),
+            target.into(),
+            true,
+        )];
+        let mut tx = get_database().get_pool().begin().await?;
+        sqlx::query(
+            "INSERT INTO realm_member (realm, member_id, role, status, created_at)
+             VALUES (?1, 'alice', 'owner', 'active', 0),
+                    (?1, 'bob', 'editor', 'active', 0)",
+        )
+        .bind(realm)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO realm_client_key (realm, key_id, public_key, member_id, registered_at)
+             VALUES (?1, 'key-a', zeroblob(32), 'alice', 0),
+                    (?1, 'key-b', randomblob(32), 'bob', 0)",
+        )
+        .bind(realm)
+        .execute(&mut *tx)
+        .await?;
+        ActorAcl::require_owner_policy(&mut tx, realm, program).await?;
+        let editor = check_key_on(&mut tx, realm, "key-b").await?;
+        ActorAcl::replace_registration_policy(&mut tx, target, &rules, &editor).await?;
+        assert!(
+            ActorAcl::require_owner_policy(&mut tx, realm, program)
+                .await
+                .is_err()
+        );
+
+        // A role change does not authorize a policy written as an editor.
+        sqlx::query(
+            "UPDATE realm_member SET role = 'editor' WHERE realm = ? AND member_id = 'alice'",
+        )
+        .bind(realm)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("UPDATE realm_member SET role = 'owner' WHERE realm = ? AND member_id = 'bob'")
+            .bind(realm)
+            .execute(&mut *tx)
+            .await?;
+        assert!(
+            ActorAcl::require_owner_policy(&mut tx, realm, program)
+                .await
+                .is_err()
+        );
+        let owner = check_key_on(&mut tx, realm, "key-b").await?;
+        ActorAcl::replace_registration_policy(&mut tx, target, &rules, &owner).await?;
+        ActorAcl::require_owner_policy(&mut tx, realm, program).await?;
+
+        sqlx::query(
+            "UPDATE realm_member SET role = 'editor' WHERE realm = ? AND member_id = 'bob'",
+        )
+        .bind(realm)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "UPDATE realm_member SET role = 'owner' WHERE realm = ? AND member_id = 'alice'",
+        )
+        .bind(realm)
+        .execute(&mut *tx)
+        .await?;
+        assert!(
+            ActorAcl::require_owner_policy(&mut tx, realm, program)
+                .await
+                .is_err()
+        );
+        let owner = check_key_on(&mut tx, realm, "key-a").await?;
+        ActorAcl::replace_registration_policy(&mut tx, target, &rules, &owner).await?;
+        ActorAcl::require_owner_policy(&mut tx, realm, program).await?;
+        sqlx::query(
+            "UPDATE realm_client_key SET revoked_at = 1 WHERE realm = ? AND key_id = 'key-a'",
+        )
+        .bind(realm)
+        .execute(&mut *tx)
+        .await?;
+        assert!(
+            ActorAcl::require_owner_policy(&mut tx, realm, program)
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
 
     #[tokio::test]
     #[serial]

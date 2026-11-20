@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const LORAN_SCHEMA_VERSION: i64 = 15;
+const LORAN_SCHEMA_VERSION: i64 = 17;
 
 /// Database manager
 #[derive(Clone)]
@@ -50,7 +50,10 @@ impl Database {
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
             .fetch_one(&mut *connection)
             .await?;
-        if matches!(version, 10 | 11 | 12 | 13 | 14 | LORAN_SCHEMA_VERSION) {
+        if matches!(
+            version,
+            10 | 11 | 12 | 13 | 14 | 15 | 16 | LORAN_SCHEMA_VERSION
+        ) {
             return Ok(version);
         }
 
@@ -248,6 +251,33 @@ impl Database {
         .execute(&mut *tx)
         .await?;
 
+        // Outgoing Service programs keep owner-only registration across
+        // Profile changes. Type-wide ACLs can outlive the selected package.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS realm_previous_service_program (
+                realm TEXT NOT NULL REFERENCES realm(name) ON DELETE CASCADE,
+                program TEXT NOT NULL,
+                PRIMARY KEY(realm, program)
+            )",
+        )
+        .execute(&mut *tx)
+        .await?;
+        if version == 15 {
+            sqlx::query(
+                "INSERT OR IGNORE INTO realm_previous_service_program (realm, program)
+                 SELECT realm, substr(actor_type, 1, instr(actor_type, '@') - 1)
+                 FROM (
+                     SELECT realm, json_extract(
+                         previous_document,
+                         '$.packages.' || json_extract(previous_document, '$.primary_package') || '.type'
+                     ) AS actor_type FROM realm_package_release
+                 )
+                 WHERE instr(actor_type, '@') > 1",
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
         // In v10 the last accepted signed Profile held the only pin for its package.
         // Copy that pin before v11 can replace the Profile with another version.
         if version == 10 {
@@ -353,11 +383,27 @@ impl Database {
                 from_type TEXT NOT NULL,
                 to_type TEXT NOT NULL,
                 access INTEGER NOT NULL CHECK(access IN (0, 1)),
+                owner_key_id TEXT,
                 FOREIGN KEY(realm) REFERENCES realm(name) ON DELETE CASCADE
             )",
         )
         .execute(&mut *tx)
         .await?;
+        if version != LORAN_SCHEMA_VERSION {
+            let has_provenance: bool = sqlx::query_scalar(
+                "SELECT EXISTS (
+                     SELECT 1 FROM pragma_table_info('actoracl') WHERE name = 'owner_key_id'
+                 )",
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            if !has_provenance {
+                // Older rules have no evidence of an owner-authorized write.
+                sqlx::query("ALTER TABLE actoracl ADD COLUMN owner_key_id TEXT")
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
 
         // Create indexes.
         sqlx::query(
@@ -684,6 +730,76 @@ mod tests {
             .fetch_one(&mut *conn)
             .await?;
         assert_eq!(members, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn v15_release_receipts_keep_outgoing_service_programs_protected() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let old = Database::new(dir.path()).await?;
+        let pool = old.get_pool();
+        sqlx::query("DROP TABLE realm_previous_service_program")
+            .execute(pool)
+            .await?;
+        let realm = "old-switch@example.com";
+        sqlx::query("INSERT INTO realm (name, created_at) VALUES (?, 1)")
+            .bind(realm)
+            .execute(pool)
+            .await?;
+        let prior = serde_json::json!({
+            "primary_package": "old-service",
+            "packages": {"old-service": {"type": "acme.example/echo@1.0.0"}}
+        });
+        sqlx::query(
+            "INSERT INTO realm_package_release
+             (realm, operation_id, sequence, previous_document, document)
+             VALUES (?, 'operation', 2, ?, '{}')",
+        )
+        .bind(realm)
+        .bind(prior.to_string())
+        .execute(pool)
+        .await?;
+        sqlx::query("PRAGMA user_version=15").execute(pool).await?;
+        pool.close().await;
+
+        let upgraded = Database::new(dir.path()).await?;
+        let program: String = sqlx::query_scalar(
+            "SELECT program FROM realm_previous_service_program WHERE realm = ?",
+        )
+        .bind(realm)
+        .fetch_one(upgraded.get_pool())
+        .await?;
+        assert_eq!(program, "acme.example/echo");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn v16_acl_rules_retain_their_permissions_without_implied_approval() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let old = Database::new(dir.path()).await?;
+        let pool = old.get_pool();
+        sqlx::query("ALTER TABLE actoracl DROP COLUMN owner_key_id")
+            .execute(pool)
+            .await?;
+        sqlx::query("INSERT INTO realm (name, created_at) VALUES ('acl@example.com', 1)")
+            .execute(pool)
+            .await?;
+        sqlx::query(
+            "INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
+             VALUES ('acl@example.com', 'acl@example.com', 'acme.com/ui@1.0.0', 'acme.com/echo@1.0.0', 1)",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query("PRAGMA user_version=16").execute(pool).await?;
+        pool.close().await;
+
+        let upgraded = Database::new(dir.path()).await?;
+        let rule: (bool, Option<String>) =
+            sqlx::query_as("SELECT access, owner_key_id FROM actoracl")
+                .fetch_one(upgraded.get_pool())
+                .await?;
+        assert_eq!(rule, (true, None));
         Ok(())
     }
 

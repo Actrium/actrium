@@ -65,9 +65,9 @@ async fn release(
     }
     let snapshot = state.service.realm_package_state(realm).await?;
     let conflict = if snapshot.sequence != operation.expected_sequence {
-        Some("The Profile changed. Reload the selection before submitting again.")
+        Some("The Profile changed. Reload the selection and try again.")
     } else if operation.rollback && snapshot.previous_selection.as_ref() != Some(&selection) {
-        Some("There is no matching previous package selection to restore.")
+        Some("There is no previous selection to roll back to.")
     } else {
         None
     };

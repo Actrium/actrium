@@ -279,7 +279,13 @@ impl Command for RealmArgs {
             RealmCommand::Update(args) => realm_members::update(args).await?,
             RealmCommand::FetchPackages(args) => super::realm_packages::fetch(args).await?,
             RealmCommand::CheckSelection(args) => {
-                super::realm_packages::check_selection(args).await?
+                match super::realm_packages::check_selection(args).await {
+                    Ok(report) => report,
+                    Err(error) => {
+                        tracing::debug!(?error, "Package selection check failed");
+                        return Ok(CommandResult::Error(error.to_string()));
+                    }
+                }
             }
             RealmCommand::Invite(args) => realm_members::invite(args).await?,
             RealmCommand::Members(args) => realm_members::members(args).await?,
