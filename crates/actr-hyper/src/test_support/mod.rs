@@ -709,7 +709,10 @@ impl TestDedupState {
     }
 
     pub fn check_or_mark(&mut self, request_id: &str) -> TestDedupOutcome {
-        match self.inner.check_or_mark(request_id) {
+        match self
+            .inner
+            .check_or_mark(&crate::lifecycle::dedup::DedupKey::test_request(request_id))
+        {
             crate::lifecycle::dedup::DedupOutcome::Fresh => TestDedupOutcome::Fresh,
             crate::lifecycle::dedup::DedupOutcome::InFlight(waiter) => {
                 TestDedupOutcome::InFlight(TestDedupWaiter { inner: waiter })
@@ -725,7 +728,10 @@ impl TestDedupState {
         request_id: &str,
         result: actr_protocol::ActorResult<actr_framework::Bytes>,
     ) {
-        self.inner.complete(request_id, result);
+        self.inner.complete(
+            &crate::lifecycle::dedup::DedupKey::test_request(request_id),
+            result,
+        );
     }
 }
 
@@ -839,6 +845,7 @@ impl TestWasmWorkload {
                 host_abi,
                 reply_deliver,
                 expects_response,
+                None,
                 None,
                 None,
             )

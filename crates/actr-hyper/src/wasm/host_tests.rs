@@ -400,6 +400,7 @@ fn deferred_reply_invocation_expires_at_inflight_ttl() {
         true,
         Some(Arc::new(std::sync::atomic::AtomicBool::new(true))),
         None,
+        None,
     );
     let admitted_at = state.invocations[&token].admitted_at;
 
@@ -436,6 +437,7 @@ fn running_invocation_is_not_expired_by_deferred_reply_sweep() {
         true,
         None,
         None,
+        None,
     );
     let admitted_at = state.invocations[&token].admitted_at;
 
@@ -461,6 +463,7 @@ fn deferred_tell_expiry_completes_without_response() {
         Some(Arc::new(delivered)),
         false,
         Some(Arc::new(std::sync::atomic::AtomicBool::new(true))),
+        None,
         None,
     );
     let admitted_at = state.invocations[&token].admitted_at;
@@ -489,6 +492,7 @@ fn reply_import_completion_retires_token_when_dispatch_finishes() {
         noop_host_abi(),
         Some(Arc::new(delivered)),
         true,
+        None,
         None,
         None,
     );

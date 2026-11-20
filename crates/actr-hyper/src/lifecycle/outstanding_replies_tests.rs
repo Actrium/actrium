@@ -58,6 +58,9 @@ async fn sweep_expired_evicts_unclaimed_entries() {
 
     let ttl = Duration::from_secs(60);
     let future = std::time::Instant::now() + ttl + Duration::from_secs(1);
-    assert_eq!(r.sweep_expired(ttl, future).await, vec!["req-unclaimed"]);
+    assert_eq!(
+        r.sweep_expired(ttl, future).await,
+        vec![super::DedupKey::test_request("req-unclaimed")]
+    );
     assert_eq!(r.len(), 0);
 }

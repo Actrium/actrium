@@ -24,7 +24,7 @@ use bytes::Bytes;
 use prost::Message;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::context::RuntimeContext;
 
@@ -39,6 +39,11 @@ pub enum HostOperation {
     Discover(HostDiscoverV1),
     ResolveDependency(HostResolveDependencyV1),
     CallRaw(HostCallRawV1),
+    ScopedActorCall {
+        request: HostCallRawV1,
+        deadline: tokio::time::Instant,
+        dispatch_id: Arc<OnceLock<String>>,
+    },
     Reply(Vec<u8>),
     ReplyError(ActrError),
     RegisterStream(HostRegisterStreamV1),
@@ -729,7 +734,7 @@ impl Workload {
                     let reply_deliver = ctx.reply_deliver();
                     let expects_response = ctx.expects_response();
                     let reply_claimed = ctx.reply_claimed_marker();
-                    let reply_deadline = ctx.reply_deadline().map(tokio::time::Instant::from_std);
+                    let reply_deadline = ctx.wasm_reply_deadline();
                     workload
                         .handle_with_reply(
                             &request_bytes,
@@ -739,10 +744,15 @@ impl Workload {
                             expects_response,
                             reply_claimed,
                             reply_deadline,
+                            ctx.scope,
                         )
                         .await
                         .map(Bytes::from)
-                        .map_err(|e| ActrError::Internal(format!("workload dispatch failed: {e}")))
+                        .map_err(|error| match error {
+                            crate::wasm::WasmError::RequestScopeEnded => ActrError::TimedOut,
+                            crate::wasm::WasmError::DispatchFailed(error) => error,
+                            _ => ActrError::Internal(format!("workload dispatch failed: {error}")),
+                        })
                 }
                 #[cfg(feature = "dynclib-engine")]
                 Workload::DynClib(workload) => {

@@ -113,7 +113,9 @@ dependencies = [
 name = "actr-pack"
 version = "0.10.7"
 dependencies = [
+ "actr-config",
  "actr-protocol",
+ "actr-service-compat",
  "base64 0.22.1",
  "ed25519-dalek",
  "hex",
@@ -123,6 +125,7 @@ dependencies = [
  "thiserror 2.0.21",
  "toml 1.1.8+spec-1.1.0",
  "tracing",
+ "url",
  "zip",
 ]
 
@@ -212,6 +215,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "proto-fingerprint",
+ "protobuf",
  "protobuf-parse",
  "serde",
  "serde_json",

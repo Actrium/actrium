@@ -789,7 +789,7 @@ async fn execute_verify(args: &PkgVerifyArgs, config_keychain: Option<&str>) -> 
             println!("  files:       {}", manifest.files.len());
             return Ok(());
         }
-        actr_pack::RuntimePackageManifest::Legacy(manifest) => manifest,
+        actr_pack::RuntimePackageManifest::Legacy(manifest) => *manifest,
     };
 
     if let Some(ref manifest_key_id) = manifest.signing_key_id {

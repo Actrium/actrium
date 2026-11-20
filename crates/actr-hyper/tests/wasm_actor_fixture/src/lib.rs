@@ -209,6 +209,12 @@ impl MessageDispatcher for DoubleDispatcher {
     ) -> ActorResult<Bytes> {
         match envelope.route_key.as_str() {
             "test/echo" => Ok(Bytes::from(envelope.payload.unwrap_or_default().to_vec())),
+            "test/scoped-expire" => {
+                let _ = ctx
+                    .call_dependency("index", "notes.Index.GetTask", Bytes::new())
+                    .await;
+                std::future::pending::<ActorResult<Bytes>>().await
+            }
             #[cfg(target_arch = "wasm32")]
             "test/wasi-data-write" => {
                 std::fs::write("/data/fixture-state", envelope.payload.unwrap_or_default())

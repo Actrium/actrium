@@ -78,6 +78,14 @@ pub struct LockedDependency {
     /// Actor type (e.g., "acme/user-service@1.0.0")
     pub actr_type: String,
 
+    /// Whole target archive digest required by scoped Actor RPC permissions.
+    #[serde(
+        default,
+        rename = "package-sha256",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub package_sha256: Option<String>,
+
     /// Service description
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -402,6 +410,7 @@ impl LockedDependency {
             name: spec.name,
             alias,
             actr_type,
+            package_sha256: None,
             description: spec.description,
             fingerprint: spec.fingerprint,
             published_at: spec.published_at,
@@ -584,6 +593,7 @@ mod tests {
             name: name.to_string(),
             alias: alias.to_string(),
             actr_type: actr_type.to_string(),
+            package_sha256: None,
             description: None,
             fingerprint: format!("service_semantic:{name}"),
             published_at: None,

@@ -202,6 +202,15 @@ data_classes = ["private"]
 capabilities = ["actor.call:infer.v1"]
 ```
 
+Scoped WASM egress extends this structure with two rule forms:
+
+| Rule | Fields and enforcement |
+| --- | --- |
+| Scoped Actor RPC | Add `dependency_alias` and `rpc_routes` to an `edge` with the `actor.call` capability and a nonempty `data_classes` list. The source and target roles must identify exact `actr_type` values. The alias must refer to a declared dependency of the source package. Each distinct route must identify a unary method in its signed dependency Proto, and the signed lock must pin the target Actor type and archive SHA-256. |
+| Fixed HTTPS | Add a `[[privacy_contract.terminal]]` entry with `alias`, `source`, `url`, `method`, `data_classes`, and `required`. The source names an Actor role with an exact `actr_type`. The alias identifies a fixed HTTPS URL and HTTP method, with a DNS host on port 443 and a nonempty data-class list. Redirects are disabled. The Host policy can use `required` when evaluating whether the instance can operate without the terminal. |
+
+The source package must list the Privacy Contract as a signed `contract` file. Only rules whose source role matches that package's `release_id` can authorize its local operations. A package with local scoped egress must identify exactly one role for its own release. For example, Notebook's contract scopes its RPCs to Index and Weather, while Weather's signed contract authorizes Weather's HTTPS request. A remote role's declaration in Notebook's graph does not grant Weather access. The embedding Host evaluates the selected graph and current grant when authorizing each operation.
+
 The declaration is not descriptive text; it is the upper bound on the capability the Actr Host may grant:
 
 ```text

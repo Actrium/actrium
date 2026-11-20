@@ -22,6 +22,7 @@
 //! ```
 
 pub mod actor_package;
+pub mod egress;
 pub mod error;
 pub mod identity;
 pub mod load;
@@ -34,7 +35,7 @@ pub mod verify;
 mod runtime;
 mod util;
 
-#[cfg(feature = "profile-validation")]
+#[cfg(all(feature = "profile-validation", not(target_arch = "wasm32")))]
 mod profiles;
 
 pub use actor_package::{

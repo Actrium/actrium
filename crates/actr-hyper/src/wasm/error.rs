@@ -17,6 +17,9 @@ pub enum WasmError {
     #[error("WASM actor execution failed: {0}")]
     ExecutionFailed(String),
 
+    #[error("WASM guest dispatch failed: {0}")]
+    DispatchFailed(actr_protocol::ActrError),
+
     #[error("WASM instance trapped (store poisoned; rebuilt on next call): {0}")]
     InstanceTrapped(String),
 
@@ -28,6 +31,8 @@ pub enum WasmError {
     ResourceLimitExceeded(&'static str),
     #[error("WASM invocation timed out after {0:?}")]
     InvocationTimeout(std::time::Duration),
+    #[error("WASM invocation request scope expired or was cancelled")]
+    RequestScopeEnded,
 }
 
 const MAX_TRAP_MESSAGE_BYTES: usize = 512;

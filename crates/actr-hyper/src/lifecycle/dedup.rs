@@ -5,7 +5,7 @@
 //! When a caller retries a request (e.g. after a transient send failure), the receiver
 //! may process the same `request_id` twice, leading to double side-effects.
 //!
-//! `DedupState` prevents this by caching the response for each `request_id` for a
+//! `DedupState` prevents this by caching the response for each caller, route, direction, and `request_id` for a
 //! fixed TTL (default 30 s).  A second call with the same `request_id` within the TTL
 //! returns the cached response without re-invoking the handler.
 //! If the original request is still in-flight, duplicate callers wait for the
@@ -22,8 +22,8 @@
 //! RETURN entries stay retained until `complete`.
 
 use actr_framework::Bytes;
-use actr_protocol::{ActorResult, ActrError};
-use std::collections::HashMap;
+use actr_protocol::{ActorResult, ActrError, ActrId};
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
@@ -43,6 +43,17 @@ pub(crate) const DEDUP_TTL: Duration = Duration::from_secs(30);
 /// deadline, so the wall clock is the correct clock to read it on.
 pub(crate) fn caller_reply_deadline(timeout_ms: i64) -> Option<Instant> {
     (timeout_ms > 0).then(|| Instant::now() + Duration::from_millis(timeout_ms as u64))
+}
+
+/// Project the remaining scope budget onto the synchronous reply clock.
+pub(crate) fn scoped_reply_deadline(deadline: tokio::time::Instant) -> Instant {
+    let now = Instant::now();
+    now + deadline.saturating_duration_since(tokio::time::Instant::now())
+}
+
+#[cfg(feature = "wasm-engine")]
+pub(crate) fn remaining_reply_budget(deadline: Instant) -> Duration {
+    deadline.saturating_duration_since(Instant::now())
 }
 
 /// Default TTL for *in-flight* dedup entries (RFC-0323 §5/§7). Independent of
@@ -72,12 +83,33 @@ struct Entry {
     result: CachedResult,
 }
 
+/// Identity of a retry at a single receiving node.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct DedupKey {
+    pub(crate) caller: Option<ActrId>,
+    pub(crate) route_key: String,
+    pub(crate) request_id: String,
+    pub(crate) is_tell: bool,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl DedupKey {
+    pub(crate) fn test_request(request_id: &str) -> Self {
+        Self {
+            caller: None,
+            route_key: String::new(),
+            request_id: request_id.to_owned(),
+            is_tell: false,
+        }
+    }
+}
+
 /// Framework-side request deduplication state.
 ///
 /// Not `Clone` intentionally; share via `Arc<Mutex<DedupState>>`.
 #[derive(Debug, Default)]
 pub(crate) struct DedupState {
-    entries: HashMap<String, Entry>,
+    entries: BTreeMap<DedupKey, Entry>,
     ttl: Duration,
 }
 
@@ -96,7 +128,7 @@ impl DedupState {
     /// Create a dedup state with the default TTLs (30 s completed, 60 s in-flight).
     pub(crate) fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: BTreeMap::new(),
             ttl: DEDUP_TTL,
         }
     }
@@ -111,15 +143,15 @@ impl DedupState {
     ///   longer than `inflight_ttl`); EXPLICIT in-flight entries are swept
     ///   only by the background [`sweep_inflight_explicit`], scoped to the
     ///   `outstanding_replies` registry.
-    pub(crate) fn check_or_mark(&mut self, request_id: &str) -> DedupOutcome {
+    pub(crate) fn check_or_mark(&mut self, key: &DedupKey) -> DedupOutcome {
         let now = Instant::now();
         self.evict_done_expired(now);
 
-        match self.entries.get(request_id) {
+        match self.entries.get(key) {
             None => {
                 let (completion_tx, _completion_rx) = watch::channel(None);
                 self.entries.insert(
-                    request_id.to_string(),
+                    key.clone(),
                     Entry {
                         received_at: now,
                         result: CachedResult::InFlight { completion_tx },
@@ -139,8 +171,8 @@ impl DedupState {
     /// Record the completed response for `request_id`.
     ///
     /// Call this after the handler finishes (success or error).
-    pub(crate) fn complete(&mut self, request_id: &str, result: ActorResult<Bytes>) {
-        if let Some(entry) = self.entries.get_mut(request_id) {
+    pub(crate) fn complete(&mut self, key: &DedupKey, result: ActorResult<Bytes>) {
+        if let Some(entry) = self.entries.get_mut(key) {
             if let CachedResult::InFlight { completion_tx } = &entry.result {
                 let _ = completion_tx.send(Some(result.clone()));
             }
@@ -173,7 +205,7 @@ impl DedupState {
     /// `Reply` that is never `send`-ed would otherwise pin its `InFlight`
     /// marker permanently). `Done` entries are left to `evict_done_expired`.
     #[cfg(test)]
-    pub(crate) fn sweep_inflight_explicit(&mut self, now: Instant, explicit_ids: &[String]) {
+    pub(crate) fn sweep_inflight_explicit(&mut self, now: Instant, explicit_ids: &[DedupKey]) {
         let inflight_ttl = INFLIGHT_TTL;
         self.entries.retain(|id, e| match &mut e.result {
             CachedResult::InFlight { completion_tx } => {
@@ -195,7 +227,7 @@ impl DedupState {
     /// already applied either the caller deadline or that TTL. Requiring both
     /// would leave a short-deadline request parked in dedup until 60 seconds
     /// after its caller was told it timed out.
-    pub(crate) fn expire_inflight_explicit(&mut self, expired_ids: &[String]) {
+    pub(crate) fn expire_inflight_explicit(&mut self, expired_ids: &[DedupKey]) {
         self.entries.retain(|id, e| match &mut e.result {
             CachedResult::InFlight { completion_tx }
                 if expired_ids.iter().any(|expired| expired == id) =>
