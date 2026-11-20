@@ -36,6 +36,7 @@ final class RendererLocalStorage {
     }
 
     func resolveOrigin(config: [String: Any], window: NSWindow? = nil) async throws -> [String: Any] {
+        guard let publisherIdentity = config["localStoragePublisherIdentity"] as? String else { return config }
         guard let origin = config["localStorageOrigin"] as? String,
               let manifest = config["capabilityManifestJSON"] as? String,
               let permissions = config["permissions"] as? [String],
@@ -44,7 +45,7 @@ final class RendererLocalStorage {
         var resolved = config
         resolved["localStoragePrincipal"] = origin
         resolved["localStorageOrigin"] = try await migrationConsent.resolve(
-            origin: origin, publisherIdentity: config["localStoragePublisherIdentity"] as? String,
+            origin: origin, publisherIdentity: publisherIdentity,
             database: databaseAccess, window: window
         )
         return resolved

@@ -570,6 +570,8 @@ public protocol GuestLocalStorageProtocol: AnyObject, Sendable {
 
     func acceptPublisherProfile(body: String, domain: String, previousPinsJson: String?, previousProfileBody: String?) throws  -> PublisherProfileAcceptance
 
+    func acceptedPublisherPins(domain: String) throws  -> String?
+
     func getItem(origin: String, key: String) throws  -> String?
 
     func keepStorageSeparate(origin: String, publisherIdentity: String) throws  -> String
@@ -653,6 +655,14 @@ open func acceptPublisherProfile(body: String, domain: String, previousPinsJson:
         FfiConverterString.lower(domain),
         FfiConverterOptionString.lower(previousPinsJson),
         FfiConverterOptionString.lower(previousProfileBody),$0
+    )
+})
+}
+
+open func acceptedPublisherPins(domain: String)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publisher_pins(self.uniffiClonePointer(),
+        FfiConverterString.lower(domain),$0
     )
 })
 }
@@ -12454,6 +12464,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_method_guestlocalstorage_accept_publisher_profile() != 43094) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publisher_pins() != 15617) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_method_guestlocalstorage_get_item() != 63346) {

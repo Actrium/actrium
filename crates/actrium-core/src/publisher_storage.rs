@@ -122,6 +122,16 @@ fn restore(
 }
 
 impl GuestLocalStorage {
+    /// Read only a fully verified database anchor, never an unvalidated cache hint.
+    pub fn accepted_publisher_pins(&self, domain: String) -> Result<Option<String>, Error> {
+        canonical_domain(&domain)?;
+        self.with_connection(|connection| {
+            load(connection, &domain)?
+                .map(|saved| serde_json::to_string(&saved.pins).map_err(invalid))
+                .transpose()
+        })
+    }
+
     /// The Host supplies a document fetched from the bound Publisher over HTTPS.
     pub fn accept_publisher_profile(
         &self,
@@ -132,18 +142,14 @@ impl GuestLocalStorage {
     ) -> Result<PublisherProfileAcceptance, Error> {
         canonical_domain(&domain)?;
         let profile = parse_profile(&body, &domain)?;
-        let external: Option<KeyPins> = previous_pins_json
-            .as_deref()
-            .map(serde_json::from_str)
-            .transpose()
-            .map_err(invalid)?;
-        let history = previous_profile_body
-            .as_deref()
-            .map(|body| pinned_history(body, &domain, external.as_ref()))
-            .transpose()?
-            .unwrap_or_default();
         self.with_connection(|connection| {
-            accept(connection, &domain, &profile, external.as_ref(), &history)
+            accept(
+                connection,
+                &domain,
+                &profile,
+                previous_pins_json.as_deref(),
+                previous_profile_body.as_deref(),
+            )
         })
     }
 
@@ -296,32 +302,30 @@ fn accept(
     connection: &mut Connection,
     domain: &str,
     profile: &PublisherProfile,
-    external: Option<&KeyPins>,
-    history: &[PackageSigningKey],
+    previous_pins_json: Option<&str>,
+    previous_profile_body: Option<&str>,
 ) -> Result<PublisherProfileAcceptance, Error> {
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let previous = load(&transaction, domain)?;
+    let (external, history) = if previous.is_none() {
+        bootstrap(domain, previous_pins_json, previous_profile_body)?
+    } else {
+        (None, Vec::new())
+    };
     let now = Utc::now();
     let (keys, outcome) = profile
         .accept(
             domain,
             now,
-            previous.as_ref().map(|saved| &saved.pins).or(external),
+            previous
+                .as_ref()
+                .map(|saved| &saved.pins)
+                .or(external.as_ref()),
         )
         .map_err(invalid)?;
     let KeyPinOutcome::Accepted(pins) = outcome else {
         return Err(Error::IdentityChanged);
     };
-    if previous.is_some()
-        && let Some(external) = external
-    {
-        let (_, outcome) = profile
-            .accept(domain, now, Some(external))
-            .map_err(invalid)?;
-        if !matches!(outcome, KeyPinOutcome::Accepted(_)) {
-            return Err(Error::IdentityChanged);
-        }
-    }
     let identity = previous.map(|saved| saved.identity).unwrap_or_else(|| {
         let mut bytes = [0; 16];
         rand::rngs::OsRng.fill_bytes(&mut bytes);
@@ -342,6 +346,23 @@ fn accept(
         profile: profile_info(domain, keys, identity),
         pins_json: serde_json::to_string(&pins).map_err(invalid)?,
     })
+}
+
+fn bootstrap(
+    domain: &str,
+    pins_json: Option<&str>,
+    profile_body: Option<&str>,
+) -> Result<(Option<KeyPins>, Vec<PackageSigningKey>), Error> {
+    // Preferences seed first enrollment only. A registered Publisher is owned by SQLite.
+    let pins = pins_json
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(invalid)?;
+    let history = profile_body
+        .map(|body| pinned_history(body, domain, pins.as_ref()))
+        .transpose()?
+        .unwrap_or_default();
+    Ok((pins, history))
 }
 
 fn profile_info(domain: &str, keys: PublisherKeys, identity: String) -> PublisherProfileInfo {

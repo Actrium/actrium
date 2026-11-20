@@ -6,6 +6,43 @@ import Testing
 
 @MainActor
 struct RendererStorageLaunchTests {
+    @Test(arguments: [false, true])
+    func independentGuestStartsWhileTheSharedDatabaseQueueIsFull(signed: Bool) async throws {
+        _ = NSApplication.shared
+        let key = try PublisherStorageFixture.key(3).publicKey.rawRepresentation.base64EncodedString()
+        let origin = signed ? "signed:\(key):publisher.example/counter" : "dev:/tmp/storage-launch-guest"
+        let database = GuestStorageDatabase(database: GuestLocalStorage(path: ":memory:"), pendingLimit: 1)
+        let started = AsyncStream<Void>.makeStream()
+        let resume = DispatchSemaphore(value: 0)
+        let blocker = Task {
+            try await database.run { _ in
+                started.continuation.yield(())
+                guard resume.wait(timeout: .now() + 15) == .success else {
+                    throw GuestLocalStorageError.DatabaseFailure(message: "The test did not release its queue blocker.")
+                }
+            }
+        }
+        defer { resume.signal() }
+        let timeout = Task { try await Task.sleep(for: .seconds(5)); started.continuation.finish() }
+        defer { timeout.cancel() }
+        var events = started.stream.makeAsyncIterator()
+        try #require(await events.next() != nil)
+        let broker = RendererLocalStorage(access: database)
+        let pool = RendererProcessPool(localStorage: broker)
+        defer { pool.shutdown() }
+        let tabId = UUID()
+        _ = try pool.allocateRenderer(for: tabId, fingerprint: "local-storage-start-\(tabId)")
+        _ = try await pool.prepareTab(tabId: tabId, config: [
+            "reloadKey": 1, "localStorageOrigin": origin,
+            "permissions": ["host:local-storage.getItem"],
+            "capabilityManifestJSON": #"{"hostModules":{"local-storage":{"rpc":["getItem"]}}}"#,
+        ])
+        #expect(database.pendingOperationCount == 1)
+        resume.signal()
+        try await blocker.value
+        #expect(database.pendingOperationCount == 0)
+    }
+
     @Test func storageOnlyGuestCanCopyLegacyDataWithoutFileImportPermission() async throws {
         _ = NSApplication.shared
         let core = GuestLocalStorage(path: ":memory:")

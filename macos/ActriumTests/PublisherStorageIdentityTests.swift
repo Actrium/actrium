@@ -123,6 +123,19 @@ private struct PackageFixture: Decodable {
 }
 
 enum PublisherStorageFixture {
+    static func profileAfterRemovingOldProfileKey() throws -> String {
+        var descriptor = try #require(JSONSerialization.jsonObject(with: Data(profile(rotated: true).utf8)) as? [String: Any])
+        var publisher = try #require(descriptor["publisher"] as? [String: Any])
+        publisher.removeValue(forKey: "signature")
+        publisher["sequence"] = 3
+        publisher["profile_signing_keys"] = [try entry(2, id: "root-2")]
+        publisher["rotations"] = [] as [String]
+        publisher["signature"] = ["key_id": "root-2", "algorithm": "Ed25519",
+                                  "value": try key(2).signature(for: payload(publisher)).base64EncodedString()]
+        descriptor["publisher"] = publisher
+        return String(decoding: try payload(descriptor), as: UTF8.self)
+    }
+
     static func key(_ seed: UInt8) throws -> Curve25519.Signing.PrivateKey {
         try Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: seed, count: 32))
     }

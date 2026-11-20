@@ -1272,6 +1272,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -1831,6 +1833,8 @@ fun uniffi_actrium_core_checksum_func_verify_realm_package_publisher(
 ): Short
 fun uniffi_actrium_core_checksum_method_guestlocalstorage_accept_publisher_profile(
 ): Short
+fun uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publisher_pins(
+): Short
 fun uniffi_actrium_core_checksum_method_guestlocalstorage_get_item(
 ): Short
 fun uniffi_actrium_core_checksum_method_guestlocalstorage_keep_storage_separate(
@@ -1901,6 +1905,8 @@ fun uniffi_actrium_core_fn_free_guestlocalstorage(`ptr`: Pointer,uniffi_out_err:
 fun uniffi_actrium_core_fn_constructor_guestlocalstorage_new(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
 fun uniffi_actrium_core_fn_method_guestlocalstorage_accept_publisher_profile(`ptr`: Pointer,`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,`previousPinsJson`: RustBuffer.ByValue,`previousProfileBody`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publisher_pins(`ptr`: Pointer,`domain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_method_guestlocalstorage_get_item(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -3398,6 +3404,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_accept_publisher_profile() != 43094.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publisher_pins() != 15617.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_get_item() != 63346.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -3882,6 +3891,8 @@ public interface GuestLocalStorageInterface {
 
     fun `acceptPublisherProfile`(`body`: kotlin.String, `domain`: kotlin.String, `previousPinsJson`: kotlin.String?, `previousProfileBody`: kotlin.String?): PublisherProfileAcceptance
 
+    fun `acceptedPublisherPins`(`domain`: kotlin.String): kotlin.String?
+
     fun `getItem`(`origin`: kotlin.String, `key`: kotlin.String): kotlin.String?
 
     fun `keepStorageSeparate`(`origin`: kotlin.String, `publisherIdentity`: kotlin.String): kotlin.String
@@ -3996,6 +4007,19 @@ open class GuestLocalStorage: Disposable, AutoCloseable, GuestLocalStorageInterf
     uniffiRustCallWithError(GuestLocalStorageException) { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_accept_publisher_profile(
         it, FfiConverterString.lower(`body`),FfiConverterString.lower(`domain`),FfiConverterOptionalString.lower(`previousPinsJson`),FfiConverterOptionalString.lower(`previousProfileBody`),_status)
+}
+    }
+    )
+    }
+
+
+
+    @Throws(GuestLocalStorageException::class)override fun `acceptedPublisherPins`(`domain`: kotlin.String): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithPointer {
+    uniffiRustCallWithError(GuestLocalStorageException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publisher_pins(
+        it, FfiConverterString.lower(`domain`),_status)
 }
     }
     )

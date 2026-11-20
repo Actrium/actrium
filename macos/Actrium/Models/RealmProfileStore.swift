@@ -251,6 +251,19 @@ enum RealmProfileStore {
         body: String, domain: String, preferences: UserDefaults, database: GuestStorageDatabase,
         fallbackPins: String? = nil
     ) async throws -> PublisherProfileInfo {
+        let storedPins = try await database.acceptedPublisherPins(domain: domain)
+        let bootstrap = try publisherBootstrap(domain: domain, preferences: preferences, fallbackPins: fallbackPins, storedPins: storedPins)
+        let accepted = try await database.acceptPublisherProfile(
+            body: body, domain: domain, previousPins: bootstrap.pins, previousProfile: bootstrap.body
+        )
+        preferences.set(["body": body, "pins": accepted.pinsJson], forKey: publisherKey(domain))
+        return accepted.profile
+    }
+
+    private static func publisherBootstrap(
+        domain: String, preferences: UserDefaults, fallbackPins: String?, storedPins: String?
+    ) throws -> (pins: String?, body: String?) {
+        if let storedPins { return (storedPins, nil) }
         let key = publisherKey(domain)
         let saved = preferences.dictionary(forKey: key)
         let pins = saved?["pins"] as? String ?? preferences.string(forKey: key)
@@ -261,11 +274,7 @@ enum RealmProfileStore {
         if saved?["body"] != nil && previousBody == nil {
             throw CoreError.AuthorityDescriptorInvalid(message: "Saved Publisher Profile could not be read; it was not reset.")
         }
-        let accepted = try await database.acceptPublisherProfile(
-            body: body, domain: domain, previousPins: pins ?? fallbackPins, previousProfile: previousBody
-        )
-        preferences.set(["body": body, "pins": accepted.pinsJson], forKey: key)
-        return accepted.profile
+        return (pins ?? fallbackPins, previousBody)
     }
 
     private static func authorityState(_ realmName: String, preferences: UserDefaults) -> [String: Any]? {
