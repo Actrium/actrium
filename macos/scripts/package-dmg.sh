@@ -31,6 +31,7 @@
 #   APP_BASE64         Optional base64-encoded .p12 (CI usage)
 #   P12_FILE           Optional .p12 path (alternative to APP_BASE64)
 #   P12_PASSWORD       Required when APP_BASE64/P12_FILE is used
+#   APP_PROVISIONING_PROFILE  Host macOS provisioning file for private Keychain access
 #   KEYCHAIN_PATH      Optional keychain to import into and use
 #   KEYCHAIN_PASSWORD  Required when KEYCHAIN_PATH already exists
 #   KEEP_KEYCHAIN=1    Keep the temporary keychain (deleted by default)
@@ -142,10 +143,12 @@ need_cmd find
 need_cmd ditto
 need_cmd hdiutil
 
+BUILD_COMMAND=(env -u APP_BASE64 -u P12_FILE -u P12_PASSWORD -u KEYCHAIN_PASSWORD -u ACCOUNT_PASSWORD xcodebuild)
+
 # The Xcode project is the single source of truth for the version.
 if [ -z "${TAG:-}" ]; then
   echo "==> Reading the version"
-  BUILD_SETTINGS="$(xcodebuild "${XCODE_PROJECT_FLAG[@]}" \
+  BUILD_SETTINGS="$("${BUILD_COMMAND[@]}" "${XCODE_PROJECT_FLAG[@]}" \
     -scheme "${APP_SCHEME}" \
     -configuration "${CONFIGURATION}" \
     -showBuildSettings 2>/dev/null || true)"
@@ -191,7 +194,7 @@ trap cleanup EXIT
 # is needed here.
 echo "==> Building the app (unsigned)"
 mkdir -p "$(dirname "${DERIVED_DATA_PATH}")"
-xcodebuild \
+"${BUILD_COMMAND[@]}" \
   "${XCODE_PROJECT_FLAG[@]}" \
   -scheme "${APP_SCHEME}" \
   -configuration "${CONFIGURATION}" \
@@ -344,6 +347,8 @@ if [ "${SKIP_DMG}" -eq 0 ]; then
   if [ "${SKIP_NOTARY_DMG}" -eq 0 ]; then
     [ "${SKIP_SIGNING}" -eq 0 ] || die "DMG notarization requires signing."
 
+    codesign --force --timestamp --sign "${IDENTITY_NAME}" \
+      ${NOTARY_KEYCHAIN_ARGS[@]+"${NOTARY_KEYCHAIN_ARGS[@]}"} "${DMG_PATH}"
     echo "==> Notarizing the DMG"
     xcrun notarytool submit "${DMG_PATH}" \
       --keychain-profile "${NOTARY_PROFILE}" \
