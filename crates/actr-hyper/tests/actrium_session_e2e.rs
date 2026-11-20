@@ -79,11 +79,12 @@ impl MessageDispatcher for EchoDispatcher {
             "echo" => Ok(envelope.payload.unwrap_or_default()),
             PREPARE_ATTACHMENT_ROUTE => {
                 let payload = envelope.payload.unwrap_or_default();
-                let request = PrepareAttachmentRequest::decode(payload.clone()).map_err(|error| {
-                    actr_protocol::ActrError::InvalidArgument(format!(
-                        "invalid attachment prepare payload: {error}"
-                    ))
-                })?;
+                let request =
+                    PrepareAttachmentRequest::decode(payload.clone()).map_err(|error| {
+                        actr_protocol::ActrError::InvalidArgument(format!(
+                            "invalid attachment prepare payload: {error}"
+                        ))
+                    })?;
                 if request.id == "reject" {
                     Ok(Bytes::from(
                         PrepareAttachmentResponse { status_code: 13 }.encode_to_vec(),

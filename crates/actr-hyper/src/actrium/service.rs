@@ -630,8 +630,7 @@ impl IncomingGuard for ActriumServiceGuard {
             let now = now_secs();
             let mut results = self.shared.attachment_results.lock().await;
             results.retain(|_, entry| entry.expires_at > now);
-            if results.len() >= MAX_PENDING_ATTACHMENT_RESULTS && !results.contains_key(stream_id)
-            {
+            if results.len() >= MAX_PENDING_ATTACHMENT_RESULTS && !results.contains_key(stream_id) {
                 return Err(IncomingGuardError::new(
                     IncomingGuardErrorCode::Unavailable,
                     "too many pending attachment result streams".to_string(),
@@ -675,7 +674,11 @@ impl IncomingGuard for ActriumServiceGuard {
             let accepted = response.error.is_none()
                 && attachment_prepare_accepted(response.payload.as_deref().unwrap_or_default());
             if !accepted {
-                self.shared.attachment_results.lock().await.remove(&stream_id);
+                self.shared
+                    .attachment_results
+                    .lock()
+                    .await
+                    .remove(&stream_id);
             }
         }
         let secret = self

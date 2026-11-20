@@ -16,7 +16,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use actr_framework::Dest;
+use actr_framework::{Context as _, Dest};
 use actr_protocol::{
     ActorResult, ActrError, ActrId, DataChunk, Direction, MetadataEntry, PayloadType, RpcEnvelope,
     prost::Message as _,
@@ -651,10 +651,7 @@ impl ActrRef {
         if let Some(runtime) = self.shared.peer_runtime.as_ref() {
             runtime.shared.finish_peer_attachment_result(stream_id);
         }
-        self.app_context()
-            .await
-            .unregister_stream(stream_id)
-            .await
+        self.app_context().await.unregister_stream(stream_id).await
     }
 
     /// Connect to a peer Service over the verified Actor channel and Attach.
