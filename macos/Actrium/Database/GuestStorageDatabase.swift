@@ -43,6 +43,10 @@ final class GuestStorageDatabase {
         try await run { try $0.acceptedPublisherPins(domain: domain) }
     }
 
+    func acceptedPublishers(domains: [String]) async throws -> [PublisherProfileInfo] {
+        try await run { try $0.acceptedPublishers(domains: domains) }
+    }
+
     func resolveSignedOrigin(_ origin: String, publisherIdentity: String? = nil, migrationApproval: String? = nil) async throws -> String {
         try await run { try $0.resolveSignedOrigin(origin: origin, publisherIdentity: publisherIdentity, migrationApproval: migrationApproval) }
     }

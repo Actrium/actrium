@@ -1,5 +1,6 @@
 import ActriumCore
 import AppKit
+import CryptoKit
 import Foundation
 import Testing
 @testable import Actrium

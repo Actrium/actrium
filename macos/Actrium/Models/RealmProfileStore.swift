@@ -228,21 +228,34 @@ enum RealmProfileStore {
         return accepted.profile
     }
 
-    /// Reevaluate a verified snapshot's key against the latest accepted Publisher Profile.
+    struct KeyRequirement {
+        let publicKey: Data
+        let domain: String
+        var localFront: LocalRealmFront? = nil
+    }
+
     static func requirePublisherKey(
-        _ publicKey: Data, domain: String, localFront: LocalRealmFront? = nil, preferences: UserDefaults
-    ) throws {
-        guard let saved = preferences.dictionary(forKey: publisherKey(domain)),
-              let body = saved["body"] as? String, let pins = saved["pins"] as? String else {
-            throw RealmServiceError(message: "The accepted Publisher Profile is unavailable.")
-        }
-        let current = try ActriumCore.acceptRealmPackagePublisher(
-            body: body, domain: domain, previousPinsJson: pins
-        ).profile
-        let allowed = localFront.map { current.verificationKey(for: $0) == publicKey }
-            ?? current.fixedArchiveVerificationKeys.contains(publicKey)
-        guard allowed else {
-            throw RealmServiceError(message: "The Publisher key is no longer trusted for this package.")
+        _ publicKey: Data, domain: String, localFront: LocalRealmFront? = nil,
+        database: GuestStorageDatabase
+    ) async throws {
+        try await requirePublisherKeys([KeyRequirement(publicKey: publicKey, domain: domain, localFront: localFront)], database: database)
+    }
+
+    /// Recheck all Front and Service keys against one current SQLite snapshot.
+    static func requirePublisherKeys(
+        _ requirements: [KeyRequirement], database: GuestStorageDatabase
+    ) async throws {
+        let domains = Array(Set(requirements.map(\.domain))).sorted()
+        let profiles = try await database.acceptedPublishers(domains: domains)
+        for requirement in requirements {
+            guard let profile = profiles.first(where: { $0.domain == requirement.domain }) else {
+                throw RealmServiceError(message: "The accepted Publisher is unavailable.")
+            }
+            let allowed = requirement.localFront.map { profile.verificationKey(for: $0) == requirement.publicKey }
+                ?? profile.fixedArchiveVerificationKeys.contains(requirement.publicKey)
+            guard allowed else {
+                throw RealmServiceError(message: "The Publisher key is no longer trusted for this package.")
+            }
         }
     }
 

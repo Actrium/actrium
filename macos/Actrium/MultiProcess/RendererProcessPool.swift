@@ -276,6 +276,19 @@ final class RendererProcessPool: ObservableObject {
 
     // MARK: - Tab protocol
 
+    func prepareLocalStorage(
+        tabId: UUID, reloadKey: Int, origin: String?, publisherIdentity: String?,
+        manifest: String?, permissions: [String]
+    ) async throws -> PreparedLocalStorage? {
+        var config: [String: Any] = ["permissions": permissions]
+        config["localStorageOrigin"] = origin
+        config["localStoragePublisherIdentity"] = publisherIdentity
+        config["capabilityManifestJSON"] = manifest
+        return try await localStorage.prepareForActivation(
+            config: config, window: documentWindow?(tabId, reloadKey)
+        )
+    }
+
     @discardableResult
     func prepareTab(
         tabId: UUID,

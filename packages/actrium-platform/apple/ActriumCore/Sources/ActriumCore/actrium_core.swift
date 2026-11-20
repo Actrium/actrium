@@ -572,6 +572,8 @@ public protocol GuestLocalStorageProtocol: AnyObject, Sendable {
 
     func acceptedPublisherPins(domain: String) throws  -> String?
 
+    func acceptedPublishers(domains: [String]) throws  -> [PublisherProfileInfo]
+
     func getItem(origin: String, key: String) throws  -> String?
 
     func keepStorageSeparate(origin: String, publisherIdentity: String) throws  -> String
@@ -663,6 +665,14 @@ open func acceptedPublisherPins(domain: String)throws  -> String?  {
     return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
     uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publisher_pins(self.uniffiClonePointer(),
         FfiConverterString.lower(domain),$0
+    )
+})
+}
+
+open func acceptedPublishers(domains: [String])throws  -> [PublisherProfileInfo]  {
+    return try  FfiConverterSequenceTypePublisherProfileInfo.lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publishers(self.uniffiClonePointer(),
+        FfiConverterSequenceString.lower(domains),$0
     )
 })
 }
@@ -8916,6 +8926,31 @@ fileprivate struct FfiConverterSequenceTypePublisherPackageKeyInfo: FfiConverter
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypePublisherProfileInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [PublisherProfileInfo]
+
+    public static func write(_ value: [PublisherProfileInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePublisherProfileInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PublisherProfileInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PublisherProfileInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePublisherProfileInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeRealmDependencyInfo: FfiConverterRustBuffer {
     typealias SwiftType = [RealmDependencyInfo]
 
@@ -12467,6 +12502,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publisher_pins() != 15617) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publishers() != 2251) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_method_guestlocalstorage_get_item() != 63346) {

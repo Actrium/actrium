@@ -54,6 +54,7 @@ enum TabWindowTransfer {
             guestEntry: tab.guestEntry, capabilityManifestJSON: tab.capabilityManifestJSON,
             localStorageOrigin: tab.localStorageOrigin,
             localStoragePublisherIdentity: tab.localStoragePublisherIdentity,
+            preparedLocalStorage: tab.preparedLocalStorage,
             capabilityRevision: tab.capabilityRevision, contractName: tab.contractName,
             contractVersion: tab.contractVersion, permissions: tab.permissions,
             reloadNonce: tab.reloadNonce, leftPanelDefaultVisible: tab.leftPanelDefaultVisible,

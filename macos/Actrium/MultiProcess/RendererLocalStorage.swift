@@ -36,6 +36,15 @@ final class RendererLocalStorage {
     }
 
     func resolveOrigin(config: [String: Any], window: NSWindow? = nil) async throws -> [String: Any] {
+        var config = config
+        let prepared = (config.removeValue(forKey: "preparedLocalStorage") as? [String: String])
+            .flatMap(PreparedLocalStorage.init(configuration:))
+        if let prepared, prepared.matches(principal: config["localStorageOrigin"] as? String,
+                                         publisherIdentity: config["localStoragePublisherIdentity"] as? String) {
+            config["localStoragePrincipal"] = prepared.principal
+            config["localStorageOrigin"] = prepared.origin
+            return config
+        }
         guard let publisherIdentity = config["localStoragePublisherIdentity"] as? String else { return config }
         guard let origin = config["localStorageOrigin"] as? String,
               let manifest = config["capabilityManifestJSON"] as? String,
@@ -51,8 +60,17 @@ final class RendererLocalStorage {
         return resolved
     }
 
+    func prepareForActivation(config: [String: Any], window: NSWindow?) async throws -> PreparedLocalStorage? {
+        let resolved = try await resolveOrigin(config: config, window: window)
+        guard let principal = resolved["localStoragePrincipal"] as? String,
+              let identity = resolved["localStoragePublisherIdentity"] as? String,
+              let origin = resolved["localStorageOrigin"] as? String else { return nil }
+        return PreparedLocalStorage(principal: principal, publisherIdentity: identity, origin: origin)
+    }
+
     func prepare(tabId: UUID, config: [String: Any]) -> [String: Any] {
         var config = config
+        config.removeValue(forKey: "preparedLocalStorage")
         let origin = config.removeValue(forKey: "localStorageOrigin") as? String
         let principal = config.removeValue(forKey: "localStoragePrincipal") as? String ?? origin
         let publisherIdentity = config.removeValue(forKey: "localStoragePublisherIdentity") as? String

@@ -1,4 +1,5 @@
 import ActriumCore
+import CryptoKit
 import Foundation
 import Testing
 @testable import Actrium
@@ -38,7 +39,7 @@ struct PublisherStorageRecoveryTests {
         #expect(try reopened.getItem(origin: canonical, key: "theme") == "dark")
         #expect(preferences.dictionary(forKey: "actr.acceptedPublisherProfile.publisher.example")?["body"] as? String == body)
         let key = try PublisherStorageFixture.key(4).publicKey.rawRepresentation
-        try RealmProfileStore.requirePublisherKey(key, domain: "publisher.example", preferences: preferences)
+        try await RealmProfileStore.requirePublisherKey(key, domain: "publisher.example", database: GuestStorageDatabase(database: reopened))
     }
 
     @Test func registeredDatabaseTrustRepairsAnUnreadablePreferenceCache() async throws {

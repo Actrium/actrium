@@ -622,7 +622,8 @@ final class RealmAdmissionTests: XCTestCase {
         let publicKey = Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
         let replacement = packageKey(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation, status: "active")
         let initial = try publisherDescriptor(sequence: 1, root: root, keys: [packageKey(publicKey, status: "active")])
-        let snapshot = try RealmProfileStore.acceptPublisher(body: initial, domain: domain, preferences: preferences)
+        let database = GuestStorageDatabase(database: GuestLocalStorage(path: ":memory:"))
+        let snapshot = try await RealmProfileStore.acceptPublisher(body: initial, domain: domain, preferences: preferences, database: database)
         let keyId = try XCTUnwrap(snapshot.packageSigningKeys.first?.id)
         let rebuildable = LocalRealmFront(signingKeyId: keyId, allowRebuild: true)
         let pinned = LocalRealmFront(signingKeyId: keyId, allowRebuild: false)
@@ -634,29 +635,32 @@ final class RealmAdmissionTests: XCTestCase {
             signalStarted.yield(())
             signalStarted.finish()
             for await _ in resume { break }
-            try RealmProfileStore.requirePublisherKey(
-                verifiedKey, domain: domain, localFront: rebuildable, preferences: preferences
+            try await RealmProfileStore.requirePublisherKey(
+                verifiedKey, domain: domain, localFront: rebuildable, database: database
             )
         }
         for await _ in started { break }
         let retired = try publisherDescriptor(
             sequence: 2, root: root, keys: [packageKey(publicKey, status: "retired"), replacement]
         )
-        _ = try RealmProfileStore.acceptPublisher(body: retired, domain: domain, preferences: preferences)
+        _ = try await RealmProfileStore.acceptPublisher(body: retired, domain: domain, preferences: preferences, database: database)
         release.yield(())
         release.finish()
         guard case .failure = await install.result else {
             return XCTFail("A pending rebuild used a retired key")
         }
-        XCTAssertNoThrow(try RealmProfileStore.requirePublisherKey(
-            verifiedKey, domain: domain, localFront: pinned, preferences: preferences
-        ))
+        try await RealmProfileStore.requirePublisherKey(
+            verifiedKey, domain: domain, localFront: pinned, database: database
+        )
 
         let removed = try publisherDescriptor(sequence: 3, root: root, keys: [replacement])
-        _ = try RealmProfileStore.acceptPublisher(body: removed, domain: domain, preferences: preferences)
-        XCTAssertThrowsError(try RealmProfileStore.requirePublisherKey(
-            verifiedKey, domain: domain, localFront: pinned, preferences: preferences
-        ))
+        _ = try await RealmProfileStore.acceptPublisher(body: removed, domain: domain, preferences: preferences, database: database)
+        do {
+            try await RealmProfileStore.requirePublisherKey(
+                verifiedKey, domain: domain, localFront: pinned, database: database
+            )
+            XCTFail("A removed Publisher key was accepted")
+        } catch { }
     }
 
     @MainActor

@@ -1055,6 +1055,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 tabs[index].capabilityManifestJSON = nil
                 tabs[index].localStorageOrigin = nil
                 tabs[index].localStoragePublisherIdentity = nil
+                tabs[index].preparedLocalStorage = nil
                 tabs[index].leftPanelScript = nil
                 tabs[index].rightPanelScript = nil
                 tabs[index].guestScript = nil
@@ -1122,6 +1123,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].capabilityManifestJSON = nil
             tabs[index].localStorageOrigin = nil
             tabs[index].localStoragePublisherIdentity = nil
+            tabs[index].preparedLocalStorage = nil
             tabs[index].leftPanelScript = nil
             tabs[index].rightPanelScript = nil
             tabs[index].guestScript = nil
@@ -1419,6 +1421,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 devDirectory: isDirectory.boolValue ? resolvedURL : nil
             )
             tabs[tabIndex].localStoragePublisherIdentity = nil
+            tabs[tabIndex].preparedLocalStorage = nil
             tabs[tabIndex].leftPanelDefaultVisible = manifestInfo.leftPanelDefaultVisible
             tabs[tabIndex].rightPanelDefaultVisible = manifestInfo.rightPanelDefaultVisible
 
@@ -1525,6 +1528,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     private static func clearRealmContent(_ tab: inout Tab) {
         tab.localStorageOrigin = nil
         tab.localStoragePublisherIdentity = nil
+        tab.preparedLocalStorage = nil
         tab.reloadNonce &+= 1
         tab.appId = nil
         tab.systemTabType = nil
@@ -1984,14 +1988,22 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         permissions: manifest.permissions
                     )
                 }
+                guard let storageIndex = tabIndex() else { return }
+                let preparedStorage = try await RendererProcessPool.shared.prepareLocalStorage(
+                    tabId: replacingTabId, reloadKey: tabs[storageIndex].reloadNonce,
+                    origin: manifest.storageOrigin(devDirectory: nil), publisherIdentity: publisher.storageIdentity,
+                    manifest: manifest.capabilityManifestJSON, permissions: manifest.permissions
+                )
                 if approved != nil, let candidateBinding {
                     try await candidateBinding.prepareForSwitch()
                 }
                 try Task.checkCancellation()
                 guard try profileIsCurrent() else { return }
-                try RealmProfileStore.requirePublisherKey(
-                    verified.trustedKey, domain: publisherDomain, preferences: realmPreferences
+                try await RealmProfileStore.requirePublisherKey(
+                    verified.trustedKey, domain: publisherDomain, database: .shared
                 )
+                try Task.checkCancellation()
+                guard try profileIsCurrent() else { return }
                 guard let publisherIdentity = publisher.storageIdentity else {
                     throw GuestLocalStorageError.InvalidPublisher(message: "Verified Publisher identity is missing.")
                 }
@@ -2002,6 +2014,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     requireSignature: true,
                     additionalTrustedKeys: publisherKeys,
                     publisherStorageIdentity: publisherIdentity,
+                    preparedLocalStorage: preparedStorage,
                     replacingTabId: replacingTabId,
                     realmAddress: address
                 ) != nil else {
@@ -2211,18 +2224,23 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         )
         var installed = false
         defer { if !installed { Task { await binding.stop() } } }
-        func requireCurrentPublisherKeys() throws {
-            try RealmProfileStore.requirePublisherKey(
-                trustedKey, domain: publisher.domain, localFront: policy, preferences: realmPreferences
-            )
-            try RealmProfileStore.requirePublisherKey(
-                verified.servicePublicKey, domain: servicePublisher.domain, preferences: realmPreferences
-            )
+        func requireCurrentPublisherKeys() async throws {
+            try await RealmProfileStore.requirePublisherKeys([
+                .init(publicKey: trustedKey, domain: publisher.domain, localFront: policy),
+                .init(publicKey: verified.servicePublicKey, domain: servicePublisher.domain)
+            ], database: .shared)
         }
-        try requireCurrentPublisherKeys()
+        guard let storageIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return nil }
+        let preparedStorage = try await RendererProcessPool.shared.prepareLocalStorage(
+            tabId: tabId, reloadKey: tabs[storageIndex].reloadNonce,
+            origin: manifest.storageOrigin(devDirectory: nil), publisherIdentity: publisher.storageIdentity,
+            manifest: capabilities, permissions: manifest.permissions
+        )
+        try await requireCurrentPublisherKeys()
+        guard isCurrent() else { return nil }
         try await binding.prepareLocalFront()
+        try await requireCurrentPublisherKeys()
         guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else { return nil }
-        try requireCurrentPublisherKeys()
 
         // New renderer identity prevents late messages from the old Guest
         // from using the new binding or inheriting its approvals.
@@ -2232,7 +2250,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             groupId: tabs[index].groupId, unifiedScript: script, guestExtractedPath: root.path,
             guestEntry: entry, capabilityManifestJSON: capabilities,
             localStorageOrigin: manifest.storageOrigin(devDirectory: nil),
-            localStoragePublisherIdentity: publisher.storageIdentity, contractName: manifest.contractName,
+            localStoragePublisherIdentity: publisher.storageIdentity, preparedLocalStorage: preparedStorage,
+            contractName: manifest.contractName,
             contractVersion: manifest.contractVersion, permissions: manifest.permissions,
             leftPanelDefaultVisible: manifest.leftPanelDefaultVisible,
             rightPanelDefaultVisible: manifest.rightPanelDefaultVisible, backgroundColor: manifest.themeColor
@@ -2694,6 +2713,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         requireSignature: Bool = true,
         additionalTrustedKeys: [Data] = [],
         publisherStorageIdentity: String? = nil,
+        preparedLocalStorage: PreparedLocalStorage? = nil,
         replacingTabId: UUID? = nil,
         realmAddress: URL? = nil
     ) -> Tab? {
@@ -2802,6 +2822,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         devDirectory: isDirectory.boolValue ? resolvedURL : nil
                     ),
                     localStoragePublisherIdentity: publisherStorageIdentity,
+                    preparedLocalStorage: preparedLocalStorage,
                     leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                     rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                     themeColor: manifestInfo.themeColor,
@@ -3322,6 +3343,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         capabilityManifestJSON: String? = nil,
         localStorageOrigin: String? = nil,
         localStoragePublisherIdentity: String? = nil,
+        preparedLocalStorage: PreparedLocalStorage? = nil,
         leftPanelDefaultVisible: Bool = true,
         rightPanelDefaultVisible: Bool = false,
         themeColor: String? = nil,
@@ -3355,6 +3377,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].capabilityManifestJSON = capabilityManifestJSON
             tabs[index].localStorageOrigin = localStorageOrigin
             tabs[index].localStoragePublisherIdentity = localStoragePublisherIdentity
+            tabs[index].preparedLocalStorage = preparedLocalStorage
             tabs[index].leftPanelDefaultVisible = leftPanelDefaultVisible
             tabs[index].rightPanelDefaultVisible = rightPanelDefaultVisible
             if let themeColor { tabs[index].backgroundColor = themeColor }
@@ -3387,6 +3410,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             capabilityManifestJSON: capabilityManifestJSON,
             localStorageOrigin: localStorageOrigin,
             localStoragePublisherIdentity: localStoragePublisherIdentity,
+            preparedLocalStorage: preparedLocalStorage,
             contractName: contractName,
             contractVersion: contractVersion,
             permissions: permissions,

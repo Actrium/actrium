@@ -147,7 +147,7 @@ struct RendererLocalStorageTests {
             containerSize: CGSize(width: 800, height: 600), systemAppType: nil,
             unifiedScript: "old", capabilityManifestJSON: nil, capabilitySnapshotJSON: nil,
             leftPanelScript: nil, leftPanelVisible: true, rightPanelVisible: false,
-            permissions: [], libraryData: [:], reloadKey: 0, serviceCallUrl: nil
+            permissions: [], libraryData: [:], reloadKey: 0, serviceCallUrl: nil, serviceEventsUrl: nil
         )
         let view = RendererSurfaceHostView(frame: .zero)
         view.tabId = tabId

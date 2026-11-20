@@ -122,6 +122,31 @@ fn restore(
 }
 
 impl GuestLocalStorage {
+    /// Read the current verified Publisher snapshots in one database transaction.
+    pub fn accepted_publishers(
+        &self,
+        domains: Vec<String>,
+    ) -> Result<Vec<PublisherProfileInfo>, Error> {
+        for domain in &domains {
+            canonical_domain(domain)?;
+        }
+        self.with_connection(|connection| {
+            let transaction = connection.transaction()?;
+            let now = Utc::now();
+            let profiles = domains
+                .iter()
+                .map(|domain| {
+                    let saved = load(&transaction, domain)?
+                        .ok_or_else(|| invalid("The accepted Publisher is unavailable"))?;
+                    let keys = saved.profile.verify(domain, now).map_err(invalid)?;
+                    Ok(profile_info(domain, keys, saved.identity))
+                })
+                .collect::<Result<Vec<_>, Error>>()?;
+            transaction.commit()?;
+            Ok(profiles)
+        })
+    }
+
     /// Read only a fully verified database anchor, never an unvalidated cache hint.
     pub fn accepted_publisher_pins(&self, domain: String) -> Result<Option<String>, Error> {
         canonical_domain(&domain)?;

@@ -1274,6 +1274,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -1835,6 +1837,8 @@ fun uniffi_actrium_core_checksum_method_guestlocalstorage_accept_publisher_profi
 ): Short
 fun uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publisher_pins(
 ): Short
+fun uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publishers(
+): Short
 fun uniffi_actrium_core_checksum_method_guestlocalstorage_get_item(
 ): Short
 fun uniffi_actrium_core_checksum_method_guestlocalstorage_keep_storage_separate(
@@ -1907,6 +1911,8 @@ fun uniffi_actrium_core_fn_constructor_guestlocalstorage_new(`path`: RustBuffer.
 fun uniffi_actrium_core_fn_method_guestlocalstorage_accept_publisher_profile(`ptr`: Pointer,`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,`previousPinsJson`: RustBuffer.ByValue,`previousProfileBody`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publisher_pins(`ptr`: Pointer,`domain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publishers(`ptr`: Pointer,`domains`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_method_guestlocalstorage_get_item(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -3407,6 +3413,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publisher_pins() != 15617.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publishers() != 2251.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_get_item() != 63346.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -3893,6 +3902,8 @@ public interface GuestLocalStorageInterface {
 
     fun `acceptedPublisherPins`(`domain`: kotlin.String): kotlin.String?
 
+    fun `acceptedPublishers`(`domains`: List<kotlin.String>): List<PublisherProfileInfo>
+
     fun `getItem`(`origin`: kotlin.String, `key`: kotlin.String): kotlin.String?
 
     fun `keepStorageSeparate`(`origin`: kotlin.String, `publisherIdentity`: kotlin.String): kotlin.String
@@ -4020,6 +4031,19 @@ open class GuestLocalStorage: Disposable, AutoCloseable, GuestLocalStorageInterf
     uniffiRustCallWithError(GuestLocalStorageException) { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publisher_pins(
         it, FfiConverterString.lower(`domain`),_status)
+}
+    }
+    )
+    }
+
+
+
+    @Throws(GuestLocalStorageException::class)override fun `acceptedPublishers`(`domains`: List<kotlin.String>): List<PublisherProfileInfo> {
+            return FfiConverterSequenceTypePublisherProfileInfo.lift(
+    callWithPointer {
+    uniffiRustCallWithError(GuestLocalStorageException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publishers(
+        it, FfiConverterSequenceString.lower(`domains`),_status)
 }
     }
     )
@@ -8510,6 +8534,34 @@ public object FfiConverterSequenceTypePublisherPackageKeyInfo: FfiConverterRustB
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypePublisherPackageKeyInfo.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypePublisherProfileInfo: FfiConverterRustBuffer<List<PublisherProfileInfo>> {
+    override fun read(buf: ByteBuffer): List<PublisherProfileInfo> {
+        val len = buf.getInt()
+        return List<PublisherProfileInfo>(len) {
+            FfiConverterTypePublisherProfileInfo.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<PublisherProfileInfo>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypePublisherProfileInfo.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<PublisherProfileInfo>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypePublisherProfileInfo.write(it, buf)
         }
     }
 }

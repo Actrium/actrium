@@ -134,6 +134,7 @@ struct Tab: Identifiable {
     var capabilityManifestJSON: String?
     var localStorageOrigin: String?
     var localStoragePublisherIdentity: String?
+    var preparedLocalStorage: PreparedLocalStorage?
 
     /// Incremented when the Native capability snapshot changes.
     var capabilityRevision: Int
@@ -180,6 +181,7 @@ struct Tab: Identifiable {
         capabilityManifestJSON: String? = nil,
         localStorageOrigin: String? = nil,
         localStoragePublisherIdentity: String? = nil,
+        preparedLocalStorage: PreparedLocalStorage? = nil,
         capabilityRevision: Int = 0,
         contractName: String? = nil,
         contractVersion: Int? = nil,
@@ -208,6 +210,7 @@ struct Tab: Identifiable {
         self.capabilityManifestJSON = capabilityManifestJSON
         self.localStorageOrigin = localStorageOrigin
         self.localStoragePublisherIdentity = localStoragePublisherIdentity
+        self.preparedLocalStorage = preparedLocalStorage
         self.capabilityRevision = capabilityRevision
         self.contractName = contractName
         self.contractVersion = contractVersion

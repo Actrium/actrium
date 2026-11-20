@@ -1,5 +1,6 @@
 import ActriumCore
 import ActriumIPC
+import CryptoKit
 import Foundation
 import Testing
 @testable import Actrium
@@ -52,9 +53,9 @@ struct RendererStorageAdaptationTests {
         )
         #expect(profile.storageIdentity != nil)
         let key = try #require(profile.packageSigningKeys.first)
-        try RealmProfileStore.requirePublisherKey(
+        try await RealmProfileStore.requirePublisherKey(
             try #require(Data(base64Encoded: key.publicKeyBase64)),
-            domain: profile.domain, preferences: preferences
+            domain: profile.domain, database: database
         )
     }
 

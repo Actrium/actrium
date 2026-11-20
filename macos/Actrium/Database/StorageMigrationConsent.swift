@@ -8,9 +8,11 @@ final class StorageMigrationConsent {
     private var decisions: [String: Bool] = [:]
     private var pending: [String: Task<Bool, Never>] = [:]
     private let present: Presenter
+    private let reportFailure: @MainActor (NSWindow) async -> Void
 
-    init(present: Presenter? = nil) {
+    init(present: Presenter? = nil, reportFailure: (@MainActor (NSWindow) async -> Void)? = nil) {
         self.present = present ?? Self.presentAlert
+        self.reportFailure = reportFailure ?? Self.presentFailure
     }
 
     func resolve(
@@ -30,11 +32,7 @@ final class StorageMigrationConsent {
             do {
                 return try await database.resolveSignedOrigin(origin, publisherIdentity: publisherIdentity, migrationApproval: token)
             } catch let error as GuestLocalStorageError {
-                let alert = NSAlert()
-                alert.messageText = "Saved data was not copied"
-                alert.informativeText = "The sources may have changed, contain conflicting values, or exceed the storage limit. The original data has been preserved. Reopen the application to review the copy."
-                alert.addButton(withTitle: "OK")
-                await alert.beginSheetModal(for: window)
+                await reportFailure(window)
                 throw error
             }
         }
@@ -50,6 +48,14 @@ final class StorageMigrationConsent {
         pending.removeValue(forKey: scope)
         if !approved { decisions[scope] = false }
         return approved
+    }
+
+    private static func presentFailure(window: NSWindow) async {
+        let alert = NSAlert()
+        alert.messageText = "Saved data was not copied"
+        alert.informativeText = "The sources may have changed, contain conflicting values, or exceed the storage limit. The original data has been preserved. Reopen the application to review the copy."
+        alert.addButton(withTitle: "OK")
+        await alert.beginSheetModal(for: window)
     }
 
     private static func presentAlert(origin: String, window: NSWindow) async -> Bool {
