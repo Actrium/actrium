@@ -5,8 +5,8 @@
 //! Realm signing key listed in the domain's `realm_signing_keys` member.
 
 use crate::authority::{
-    AuthorityDescriptor, DetachedSignature, KeyStatus, PinnedKey, PinnedStatus, RealmSigningKey,
-    RealmSigningKeys, SIGNATURE_ALGORITHM,
+    AuthorityDescriptor, DetachedSignature, KeyStatus, PackageSigningKey, PinnedKey, PinnedStatus,
+    RealmSigningKey, RealmSigningKeys, SIGNATURE_ALGORITHM,
 };
 use crate::uri::ActrUri;
 use base64::Engine as _;
@@ -110,6 +110,13 @@ pub struct RealmPackage {
 pub struct LocalRealmFront {
     pub signing_key_id: String,
     pub allow_rebuild: bool,
+}
+
+impl LocalRealmFront {
+    /// Check the declared key ID and require an active key for rebuildable archives.
+    pub fn matches_signing_key(&self, key: &PackageSigningKey) -> bool {
+        key.id == self.signing_key_id && (key.status == KeyStatus::Active || !self.allow_rebuild)
+    }
 }
 
 impl RealmPackage {

@@ -214,6 +214,7 @@ where
             &mut cache,
             &state_path,
             selection.packages.keys().cloned().collect(),
+            None,
             get,
         )
         .await?;

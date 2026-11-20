@@ -640,6 +640,7 @@ async fn previews_manual_selections_and_fetches_cyclic_dependency_closure() {
         selection: selection_path.clone(),
         output: dir.path().join("check"),
         trust_dir: Some(trust_dir.clone()),
+        local_front: None,
         probe_realm: None,
         probe: ServiceProbeArgs::default(),
     };
@@ -719,6 +720,7 @@ async fn traverses_local_front_dependencies_and_defers_its_incoming_export_check
         selection: selection_path.clone(),
         output: dir.path().join("check"),
         trust_dir: None,
+        local_front: None,
         probe_realm: None,
         probe: ServiceProbeArgs::default(),
     };
@@ -739,4 +741,67 @@ async fn traverses_local_front_dependencies_and_defers_its_incoming_export_check
     write_selection(&profile);
     let error = check_selection_with(&args, check).await.unwrap_err();
     assert!(error.to_string().contains("svc.invalid -> view"), "{error}");
+}
+
+#[tokio::test]
+async fn checks_the_archive_and_rpc_contract_of_an_explicit_local_front() {
+    let (docs, _, profile, publisher) = fixture(PROTO);
+    let mut selection = json!({
+        "primary_package": profile["primary_package"],
+        "front_package": profile["front_package"],
+        "packages": profile["packages"]
+    });
+    let front = &mut selection["packages"]["view"];
+    let archive = docs
+        .borrow_mut()
+        .remove(front["href"].as_str().unwrap())
+        .unwrap();
+    front["href"] = json!("/Users/example/front.actr");
+    front["local_path"] = json!({
+        "allow_rebuild": false,
+        "signing_key_id": actr_protocol::package_key_id(publisher.verifying_key().as_bytes())
+    });
+    front["dependencies"] = json!({"service": "svc"});
+
+    let dir = tempfile::tempdir().unwrap();
+    let selection_path = dir.path().join("selection.json");
+    let local_front = dir.path().join("selected.actr");
+    let args = CheckArgs {
+        selection: selection_path.clone(),
+        output: dir.path().join("verified"),
+        trust_dir: None,
+        local_front: Some(local_front.clone()),
+        probe_realm: None,
+        probe: ServiceProbeArgs::default(),
+    };
+    let check = |url: String, _limit| {
+        std::future::ready(
+            docs.borrow()
+                .get(&url)
+                .cloned()
+                .with_context(|| format!("unexpected fetch {url}")),
+        )
+    };
+    let write_selection = |selection: &Value| {
+        std::fs::write(&selection_path, serde_json::to_vec(selection).unwrap()).unwrap();
+    };
+    write_selection(&selection);
+    std::fs::write(&local_front, &archive).unwrap();
+    let result = check_selection_with(&args, check).await.unwrap();
+    assert_eq!(
+        std::fs::read(result["front"].as_str().unwrap()).unwrap(),
+        archive
+    );
+
+    let (_, incompatible) = package(KEEL_GUEST_PROFILE_V1, OTHER_PROTO, &publisher, None);
+    std::fs::write(&local_front, incompatible).unwrap();
+    let error = check_selection_with(&args, check).await.unwrap_err();
+    assert!(error.to_string().contains("SHA-256"), "{error}");
+
+    let front = &mut selection["packages"]["view"];
+    front.as_object_mut().unwrap().remove("sha256");
+    front["local_path"]["allow_rebuild"] = json!(true);
+    write_selection(&selection);
+    let error = check_selection_with(&args, check).await.unwrap_err();
+    assert!(error.to_string().contains("The RPC definitions"), "{error}");
 }
