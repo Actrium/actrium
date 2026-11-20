@@ -75,6 +75,18 @@ private final class RealmServiceAttachmentResultCallback: ActrBindings.DataChunk
     }
 }
 
+private final class RealmServicePromptResultCallback: ActrBindings.DataChunkCallback {
+    private let receive: @Sendable (ActrBindings.DataChunk, ActrBindings.ActrId) async -> Void
+
+    init(receive: @escaping @Sendable (ActrBindings.DataChunk, ActrBindings.ActrId) async -> Void) {
+        self.receive = receive
+    }
+
+    func onStream(chunk: ActrBindings.DataChunk, sender: ActrBindings.ActrId) async throws {
+        await receive(chunk, sender)
+    }
+}
+
 /// A lock-protected intake snapshot for the nonisolated Rust event callback.
 /// The MainActor registry remains authoritative; queued delivery rechecks each
 /// captured subscription ID so a replacement can never inherit an old event.
@@ -542,6 +554,11 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// caller-supplied attachment id may be reused by a retry, so it cannot
     /// identify a delivery on its own.
     private var attachmentDeliveries: [String: @Sendable (RealmServiceAttachmentResultEvent) -> Void] = [:]
+    private static let promptStreamEvent = "ask.PromptResponseStreamPayload"
+    // AskAway has one active result stream per tab. Keep it after EOS so the
+    // Front can replay its final frame after a delivery interruption.
+    private var promptStream: (id: String, peer: ActrBindings.ActrId, nonce: UUID)?
+    private var updatingPromptStream = false
     private var startup: (id: UUID, task: Task<ActrRefWrapper, Error>)?
     private var stopped = false
 
@@ -654,12 +671,78 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             ifGeneration: eventGeneration, reference: reference, serviceType: serviceType
         )
         guard !stopped else { throw CancellationError() }
+        if events.contains(Self.promptStreamEvent), let streamId = try promptStreamId(for: request) {
+            try await bindPromptStream(streamId, target: target, reference: reference)
+        }
         return try await reference.callPeer(
             target: target,
             routeKey: request.route,
             requestPayload: request.payload,
             timeoutMs: Int64(request.timeoutMs)
         )
+    }
+
+    private func promptStreamId(for request: RealmServiceCall) throws -> String? {
+        switch request.route {
+        case "ask.AskService.Prompt":
+            let id = try Ask_PromptStreamRequest(serializedBytes: request.payload).textResponseStreamID
+            return id.isEmpty ? nil : id
+        case "ask.AskService.ContinuePromptResultStreams":
+            let cursors = try Ask_PromptStreamResume(serializedBytes: request.payload).streams
+            guard cursors.count == 1 else { return nil }
+            return cursors[0].streamID.isEmpty ? nil : cursors[0].streamID
+        default:
+            return nil
+        }
+    }
+
+    private func bindPromptStream(
+        _ streamId: String, target: ActrBindings.ActrId, reference: ActrRefWrapper
+    ) async throws {
+        guard streamId.utf8.count <= 128,
+              !streamId.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            throw RealmServiceError(message: "Invalid Prompt result stream ID.")
+        }
+        guard !updatingPromptStream else {
+            throw RealmServiceError(message: "The tab is already registering a Prompt result stream.")
+        }
+        if let stream = promptStream, stream.id == streamId, stream.peer == target { return }
+        updatingPromptStream = true
+        defer { updatingPromptStream = false }
+        await clearPromptStream()
+        guard !stopped else { throw CancellationError() }
+        let nonce = UUID()
+        promptStream = (streamId, target, nonce)
+        let callback = RealmServicePromptResultCallback { [weak self] chunk, sender in
+            await self?.receivePromptChunk(chunk, sender: sender, nonce: nonce)
+        }
+        do {
+            try await reference.registerStream(streamId: streamId, callback: callback)
+        } catch {
+            if promptStream?.nonce == nonce { promptStream = nil }
+            throw error
+        }
+        guard !stopped, promptStream?.nonce == nonce else {
+            try? await reference.unregisterStream(streamId: streamId)
+            throw CancellationError()
+        }
+    }
+
+    private func receivePromptChunk(_ chunk: ActrBindings.DataChunk, sender: ActrBindings.ActrId, nonce: UUID) {
+        guard !stopped, let stream = promptStream, stream.nonce == nonce,
+              stream.peer == sender, stream.id == chunk.streamId,
+              chunk.payload.count <= 131_072 else { return }
+        eventRelay.onEvent(event: ActrBindings.ServiceEventBridge(
+            event: Self.promptStreamEvent, payload: chunk.payload
+        ))
+    }
+
+    private func clearPromptStream() async {
+        guard let id = promptStream?.id else { return }
+        promptStream = nil
+        if let reference = try? await startup?.task.value {
+            try? await reference.unregisterStream(streamId: id)
+        }
     }
 
     func prepareLocalFront() async throws {
@@ -684,10 +767,12 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
 
     func suspendEvents(ifGeneration generation: UInt64) async {
         await eventPeers.suspend(ifGeneration: generation)
+        if await eventPeers.activeGeneration() == nil { await clearPromptStream() }
     }
 
     private func clearEventPeer() async {
         await eventPeers.clear()
+        await clearPromptStream()
     }
 
     /// Availability as seen by this binding: the manifest must opt in and the

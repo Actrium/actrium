@@ -5,6 +5,18 @@ service AskService {
   rpc PrepareAttachmentUpload(PrepareAttachmentUploadRequest) returns (PrepareAttachmentUploadResponse);
 }
 
+// Projections of the AskAway requests used to bind the result DataStream.
+message PromptStreamRequest {
+  string text_response_stream_id = 7;
+}
+
+message PromptStreamResume {
+  message Cursor {
+    string stream_id = 1;
+  }
+  repeated Cursor streams = 3;
+}
+
 enum AttachmentType {
   ATTACHMENT_TYPE_UNKNOWN = 0;
   IMAGE = 1;
