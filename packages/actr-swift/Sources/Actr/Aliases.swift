@@ -12,5 +12,6 @@ public typealias NetworkEventResult = ActrBindings.NetworkEventResult
 public typealias RtcPeerStateSubscription = ActrBindings.RtcPeerStateSubscription
 
 public typealias RealmMembership = ActrBindings.RealmMembership
+public typealias RealmMemberRole = ActrBindings.RealmMemberRole
 public typealias RealmMembershipError = ActrBindings.RealmMembershipError
 public typealias RealmRuntimeConfiguration = ActrBindings.RealmRuntimeConfiguration
