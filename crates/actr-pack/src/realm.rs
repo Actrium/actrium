@@ -21,26 +21,43 @@ pub fn verify_realm_archive(
     keys: &[PackageSigningKey],
     limit: usize,
 ) -> Result<InspectedActorPackage, PackError> {
-    if bytes.len() > limit || sha256_hex(bytes) != reference.sha256 {
-        return Err(PackError::InvalidPackage(
-            "Realm archive size or digest mismatch".into(),
-        ));
+    if bytes.len() > limit {
+        return Err(PackError::InvalidPackage(format!(
+            "{} is too large. The limit is {limit} bytes.",
+            reference.r#type
+        )));
+    }
+    if sha256_hex(bytes) != reference.sha256 {
+        return Err(PackError::InvalidPackage(format!(
+            "{} does not match the selected SHA-256.",
+            reference.r#type
+        )));
     }
     let verified = inspect_actor_package_bounded(bytes, limit, limit)?;
-    let invalid = |message: &str| PackError::SignatureVerificationFailed(message.into());
+    let untrusted_key = || {
+        PackError::SignatureVerificationFailed(format!(
+            "The publisher does not trust the signing key for {}.",
+            reference.r#type
+        ))
+    };
     let key = keys
         .iter()
         .find(|k| k.id == verified.manifest.signature.key_id)
-        .ok_or_else(|| invalid("key is not listed by the package Publisher"))?;
-    let key = key
-        .verification_key()
-        .map_err(PackError::SignatureVerificationFailed)?;
-    verified.verify_signature(&key)?;
+        .ok_or_else(untrusted_key)?;
+    let key = key.verification_key().map_err(|_| untrusted_key())?;
+    verified.verify_signature(&key).map_err(|_| {
+        PackError::SignatureVerificationFailed(format!(
+            "The signature for {} is invalid.",
+            reference.r#type
+        ))
+    })?;
     verified.manifest.read_privacy_contract(bytes, limit)?;
-    if verified.manifest.actor_type() != reference.r#type {
-        return Err(PackError::InvalidPackage(
-            "Realm archive Actor type mismatch".into(),
-        ));
+    let actual = verified.manifest.actor_type();
+    if actual != reference.r#type {
+        return Err(PackError::InvalidPackage(format!(
+            "You selected {}, but the archive contains {actual}.",
+            reference.r#type
+        )));
     }
     Ok(verified)
 }
@@ -75,7 +92,11 @@ pub fn check_realm_pair(
             .any(|file| file.sha256 == front_contract.sha256)
     };
     if !matches_export {
-        return Err(invalid("Service and Front RPC contracts differ"));
+        return Err(invalid(&format!(
+            "The RPC definitions in {} and {} do not match.",
+            front.actor_type(),
+            service.actor_type()
+        )));
     }
     Ok(())
 }
@@ -100,9 +121,13 @@ pub fn check_front_service_dependency<'a>(
     let version =
         Version::parse(&service.version).map_err(|_| invalid("invalid Service version"))?;
     if dep.actor != expected || !constraint.matches(&version) {
-        return Err(invalid(
-            "Front service dependency does not match selected Service",
-        ));
+        return Err(invalid(&format!(
+            "{} needs {} {}, but {} is selected.",
+            front.actor_type(),
+            dep.actor,
+            dep.version,
+            service.to_string_repr()
+        )));
     }
     let front_path = dep
         .contract

@@ -54,13 +54,13 @@ pub(super) async fn verify(
             ProfileError::Unavailable(format!("Could not start the package verifier: {error}"))
         })?;
     if !output.status.success() {
-        let details: String = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(1800)
-            .collect();
-        return Err(ProfileError::Invalid(format!(
-            "Package verification failed: {details}"
-        )));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        platform::recording::debug!("Package verifier rejected the selection: {stderr}");
+        let reason = stderr
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("Error: "))
+            .unwrap_or("Could not verify the selected packages. See the server logs.");
+        return Err(ProfileError::Invalid(reason.chars().take(1000).collect()));
     }
     let report: VerificationReport = serde_json::from_slice(&output.stdout)
         .map_err(|_| ProfileError::Unavailable("Invalid package verification result.".into()))?;
@@ -71,8 +71,7 @@ pub(super) async fn verify(
     }
     if matches!(release, PackageRelease::Service(_)) && report.front.is_none() {
         return Err(ProfileError::Invalid(
-            "A Service release needs a downloadable Front archive for RPC contract verification."
-                .into(),
+            "Choose a downloadable Front so the Service release can check the RPC contract.".into(),
         ));
     }
     Ok(())

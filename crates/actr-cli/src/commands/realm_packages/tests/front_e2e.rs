@@ -1,6 +1,8 @@
 use super::*;
 use crate::commands::realm_members::{KeyArgs, Member};
 use actr_hyper::{ActrRef, Node, WorkloadPackage};
+use actr_protocol::realm_membership::{MembershipOp, MembershipRequest};
+use actr_protocol::realm_profile::FrontUpdate;
 use actr_protocol::{ActrId, PayloadType, RpcRequest};
 use prost::Message;
 
@@ -146,16 +148,38 @@ async fn realm_front_release_fixture() -> Result<()> {
                     realm,
                     provider,
                     &request.output,
-                    Some(incompatible),
+                    Some(incompatible.clone()),
                     &get,
                     |_| async { panic!("incompatible package selection attempted publication") },
                 )
                 .await
                 .unwrap_err();
                 ensure!(
-                    mismatch.to_string().contains("Front service dependency"),
-                    "unexpected contract verification failure: {mismatch:#}"
+                    mismatch
+                        .to_string()
+                        .contains("Choose a different Front package or version too."),
+                    "unexpected Service identity check failure: {mismatch:#}"
                 );
+                let mut request = MembershipRequest::new(
+                    MembershipOp::SwitchService,
+                    realm,
+                    provider,
+                    &hex::encode(rand::random::<[u8; 16]>()),
+                );
+                request.selection = Some(incompatible);
+                request.service_update = Some(FrontUpdate {
+                    operation_id: hex::encode(rand::random::<[u8; 16]>()),
+                    expected_sequence: baseline.sequence,
+                    rollback: false,
+                });
+                match owner.send_with_outcome(request).await {
+                    Err(SendError::Refused(error))
+                        if error
+                            .to_string()
+                            .contains("Choose a different Front package or version too.") => {}
+                    Err(error) => return Err(error.into()),
+                    Ok(_) => bail!("Issuer accepted a Service-only program change"),
+                }
                 let (unchanged, _, _) =
                     resolve_profile(realm, None, |url| get(url, DOCUMENT_LIMIT), None).await?;
                 ensure!(
@@ -163,7 +187,7 @@ async fn realm_front_release_fixture() -> Result<()> {
                     "incompatible package selection changed the Profile"
                 );
                 println!(
-                    "SERVICE_PACKAGE_GATE sequence={} rejected_incompatible_front",
+                    "SERVICE_PACKAGE_GATE sequence={} rejected_service_only_switch",
                     baseline.sequence
                 );
             }
@@ -242,6 +266,10 @@ async fn realm_front_release_fixture() -> Result<()> {
                 ensure!(
                     front == first_front,
                     "rollback did not restore the original Front"
+                );
+                ensure!(
+                    Some(selection) == original_selection.as_ref(),
+                    "rollback did not restore the full package selection"
                 );
             }
         } else {

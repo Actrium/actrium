@@ -151,7 +151,7 @@ impl RealmPackageSelection {
                 }
                 if !self.packages.contains_key(target) {
                     return Err(format!(
-                        "packages[{name}].dependencies[{alias}] names unknown package reference {target:?}"
+                        "Package {name} needs {alias}, but the selection has no package named {target}."
                     ));
                 }
             }
@@ -160,9 +160,14 @@ impl RealmPackageSelection {
     }
 
     pub fn check_successor(&self, next: &Self) -> Result<(), String> {
-        self.selected()?
-            .0
-            .check_primary_successor(next.selected()?.0)?;
+        let (service, front) = self.selected()?;
+        let (next_service, next_front) = next.selected()?;
+        if !service.same_program(next_service)? && front.r#type == next_front.r#type {
+            return Err(format!(
+                "The Service changed from {} to {}. Choose a different Front package or version too.",
+                service.r#type, next_service.r#type
+            ));
+        }
         let digests: BTreeMap<_, _> = self
             .packages
             .values()
@@ -172,7 +177,10 @@ impl RealmPackageSelection {
             if let Some(digest) = p.fixed_digest()
                 && digests.get(&p.r#type).is_some_and(|old| *old != digest)
             {
-                return Err(format!("digest changed for immutable package {}", p.r#type));
+                return Err(format!(
+                    "{} is already published with different contents. Publish a new version.",
+                    p.r#type
+                ));
             }
         }
         Ok(())
@@ -181,8 +189,17 @@ impl RealmPackageSelection {
     /// A Front release must preserve the primary Service and all packages
     /// reachable through its signed dependency selection.
     pub fn check_unchanged_service(&self, next: &Self) -> Result<(), String> {
+        if let Some(package) = self.changed_service_package(next)? {
+            return Err(format!(
+                "Service package {package} changed. Submit the complete selection with actr realm update."
+            ));
+        }
+        Ok(())
+    }
+
+    fn changed_service_package(&self, next: &Self) -> Result<Option<&str>, String> {
         if self.primary_package != next.primary_package {
-            return Err("a Front update cannot change primary_package".into());
+            return Ok(Some(&self.primary_package));
         }
         let mut pending = vec![self.primary_package.as_str()];
         let mut checked = BTreeSet::new();
@@ -195,13 +212,11 @@ impl RealmPackageSelection {
                 .get(reference)
                 .ok_or_else(|| format!("unknown Service package reference {reference:?}"))?;
             if next.packages.get(reference) != Some(old) {
-                return Err(format!(
-                    "a Front update cannot change Service package {reference:?}"
-                ));
+                return Ok(Some(reference));
             }
             pending.extend(old.dependencies.values().map(String::as_str));
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Identify a release from the accepted and proposed selections.
@@ -210,10 +225,9 @@ impl RealmPackageSelection {
         if self == next {
             return Ok(None);
         }
-        if self.selected()?.0.r#type != next.selected()?.0.r#type {
+        if self.changed_service_package(next)?.is_some() {
             return Ok(Some(PackageSelectionChange::Service));
         }
-        self.check_unchanged_service(next)?;
         Ok(Some(PackageSelectionChange::Front))
     }
 }

@@ -263,7 +263,11 @@ impl RealmProfiles {
                 .filter(|record| {
                     u64::try_from(record.sequence).ok() == Some(update.expected_sequence)
                 })
-                .ok_or_else(|| RealmError::Conflict("package release baseline changed".into()))?
+                .ok_or_else(|| {
+                    RealmError::Conflict(
+                        "The Profile changed. Reload the selection and try again.".into(),
+                    )
+                })?
                 .verify_for_update(keys)?;
             let current = baseline.selection.as_ref().ok_or_else(|| {
                 RealmError::Conflict("the baseline has no complete package selection".into())
@@ -285,7 +289,7 @@ impl RealmProfiles {
                     != Some(selection)
             {
                 return Err(RealmError::Conflict(
-                    "the last package release is no longer available for rollback".into(),
+                    "There is no previous selection to roll back to.".into(),
                 )
                 .into());
             }

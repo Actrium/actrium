@@ -6,8 +6,8 @@
 
 use actr_protocol::RealmSigningKeys;
 use actr_protocol::realm_profile::{
-    FrontUpdate, PackageSelectionChange, RealmPackageSelection, RealmProfile, RealmProfileError,
-    RealmStatus,
+    FrontUpdate, PackageSelectionChange, RealmPackage, RealmPackageSelection, RealmProfile,
+    RealmProfileError, RealmStatus,
 };
 use chrono::Utc;
 
@@ -131,6 +131,44 @@ impl RealmPackageReleaseRecord {
 fn read_selection(document: &str) -> Result<RealmPackageSelection, RealmError> {
     serde_json::from_str(document)
         .map_err(|e| RealmError::DatabaseError(format!("invalid stored package selection: {e}")))
+}
+
+fn check_unreleased_primary(
+    document: &str,
+    next: &RealmPackageSelection,
+) -> Result<(), RealmError> {
+    #[derive(serde::Deserialize)]
+    struct StoredPackages {
+        #[serde(
+            flatten,
+            deserialize_with = "RealmPackageSelection::deserialize_optional"
+        )]
+        selection: Option<RealmPackageSelection>,
+        package: Option<serde_json::Value>,
+    }
+
+    let previous: StoredPackages = serde_json::from_str(document)
+        .map_err(|e| RealmError::DatabaseError(format!("invalid stored Realm packages: {e}")))?;
+    let legacy_primary;
+    let primary = match &previous.selection {
+        Some(selection) => selection.selected().map_err(RealmError::Conflict)?.0,
+        None => {
+            let value = previous.package.ok_or_else(|| {
+                RealmError::Conflict("the accepted Profile has no primary Service".into())
+            })?;
+            legacy_primary = serde_json::from_value::<RealmPackage>(value).map_err(|e| {
+                RealmError::DatabaseError(format!("invalid stored primary Service: {e}"))
+            })?;
+            &legacy_primary
+        }
+    };
+    primary
+        .check_primary_successor(next.selected().map_err(RealmError::Conflict)?.0)
+        .map_err(|_| {
+            RealmError::Conflict(
+                "Use a package release to change the Service publisher or name.".into(),
+            )
+        })
 }
 
 impl RealmProfileRecord {
@@ -298,8 +336,11 @@ impl RealmProfileRecord {
             .bind(previous_digest)
             .fetch_optional(&mut *tx)
             .await?;
-            let previous = previous
-                .ok_or_else(|| RealmError::Conflict("package release baseline changed".into()))?;
+            let previous = previous.ok_or_else(|| {
+                RealmError::Conflict(
+                    "The Profile changed. Reload the selection and try again.".into(),
+                )
+            })?;
             let old = read_selection(&previous)?;
             let new = profile.selection.as_ref().ok_or_else(|| {
                 RealmError::Conflict("a package release needs a complete selection".into())
@@ -317,7 +358,7 @@ impl RealmProfileRecord {
                     != Some(new)
             {
                 return Err(RealmError::Conflict(
-                    "the last package release is no longer available for rollback".into(),
+                    "There is no previous selection to roll back to.".into(),
                 ));
             }
             let inserted = sqlx::query(
@@ -339,6 +380,19 @@ impl RealmProfileRecord {
                     "Package release operation ID already used".into(),
                 ));
             }
+        } else if let (Some(digest), Some(selection)) = (previous_digest, &profile.selection) {
+            // The accepted row also anchors ordinary writes when its original
+            // signing key is no longer listed.
+            let previous: Option<String> = sqlx::query_scalar(
+                "SELECT document FROM realm_profile WHERE realm = ? AND digest = ?",
+            )
+            .bind(name)
+            .bind(digest)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let previous = previous
+                .ok_or_else(|| RealmError::Conflict("Realm Profile baseline changed".into()))?;
+            check_unreleased_primary(&previous, selection)?;
         }
         if check_issuer_ledger {
             let keys = sqlx::query_as::<_, super::issuer_key::RealmIssuerKey>(
@@ -404,7 +458,7 @@ impl RealmProfileRecord {
                 .rows_affected();
                 if count == 0 {
                     return Err(RealmError::Conflict(format!(
-                        "immutable package {} changed digest",
+                        "{} is already published with different contents. Publish a new version.",
                         package.r#type
                     )));
                 }
@@ -556,6 +610,18 @@ mod tests {
         second["sequence"] = json!(2);
         second["packages"]["ui"]["type"] = json!("acme.com/ui@1.1.0");
         second["packages"]["ui"]["sha256"] = json!("12".repeat(32));
+
+        let mut unguarded = second.clone();
+        unguarded["packages"]["service"]["type"] = json!("acme.com/new-notes@1.0.0");
+        sign_document(&mut unguarded, "rs-1", &key);
+        let unguarded = unguarded.to_string();
+        let switched = RealmProfile::verify(unguarded.as_bytes(), NAME, &keys)?;
+        initial.check_successor(&switched)?;
+        assert!(matches!(
+            RealmProfileRecord::store(&switched, &unguarded, Some(&original.digest), None, None)
+                .await,
+            Err(RealmError::Conflict(message)) if message.contains("Use a package release")
+        ));
 
         let mut changed_service = second.clone();
         changed_service["packages"]["service"]["type"] = json!("acme.com/notes@2.0.0");

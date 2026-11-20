@@ -40,17 +40,18 @@ pub fn check_realm_package_dependencies(
         if declared.actor != format!("{}/{}", actor.publisher, actor.name)
             || !constraint.matches(&version)
         {
-            return Err(invalid(
-                "selected type/version does not satisfy the signed manifest",
-            ));
+            return Err(PackError::InvalidPackage(format!(
+                "{} needs {} {} for {alias}, but {} is selected.",
+                reference.r#type, declared.actor, declared.version, selected.r#type
+            )));
         }
-        if locked_types
-            .get(alias)
-            .is_some_and(|locked| locked != &selected.r#type)
+        if let Some(locked) = locked_types.get(alias)
+            && locked != &selected.r#type
         {
-            return Err(invalid(
-                "selected type differs from the signed dependency lock",
-            ));
+            return Err(PackError::InvalidPackage(format!(
+                "{} is locked to {locked} for {alias}, but {} is selected.",
+                reference.r#type, selected.r#type
+            )));
         }
     }
     Ok(())
@@ -83,7 +84,8 @@ pub fn check_realm_dependencies(
             match selected.dependencies.get(alias) {
                 Some(target) if &selection.packages[target].sha256 != digest => {
                     return Err(PackError::InvalidPackage(format!(
-                        "{source}.{alias} -> {target}: Realm package digest differs from signed egress lock"
+                        "{} pins a different SHA-256 for {alias} than the one selected for {}.",
+                        selection.packages[source].r#type, selection.packages[target].r#type
                     )));
                 }
                 None if manifest
@@ -92,7 +94,8 @@ pub fn check_realm_dependencies(
                     .is_some_and(|dep| dep.required) =>
                 {
                     return Err(PackError::InvalidPackage(format!(
-                        "{source}.{alias}: no Realm target for required egress dependency"
+                        "{} needs {alias}. Choose a package for that dependency.",
+                        selection.packages[source].r#type
                     )));
                 }
                 _ => {}
@@ -192,9 +195,7 @@ fn check_verified_target(
                 .any(|file| file.sha256 == contract.sha256)
         };
         if !matches_export {
-            return Err(invalid(
-                "dependency contract differs from the target RPC export",
-            ));
+            return Err(invalid("The RPC definitions do not match."));
         }
     }
     Ok(())
