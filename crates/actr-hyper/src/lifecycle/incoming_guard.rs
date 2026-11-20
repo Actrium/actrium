@@ -198,19 +198,20 @@ impl<'a> IncomingDispatchRequest<'a> {
 pub struct IncomingStreamChunk<'a> {
     pub chunk: &'a mut DataChunk,
     pub sender: &'a ActrId,
-    pub metadata: IncomingMetadata<'a>,
     pub peer_context: Option<Arc<VerifiedPeerContext>>,
 }
 
 impl<'a> IncomingStreamChunk<'a> {
     pub fn new(chunk: &'a mut DataChunk, sender: &'a ActrId) -> Self {
-        let metadata = IncomingMetadata::new(&chunk.metadata);
         Self {
             chunk,
             sender,
-            metadata,
             peer_context: None,
         }
+    }
+
+    pub fn metadata(&self) -> IncomingMetadata<'_> {
+        IncomingMetadata::new(&self.chunk.metadata)
     }
 
     pub fn with_peer_context(mut self, context: Option<Arc<VerifiedPeerContext>>) -> Self {

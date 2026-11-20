@@ -235,7 +235,7 @@ impl crate::lifecycle::IncomingGuard for VerifiedChannelStreamGuard {
             )
         })?;
         let claimed = request
-            .metadata
+            .metadata()
             .get_u64("actrium.channel.generation")
             .map_err(crate::lifecycle::IncomingGuardError::invalid_metadata)?
             .unwrap_or(context.channel_generation);

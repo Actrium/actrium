@@ -46,9 +46,9 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// The Front Host rewrites field 8 to an attempt-specific transport stream and
-/// restores the caller's stream ID after authenticating the terminal result.
-/// All declared fields are retained when the request is encoded again.
+/// Typed Prepare fields used to validate the result stream. The Host replaces
+/// field 8 directly in the original wire payload so fields introduced by a
+/// newer contract survive the attempt-specific transport rewrite.
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
 pub(crate) struct PrepareAttachmentRequest {
     #[prost(string, tag = "1")]
@@ -362,6 +362,52 @@ pub(crate) fn attachment_result_stream(
     Ok(Some(prepare.result_stream_id))
 }
 
+/// Replace every occurrence of a singular length-delimited field without
+/// decoding and re-encoding the surrounding message. In particular, unknown
+/// fields and their original wire representation remain byte-for-byte intact.
+fn replace_length_delimited_field(
+    payload: &[u8],
+    field: u32,
+    replacement: &str,
+) -> Result<Vec<u8>, IncomingGuardError> {
+    use actr_protocol::prost::encoding::{self, DecodeContext, WireType};
+
+    let invalid = |error: actr_protocol::prost::DecodeError| {
+        invalid_metadata(format!("invalid attachment prepare payload: {error}"))
+    };
+    let mut remaining = payload;
+    let mut copied = 0;
+    let mut replaced = false;
+    let mut output = Vec::with_capacity(payload.len() + replacement.len() + 16);
+    while !remaining.is_empty() {
+        let field_start = payload.len() - remaining.len();
+        let (tag, wire_type) = encoding::decode_key(&mut remaining).map_err(invalid)?;
+        encoding::skip_field(wire_type, tag, &mut remaining, DecodeContext::default())
+            .map_err(invalid)?;
+        if tag != field {
+            continue;
+        }
+        if wire_type != WireType::LengthDelimited {
+            return Err(invalid_metadata(
+                "attachment result stream id must be length-delimited",
+            ));
+        }
+        output.extend_from_slice(&payload[copied..field_start]);
+        encoding::encode_key(field, WireType::LengthDelimited, &mut output);
+        encoding::encode_varint(replacement.len() as u64, &mut output);
+        output.extend_from_slice(replacement.as_bytes());
+        copied = payload.len() - remaining.len();
+        replaced = true;
+    }
+    if !replaced {
+        return Err(invalid_metadata(
+            "attachment prepare requires a result stream id",
+        ));
+    }
+    output.extend_from_slice(&payload[copied..]);
+    Ok(output)
+}
+
 /// Give every Prepare a fresh wire-level result stream. A delayed result from
 /// an abandoned upload therefore cannot be authenticated as a later Prepare
 /// that happens to reuse the same caller-visible stream ID.
@@ -372,16 +418,9 @@ pub(crate) fn fresh_attachment_result_stream(
     let Some(result_stream) = attachment_result_stream(route, payload)? else {
         return Ok(None);
     };
-    let mut prepare = PrepareAttachmentRequest::decode(payload).map_err(|error| {
-        invalid_metadata(format!("invalid attachment prepare payload: {error}"))
-    })?;
     let transport_stream = format!("actrium-result-{}", uuid::Uuid::new_v4());
-    prepare.result_stream_id = transport_stream.clone();
-    Ok(Some((
-        result_stream,
-        transport_stream,
-        prepare.encode_to_vec(),
-    )))
+    let payload = replace_length_delimited_field(payload, 8, &transport_stream)?;
+    Ok(Some((result_stream, transport_stream, payload)))
 }
 
 struct Admitted {
@@ -890,7 +929,7 @@ impl IncomingGuard for ActriumServiceGuard {
             .ok_or_else(missing_verified_channel)?;
         let channel = verified_channel(context)?;
         let transport_stream_id = request.chunk.stream_id.clone();
-        let business = chunk_request(request.chunk, request.metadata)?;
+        let business = chunk_request(request.chunk, request.metadata())?;
         if let Some((session, prepare_request_id, stream_id)) = self
             .shared
             .peer_attachment_result_for_transport(&transport_stream_id)
@@ -1045,7 +1084,16 @@ mod attachment_reservation_tests {
             size_bytes: 42,
             result_stream_id: "result".to_string(),
         };
-        let payload = prepare.encode_to_vec();
+        let mut payload = prepare.encode_to_vec();
+        let unknown_start = payload.len();
+        actr_protocol::prost::encoding::encode_key(
+            100,
+            actr_protocol::prost::encoding::WireType::LengthDelimited,
+            &mut payload,
+        );
+        actr_protocol::prost::encoding::encode_varint(11, &mut payload);
+        payload.extend_from_slice(b"newer-field");
+        let unknown = payload[unknown_start..].to_vec();
         let (public, first, first_payload) =
             fresh_attachment_result_stream(ATTACHMENT_PREPARE_ROUTE, &payload)
                 .unwrap()
@@ -1058,6 +1106,7 @@ mod attachment_reservation_tests {
         assert_eq!(public, "result");
         assert_ne!(first, second);
         for (transport, payload) in [(first, first_payload), (second, second_payload)] {
+            assert!(payload.ends_with(&unknown));
             let decoded = PrepareAttachmentRequest::decode(payload.as_slice()).unwrap();
             let mut expected = prepare.clone();
             expected.result_stream_id = transport;

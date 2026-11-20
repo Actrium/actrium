@@ -3599,7 +3599,7 @@ impl crate::lifecycle::IncomingGuard for ChannelGenerationGuard {
         request: crate::lifecycle::IncomingStreamChunk<'_>,
     ) -> Result<(), crate::lifecycle::IncomingGuardError> {
         check_verified_generation(
-            request.metadata,
+            request.metadata(),
             request.peer_context.as_ref(),
             self.current_generation.load(Ordering::SeqCst),
         )
