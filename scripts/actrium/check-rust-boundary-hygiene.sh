@@ -870,6 +870,8 @@ apple_allowed_actriumcore_import_files=(
   "macos/Actrium/Models/TabRuntimeBridge.swift"
   "macos/Actrium/Models/TagCoreBridge.swift"
   "macos/Actrium/MultiProcess/RendererLocalStorage.swift"
+  "macos/Actrium/Database/GuestStorageDatabase.swift"
+  "macos/Actrium/Database/StorageMigrationConsent.swift"
   "macos/Actrium/Settings/Sync/BrowserSyncCredentialsProvider.swift"
   "macos/Actrium/Settings/Sync/BrowserSyncProviderConnectionPlanner.swift"
 )

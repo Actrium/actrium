@@ -2390,6 +2390,12 @@ struct UnifiedReactNativeLayer: View {
         if let origin = tab.localStorageOrigin {
             config["localStorageOrigin"] = origin
         }
+        if let identity = tab.localStoragePublisherIdentity {
+            config["localStoragePublisherIdentity"] = identity
+        }
+        if let prepared = tab.preparedLocalStorage {
+            config["preparedLocalStorage"] = prepared.configuration
+        }
         if let capabilitySnapshotJSON {
             config["capabilitySnapshotJSON"] = capabilitySnapshotJSON
         }

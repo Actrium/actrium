@@ -1264,6 +1264,18 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -1821,11 +1833,23 @@ fun uniffi_actrium_core_checksum_func_verify_realm_front_package(
 ): Short
 fun uniffi_actrium_core_checksum_func_verify_realm_package_publisher(
 ): Short
+fun uniffi_actrium_core_checksum_method_guestlocalstorage_accept_publisher_profile(
+): Short
+fun uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publisher_pins(
+): Short
+fun uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publishers(
+): Short
 fun uniffi_actrium_core_checksum_method_guestlocalstorage_get_item(
+): Short
+fun uniffi_actrium_core_checksum_method_guestlocalstorage_keep_storage_separate(
 ): Short
 fun uniffi_actrium_core_checksum_method_guestlocalstorage_remove_item(
 ): Short
+fun uniffi_actrium_core_checksum_method_guestlocalstorage_resolve_signed_origin(
+): Short
 fun uniffi_actrium_core_checksum_method_guestlocalstorage_set_item(
+): Short
+fun uniffi_actrium_core_checksum_method_guestlocalstorage_storage_migration_token(
 ): Short
 fun uniffi_actrium_core_checksum_constructor_guestlocalstorage_new(
 ): Short
@@ -1884,12 +1908,24 @@ fun uniffi_actrium_core_fn_free_guestlocalstorage(`ptr`: Pointer,uniffi_out_err:
 ): Unit
 fun uniffi_actrium_core_fn_constructor_guestlocalstorage_new(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
+fun uniffi_actrium_core_fn_method_guestlocalstorage_accept_publisher_profile(`ptr`: Pointer,`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,`previousPinsJson`: RustBuffer.ByValue,`previousProfileBody`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publisher_pins(`ptr`: Pointer,`domain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publishers(`ptr`: Pointer,`domains`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_method_guestlocalstorage_get_item(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_actrium_core_fn_method_guestlocalstorage_keep_storage_separate(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`publisherIdentity`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_method_guestlocalstorage_remove_item(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
+fun uniffi_actrium_core_fn_method_guestlocalstorage_resolve_signed_origin(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`publisherIdentity`: RustBuffer.ByValue,`migrationApproval`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_method_guestlocalstorage_set_item(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
+fun uniffi_actrium_core_fn_method_guestlocalstorage_storage_migration_token(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`publisherIdentity`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_accept_authority_descriptor(`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_func_accept_publisher_profile(`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -3371,13 +3407,31 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_func_verify_realm_package_publisher() != 59675.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_accept_publisher_profile() != 43094.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publisher_pins() != 15617.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publishers() != 2251.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_get_item() != 63346.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_keep_storage_separate() != 53449.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_remove_item() != 23454.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_resolve_signed_origin() != 29707.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_set_item() != 45632.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_storage_migration_token() != 44068.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actrium_core_checksum_constructor_guestlocalstorage_new() != 18051.toShort()) {
@@ -3844,11 +3898,23 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
  */
 public interface GuestLocalStorageInterface {
 
+    fun `acceptPublisherProfile`(`body`: kotlin.String, `domain`: kotlin.String, `previousPinsJson`: kotlin.String?, `previousProfileBody`: kotlin.String?): PublisherProfileAcceptance
+
+    fun `acceptedPublisherPins`(`domain`: kotlin.String): kotlin.String?
+
+    fun `acceptedPublishers`(`domains`: List<kotlin.String>): List<PublisherProfileInfo>
+
     fun `getItem`(`origin`: kotlin.String, `key`: kotlin.String): kotlin.String?
+
+    fun `keepStorageSeparate`(`origin`: kotlin.String, `publisherIdentity`: kotlin.String): kotlin.String
 
     fun `removeItem`(`origin`: kotlin.String, `key`: kotlin.String)
 
+    fun `resolveSignedOrigin`(`origin`: kotlin.String, `publisherIdentity`: kotlin.String?, `migrationApproval`: kotlin.String?): kotlin.String
+
     fun `setItem`(`origin`: kotlin.String, `key`: kotlin.String, `value`: kotlin.String)
+
+    fun `storageMigrationToken`(`origin`: kotlin.String, `publisherIdentity`: kotlin.String): kotlin.String?
 
     companion object
 }
@@ -3946,12 +4012,64 @@ open class GuestLocalStorage: Disposable, AutoCloseable, GuestLocalStorageInterf
     }
 
 
+    @Throws(GuestLocalStorageException::class)override fun `acceptPublisherProfile`(`body`: kotlin.String, `domain`: kotlin.String, `previousPinsJson`: kotlin.String?, `previousProfileBody`: kotlin.String?): PublisherProfileAcceptance {
+            return FfiConverterTypePublisherProfileAcceptance.lift(
+    callWithPointer {
+    uniffiRustCallWithError(GuestLocalStorageException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_accept_publisher_profile(
+        it, FfiConverterString.lower(`body`),FfiConverterString.lower(`domain`),FfiConverterOptionalString.lower(`previousPinsJson`),FfiConverterOptionalString.lower(`previousProfileBody`),_status)
+}
+    }
+    )
+    }
+
+
+
+    @Throws(GuestLocalStorageException::class)override fun `acceptedPublisherPins`(`domain`: kotlin.String): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithPointer {
+    uniffiRustCallWithError(GuestLocalStorageException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publisher_pins(
+        it, FfiConverterString.lower(`domain`),_status)
+}
+    }
+    )
+    }
+
+
+
+    @Throws(GuestLocalStorageException::class)override fun `acceptedPublishers`(`domains`: List<kotlin.String>): List<PublisherProfileInfo> {
+            return FfiConverterSequenceTypePublisherProfileInfo.lift(
+    callWithPointer {
+    uniffiRustCallWithError(GuestLocalStorageException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publishers(
+        it, FfiConverterSequenceString.lower(`domains`),_status)
+}
+    }
+    )
+    }
+
+
+
     @Throws(GuestLocalStorageException::class)override fun `getItem`(`origin`: kotlin.String, `key`: kotlin.String): kotlin.String? {
             return FfiConverterOptionalString.lift(
     callWithPointer {
     uniffiRustCallWithError(GuestLocalStorageException) { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_get_item(
         it, FfiConverterString.lower(`origin`),FfiConverterString.lower(`key`),_status)
+}
+    }
+    )
+    }
+
+
+
+    @Throws(GuestLocalStorageException::class)override fun `keepStorageSeparate`(`origin`: kotlin.String, `publisherIdentity`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    callWithPointer {
+    uniffiRustCallWithError(GuestLocalStorageException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_keep_storage_separate(
+        it, FfiConverterString.lower(`origin`),FfiConverterString.lower(`publisherIdentity`),_status)
 }
     }
     )
@@ -3971,6 +4089,19 @@ open class GuestLocalStorage: Disposable, AutoCloseable, GuestLocalStorageInterf
 
 
 
+    @Throws(GuestLocalStorageException::class)override fun `resolveSignedOrigin`(`origin`: kotlin.String, `publisherIdentity`: kotlin.String?, `migrationApproval`: kotlin.String?): kotlin.String {
+            return FfiConverterString.lift(
+    callWithPointer {
+    uniffiRustCallWithError(GuestLocalStorageException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_resolve_signed_origin(
+        it, FfiConverterString.lower(`origin`),FfiConverterOptionalString.lower(`publisherIdentity`),FfiConverterOptionalString.lower(`migrationApproval`),_status)
+}
+    }
+    )
+    }
+
+
+
     @Throws(GuestLocalStorageException::class)override fun `setItem`(`origin`: kotlin.String, `key`: kotlin.String, `value`: kotlin.String)
         =
     callWithPointer {
@@ -3980,6 +4111,19 @@ open class GuestLocalStorage: Disposable, AutoCloseable, GuestLocalStorageInterf
 }
     }
 
+
+
+
+    @Throws(GuestLocalStorageException::class)override fun `storageMigrationToken`(`origin`: kotlin.String, `publisherIdentity`: kotlin.String): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    callWithPointer {
+    uniffiRustCallWithError(GuestLocalStorageException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_storage_migration_token(
+        it, FfiConverterString.lower(`origin`),FfiConverterString.lower(`publisherIdentity`),_status)
+}
+    }
+    )
+    }
 
 
 
@@ -6311,6 +6455,7 @@ public object FfiConverterTypePublisherProfileAcceptance: FfiConverterRustBuffer
  */
 data class PublisherProfileInfo (
     var `domain`: kotlin.String,
+    var `storageIdentity`: kotlin.String?,
     var `profileSequence`: kotlin.ULong,
     /**
      * RFC 3339; past this point the profile must be re-fetched.
@@ -6329,6 +6474,7 @@ public object FfiConverterTypePublisherProfileInfo: FfiConverterRustBuffer<Publi
     override fun read(buf: ByteBuffer): PublisherProfileInfo {
         return PublisherProfileInfo(
             FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterString.read(buf),
             FfiConverterSequenceTypePublisherPackageKeyInfo.read(buf),
@@ -6337,6 +6483,7 @@ public object FfiConverterTypePublisherProfileInfo: FfiConverterRustBuffer<Publi
 
     override fun allocationSize(value: PublisherProfileInfo) = (
             FfiConverterString.allocationSize(value.`domain`) +
+            FfiConverterOptionalString.allocationSize(value.`storageIdentity`) +
             FfiConverterULong.allocationSize(value.`profileSequence`) +
             FfiConverterString.allocationSize(value.`profileExpiresAt`) +
             FfiConverterSequenceTypePublisherPackageKeyInfo.allocationSize(value.`packageSigningKeys`)
@@ -6344,6 +6491,7 @@ public object FfiConverterTypePublisherProfileInfo: FfiConverterRustBuffer<Publi
 
     override fun write(value: PublisherProfileInfo, buf: ByteBuffer) {
             FfiConverterString.write(value.`domain`, buf)
+            FfiConverterOptionalString.write(value.`storageIdentity`, buf)
             FfiConverterULong.write(value.`profileSequence`, buf)
             FfiConverterString.write(value.`profileExpiresAt`, buf)
             FfiConverterSequenceTypePublisherPackageKeyInfo.write(value.`packageSigningKeys`, buf)
@@ -7617,6 +7765,14 @@ sealed class GuestLocalStorageException(message: String): kotlin.Exception(messa
 
         class DatabaseFailure(message: String) : GuestLocalStorageException(message)
 
+        class InvalidPublisher(message: String) : GuestLocalStorageException(message)
+
+        class IdentityChanged(message: String) : GuestLocalStorageException(message)
+
+        class MigrationRequired(message: String) : GuestLocalStorageException(message)
+
+        class MigrationConflict(message: String) : GuestLocalStorageException(message)
+
 
     companion object ErrorHandler : UniffiRustCallStatusErrorHandler<GuestLocalStorageException> {
         override fun lift(error_buf: RustBuffer.ByValue): GuestLocalStorageException = FfiConverterTypeGuestLocalStorageError.lift(error_buf)
@@ -7634,6 +7790,10 @@ public object FfiConverterTypeGuestLocalStorageError : FfiConverterRustBuffer<Gu
             2 -> GuestLocalStorageException.InvalidValue(FfiConverterString.read(buf))
             3 -> GuestLocalStorageException.QuotaExceeded(FfiConverterString.read(buf))
             4 -> GuestLocalStorageException.DatabaseFailure(FfiConverterString.read(buf))
+            5 -> GuestLocalStorageException.InvalidPublisher(FfiConverterString.read(buf))
+            6 -> GuestLocalStorageException.IdentityChanged(FfiConverterString.read(buf))
+            7 -> GuestLocalStorageException.MigrationRequired(FfiConverterString.read(buf))
+            8 -> GuestLocalStorageException.MigrationConflict(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
 
@@ -7659,6 +7819,22 @@ public object FfiConverterTypeGuestLocalStorageError : FfiConverterRustBuffer<Gu
             }
             is GuestLocalStorageException.DatabaseFailure -> {
                 buf.putInt(4)
+                Unit
+            }
+            is GuestLocalStorageException.InvalidPublisher -> {
+                buf.putInt(5)
+                Unit
+            }
+            is GuestLocalStorageException.IdentityChanged -> {
+                buf.putInt(6)
+                Unit
+            }
+            is GuestLocalStorageException.MigrationRequired -> {
+                buf.putInt(7)
+                Unit
+            }
+            is GuestLocalStorageException.MigrationConflict -> {
+                buf.putInt(8)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -8358,6 +8534,34 @@ public object FfiConverterSequenceTypePublisherPackageKeyInfo: FfiConverterRustB
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypePublisherPackageKeyInfo.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypePublisherProfileInfo: FfiConverterRustBuffer<List<PublisherProfileInfo>> {
+    override fun read(buf: ByteBuffer): List<PublisherProfileInfo> {
+        val len = buf.getInt()
+        return List<PublisherProfileInfo>(len) {
+            FfiConverterTypePublisherProfileInfo.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<PublisherProfileInfo>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypePublisherProfileInfo.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<PublisherProfileInfo>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypePublisherProfileInfo.write(it, buf)
         }
     }
 }

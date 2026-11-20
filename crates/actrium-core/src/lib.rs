@@ -17,6 +17,7 @@ pub mod domain;
 mod ffi;
 mod guest_local_storage;
 pub mod persistence;
+mod publisher_storage;
 pub mod realm_link;
 pub mod runtime_persistence;
 pub mod speech;
