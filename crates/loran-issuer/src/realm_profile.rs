@@ -547,20 +547,20 @@ impl RealmProfiles {
             (Some(accepted), Some((profile, document))) => {
                 accepted.check_successor(&profile)?;
                 if profile.sequence > accepted.sequence {
-                    store_fetched(&profile, &document, &record.digest).await?;
-                    self.suspend_unless_listed(realm, &profile).await?;
+                    let digest = store_fetched(&profile, &document, &record.digest).await?;
+                    self.suspend_unless_listed(realm, &profile, &digest).await?;
                 }
             }
             (None, Some((profile, document))) if profile.provider.id == self.provider_id() => {
-                store_fetched(&profile, &document, &record.digest).await?;
-                self.suspend_unless_listed(realm, &profile).await?;
+                match store_fetched(&profile, &document, &record.digest).await {
+                    Ok(digest) => self.suspend_unless_listed(realm, &profile, &digest).await?,
+                    Err(error) => {
+                        suspend_unverified(&record).await?;
+                        return Err(error);
+                    }
+                }
             }
-            (None, _) => {
-                platform::recording::warn!(
-                    "Suspending Realm {realm}: no Realm Profile signed by a listed key"
-                );
-                Realm::set_enabled(realm, false).await?;
-            }
+            (None, _) => suspend_unverified(&record).await?,
             (Some(_), None) => {}
         }
         Ok(())
@@ -572,6 +572,7 @@ impl RealmProfiles {
         &self,
         realm: &str,
         profile: &RealmProfile,
+        digest: &str,
     ) -> Result<(), ProfileError> {
         if profile.realm.status != ProfileStatus::Active {
             return Ok(());
@@ -582,11 +583,10 @@ impl RealmProfiles {
             .keys
             .iter()
             .any(|key| key.status == KeyStatus::Active && key.public_key == public_key);
-        if !listed {
+        if !listed && RealmProfileRecord::suspend_if_current(realm, digest).await? {
             platform::recording::warn!(
                 "Suspending Realm {realm}: its Realm Profile no longer lists this issuer key"
             );
-            Realm::set_enabled(realm, false).await?;
         }
         Ok(())
     }
@@ -826,15 +826,24 @@ impl RealmProfiles {
     }
 }
 
+async fn suspend_unverified(record: &RealmProfileRecord) -> Result<(), ProfileError> {
+    if RealmProfileRecord::suspend_if_current(&record.realm, &record.digest).await? {
+        platform::recording::warn!(
+            "Suspending Realm {}: no replacement for the unverifiable Profile",
+            record.realm
+        );
+    }
+    Ok(())
+}
+
 async fn store_fetched(
     profile: &RealmProfile,
     document: &[u8],
     previous_digest: &str,
-) -> Result<(), ProfileError> {
+) -> Result<String, ProfileError> {
     let document = std::str::from_utf8(document)
         .map_err(|_| ProfileError::Invalid("Realm Profile is not UTF-8".to_string()))?;
-    RealmProfileRecord::store_fetched(profile, document, previous_digest).await?;
-    Ok(())
+    Ok(RealmProfileRecord::store_fetched(profile, document, previous_digest).await?)
 }
 
 /// A one-key `realm_signing_keys` member with an empty signature value, and

@@ -281,12 +281,13 @@ impl RealmProfileRecord {
     }
 
     /// Store an already verified Profile from the external Realm authority
-    /// against the accepted record the refresh read.
+    /// against the accepted record the refresh read. Returns the digest of
+    /// the Profile that was written.
     pub async fn store_fetched(
         profile: &RealmProfile,
         document: &str,
         previous_digest: &str,
-    ) -> Result<(), RealmError> {
+    ) -> Result<String, RealmError> {
         Self::store_inner(
             profile,
             document,
@@ -296,7 +297,31 @@ impl RealmProfileRecord {
             ProfileWrite::Fetch,
         )
         .await?;
-        Ok(())
+        Ok(digest(document.as_bytes()))
+    }
+
+    /// Suspend a Realm only while the Profile that caused the suspension is
+    /// still current. A concurrent replacement keeps its own enabled state.
+    pub async fn suspend_if_current(
+        realm: &str,
+        expected_digest: &str,
+    ) -> Result<bool, RealmError> {
+        let suspended = sqlx::query(
+            "UPDATE realm SET enabled = FALSE, updated_at = ?3
+             WHERE name = ?1 AND enabled AND status <> 'retired'
+               AND EXISTS (SELECT 1 FROM realm_profile WHERE realm = ?1 AND digest = ?2)",
+        )
+        .bind(realm)
+        .bind(expected_digest)
+        .bind(Utc::now().timestamp())
+        .execute(get_database().get_pool())
+        .await?
+        .rows_affected()
+            != 0;
+        if suspended {
+            super::changes::announce(realm);
+        }
+        Ok(suspended)
     }
 
     /// Store a locally signed Profile only if its issuer keys still match the

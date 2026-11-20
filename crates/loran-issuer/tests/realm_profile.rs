@@ -770,6 +770,7 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
         acme.descriptor(&rotated_member),
     );
     let before_rotation = RealmProfileRecord::get(two).await.unwrap().unwrap();
+    assert!(Realm::get(two).await.unwrap().unwrap().enabled);
     let mut replacement: Value =
         serde_json::from_slice(&acme.profile(two, 1, "active", "rs-2", &issuer[two])).unwrap();
     replacement.as_object_mut().unwrap().remove("signature");
@@ -782,6 +783,7 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     refresh(&profiles, &documents).await;
     let record = RealmProfileRecord::get(two).await.unwrap().unwrap();
     assert_eq!(record.digest, before_rotation.digest);
+    assert!(!Realm::get(two).await.unwrap().unwrap().enabled);
 
     replacement["packages"][&front]["type"] = "acme.com/notes-ui@2.0.0".into();
     let switched_after_rotation = serde_json::to_vec(&acme.sign(replacement, "rs-2")).unwrap();
@@ -790,7 +792,8 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     let record = RealmProfileRecord::get(two).await.unwrap().unwrap();
     assert_eq!(record.sequence, 1);
     assert_eq!(record.document.as_bytes(), switched_after_rotation);
-    assert!(Realm::get(two).await.unwrap().unwrap().enabled);
+    assert!(!Realm::get(two).await.unwrap().unwrap().enabled);
+    Realm::set_enabled(two, true).await.unwrap();
 
     // Without any valid Profile the Realm is suspended.
     let stranger = Domain {
@@ -847,6 +850,68 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
         2
     );
     assert!(!Realm::get(two).await.unwrap().unwrap().enabled);
+}
+
+#[tokio::test]
+#[serial]
+async fn stale_external_refresh_leaves_a_concurrently_replaced_profile_enabled() {
+    let (profiles, _dir) = setup().await;
+    let acme = Domain {
+        keys: vec![
+            ("rs-1", SigningKey::from_bytes(&[1; 32])),
+            ("rs-2", SigningKey::from_bytes(&[2; 32])),
+        ],
+    };
+    let realm = "refresh-race@acme.com";
+    insert(realm, RealmStatus::Active).await;
+    let issuer = issuer_of(&profiles, realm).await;
+    accept(
+        realm,
+        &acme.profile(realm, 1, "active", "rs-1", &issuer),
+        &acme.member(1, &["rs-1", "rs-2"]),
+    )
+    .await;
+    let previous = RealmProfileRecord::get(realm).await.unwrap().unwrap();
+
+    let rotated_member = acme.member(2, &["rs-2"]);
+    let descriptor = acme.descriptor(&rotated_member);
+    let keys: RealmSigningKeys = serde_json::from_value(rotated_member).unwrap();
+    let replacement = acme.profile(realm, 2, "active", "rs-2", &issuer);
+    let replacement_text = std::str::from_utf8(&replacement).unwrap();
+    let accepted = RealmProfile::verify(&replacement, realm, &keys).unwrap();
+    let fetched = acme.profile(realm, 3, "active", "rs-2", &issuer);
+    let profile_url = "https://acme.com/realms/refresh-race";
+    profiles
+        .refresh(|url| {
+            let descriptor = &descriptor;
+            let accepted = &accepted;
+            let previous_digest = &previous.digest;
+            let fetched = &fetched;
+            async move {
+                match url.as_str() {
+                    "https://acme.com/.well-known/actr" => Ok(Arc::from(descriptor.clone())),
+                    url if url == profile_url => {
+                        // Complete another refresh after the first one read
+                        // the revoked baseline, while its fetch is in flight.
+                        RealmProfileRecord::store_fetched(
+                            accepted,
+                            replacement_text,
+                            previous_digest,
+                        )
+                        .await
+                        .unwrap();
+                        Ok(Arc::from(fetched.clone()))
+                    }
+                    _ => Err(FetchError::new(format!("404 {url}"))),
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+    let record = RealmProfileRecord::get(realm).await.unwrap().unwrap();
+    assert_eq!(record.document.as_bytes(), replacement);
+    assert!(Realm::get(realm).await.unwrap().unwrap().enabled);
 }
 
 mod management {
