@@ -119,19 +119,22 @@ private nonisolated final class GuestStorageConnection: @unchecked Sendable {
 
     private func loadKey(for url: URL) throws -> Data {
         if let key = try keychain.read() { return key }
+        let databaseExists: Bool
         do {
             _ = try FileManager.default.attributesOfItem(atPath: url.path)
-            throw GuestStorageKeyError.missing
+            databaseExists = true
         } catch let error as CocoaError where [.fileNoSuchFile, .fileReadNoSuchFile].contains(error.code) {
-            // A new database may create a fresh key.
+            databaseExists = false
         }
-        var key = Data(count: 32)
-        let status = key.withUnsafeMutableBytes { buffer in
-            SecRandomCopyBytes(kSecRandomDefault, buffer.count, buffer.baseAddress!)
+        if !databaseExists {
+            var key = Data(count: 32)
+            let status = key.withUnsafeMutableBytes { buffer in
+                SecRandomCopyBytes(kSecRandomDefault, buffer.count, buffer.baseAddress!)
+            }
+            guard status == errSecSuccess else { throw GuestStorageKeyError.generationFailed(status) }
+            if try keychain.add(key) { return key }
         }
-        guard status == errSecSuccess else { throw GuestStorageKeyError.generationFailed(status) }
-        if try keychain.add(key) { return key }
-        // Another launch may have added the key after the initial lookup.
+        // Another launch may have persisted the key after the initial lookup.
         guard let existing = try keychain.read() else { throw GuestStorageKeyError.missing }
         return existing
     }

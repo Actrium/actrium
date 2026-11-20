@@ -68,6 +68,19 @@ struct GuestStorageKeychainTests {
         #expect(try await reopened.run { try $0.getItem(origin: "a", key: "key") } == "value")
     }
 
+    @Test func databaseCreatedAfterTheFirstKeyLookupUsesThePersistedKey() async throws {
+        let (folder, path) = try fixture()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let keychain = TestKeychain()
+        try await GuestStorageDatabase(databaseURL: path, keychain: keychain).run {
+            try $0.setItem(origin: "a", key: "key", value: "value")
+        }
+        keychain.missNextRead = true
+        let concurrentLaunch = GuestStorageDatabase(databaseURL: path, keychain: keychain)
+        #expect(try await concurrentLaunch.run { try $0.getItem(origin: "a", key: "key") } == "value")
+        #expect(keychain.addCount == 1)
+    }
+
     private func fixture() throws -> (URL, URL) {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
@@ -80,10 +93,15 @@ private final class TestKeychain: GuestStorageKeychain, @unchecked Sendable {
     var failure: GuestStorageKeyError?
     var addFailure: GuestStorageKeyError?
     var competingKey: Data?
+    var missNextRead = false
     var addCount = 0
 
     func read() throws -> Data? {
         if let failure { throw failure }
+        if missNextRead {
+            missNextRead = false
+            return nil
+        }
         return key
     }
 
