@@ -462,7 +462,7 @@ impl ActriumServiceRegistry {
     }
 
     #[cfg(test)]
-    async fn detach_without_cleanup_for_test(
+    pub(super) async fn detach_without_cleanup_for_test(
         &self,
         detach: DetachRequest,
         context: &crate::transport::VerifiedPeerContext,
