@@ -19,10 +19,10 @@ if [[ "${1:-}" == "--macos-only" ]]; then
 fi
 
 echo "==> Building for aarch64-apple-darwin..."
-cargo build --release --lib --target aarch64-apple-darwin
+cargo build --release --lib --features guest-storage-sqlcipher --target aarch64-apple-darwin
 
 echo "==> Building for x86_64-apple-darwin..."
-cargo build --release --lib --target x86_64-apple-darwin
+cargo build --release --lib --features guest-storage-sqlcipher --target x86_64-apple-darwin
 
 if [[ "$MACOS_ONLY" == "0" ]]; then
     echo "==> Building for aarch64-apple-ios..."

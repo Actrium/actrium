@@ -1,5 +1,6 @@
 import ActriumCore
 import Foundation
+import Security
 
 enum GuestStorageDatabaseError: Error { case busy, expiredBeforeStart }
 
@@ -7,7 +8,7 @@ enum GuestStorageDatabaseError: Error { case busy, expiredBeforeStart }
 @MainActor
 final class GuestStorageDatabase {
     static let shared = GuestStorageDatabase()
-    private var database: GuestLocalStorage?
+    private let connection: GuestStorageConnection
     private let queue = DispatchQueue(label: "com.actrium.guest-storage", qos: .userInitiated)
     private let pendingLimit: Int
     private var publisherTrustBusy = false
@@ -15,8 +16,11 @@ final class GuestStorageDatabase {
     private(set) var pendingOperationCount = 0
     var pendingPublisherTrustCount: Int { publisherTrustWaiters.count + (publisherTrustBusy ? 1 : 0) }
 
-    init(database: GuestLocalStorage? = nil, pendingLimit: Int = 128) {
-        self.database = database
+    init(
+        database: GuestLocalStorage? = nil, pendingLimit: Int = 128,
+        databaseURL: URL? = nil, keychain: any GuestStorageKeychain = SystemGuestStorageKeychain()
+    ) {
+        connection = GuestStorageConnection(database: database, databaseURL: databaseURL, keychain: keychain)
         self.pendingLimit = pendingLimit
     }
 
@@ -25,10 +29,12 @@ final class GuestStorageDatabase {
         guard pendingOperationCount < pendingLimit else { throw GuestStorageDatabaseError.busy }
         pendingOperationCount += 1
         defer { pendingOperationCount -= 1 }
-        let store = try open()
+        let connection = connection
         return try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 continuation.resume(with: Result {
+                    if let deadline, DispatchTime.now().uptimeNanoseconds >= deadline { throw GuestStorageDatabaseError.expiredBeforeStart }
+                    let store = try connection.open()
                     if let deadline, DispatchTime.now().uptimeNanoseconds >= deadline { throw GuestStorageDatabaseError.expiredBeforeStart }
                     return try operation(store)
                 })
@@ -79,16 +85,54 @@ final class GuestStorageDatabase {
     func keepSeparate(_ origin: String, publisherIdentity: String) async throws -> String {
         try await run { try $0.keepStorageSeparate(origin: origin, publisherIdentity: publisherIdentity) }
     }
+}
 
-    private func open() throws -> GuestLocalStorage {
+/// Accessed only on the owning GuestStorageDatabase's serial queue.
+private nonisolated final class GuestStorageConnection: @unchecked Sendable {
+    private var database: GuestLocalStorage?
+    private let databaseURL: URL?
+    private let keychain: any GuestStorageKeychain
+
+    init(database: GuestLocalStorage?, databaseURL: URL?, keychain: any GuestStorageKeychain) {
+        self.database = database
+        self.databaseURL = databaseURL
+        self.keychain = keychain
+    }
+
+    func open() throws -> GuestLocalStorage {
         if let database { return database }
+        let url = try databaseURL ?? defaultDatabaseURL()
+        var key = try loadKey(for: url)
+        defer { key.resetBytes(in: 0..<key.count) }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let store = try GuestLocalStorage.newEncrypted(path: url.path, key: key)
+        database = store
+        return store
+    }
+
+    private func defaultDatabaseURL() throws -> URL {
         let support = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
         )
-        let folder = DatabaseManager.appDataDirectory(in: support)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let store = GuestLocalStorage(path: folder.appendingPathComponent("guest-local-storage.sqlite").path)
-        database = store
-        return store
+        return DatabaseManager.appDataDirectory(in: support).appendingPathComponent("guest-local-storage.sqlite")
+    }
+
+    private func loadKey(for url: URL) throws -> Data {
+        if let key = try keychain.read() { return key }
+        do {
+            _ = try FileManager.default.attributesOfItem(atPath: url.path)
+            throw GuestStorageKeyError.missing
+        } catch let error as CocoaError where [.fileNoSuchFile, .fileReadNoSuchFile].contains(error.code) {
+            // A new database may create a fresh key.
+        }
+        var key = Data(count: 32)
+        let status = key.withUnsafeMutableBytes { buffer in
+            SecRandomCopyBytes(kSecRandomDefault, buffer.count, buffer.baseAddress!)
+        }
+        guard status == errSecSuccess else { throw GuestStorageKeyError.generationFailed(status) }
+        if try keychain.add(key) { return key }
+        // Another launch may have added the key after the initial lookup.
+        guard let existing = try keychain.read() else { throw GuestStorageKeyError.missing }
+        return existing
     }
 }

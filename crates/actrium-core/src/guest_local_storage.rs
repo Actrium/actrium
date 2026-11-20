@@ -5,6 +5,9 @@ use std::time::Duration;
 use rusqlite::{Connection, OptionalExtension, params};
 use thiserror::Error;
 
+#[cfg(all(target_os = "macos", feature = "guest-storage-sqlcipher"))]
+mod encryption;
+
 pub(crate) const MAX_KEY_BYTES: usize = 1024;
 pub(crate) const MAX_VALUE_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_ORIGIN_BYTES: usize = 1024 * 1024;
@@ -30,6 +33,10 @@ pub enum GuestLocalStorageError {
     MigrationRequired,
     #[error("Storage migration failed: {0}")]
     MigrationConflict(String),
+    #[error("The saved local storage database could not be unlocked.")]
+    DatabaseUnlockFailed,
+    #[error("Local storage encryption is unavailable in this build.")]
+    EncryptionUnavailable,
 }
 
 impl From<rusqlite::Error> for GuestLocalStorageError {
@@ -50,6 +57,22 @@ impl GuestLocalStorage {
             path: path.into(),
             connection: Mutex::new(None),
         }
+    }
+
+    #[cfg(all(target_os = "macos", feature = "guest-storage-sqlcipher"))]
+    pub fn new_encrypted(path: String, key: Vec<u8>) -> Result<Self, GuestLocalStorageError> {
+        let path = PathBuf::from(path);
+        let connection = encryption::open(&path, key)?;
+        Self::initialize(&connection)?;
+        Ok(Self {
+            path,
+            connection: Mutex::new(Some(connection)),
+        })
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "guest-storage-sqlcipher")))]
+    pub fn new_encrypted(_path: String, _key: Vec<u8>) -> Result<Self, GuestLocalStorageError> {
+        Err(GuestLocalStorageError::EncryptionUnavailable)
     }
 
     pub fn get_item(
@@ -116,6 +139,11 @@ impl GuestLocalStorage {
 
     fn open(&self) -> rusqlite::Result<Connection> {
         let connection = Connection::open(&self.path)?;
+        Self::initialize(&connection)?;
+        Ok(connection)
+    }
+
+    fn initialize(connection: &Connection) -> rusqlite::Result<()> {
         connection.busy_timeout(Duration::from_secs(2))?;
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS guest_local_storage (
@@ -126,8 +154,7 @@ impl GuestLocalStorage {
                 PRIMARY KEY (origin, key)
             ) WITHOUT ROWID",
         )?;
-        crate::publisher_storage::initialize(&connection)?;
-        Ok(connection)
+        crate::publisher_storage::initialize(connection)
     }
 
     pub(crate) fn with_connection<T>(

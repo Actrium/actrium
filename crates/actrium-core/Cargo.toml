@@ -11,6 +11,9 @@ crate-type = ["lib", "staticlib", "cdylib"]
 name = "actrium_core"
 path = "src/lib.rs"
 
+[features]
+guest-storage-sqlcipher = ["dep:hex", "dep:libsqlite3-sys", "dep:zeroize"]
+
 [dependencies]
 actr-pack.workspace = true
 actr-config.workspace = true
@@ -29,6 +32,11 @@ url = "2"
 
 [build-dependencies]
 uniffi = { version = "0.29.2", features = ["build"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+hex = { workspace = true, optional = true }
+libsqlite3-sys = { version = "0.39", features = ["bundled-sqlcipher"], optional = true }
+zeroize = { version = "1", optional = true }
 
 [dev-dependencies]
 base64.workspace = true

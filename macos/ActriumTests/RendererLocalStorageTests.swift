@@ -31,7 +31,7 @@ struct RendererLocalStorageTests {
         )
         let tabId = tab.id
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(tabId.uuidString)
-        let database = GuestLocalStorage(path: url.path)
+        let database = try GuestLocalStorage.newEncrypted(path: url.path, key: Data(repeating: 42, count: 32))
         let pool = RendererProcessPool(localStorage: RendererLocalStorage(database: database))
         let origin = "test:\(tabId.uuidString)"
         tab.localStorageOrigin = origin

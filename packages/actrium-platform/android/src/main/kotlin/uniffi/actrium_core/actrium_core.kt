@@ -1276,6 +1276,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -1853,6 +1855,8 @@ fun uniffi_actrium_core_checksum_method_guestlocalstorage_storage_migration_toke
 ): Short
 fun uniffi_actrium_core_checksum_constructor_guestlocalstorage_new(
 ): Short
+fun uniffi_actrium_core_checksum_constructor_guestlocalstorage_new_encrypted(
+): Short
 fun ffi_actrium_core_uniffi_contract_version(
 ): Int
 
@@ -1907,6 +1911,8 @@ internal interface UniffiLib : Library {
 fun uniffi_actrium_core_fn_free_guestlocalstorage(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 fun uniffi_actrium_core_fn_constructor_guestlocalstorage_new(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_actrium_core_fn_constructor_guestlocalstorage_new_encrypted(`path`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
 fun uniffi_actrium_core_fn_method_guestlocalstorage_accept_publisher_profile(`ptr`: Pointer,`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,`previousPinsJson`: RustBuffer.ByValue,`previousProfileBody`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -3437,6 +3443,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_constructor_guestlocalstorage_new() != 18051.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_constructor_guestlocalstorage_new_encrypted() != 52887.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
 }
 
 /**
@@ -4129,8 +4138,20 @@ open class GuestLocalStorage: Disposable, AutoCloseable, GuestLocalStorageInterf
 
 
 
+    companion object {
 
-    companion object
+    @Throws(GuestLocalStorageException::class) fun `newEncrypted`(`path`: kotlin.String, `key`: kotlin.ByteArray): GuestLocalStorage {
+            return FfiConverterTypeGuestLocalStorage.lift(
+    uniffiRustCallWithError(GuestLocalStorageException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_constructor_guestlocalstorage_new_encrypted(
+        FfiConverterString.lower(`path`),FfiConverterByteArray.lower(`key`),_status)
+}
+    )
+    }
+
+
+
+    }
 
 }
 
@@ -7773,6 +7794,10 @@ sealed class GuestLocalStorageException(message: String): kotlin.Exception(messa
 
         class MigrationConflict(message: String) : GuestLocalStorageException(message)
 
+        class DatabaseUnlockFailed(message: String) : GuestLocalStorageException(message)
+
+        class EncryptionUnavailable(message: String) : GuestLocalStorageException(message)
+
 
     companion object ErrorHandler : UniffiRustCallStatusErrorHandler<GuestLocalStorageException> {
         override fun lift(error_buf: RustBuffer.ByValue): GuestLocalStorageException = FfiConverterTypeGuestLocalStorageError.lift(error_buf)
@@ -7794,6 +7819,8 @@ public object FfiConverterTypeGuestLocalStorageError : FfiConverterRustBuffer<Gu
             6 -> GuestLocalStorageException.IdentityChanged(FfiConverterString.read(buf))
             7 -> GuestLocalStorageException.MigrationRequired(FfiConverterString.read(buf))
             8 -> GuestLocalStorageException.MigrationConflict(FfiConverterString.read(buf))
+            9 -> GuestLocalStorageException.DatabaseUnlockFailed(FfiConverterString.read(buf))
+            10 -> GuestLocalStorageException.EncryptionUnavailable(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
 
@@ -7835,6 +7862,14 @@ public object FfiConverterTypeGuestLocalStorageError : FfiConverterRustBuffer<Gu
             }
             is GuestLocalStorageException.MigrationConflict -> {
                 buf.putInt(8)
+                Unit
+            }
+            is GuestLocalStorageException.DatabaseUnlockFailed -> {
+                buf.putInt(9)
+                Unit
+            }
+            is GuestLocalStorageException.EncryptionUnavailable -> {
+                buf.putInt(10)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }

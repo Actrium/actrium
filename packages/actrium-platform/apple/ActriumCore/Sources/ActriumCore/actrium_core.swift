@@ -648,6 +648,15 @@ public convenience init(path: String) {
     }
 
 
+public static func newEncrypted(path: String, key: Data)throws  -> GuestLocalStorage  {
+    return try  FfiConverterTypeGuestLocalStorage_lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_constructor_guestlocalstorage_new_encrypted(
+        FfiConverterString.lower(path),
+        FfiConverterData.lower(key),$0
+    )
+})
+}
+
 
 
 open func acceptPublisherProfile(body: String, domain: String, previousPinsJson: String?, previousProfileBody: String?)throws  -> PublisherProfileAcceptance  {
@@ -8250,6 +8259,10 @@ public enum GuestLocalStorageError: Swift.Error {
 
     case MigrationConflict(message: String)
 
+    case DatabaseUnlockFailed(message: String)
+
+    case EncryptionUnavailable(message: String)
+
 }
 
 
@@ -8298,6 +8311,14 @@ public struct FfiConverterTypeGuestLocalStorageError: FfiConverterRustBuffer {
             message: try FfiConverterString.read(from: &buf)
         )
 
+        case 9: return .DatabaseUnlockFailed(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 10: return .EncryptionUnavailable(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -8325,6 +8346,10 @@ public struct FfiConverterTypeGuestLocalStorageError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(7))
         case .MigrationConflict(_ /* message is ignored*/):
             writeInt(&buf, Int32(8))
+        case .DatabaseUnlockFailed(_ /* message is ignored*/):
+            writeInt(&buf, Int32(9))
+        case .EncryptionUnavailable(_ /* message is ignored*/):
+            writeInt(&buf, Int32(10))
 
 
         }
@@ -12526,6 +12551,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_constructor_guestlocalstorage_new() != 18051) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_constructor_guestlocalstorage_new_encrypted() != 52887) {
         return InitializationResult.apiChecksumMismatch
     }
 
