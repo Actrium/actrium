@@ -82,7 +82,9 @@ REALM_HTTPS=1 REALM_MODE=provider REALM_FRONT_RELEASE=1 \
 
 The log records the three Profile revisions and checks the Service type, digest, and ActorId at every Echo call.
 
-To verify Service publication, rejection of incompatible packages, and rollback to the original Actor, run:
+To switch from a Local Front to a different Echo Service program with a matching
+downloadable Front, then roll back both packages and check the original Service
+ACL, run:
 
 ```sh
 REALM_HTTPS=1 REALM_MODE=provider REALM_SERVICE_SWITCH=1 \

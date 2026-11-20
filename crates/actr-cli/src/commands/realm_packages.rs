@@ -178,7 +178,9 @@ where
             bytes
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            get(reference.href.clone(), ARCHIVE_LIMIT).await?
+            get(reference.href.clone(), ARCHIVE_LIMIT)
+                .await
+                .with_context(|| format!("Could not download {}.", reference.r#type))?
         }
         Err(e) => return Err(e.into()),
     };
@@ -208,7 +210,7 @@ impl Cache {
                     .or_insert_with(|| digest.to_owned());
                 ensure!(
                     *pinned == digest,
-                    "PACKAGE_EQUIVOCATION for {}",
+                    "{} is already published with different contents. Publish a new version.",
                     package.r#type
                 );
             }
@@ -412,7 +414,8 @@ where
                     && (key.status == KeyStatus::Active
                         || (!local.allow_rebuild && key.status == KeyStatus::Retired))
                     && key.verification_key().is_ok()),
-                "local Front key is not trusted by its Publisher"
+                "The publisher does not trust the signing key for {}.",
+                entry.r#type
             );
             continue;
         }
@@ -444,9 +447,13 @@ where
                 let locked = lock
                     .get_dependency_by_alias("service")
                     .context("signed Front lock does not select a Service")?;
+                let service = selection.selected().map_err(anyhow::Error::msg)?.0;
                 ensure!(
-                    locked.actr_type == selection.selected().map_err(anyhow::Error::msg)?.0.r#type,
-                    "signed Front lock pins a different Service"
+                    locked.actr_type == service.r#type,
+                    "{} is locked to {}, but {} is selected.",
+                    entry.r#type,
+                    locked.actr_type,
+                    service.r#type
                 );
             }
         }

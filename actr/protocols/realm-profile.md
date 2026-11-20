@@ -350,7 +350,30 @@ pending Realm that is not activated in time expires and is removed.
 
 A selection update **MUST** replace the entire selection by submitting both selectors and the complete `packages` map together.
 Every change, including a new download URL, requires a higher `sequence` and a new signature.
-The primary publisher/program and `provider.id` are fixed. The Realm may select another compatible Front. Each exact Actor type retains its archive digest.
+`provider.id` is fixed. A change to the primary Service's publisher or
+program requires a different exact Actor type for the selected Front in
+the same Profile. A legacy single-package Profile must first select a
+complete pair while preserving the Service's program identity. Each exact
+Actor type with a fixed digest retains its archive digest.
+
+For a provider-signed Realm, use a guarded Service release to change the
+primary program or its dependency graph. A release can reuse the Service
+archive when its signed manifest, dependency locks and RPC contracts allow
+the new selection. Before a forward release changes the Service program,
+the current owner must have approved the outgoing program's ACLs so that
+the saved selection can be restored. Rollback restores the complete previous
+selection at a new sequence. A saved rollback selection can restore a Local Front. The Host
+checks its archive and RPC contract when opening it with the user's consent.
+Deployment applies the selection to the running Service.
+
+For an externally signed Realm, `publish_profile` preserves the current
+Service program. The provider can also accept a valid signed successor from
+the Realm domain's configured `realms` endpoint. When accepting a new
+primary program, including during rollback or refresh, the provider checks
+that its unrevoked Actor registrations from active members belong to the
+Realm owner. The provider checks the package selection against the stored
+selection during a refresh, including after removal of the previous signing
+key.
 
 Issuer keys, endpoints, `display_name` and `policy` may also change at a higher sequence.
 For metadata-only updates and key rotations, drafts and signed Profiles **MUST** retain the accepted selection.

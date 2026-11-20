@@ -1,6 +1,8 @@
 use super::*;
 use crate::commands::realm_members::{KeyArgs, Member};
 use actr_hyper::{ActrRef, Node, WorkloadPackage};
+use actr_protocol::realm_membership::{MembershipOp, MembershipRequest};
+use actr_protocol::realm_profile::{FrontUpdate, LocalRealmFront};
 use actr_protocol::{ActrId, PayloadType, RpcRequest};
 use prost::Message;
 
@@ -122,6 +124,41 @@ async fn realm_front_release_fixture() -> Result<()> {
         additional: vec![],
         output: request.output.clone(),
     };
+    // Start the joint Service switch from an already accepted Local Front.
+    let local_archive = if request.service_actors.is_some() {
+        let pair = fetch_with(&args, &get).await?;
+        let archive = std::fs::read(pair["front"].as_str().context("verified Front path")?)?;
+        let (profile, _, _) =
+            resolve_profile(realm, None, |url| get(url, DOCUMENT_LIMIT), None).await?;
+        let mut selection = profile.selection.context("active selection")?;
+        let front = selection
+            .packages
+            .get_mut(&selection.front_package)
+            .context("selected Front")?;
+        front.href = "echo-front.actr".into();
+        front
+            .dependencies
+            .insert("service".into(), selection.primary_package.clone());
+        front.local_path = Some(LocalRealmFront {
+            signing_key_id: actr_protocol::package_key_id(&base64::Engine::decode(
+                &STANDARD,
+                &request.package_key,
+            )?),
+            allow_rebuild: false,
+        });
+        front::release_with(
+            realm,
+            provider,
+            &request.output,
+            Some(selection),
+            &get,
+            |operation| owner.send_with_outcome(operation),
+        )
+        .await?;
+        Some(archive)
+    } else {
+        None
+    };
     let mut previous = None;
     let mut original = None;
     let mut original_selection: Option<RealmPackageSelection> = None;
@@ -146,16 +183,38 @@ async fn realm_front_release_fixture() -> Result<()> {
                     realm,
                     provider,
                     &request.output,
-                    Some(incompatible),
+                    Some(incompatible.clone()),
                     &get,
                     |_| async { panic!("incompatible package selection attempted publication") },
                 )
                 .await
                 .unwrap_err();
                 ensure!(
-                    mismatch.to_string().contains("Front service dependency"),
-                    "unexpected contract verification failure: {mismatch:#}"
+                    mismatch
+                        .to_string()
+                        .contains("Choose a different Front package or version too."),
+                    "unexpected Service identity check failure: {mismatch:#}"
                 );
+                let mut request = MembershipRequest::new(
+                    MembershipOp::SwitchService,
+                    realm,
+                    provider,
+                    &hex::encode(rand::random::<[u8; 16]>()),
+                );
+                request.selection = Some(incompatible);
+                request.service_update = Some(FrontUpdate {
+                    operation_id: hex::encode(rand::random::<[u8; 16]>()),
+                    expected_sequence: baseline.sequence,
+                    rollback: false,
+                });
+                match owner.send_with_outcome(request).await {
+                    Err(SendError::Refused(error))
+                        if error
+                            .to_string()
+                            .contains("Choose a different Front package or version too.") => {}
+                    Err(error) => return Err(error.into()),
+                    Ok(_) => bail!("Issuer accepted a Service-only program change"),
+                }
                 let (unchanged, _, _) =
                     resolve_profile(realm, None, |url| get(url, DOCUMENT_LIMIT), None).await?;
                 ensure!(
@@ -163,7 +222,7 @@ async fn realm_front_release_fixture() -> Result<()> {
                     "incompatible package selection changed the Profile"
                 );
                 println!(
-                    "SERVICE_PACKAGE_GATE sequence={} rejected_incompatible_front",
+                    "SERVICE_PACKAGE_GATE sequence={} rejected_service_only_switch",
                     baseline.sequence
                 );
             }
@@ -183,7 +242,18 @@ async fn realm_front_release_fixture() -> Result<()> {
             resolve_profile(realm, None, |url| get(url, DOCUMENT_LIMIT), None).await?;
         let selection = profile.selection.as_ref().context("active selection")?;
         let (service, front) = selection.selected().map_err(anyhow::Error::msg)?;
-        let front_archive = std::fs::read(pair["front"].as_str().context("verified Front path")?)?;
+        let front_archive = if front.local_path.is_some() {
+            let archive = local_archive
+                .clone()
+                .context("fixture's local Front archive")?;
+            ensure!(
+                hex::encode(Sha256::digest(&archive)) == front.sha256,
+                "restored Local Front digest differs from the fixture archive"
+            );
+            archive
+        } else {
+            std::fs::read(pair["front"].as_str().context("verified Front path")?)?
+        };
         let (candidate, service_actor) = call_echo(
             &profile,
             front_archive,
@@ -193,6 +263,10 @@ async fn realm_front_release_fixture() -> Result<()> {
         )
         .await?;
         if let Some(actors) = &request.service_actors {
+            ensure!(
+                front.local_path.is_some() == (step != 1),
+                "Service release did not switch away from and restore the Local Front"
+            );
             let expected = &actors[usize::from(step == 1)];
             ensure!(
                 service_actor.to_string_repr() == *expected,
@@ -242,6 +316,10 @@ async fn realm_front_release_fixture() -> Result<()> {
                 ensure!(
                     front == first_front,
                     "rollback did not restore the original Front"
+                );
+                ensure!(
+                    Some(selection) == original_selection.as_ref(),
+                    "rollback did not restore the full package selection"
                 );
             }
         } else {

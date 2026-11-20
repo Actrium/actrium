@@ -717,29 +717,30 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     )
     .await;
 
-    // A newer Profile is taken from the domain's realms location.
+    // A newer Profile is taken from the domain's realms location, including
+    // a paired program change that has no local package release receipt.
     let mut documents = Documents::new();
     documents.insert(
         "https://acme.com/.well-known/actr".into(),
         acme.descriptor(&member),
     );
-    documents.insert(
-        "https://acme.com/realms/one".into(),
-        acme.profile(one, 2, "active", "rs-1", &issuer[one]),
-    );
+    let mut successor: Value =
+        serde_json::from_slice(&acme.profile(one, 2, "active", "rs-1", &issuer[one])).unwrap();
+    let primary = successor["primary_package"].as_str().unwrap().to_owned();
+    let front = successor["front_package"].as_str().unwrap().to_owned();
+    successor["packages"][&primary]["type"] = "acme.com/notes-next@1.0.0".into();
+    successor["packages"][&front]["type"] = "acme.com/notes-ui@2.0.0".into();
+    successor.as_object_mut().unwrap().remove("signature");
+    let switched = serde_json::to_vec(&acme.sign(successor, "rs-1")).unwrap();
+    documents.insert("https://acme.com/realms/one".into(), switched.clone());
     documents.insert(
         "https://acme.com/realms/two".into(),
         acme.profile(two, 4, "active", "rs-1", &issuer[two]),
     );
     refresh(&profiles, &documents).await;
-    assert_eq!(
-        RealmProfileRecord::get(one)
-            .await
-            .unwrap()
-            .unwrap()
-            .sequence,
-        2
-    );
+    let record = RealmProfileRecord::get(one).await.unwrap().unwrap();
+    assert_eq!(record.sequence, 2);
+    assert_eq!(record.document.as_bytes(), switched);
     // Rollback is refused.
     assert_eq!(
         RealmProfileRecord::get(two)
@@ -761,20 +762,38 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
         RealmStatus::Retired
     );
 
-    // rs-1 is revoked: its Profiles lose their baseline. A Profile signed by
-    // a still-listed key replaces it, even at a lower sequence.
+    // Revoking rs-1 resets the sequence baseline. The replacement still has
+    // to pass the package selection checks against the accepted record.
+    let rotated_member = acme.member(2, &["rs-2"]);
     documents.insert(
         "https://acme.com/.well-known/actr".into(),
-        acme.descriptor(&acme.member(2, &["rs-2"])),
+        acme.descriptor(&rotated_member),
     );
-    documents.insert(
-        "https://acme.com/realms/two".into(),
-        acme.profile(two, 1, "active", "rs-2", &issuer[two]),
-    );
+    let before_rotation = RealmProfileRecord::get(two).await.unwrap().unwrap();
+    assert!(Realm::get(two).await.unwrap().unwrap().enabled);
+    let mut replacement: Value =
+        serde_json::from_slice(&acme.profile(two, 1, "active", "rs-2", &issuer[two])).unwrap();
+    replacement.as_object_mut().unwrap().remove("signature");
+    replacement["packages"][&primary]["type"] = "acme.com/notes-next@1.0.0".into();
+    let profile_url = "https://acme.com/realms/two";
+    let service_only = serde_json::to_vec(&acme.sign(replacement.clone(), "rs-2")).unwrap();
+    let current_keys: RealmSigningKeys = serde_json::from_value(rotated_member).unwrap();
+    RealmProfile::verify(&service_only, two, &current_keys).unwrap();
+    documents.insert(profile_url.into(), service_only);
+    refresh(&profiles, &documents).await;
+    let record = RealmProfileRecord::get(two).await.unwrap().unwrap();
+    assert_eq!(record.digest, before_rotation.digest);
+    assert!(!Realm::get(two).await.unwrap().unwrap().enabled);
+
+    replacement["packages"][&front]["type"] = "acme.com/notes-ui@2.0.0".into();
+    let switched_after_rotation = serde_json::to_vec(&acme.sign(replacement, "rs-2")).unwrap();
+    documents.insert(profile_url.into(), switched_after_rotation.clone());
     refresh(&profiles, &documents).await;
     let record = RealmProfileRecord::get(two).await.unwrap().unwrap();
     assert_eq!(record.sequence, 1);
-    assert!(Realm::get(two).await.unwrap().unwrap().enabled);
+    assert_eq!(record.document.as_bytes(), switched_after_rotation);
+    assert!(!Realm::get(two).await.unwrap().unwrap().enabled);
+    Realm::set_enabled(two, true).await.unwrap();
 
     // Without any valid Profile the Realm is suspended.
     let stranger = Domain {
@@ -831,6 +850,68 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
         2
     );
     assert!(!Realm::get(two).await.unwrap().unwrap().enabled);
+}
+
+#[tokio::test]
+#[serial]
+async fn stale_external_refresh_leaves_a_concurrently_replaced_profile_enabled() {
+    let (profiles, _dir) = setup().await;
+    let acme = Domain {
+        keys: vec![
+            ("rs-1", SigningKey::from_bytes(&[1; 32])),
+            ("rs-2", SigningKey::from_bytes(&[2; 32])),
+        ],
+    };
+    let realm = "refresh-race@acme.com";
+    insert(realm, RealmStatus::Active).await;
+    let issuer = issuer_of(&profiles, realm).await;
+    accept(
+        realm,
+        &acme.profile(realm, 1, "active", "rs-1", &issuer),
+        &acme.member(1, &["rs-1", "rs-2"]),
+    )
+    .await;
+    let previous = RealmProfileRecord::get(realm).await.unwrap().unwrap();
+
+    let rotated_member = acme.member(2, &["rs-2"]);
+    let descriptor = acme.descriptor(&rotated_member);
+    let keys: RealmSigningKeys = serde_json::from_value(rotated_member).unwrap();
+    let replacement = acme.profile(realm, 2, "active", "rs-2", &issuer);
+    let replacement_text = std::str::from_utf8(&replacement).unwrap();
+    let accepted = RealmProfile::verify(&replacement, realm, &keys).unwrap();
+    let fetched = acme.profile(realm, 3, "active", "rs-2", &issuer);
+    let profile_url = "https://acme.com/realms/refresh-race";
+    profiles
+        .refresh(|url| {
+            let descriptor = &descriptor;
+            let accepted = &accepted;
+            let previous_digest = &previous.digest;
+            let fetched = &fetched;
+            async move {
+                match url.as_str() {
+                    "https://acme.com/.well-known/actr" => Ok(Arc::from(descriptor.clone())),
+                    url if url == profile_url => {
+                        // Complete another refresh after the first one read
+                        // the revoked baseline, while its fetch is in flight.
+                        RealmProfileRecord::store_fetched(
+                            accepted,
+                            replacement_text,
+                            previous_digest,
+                        )
+                        .await
+                        .unwrap();
+                        Ok(Arc::from(fetched.clone()))
+                    }
+                    _ => Err(FetchError::new(format!("404 {url}"))),
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+    let record = RealmProfileRecord::get(realm).await.unwrap().unwrap();
+    assert_eq!(record.document.as_bytes(), replacement);
+    assert!(Realm::get(realm).await.unwrap().unwrap().enabled);
 }
 
 mod management {

@@ -79,13 +79,12 @@ struct ActrUriNotice: Identifiable {
 struct PendingInviteRedeem: Identifiable {
     let id = UUID()
     let tabId: UUID
-    let sourceURL: URL?
     let navigationNonce: Int
     let uri: String
     let domain: String
 
     func matches(_ tab: Tab) -> Bool {
-        tab.id == tabId && tab.url == sourceURL && tab.reloadNonce == navigationNonce
+        tab.id == tabId && tab.reloadNonce == navigationNonce
     }
 }
 

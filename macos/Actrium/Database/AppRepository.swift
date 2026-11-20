@@ -3,8 +3,12 @@ import ActriumCore
 
 /// Repository for Actrium apps using native SQLite3
 final class AppRepository {
-    private let db = DatabaseManager.shared
+    private let db: DatabaseManager
     private let sql = coreAppRepositorySql()
+
+    init(database: DatabaseManager? = nil) {
+        db = database ?? .shared
+    }
 
     // MARK: - CRUD Operations
 

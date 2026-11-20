@@ -164,10 +164,17 @@ impl RealmPackage {
         }
     }
 
-    pub(super) fn check_primary_successor(&self, next: &Self) -> Result<(), String> {
+    /// Compare the publisher and program name, independent of the version.
+    pub fn same_program(&self, next: &Self) -> Result<bool, String> {
         let old = self.actr_type()?;
         let new = next.actr_type()?;
-        if old.publisher != new.publisher || old.name != new.name {
+        Ok(old.publisher == new.publisher && old.name == new.name)
+    }
+
+    /// Preserve the Service's program identity on an unguarded publication
+    /// or when the previous Profile only selected a legacy primary package.
+    pub fn check_primary_successor(&self, next: &Self) -> Result<(), String> {
+        if !self.same_program(next)? {
             return Err("the primary package belongs to another program".into());
         }
         Ok(())
@@ -1153,6 +1160,20 @@ mod tests {
             v["packages"]["service"][field] = value;
             assert!(previous.check_successor(&verify(v).unwrap()).is_err());
         }
+        let mut switched = unsigned(2);
+        switched["packages"]["service"]["type"] = "acme.com/different@1.0.0".into();
+        switched["packages"]["ui"]["type"] = "acme.com/ui@2.0.0".into();
+        let switched = verify(switched).unwrap();
+        previous.check_successor(&switched).unwrap();
+        assert_eq!(
+            previous
+                .selection
+                .as_ref()
+                .unwrap()
+                .release_change(switched.selection.as_ref().unwrap())
+                .unwrap(),
+            Some(crate::realm_profile::PackageSelectionChange::Service)
+        );
         let mut v = unsigned(2);
         v["packages"]["another"] = v["packages"]["ui"].clone();
         v["packages"]["another"]["sha256"] = "ef".repeat(32).into();
@@ -1206,7 +1227,9 @@ mod tests {
 
         document["packages"]["service"]["dependencies"]["self"] = json!("missing");
         let error = RealmProfile::verify(&sign(document, "rs-1", &key), NAME, &keys).unwrap_err();
-        assert!(error.to_string().contains("unknown package reference"));
+        assert!(error.to_string().contains(
+            "Package service needs self, but the selection has no package named missing."
+        ));
     }
 
     #[test]

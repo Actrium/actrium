@@ -223,9 +223,10 @@ The Issuer issues only when all of the following hold:
    identity enrollment also requires the currently bound key and an unexpired
    renewal token;
 3. at registration, resolve `packages[primary_package]` from the verified Profile.
-   The Issuer **MUST** reject an invalid primary reference. If the Actor type's publisher and
-   program name equal those of this primary's `type` (in any version, that is, the
-   instance's Service and its upgrades), the signing key belongs to the owner.
+   The Issuer **MUST** reject an invalid primary reference. Registration of any
+   version of the Realm's current or previous primary Service program requires
+   an owner key. This keeps the outgoing Service's ACL under owner control for
+   clients still using it and for rollback.
    Renewal and reissue do not check the role again, so an ownership transfer
    does not affect a running Service.
 
@@ -234,6 +235,11 @@ Package selection does not change membership or Actor-admission rules.
 A connection ACL carried by a registration applies only to the registering
 Actor's own type; since only the owner can register the Service's program,
 other members cannot rewrite the Service's ACL.
+Before a program becomes the primary Service, existing ACL rules for all its
+versions must have been written by a still-active key of the current owner.
+Actor revocation leaves its type-wide policy in place. Legacy ACL rules do
+not carry owner authorization. The owner can re-register the Service with
+its ACL to approve the policy.
 
 Actor credential claims include the member id, the Realm client key id and
 the role at issuance. A Service **MAY** use them to decide a Front's

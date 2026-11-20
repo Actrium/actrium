@@ -59,9 +59,9 @@ loran-turn = {{ path = {json.dumps((module.REPO / 'crates/loran-turn').as_posix(
                 self.assertEqual(patches[package]["git"], dependencies[dependency]["git"])
                 self.assertEqual(patches[package]["rev"], dependencies[dependency]["rev"])
 
-    def test_loran_consumer_sqlx_override_resolves_with_patched_sqlite(self):
+    def test_loran_consumer_published_sqlx_resolves_with_patched_sqlite(self):
         dependencies = tomllib.loads((module.REPO / "Cargo.toml").read_text())["workspace"]["dependencies"]
-        patch = dependencies["sqlx"]
+        sqlx = dependencies["sqlx"]
         rusqlite = dependencies["rusqlite"]
         with tempfile.TemporaryDirectory(prefix="actr-registry-sqlx-") as directory:
             root = Path(directory)
@@ -76,11 +76,8 @@ edition = "2024"
 [workspace]
 
 [dependencies]
-sqlx = {{ version = {json.dumps(patch["version"])}, default-features = false, features = ["runtime-tokio", "sqlite"] }}
+sqlx = {{ version = {json.dumps(sqlx["version"])}, default-features = false, features = ["runtime-tokio", "sqlite"] }}
 rusqlite = {{ version = {json.dumps(rusqlite["version"])}, features = ["bundled"] }}
-
-[patch.crates-io]
-sqlx = {{ git = {json.dumps(patch["git"])}, rev = {json.dumps(patch["rev"])} }}
 ''')
             subprocess.run(["cargo", "generate-lockfile", "--manifest-path", str(manifest)], check=True)
             packages = tomllib.loads((root / "Cargo.lock").read_text())["package"]
@@ -90,7 +87,8 @@ sqlx = {{ git = {json.dumps(patch["git"])}, rev = {json.dumps(patch["rev"])} }}
             for name in ("sqlx", "sqlx-sqlite"):
                 matches = [package for package in packages if package["name"] == name]
                 self.assertEqual(len(matches), 1)
-                self.assertTrue(matches[0]["source"].startswith(f'git+{patch["git"]}?rev={patch["rev"]}#'))
+                self.assertEqual(matches[0]["version"], sqlx["version"].removeprefix("="))
+                self.assertEqual(matches[0]["source"], "registry+https://github.com/rust-lang/crates.io-index")
 
     def test_merges_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:

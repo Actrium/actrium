@@ -204,7 +204,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        viewModel.invalidateRealmLoadsForWindowClose()
+        viewModel.invalidateRealmNavigationForWindowClose()
         for tab in viewModel.tabs {
             TabSnapshotCacheManager.shared.invalidate(tabId: tab.id)
             WebViewHolderManager.shared.remove(tabId: tab.id)
