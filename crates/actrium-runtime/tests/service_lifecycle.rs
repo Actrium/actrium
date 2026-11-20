@@ -624,6 +624,63 @@ async fn lifecycle_recovery_defers_to_live_and_restarting_services() {
 }
 
 #[tokio::test]
+async fn lifecycle_failed_restart_is_owner_only_and_generation_checked() {
+    let temp = TempDir::new().unwrap();
+    let first_manager = LifecycleService::open(temp.path()).unwrap();
+    let second_manager = LifecycleService::open(temp.path()).unwrap();
+    let created = create(&first_manager, "failed-restart").await;
+    let actor_id = created.actor_id;
+    first_manager.start(&actor_id).await.unwrap();
+    let pending = first_manager.restart(&actor_id).await.unwrap();
+    assert_eq!(pending.lifecycle_state, LifecycleState::Starting);
+
+    assert!(matches!(
+        second_manager
+            .mark_start_failed(&actor_id, &pending.runtime_instance_id)
+            .await
+            .unwrap_err(),
+        LifecycleError::ConcurrentLifecycleOperation
+    ));
+    assert!(matches!(
+        first_manager
+            .mark_start_failed(&actor_id, "stale-runtime")
+            .await
+            .unwrap_err(),
+        LifecycleError::InvalidRequest(_)
+    ));
+    assert_eq!(
+        first_manager.instance(&actor_id).unwrap().lifecycle_state,
+        LifecycleState::Starting
+    );
+    assert!(matches!(
+        second_manager.recover().await.unwrap_err(),
+        LifecycleError::ConcurrentRecovery
+    ));
+
+    let failed = first_manager
+        .mark_start_failed(&actor_id, &pending.runtime_instance_id)
+        .await
+        .unwrap();
+    assert_eq!(failed.lifecycle_state, LifecycleState::Stopped);
+    assert_eq!(failed.desired_state, DesiredState::Stopped);
+    assert_eq!(failed.reachability, Reachability::Offline);
+    assert_eq!(failed.health, Health::Failed);
+    assert_eq!(failed.runtime_instance_id, pending.runtime_instance_id);
+    assert!(
+        first_manager
+            .mark_running(&actor_id, &pending.runtime_instance_id)
+            .await
+            .is_err(),
+        "a late completion must not revive the failed start"
+    );
+
+    second_manager.recover().await.unwrap();
+    let restarted = second_manager.start(&actor_id).await.unwrap();
+    assert_eq!(restarted.lifecycle_state, LifecycleState::Running);
+    second_manager.stop(&actor_id).await.unwrap();
+}
+
+#[tokio::test]
 async fn lifecycle_only_the_active_owner_can_stop_a_live_service() {
     let temp = TempDir::new().unwrap();
     let first_manager = LifecycleService::open(temp.path()).unwrap();
@@ -686,6 +743,13 @@ async fn lifecycle_unknown_actors_do_not_allocate_active_lock_files() {
     ));
     assert!(matches!(
         service.mark_running(actor_id, "runtime").await.unwrap_err(),
+        LifecycleError::NotFound(_)
+    ));
+    assert!(matches!(
+        service
+            .mark_start_failed(actor_id, "runtime")
+            .await
+            .unwrap_err(),
         LifecycleError::NotFound(_)
     ));
     assert!(matches!(

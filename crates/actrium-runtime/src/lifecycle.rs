@@ -917,7 +917,8 @@ impl LifecycleService {
     /// Stop an instance and persist the intent to restart it. This is only a
     /// durable state transition: no workload is started here. After the Host
     /// has actually started the runtime, it must call [`Self::mark_running`]
-    /// with the returned runtime instance identity.
+    /// with the returned runtime instance identity. A failed or abandoned Host
+    /// start must instead call [`Self::mark_start_failed`] with that identity.
     pub async fn restart(&self, actor_id: &str) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
@@ -985,6 +986,34 @@ impl LifecycleService {
         instance.last_opened_at_epoch_secs = Some(now_epoch_secs());
         self.persist_transition(&mut instance, LifecycleState::Running)?;
         self.retain_active_guard(actor_id, lifecycle_guard, active_guard);
+        Ok(instance)
+    }
+
+    /// Commit a Host-confirmed start failure or cancellation. The state and
+    /// generation checks prevent a late failure from stopping a newer start,
+    /// while the active-owner lock prevents another manager from releasing it.
+    pub async fn mark_start_failed(
+        &self,
+        actor_id: &str,
+        runtime_instance_id: &str,
+    ) -> Result<ServiceInstance, LifecycleError> {
+        let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
+        let _guard = operation_lock.lock().await;
+        let _lifecycle_guard = self.lock_operation()?;
+        let _active_guard = self.lock_active_instance(actor_id)?;
+        let mut instance = self.instance(actor_id)?;
+        if instance.lifecycle_state != LifecycleState::Starting {
+            return Err(invalid_transition(&instance, LifecycleState::Stopped));
+        }
+        if instance.runtime_instance_id != runtime_instance_id {
+            return Err(LifecycleError::InvalidRequest(
+                "the failed runtime instance does not match the pending start".into(),
+            ));
+        }
+        self.mark_offline(&mut instance, DesiredState::Stopped);
+        instance.health = Health::Failed;
+        self.persist_transition(&mut instance, LifecycleState::Stopped)?;
+        self.release_active_guard(actor_id);
         Ok(instance)
     }
 
