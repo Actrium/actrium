@@ -54,6 +54,8 @@ def test_macos_host_checks_are_affected_only_and_gate_failures() -> None:
     assert "if: needs.determine.outputs.macos_host == 'true'" in job
     assert "runs-on: macos-15" in job
     assert "bash macos/scripts/test-host.sh" in job
+    assert "arduino/setup-protoc@v3" in job
+    assert "cargo test --locked -p actrium-core --features guest-storage-sqlcipher --lib --test guest_local_storage_encryption" in job
     assert "      - macos_host\n" in gate
     assert "MACOS_HOST_RESULT: ${{ needs.macos_host.result }}" in gate
     assert '"macos_host": os.environ["MACOS_HOST_RESULT"]' in gate
