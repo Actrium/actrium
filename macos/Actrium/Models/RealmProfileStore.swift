@@ -257,8 +257,12 @@ enum RealmProfileStore {
         if preferences.object(forKey: key) != nil && pins == nil {
             throw CoreError.AuthorityDescriptorInvalid(message: "Saved Publisher trust could not be read; it was not reset.")
         }
+        let previousBody = saved?["body"] as? String
+        if saved?["body"] != nil && previousBody == nil {
+            throw CoreError.AuthorityDescriptorInvalid(message: "Saved Publisher Profile could not be read; it was not reset.")
+        }
         let accepted = try await database.acceptPublisherProfile(
-            body: body, domain: domain, previousPins: pins ?? fallbackPins
+            body: body, domain: domain, previousPins: pins ?? fallbackPins, previousProfile: previousBody
         )
         preferences.set(["body": body, "pins": accepted.pinsJson], forKey: key)
         return accepted.profile

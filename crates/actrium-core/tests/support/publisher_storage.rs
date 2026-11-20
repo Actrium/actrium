@@ -38,7 +38,7 @@ pub fn profile(
 
 pub fn accepted(store: &actrium_core::GuestLocalStorage, body: String) -> String {
     store
-        .accept_publisher_profile(body, "publisher.example".into(), None)
+        .accept_publisher_profile(body, "publisher.example".into(), None, None)
         .unwrap()
         .profile
         .storage_identity

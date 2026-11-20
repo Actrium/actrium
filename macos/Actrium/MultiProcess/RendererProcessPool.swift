@@ -145,6 +145,7 @@ final class RendererProcessPool: ObservableObject {
     private var tabWorkerMap: [UUID: String] = [:]
     private let localStorage: RendererLocalStorage
     private let fileImport = RendererFileImport()
+    var documentWindow: ((UUID, Int) -> NSWindow?)?
     var fileImportWindow: ((UUID, Int) -> NSWindow?)?
     private var fingerprintWorkerMap: [String: String] = [:]
     private var systemWorkerId: String?
@@ -288,15 +289,15 @@ final class RendererProcessPool: ObservableObject {
         guard self.worker(for: tabId) === worker else {
             throw RendererProcessPoolError.rendererExited("Tab changed renderer")
         }
-        let window = fileImportWindow?(tabId, config["reloadKey"] as? Int ?? 0)
-        let config = try await localStorage.resolveOrigin(config: config, window: window)
+        let window = documentWindow?(tabId, config["reloadKey"] as? Int ?? 0)
+        let resolvedConfig = try await localStorage.resolveOrigin(config: config, window: window)
         try Task.checkCancellation()
         guard self.worker(for: tabId) === worker else {
             throw RendererProcessPoolError.rendererExited("Tab changed renderer")
         }
-        fileImport.update(tabId: tabId, reloadKey: config["reloadKey"] as? Int ?? 0)
+        fileImport.update(tabId: tabId, reloadKey: resolvedConfig["reloadKey"] as? Int ?? 0)
 
-        let config = localStorage.prepare(tabId: tabId, config: config)
+        let config = localStorage.prepare(tabId: tabId, config: resolvedConfig)
         guard JSONSerialization.isValidJSONObject(config),
               let data = try? JSONSerialization.data(withJSONObject: config),
               let json = String(data: data, encoding: .utf8) else {

@@ -6,6 +6,33 @@ import Testing
 
 @MainActor
 struct RendererStorageAdaptationTests {
+    @Test func firstEnrollmentImportsThePreviousProfilesRemovedPackageKey() async throws {
+        let suite = "storage-first-enrollment-\(UUID().uuidString)"
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        _ = try RealmProfileStore.acceptPublisher(
+            body: PublisherStorageFixture.profile(rotated: false), domain: "publisher.example", preferences: preferences
+        )
+        let core = GuestLocalStorage(path: ":memory:")
+        let key = try PublisherStorageFixture.key(3).publicKey.rawRepresentation.base64EncodedString()
+        let oldOrigin = "signed:\(key):publisher.example/counter"
+        try core.setItem(origin: oldOrigin, key: "theme", value: "dark")
+        let database = GuestStorageDatabase(database: core)
+        let profile = try await RealmProfileStore.acceptPublisher(
+            body: PublisherStorageFixture.profile(rotated: true), domain: "publisher.example",
+            preferences: preferences, database: database
+        )
+        let current = try PublisherStorageFixture.key(4).publicKey.rawRepresentation.base64EncodedString()
+        let currentOrigin = "signed:\(current):publisher.example/counter"
+        let identity = try #require(profile.storageIdentity)
+        let token = try #require(try await database.migrationToken(currentOrigin, publisherIdentity: identity))
+        let canonical = try await database.resolveSignedOrigin(
+            currentOrigin, publisherIdentity: identity, migrationApproval: token
+        )
+        #expect(try core.getItem(origin: canonical, key: "theme") == "dark")
+        #expect(try core.getItem(origin: oldOrigin, key: "theme") == "dark")
+    }
+
     @Test func publisherEnrollmentUsesTheExistingHostPinsAndKeepsItsCurrentSnapshot() async throws {
         let suite = "storage-adaptation-\(UUID().uuidString)"
         let preferences = try #require(UserDefaults(suiteName: suite))

@@ -32,9 +32,9 @@ pub(crate) fn initialize(connection: &Connection) -> rusqlite::Result<()> {
              publisher_identity TEXT NOT NULL, program TEXT NOT NULL, origin TEXT NOT NULL UNIQUE,
              PRIMARY KEY(publisher_identity, program)
          ) WITHOUT ROWID;
-         CREATE TABLE IF NOT EXISTS guest_storage_aliases (
-             alias TEXT PRIMARY KEY, origin TEXT NOT NULL,
-             publisher_identity TEXT NOT NULL, program TEXT NOT NULL
+         CREATE TABLE IF NOT EXISTS guest_storage_copies (
+             publisher_identity TEXT NOT NULL, program TEXT NOT NULL,
+             PRIMARY KEY (publisher_identity, program)
          ) WITHOUT ROWID;",
     )
 }
@@ -128,25 +128,23 @@ impl GuestLocalStorage {
         body: String,
         domain: String,
         previous_pins_json: Option<String>,
+        previous_profile_body: Option<String>,
     ) -> Result<PublisherProfileAcceptance, Error> {
         canonical_domain(&domain)?;
-        if body.len() > 2 * 1024 * 1024 {
-            return Err(invalid("Publisher document exceeds 2 MiB"));
-        }
-        let document = actr_protocol::signed_json::parse(body.as_bytes()).map_err(invalid)?;
-        let descriptor: actr_protocol::AuthorityDescriptor =
-            serde_json::from_value(document).map_err(invalid)?;
-        let uri = actr_protocol::uri::ActrUri::from_domain(&domain).map_err(invalid)?;
-        descriptor.validate_for(&uri).map_err(invalid)?;
-        let profile = descriptor
-            .publisher
-            .ok_or_else(|| invalid("Publisher profile is missing"))?;
+        let profile = parse_profile(&body, &domain)?;
         let external: Option<KeyPins> = previous_pins_json
             .as_deref()
             .map(serde_json::from_str)
             .transpose()
             .map_err(invalid)?;
-        self.with_connection(|connection| accept(connection, &domain, &profile, external.as_ref()))
+        let history = previous_profile_body
+            .as_deref()
+            .map(|body| pinned_history(body, &domain, external.as_ref()))
+            .transpose()?
+            .unwrap_or_default();
+        self.with_connection(|connection| {
+            accept(connection, &domain, &profile, external.as_ref(), &history)
+        })
     }
 
     /// Publisher context comes only from an authenticated Host selection, never a Guest.
@@ -156,26 +154,18 @@ impl GuestLocalStorage {
         publisher_identity: Option<String>,
         migration_approval: Option<String>,
     ) -> Result<String, Error> {
+        let Some(identity) = publisher_identity else {
+            return Ok(origin);
+        };
         self.with_connection(|connection| {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            if publisher_identity.is_none() {
-                let delegated: bool = transaction.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM guest_storage_aliases WHERE alias = ?1)",
-                    [&origin],
-                    |row| row.get(0),
-                )?;
-                if !delegated {
-                    return Ok(origin.clone());
-                }
-            }
             let signed = SignedOrigin::parse(&origin)?
                 .ok_or_else(|| invalid("Publisher context requires a canonical signed origin"))?;
             let canonical = resolve_context(
                 &transaction,
-                &origin,
                 &signed,
-                publisher_identity.as_deref(),
+                &identity,
                 migration_approval.as_deref(),
             )?;
             transaction.commit()?;
@@ -195,9 +185,8 @@ impl GuestLocalStorage {
             let saved = validated_publisher(&transaction, &signed, &publisher_identity)?;
             let established: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM guest_storage_programs WHERE publisher_identity = ?1 AND program = ?2)", params![saved.identity, signed.program], |row| row.get(0))?;
             if established { return Ok(None); }
-            let canonical = format!("publisher:{}:{}", saved.identity, signed.program);
-            let aliases = program_aliases(&transaction, &signed, &canonical)?;
-            migration_token(&transaction, &saved.identity, signed.program, &aliases)
+            let sources = program_sources(&transaction, &signed)?;
+            migration_token(&transaction, &saved.identity, signed.program, &sources)
         })
     }
 
@@ -221,6 +210,48 @@ impl GuestLocalStorage {
     }
 }
 
+fn parse_profile(body: &str, domain: &str) -> Result<PublisherProfile, Error> {
+    if body.len() > 2 * 1024 * 1024 {
+        return Err(invalid("Publisher document exceeds 2 MiB"));
+    }
+    let document = actr_protocol::signed_json::parse(body.as_bytes()).map_err(invalid)?;
+    let descriptor: actr_protocol::AuthorityDescriptor =
+        serde_json::from_value(document).map_err(invalid)?;
+    let uri = actr_protocol::uri::ActrUri::from_domain(domain).map_err(invalid)?;
+    descriptor.validate_for(&uri).map_err(invalid)?;
+    descriptor
+        .publisher
+        .ok_or_else(|| invalid("Publisher profile is missing"))
+}
+
+fn pinned_history(
+    body: &str,
+    domain: &str,
+    pins: Option<&KeyPins>,
+) -> Result<Vec<PackageSigningKey>, Error> {
+    let pins =
+        pins.ok_or_else(|| invalid("Historical Publisher Profile requires its saved pins"))?;
+    let profile = parse_profile(body, domain)?;
+    let issued = profile
+        .other
+        .get("profile_issued_at")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| invalid("Historical Publisher Profile has no issuance time"))?;
+    let issued = chrono::DateTime::parse_from_rfc3339(issued)
+        .map_err(invalid)?
+        .with_timezone(&Utc);
+    // Historical freshness is irrelevant; its signature and exact pinned digest are required.
+    let (keys, outcome) = profile
+        .accept(domain, issued, Some(pins))
+        .map_err(invalid)?;
+    if keys.sequence != pins.sequence || !matches!(outcome, KeyPinOutcome::Accepted(_)) {
+        return Err(invalid(
+            "Historical Publisher Profile does not match its saved pins",
+        ));
+    }
+    Ok(keys.keys)
+}
+
 fn validated_publisher(
     connection: &Connection,
     signed: &SignedOrigin<'_>,
@@ -238,32 +269,12 @@ fn validated_publisher(
 
 fn resolve_context(
     connection: &Connection,
-    raw: &str,
     signed: &SignedOrigin<'_>,
-    identity: Option<&str>,
+    identity: &str,
     approval: Option<&str>,
 ) -> Result<String, Error> {
-    let delegated: Option<(String, String)> = connection
-        .query_row(
-            "SELECT origin, publisher_identity FROM guest_storage_aliases WHERE alias = ?1",
-            [raw],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    let Some(identity) = identity.or(delegated.as_ref().map(|(_, identity)| identity.as_str()))
-    else {
-        return Ok(raw.into());
-    };
     let saved = validated_publisher(connection, signed, identity)?;
     let canonical = format!("publisher:{}:{}", saved.identity, signed.program);
-    if delegated
-        .as_ref()
-        .is_some_and(|(origin, _)| origin != &canonical)
-    {
-        return Err(Error::MigrationConflict(
-            "The origin belongs to another accepted identity".into(),
-        ));
-    }
     let established: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM guest_storage_programs WHERE publisher_identity = ?1 AND program = ?2)", params![identity, signed.program], |row| row.get(0))?;
     if !established || approval.is_some() {
         bind_program(connection, identity, signed, &canonical, approval)?;
@@ -286,6 +297,7 @@ fn accept(
     domain: &str,
     profile: &PublisherProfile,
     external: Option<&KeyPins>,
+    history: &[PackageSigningKey],
 ) -> Result<PublisherProfileAcceptance, Error> {
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let previous = load(&transaction, domain)?;
@@ -315,13 +327,14 @@ fn accept(
         rand::rngs::OsRng.fill_bytes(&mut bytes);
         URL_SAFE_NO_PAD.encode(bytes)
     });
+    let history: Vec<_> = history.iter().chain(&keys.keys).cloned().collect();
     save(
         &transaction,
         domain,
         &identity,
         &pins,
         profile,
-        &keys.keys,
+        &history,
         &now.to_rfc3339(),
     )?;
     transaction.commit()?;
@@ -452,17 +465,21 @@ fn bind_program(
     canonical: &str,
     migration_approval: Option<&str>,
 ) -> Result<(), Error> {
-    let aliases = program_aliases(connection, signed, canonical)?;
-    if let Some(token) = migration_token(connection, identity, signed.program, &aliases)? {
+    let copied: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM guest_storage_copies WHERE publisher_identity = ?1 AND program = ?2)", params![identity, signed.program], |row| row.get(0))?;
+    if copied {
+        return Ok(());
+    }
+    let sources = program_sources(connection, signed)?;
+    if let Some(token) = migration_token(connection, identity, signed.program, &sources)? {
         if migration_approval != Some(token.as_str()) {
             return Err(Error::MigrationRequired);
         }
-        let sources = nonempty_sources(connection, &aliases)?;
-        migrate(connection, canonical, &sources)?;
-        // Only an explicit transfer delegates an independently trusted signer space.
-        for alias in sources {
-            connection.execute("INSERT OR IGNORE INTO guest_storage_aliases (alias, origin, publisher_identity, program) VALUES (?1, ?2, ?3, ?4)", params![alias, canonical, identity, signed.program])?;
-        }
+        let sources = nonempty_sources(connection, &sources)?;
+        copy_values(connection, canonical, &sources)?;
+        connection.execute(
+            "INSERT INTO guest_storage_copies (publisher_identity, program) VALUES (?1, ?2)",
+            params![identity, signed.program],
+        )?;
     }
     provision_program(connection, identity, signed.program, canonical)
 }
@@ -471,9 +488,9 @@ fn migration_token(
     connection: &Connection,
     identity: &str,
     program: &str,
-    aliases: &[String],
+    candidates: &[String],
 ) -> Result<Option<String>, Error> {
-    let sources = nonempty_sources(connection, aliases)?;
+    let sources = nonempty_sources(connection, candidates)?;
     if sources.is_empty() {
         return Ok(None);
     }
@@ -481,63 +498,43 @@ fn migration_token(
     Ok(Some(URL_SAFE_NO_PAD.encode(Sha256::digest(payload))))
 }
 
-fn nonempty_sources(connection: &Connection, aliases: &[String]) -> Result<Vec<String>, Error> {
+fn nonempty_sources(connection: &Connection, candidates: &[String]) -> Result<Vec<String>, Error> {
     let mut sources = Vec::new();
-    for alias in aliases {
+    for source in candidates {
         let nonempty: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM guest_local_storage WHERE origin = ?1)",
-            [alias],
+            [source],
             |row| row.get(0),
         )?;
         if nonempty {
-            sources.push(alias.clone());
+            sources.push(source.clone());
         }
     }
     Ok(sources)
 }
 
-fn program_aliases(
+fn program_sources(
     connection: &Connection,
     signed: &SignedOrigin<'_>,
-    canonical: &str,
 ) -> Result<Vec<String>, Error> {
     let mut query = connection.prepare(
         "SELECT public_key FROM guest_publisher_keys WHERE domain = ?1 ORDER BY public_key",
     )?;
-    let aliases = query
+    let sources = query
         .query_map([signed.domain], |row| row.get::<_, String>(0))?
         .map(|key| key.map(|key| format!("signed:{key}:{}", signed.program)))
         .collect::<Result<Vec<_>, _>>()?;
-    for alias in &aliases {
-        let existing: Option<String> = connection
-            .query_row(
-                "SELECT origin FROM guest_storage_aliases WHERE alias = ?1",
-                [alias],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if existing
-            .as_deref()
-            .is_some_and(|origin| origin != canonical)
-        {
-            return Err(Error::MigrationConflict(
-                "The origin belongs to another accepted identity".into(),
-            ));
-        }
-    }
-    Ok(aliases)
+    Ok(sources)
 }
 
-fn migrate(connection: &Connection, canonical: &str, aliases: &[String]) -> Result<(), Error> {
-    let values = collect_values(connection, canonical, aliases)?;
+fn copy_values(
+    connection: &Connection,
+    canonical: &str,
+    candidates: &[String],
+) -> Result<(), Error> {
+    let values = collect_values(connection, canonical, candidates)?;
     for (key, value) in values {
         connection.execute("INSERT INTO guest_local_storage (origin, key, value, size) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(origin, key) DO UPDATE SET size = excluded.size", params![canonical, key, value, key.len() + value.len()])?;
-    }
-    for origin in aliases {
-        connection.execute(
-            "DELETE FROM guest_local_storage WHERE origin = ?1",
-            [origin],
-        )?;
     }
     Ok(())
 }
@@ -545,11 +542,11 @@ fn migrate(connection: &Connection, canonical: &str, aliases: &[String]) -> Resu
 fn collect_values(
     connection: &Connection,
     canonical: &str,
-    aliases: &[String],
+    candidates: &[String],
 ) -> Result<BTreeMap<String, String>, Error> {
     let mut values = BTreeMap::new();
     let mut bytes = 0;
-    for origin in std::iter::once(canonical).chain(aliases.iter().map(String::as_str)) {
+    for origin in std::iter::once(canonical).chain(candidates.iter().map(String::as_str)) {
         let mut query =
             connection.prepare("SELECT key, value FROM guest_local_storage WHERE origin = ?1")?;
         let rows = query.query_map([origin], |row| {

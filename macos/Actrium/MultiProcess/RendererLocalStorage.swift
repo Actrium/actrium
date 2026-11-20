@@ -22,15 +22,17 @@ final class RendererLocalStorage {
 
     private var documents: [UUID: Document] = [:]
     private let databaseAccess: GuestStorageDatabase
-    private let migrationConsent = StorageMigrationConsent()
+    private let migrationConsent: StorageMigrationConsent
     var pendingOperationCount: Int { databaseAccess.pendingOperationCount }
 
-    init(database: GuestLocalStorage? = nil, pendingLimit: Int = 128) {
+    init(database: GuestLocalStorage? = nil, pendingLimit: Int = 128, migrationConsent: StorageMigrationConsent? = nil) {
         databaseAccess = GuestStorageDatabase(database: database, pendingLimit: pendingLimit)
+        self.migrationConsent = migrationConsent ?? StorageMigrationConsent()
     }
 
-    init(access: GuestStorageDatabase) {
+    init(access: GuestStorageDatabase, migrationConsent: StorageMigrationConsent? = nil) {
         databaseAccess = access
+        self.migrationConsent = migrationConsent ?? StorageMigrationConsent()
     }
 
     func resolveOrigin(config: [String: Any], window: NSWindow? = nil) async throws -> [String: Any] {

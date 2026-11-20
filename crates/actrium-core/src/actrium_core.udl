@@ -1701,7 +1701,7 @@ enum GuestLocalStorageError {
 interface GuestLocalStorage {
     constructor(string path);
     [Throws=GuestLocalStorageError]
-    PublisherProfileAcceptance accept_publisher_profile(string body, string domain, string? previous_pins_json);
+    PublisherProfileAcceptance accept_publisher_profile(string body, string domain, string? previous_pins_json, string? previous_profile_body);
     [Throws=GuestLocalStorageError]
     string resolve_signed_origin(string origin, string? publisher_identity, string? migration_approval);
     [Throws=GuestLocalStorageError]

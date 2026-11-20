@@ -1900,7 +1900,7 @@ fun uniffi_actrium_core_fn_free_guestlocalstorage(`ptr`: Pointer,uniffi_out_err:
 ): Unit
 fun uniffi_actrium_core_fn_constructor_guestlocalstorage_new(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
-fun uniffi_actrium_core_fn_method_guestlocalstorage_accept_publisher_profile(`ptr`: Pointer,`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,`previousPinsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_actrium_core_fn_method_guestlocalstorage_accept_publisher_profile(`ptr`: Pointer,`body`: RustBuffer.ByValue,`domain`: RustBuffer.ByValue,`previousPinsJson`: RustBuffer.ByValue,`previousProfileBody`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_method_guestlocalstorage_get_item(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -3395,7 +3395,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_func_verify_realm_package_publisher() != 59675.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_accept_publisher_profile() != 61750.toShort()) {
+    if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_accept_publisher_profile() != 43094.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_get_item() != 63346.toShort()) {
@@ -3880,7 +3880,7 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
  */
 public interface GuestLocalStorageInterface {
 
-    fun `acceptPublisherProfile`(`body`: kotlin.String, `domain`: kotlin.String, `previousPinsJson`: kotlin.String?): PublisherProfileAcceptance
+    fun `acceptPublisherProfile`(`body`: kotlin.String, `domain`: kotlin.String, `previousPinsJson`: kotlin.String?, `previousProfileBody`: kotlin.String?): PublisherProfileAcceptance
 
     fun `getItem`(`origin`: kotlin.String, `key`: kotlin.String): kotlin.String?
 
@@ -3990,12 +3990,12 @@ open class GuestLocalStorage: Disposable, AutoCloseable, GuestLocalStorageInterf
     }
 
 
-    @Throws(GuestLocalStorageException::class)override fun `acceptPublisherProfile`(`body`: kotlin.String, `domain`: kotlin.String, `previousPinsJson`: kotlin.String?): PublisherProfileAcceptance {
+    @Throws(GuestLocalStorageException::class)override fun `acceptPublisherProfile`(`body`: kotlin.String, `domain`: kotlin.String, `previousPinsJson`: kotlin.String?, `previousProfileBody`: kotlin.String?): PublisherProfileAcceptance {
             return FfiConverterTypePublisherProfileAcceptance.lift(
     callWithPointer {
     uniffiRustCallWithError(GuestLocalStorageException) { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_accept_publisher_profile(
-        it, FfiConverterString.lower(`body`),FfiConverterString.lower(`domain`),FfiConverterOptionalString.lower(`previousPinsJson`),_status)
+        it, FfiConverterString.lower(`body`),FfiConverterString.lower(`domain`),FfiConverterOptionalString.lower(`previousPinsJson`),FfiConverterOptionalString.lower(`previousProfileBody`),_status)
 }
     }
     )

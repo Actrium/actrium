@@ -61,8 +61,7 @@ impl GuestLocalStorage {
         self.with_connection(|connection| {
             Ok(connection
                 .query_row(
-                    "SELECT value FROM guest_local_storage WHERE origin = COALESCE(
-                        (SELECT origin FROM guest_storage_aliases WHERE alias = ?1), ?1) AND key = ?2",
+                    "SELECT value FROM guest_local_storage WHERE origin = ?1 AND key = ?2",
                     params![origin, key],
                     |row| row.get(0),
                 )
@@ -84,16 +83,14 @@ impl GuestLocalStorage {
         // The quota check and the write share one statement, including across connections.
         let changed = self.with_connection(|connection| {
             Ok(connection.execute(
-                "WITH selected AS (SELECT COALESCE(
-                     (SELECT origin FROM guest_storage_aliases WHERE alias = ?1), ?1) AS origin)
-                 INSERT INTO guest_local_storage (origin, key, value, size)
-                 SELECT (SELECT origin FROM selected), ?2, ?3, ?4
+                "INSERT INTO guest_local_storage (origin, key, value, size)
+                 SELECT ?1, ?2, ?3, ?4
                  FROM (
                      SELECT COALESCE(SUM(size), 0) AS total,
                             COALESCE(MAX(CASE WHEN key = ?2 THEN size END), 0) AS previous,
                             COUNT(*) AS entries,
                             COALESCE(MAX(key = ?2), 0) AS replacing
-                     FROM guest_local_storage WHERE origin = (SELECT origin FROM selected)
+                     FROM guest_local_storage WHERE origin = ?1
                  )
                  WHERE total - previous + ?4 <= ?5 AND (entries < ?6 OR replacing)
                  ON CONFLICT (origin, key) DO UPDATE SET value = excluded.value, size = excluded.size",
@@ -110,8 +107,7 @@ impl GuestLocalStorage {
         validate_key(&key)?;
         self.with_connection(|connection| {
             connection.execute(
-                "DELETE FROM guest_local_storage WHERE origin = COALESCE(
-                    (SELECT origin FROM guest_storage_aliases WHERE alias = ?1), ?1) AND key = ?2",
+                "DELETE FROM guest_local_storage WHERE origin = ?1 AND key = ?2",
                 params![origin, key],
             )?;
             Ok(())

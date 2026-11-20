@@ -64,7 +64,7 @@ fn rejected_profiles_do_not_change_identity_or_grant_another_key_storage_access(
     ] {
         assert!(
             store
-                .accept_publisher_profile(body, "publisher.example".into(), None)
+                .accept_publisher_profile(body, "publisher.example".into(), None, None)
                 .is_err()
         );
         assert_eq!(
@@ -91,12 +91,12 @@ fn invalid_signatures_domains_and_expired_profiles_are_rejected() {
     let store = GuestLocalStorage::new(":memory:".into());
     assert!(
         store
-            .accept_publisher_profile(tampered.to_string(), "publisher.example".into(), None)
+            .accept_publisher_profile(tampered.to_string(), "publisher.example".into(), None, None)
             .is_err()
     );
     assert!(
         store
-            .accept_publisher_profile(valid.clone(), "other.example".into(), None)
+            .accept_publisher_profile(valid.clone(), "other.example".into(), None, None)
             .is_err()
     );
     let mut expired: Value = serde_json::from_str(&valid).unwrap();
@@ -104,7 +104,7 @@ fn invalid_signatures_domains_and_expired_profiles_are_rejected() {
     actr_protocol::realm_profile::sign_document(&mut expired["publisher"], "root", &root);
     assert!(
         store
-            .accept_publisher_profile(expired.to_string(), "publisher.example".into(), None)
+            .accept_publisher_profile(expired.to_string(), "publisher.example".into(), None, None)
             .is_err()
     );
     accepted(&store, valid);
@@ -155,12 +155,18 @@ fn initial_storage_enrollment_preserves_existing_host_pins() {
             .accept_publisher_profile(
                 changed,
                 "publisher.example".into(),
-                Some(previous.pins_json.clone())
+                Some(previous.pins_json.clone()),
+                None
             )
             .is_err()
     );
     let accepted = store
-        .accept_publisher_profile(first, "publisher.example".into(), Some(previous.pins_json))
+        .accept_publisher_profile(
+            first,
+            "publisher.example".into(),
+            Some(previous.pins_json),
+            None,
+        )
         .unwrap();
     assert!(accepted.profile.storage_identity.is_some());
 }

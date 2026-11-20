@@ -20,7 +20,7 @@ fn accept(store: &GuestLocalStorage) -> String {
 }
 
 #[test]
-fn legacy_data_requires_consent_and_migration_is_idempotent_across_connections() {
+fn legacy_data_requires_consent_and_copy_is_idempotent_across_connections() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("storage.sqlite");
     let path = path.to_str().unwrap().to_owned();
@@ -41,9 +41,9 @@ fn legacy_data_requires_consent_and_migration_is_idempotent_across_connections()
     assert_eq!(stored(&store, second.clone(), "theme"), None);
     let canonical = adopted(&store, second.clone(), &identity).unwrap();
     let other = GuestLocalStorage::new(path);
-    assert_eq!(unqualified(&other, first.clone()), canonical);
+    assert_eq!(unqualified(&other, first.clone()), first);
     assert_eq!(
-        stored(&other, second.clone(), "theme").as_deref(),
+        stored(&other, canonical.clone(), "theme").as_deref(),
         Some("dark")
     );
     other
@@ -51,11 +51,11 @@ fn legacy_data_requires_consent_and_migration_is_idempotent_across_connections()
         .unwrap();
     assert_eq!(
         stored(&store, canonical.clone(), "theme").as_deref(),
-        Some("light")
+        Some("dark")
     );
     assert_eq!(adopted(&store, second, &identity).unwrap(), canonical);
     store.remove_item(first, "language".into()).unwrap();
-    assert_eq!(stored(&other, canonical, "language"), None);
+    assert_eq!(stored(&other, canonical, "language").as_deref(), Some("en"));
 }
 
 #[test]
@@ -122,8 +122,10 @@ fn equal_values_deduplicate_but_other_programs_and_signers_stay_isolated() {
     let another = resolved(&store, origin(&key(33), "other"), &identity);
     assert_ne!(canonical, another);
     assert_eq!(stored(&store, another, "theme"), None);
-    store.remove_item(second, "theme".into()).unwrap();
-    assert_eq!(stored(&store, first, "theme"), None);
+    store.remove_item(second.clone(), "theme".into()).unwrap();
+    assert_eq!(stored(&store, second, "theme"), None);
+    assert_eq!(stored(&store, first, "theme").as_deref(), Some("dark"));
+    assert_eq!(stored(&store, canonical, "theme").as_deref(), Some("dark"));
     assert_eq!(
         stored(&store, independent, "theme").as_deref(),
         Some("dark")
@@ -191,7 +193,7 @@ fn choosing_separate_storage_never_adopts_independent_data() {
 }
 
 #[test]
-fn an_explicit_inflight_transfer_is_not_silently_dropped_by_another_tab() {
+fn an_explicit_inflight_copy_is_not_silently_dropped_by_another_tab() {
     let store = GuestLocalStorage::new(":memory:".into());
     let raw = origin(&key(32), "counter");
     let current = origin(&key(33), "counter");
@@ -210,4 +212,65 @@ fn an_explicit_inflight_transfer_is_not_silently_dropped_by_another_tab() {
         canonical
     );
     assert_eq!(stored(&store, canonical, "theme").as_deref(), Some("dark"));
+}
+
+#[test]
+fn a_one_time_copy_never_grants_the_old_guest_access_to_future_publisher_data() {
+    let store = GuestLocalStorage::new(":memory:".into());
+    let raw = origin(&key(32), "counter");
+    store
+        .set_item(raw.clone(), "theme".into(), "dark".into())
+        .unwrap();
+    let identity = accept(&store);
+    let canonical = adopted(&store, origin(&key(33), "counter"), &identity).unwrap();
+    assert_eq!(unqualified(&store, raw.clone()), raw);
+    assert_eq!(
+        stored(&store, raw.clone(), "theme").as_deref(),
+        Some("dark")
+    );
+    store
+        .set_item(
+            canonical.clone(),
+            "new-secret".into(),
+            "publisher-only".into(),
+        )
+        .unwrap();
+    assert_eq!(stored(&store, raw.clone(), "new-secret"), None);
+    store
+        .set_item(raw.clone(), "theme".into(), "local-only".into())
+        .unwrap();
+    store.remove_item(raw.clone(), "new-secret".into()).unwrap();
+    assert_eq!(
+        stored(&store, canonical.clone(), "theme").as_deref(),
+        Some("dark")
+    );
+    assert_eq!(
+        stored(&store, canonical, "new-secret").as_deref(),
+        Some("publisher-only")
+    );
+}
+
+#[test]
+fn replaying_an_approved_copy_does_not_import_later_local_changes() {
+    let store = GuestLocalStorage::new(":memory:".into());
+    let raw = origin(&key(32), "counter");
+    let current = origin(&key(33), "counter");
+    store
+        .set_item(raw.clone(), "theme".into(), "dark".into())
+        .unwrap();
+    let identity = accept(&store);
+    let approval = store
+        .storage_migration_token(current.clone(), identity.clone())
+        .unwrap();
+    let canonical = store
+        .resolve_signed_origin(current.clone(), Some(identity.clone()), approval.clone())
+        .unwrap();
+    store
+        .set_item(raw.clone(), "later".into(), "local-only".into())
+        .unwrap();
+    store
+        .resolve_signed_origin(current, Some(identity), approval)
+        .unwrap();
+    assert_eq!(stored(&store, canonical, "later"), None);
+    assert_eq!(stored(&store, raw, "later").as_deref(), Some("local-only"));
 }

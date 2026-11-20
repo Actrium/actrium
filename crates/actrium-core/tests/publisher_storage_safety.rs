@@ -42,14 +42,14 @@ fn corrupt_trust_is_not_silently_replaced_with_a_fresh_identity() {
         Err(GuestLocalStorageError::DatabaseFailure(_))
     ));
     assert!(matches!(
-        store.accept_publisher_profile(profile, "publisher.example".into(), None),
+        store.accept_publisher_profile(profile, "publisher.example".into(), None, None),
         Err(GuestLocalStorageError::DatabaseFailure(_))
     ));
     assert_eq!(stored(&store, canonical, "theme").as_deref(), Some("dark"));
 }
 
 #[test]
-fn interrupted_migration_rolls_back_copies_and_aliases_before_a_retry() {
+fn interrupted_migration_rolls_back_the_copy_and_receipt_before_a_retry() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("storage.sqlite");
     let path = path.to_str().unwrap().to_owned();
@@ -60,7 +60,7 @@ fn interrupted_migration_rolls_back_copies_and_aliases_before_a_retry() {
         .unwrap();
     let (_, identity) = accept(&store);
     let external = Connection::open(path).unwrap();
-    external.execute_batch("CREATE TRIGGER interrupt_migration BEFORE DELETE ON guest_local_storage BEGIN SELECT RAISE(ABORT, 'interrupted'); END").unwrap();
+    external.execute_batch("CREATE TRIGGER interrupt_migration BEFORE INSERT ON guest_storage_copies BEGIN SELECT RAISE(ABORT, 'interrupted'); END").unwrap();
     assert!(matches!(
         store.resolve_signed_origin(
             signed.clone(),
@@ -71,12 +71,20 @@ fn interrupted_migration_rolls_back_copies_and_aliases_before_a_retry() {
         ),
         Err(GuestLocalStorageError::DatabaseFailure(_))
     ));
-    let aliases: i64 = external
-        .query_row("SELECT COUNT(*) FROM guest_storage_aliases", [], |row| {
+    let receipts: i64 = external
+        .query_row("SELECT COUNT(*) FROM guest_storage_copies", [], |row| {
             row.get(0)
         })
         .unwrap();
-    assert_eq!(aliases, 0);
+    assert_eq!(receipts, 0);
+    assert_eq!(
+        stored(
+            &store,
+            format!("publisher:{identity}:publisher.example/counter"),
+            "theme"
+        ),
+        None
+    );
     assert_eq!(
         stored(&store, signed.clone(), "theme").as_deref(),
         Some("dark")
@@ -97,7 +105,7 @@ fn interrupted_migration_rolls_back_copies_and_aliases_before_a_retry() {
 }
 
 #[test]
-fn old_origin_writes_on_another_connection_do_not_become_stranded_during_migration() {
+fn concurrent_source_writes_remain_independent_after_the_atomic_copy() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("storage.sqlite");
     let path = path.to_str().unwrap().to_owned();
@@ -126,6 +134,17 @@ fn old_origin_writes_on_another_connection_do_not_become_stranded_during_migrati
         )
         .unwrap();
     writer.join().unwrap();
-    assert_eq!(stored(&store, canonical, "theme").as_deref(), Some("19"));
-    assert_eq!(stored(&store, signed, "theme").as_deref(), Some("19"));
+    let copied = stored(&store, canonical.clone(), "theme").unwrap();
+    assert!(copied == "dark" || copied.parse::<u8>().is_ok_and(|value| value < 20));
+    assert_eq!(
+        stored(&store, signed.clone(), "theme").as_deref(),
+        Some("19")
+    );
+    store
+        .set_item(signed, "theme".into(), "after-copy".into())
+        .unwrap();
+    assert_eq!(
+        stored(&store, canonical, "theme").as_deref(),
+        Some(copied.as_str())
+    );
 }

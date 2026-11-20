@@ -568,7 +568,7 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
  */
 public protocol GuestLocalStorageProtocol: AnyObject, Sendable {
 
-    func acceptPublisherProfile(body: String, domain: String, previousPinsJson: String?) throws  -> PublisherProfileAcceptance
+    func acceptPublisherProfile(body: String, domain: String, previousPinsJson: String?, previousProfileBody: String?) throws  -> PublisherProfileAcceptance
 
     func getItem(origin: String, key: String) throws  -> String?
 
@@ -646,12 +646,13 @@ public convenience init(path: String) {
 
 
 
-open func acceptPublisherProfile(body: String, domain: String, previousPinsJson: String?)throws  -> PublisherProfileAcceptance  {
+open func acceptPublisherProfile(body: String, domain: String, previousPinsJson: String?, previousProfileBody: String?)throws  -> PublisherProfileAcceptance  {
     return try  FfiConverterTypePublisherProfileAcceptance_lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
     uniffi_actrium_core_fn_method_guestlocalstorage_accept_publisher_profile(self.uniffiClonePointer(),
         FfiConverterString.lower(body),
         FfiConverterString.lower(domain),
-        FfiConverterOptionString.lower(previousPinsJson),$0
+        FfiConverterOptionString.lower(previousPinsJson),
+        FfiConverterOptionString.lower(previousProfileBody),$0
     )
 })
 }
@@ -12452,7 +12453,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_actrium_core_checksum_func_verify_realm_package_publisher() != 59675) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_actrium_core_checksum_method_guestlocalstorage_accept_publisher_profile() != 61750) {
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_accept_publisher_profile() != 43094) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_method_guestlocalstorage_get_item() != 63346) {
