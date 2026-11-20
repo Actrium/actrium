@@ -534,6 +534,13 @@ impl LifecycleService {
     }
 
     fn lock_active_instance(&self, actor_id: &str) -> Result<Option<File>, LifecycleError> {
+        // Unknown actors must not leave a permanent lock file behind. This is
+        // only an allocation check; callers still read the authoritative record
+        // after acquiring the lock when an instance exists.
+        if !self.instance_path(actor_id).exists() {
+            self.ensure_not_purged(actor_id)?;
+            return Err(LifecycleError::NotFound(actor_id.into()));
+        }
         let guards = self
             .inner
             .active_guards

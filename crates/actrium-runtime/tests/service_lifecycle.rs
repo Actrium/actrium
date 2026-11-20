@@ -667,6 +667,70 @@ async fn lifecycle_only_the_active_owner_can_stop_a_live_service() {
 }
 
 #[tokio::test]
+async fn lifecycle_unknown_actors_do_not_allocate_active_lock_files() {
+    let temp = TempDir::new().unwrap();
+    let service = LifecycleService::open(temp.path()).unwrap();
+    let actor_id = "missing.notes@acme.com";
+
+    assert!(matches!(
+        service.start(actor_id).await.unwrap_err(),
+        LifecycleError::NotFound(_)
+    ));
+    assert!(matches!(
+        service.stop(actor_id).await.unwrap_err(),
+        LifecycleError::NotFound(_)
+    ));
+    assert!(matches!(
+        service.restart(actor_id).await.unwrap_err(),
+        LifecycleError::NotFound(_)
+    ));
+    assert!(matches!(
+        service
+            .mark_running(actor_id, "runtime")
+            .await
+            .unwrap_err(),
+        LifecycleError::NotFound(_)
+    ));
+    assert!(matches!(
+        service.suspend(actor_id).await.unwrap_err(),
+        LifecycleError::NotFound(_)
+    ));
+    assert!(matches!(
+        service.resume(actor_id).await.unwrap_err(),
+        LifecycleError::NotFound(_)
+    ));
+    assert!(matches!(
+        service.archive(actor_id).await.unwrap_err(),
+        LifecycleError::NotFound(_)
+    ));
+    assert!(matches!(
+        service.trash(actor_id).await.unwrap_err(),
+        LifecycleError::NotFound(_)
+    ));
+    assert!(matches!(
+        service.restore(actor_id).await.unwrap_err(),
+        LifecycleError::NotFound(_)
+    ));
+    assert!(matches!(
+        service
+            .migrate(actor_id, Placement::Remote)
+            .await
+            .unwrap_err(),
+        LifecycleError::NotFound(_)
+    ));
+    assert!(matches!(
+        service.purge(actor_id).await.unwrap_err(),
+        LifecycleError::NotFound(_)
+    ));
+    assert_eq!(
+        fs::read_dir(temp.path().join("active-locks"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
+#[tokio::test]
 async fn lifecycle_trash_retains_private_state_and_restore_reuses_identity() {
     let temp = TempDir::new().unwrap();
     let service = LifecycleService::open(temp.path()).unwrap();

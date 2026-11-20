@@ -32,10 +32,10 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use super::metadata;
+use super::{ATTACHMENT_CANCEL_ROUTE, ATTACHMENT_UPLOAD_TRANSPORT, metadata};
 use super::service::{
-    PendingCall, PendingCallGuard, Shared as PeerShared, TakeoverPayload,
-    attachment_prepare_accepted, attachment_result_stream,
+    AttachmentResultCancellation, PendingCall, PendingCallGuard, Shared as PeerShared,
+    TakeoverPayload, attachment_prepare_accepted, attachment_result_stream,
 };
 use crate::actr_ref::ActrRef;
 use crate::outbound::PeerGate;
@@ -399,7 +399,7 @@ impl ActriumPeerSession {
         if let Some(stream_id) = result_stream.as_ref() {
             self.runtime
                 .shared
-                .register_peer_attachment_result(stream_id.clone(), self)
+                .register_peer_attachment_result(stream_id.clone(), request_id.clone(), self)
                 .map_err(|error| error.into_actr_error())?;
         }
         let preserve_result = result_stream.is_some();
@@ -447,6 +447,47 @@ impl ActriumPeerSession {
                 RpcDeadline::from_duration(Duration::from_secs(30)),
             )
             .await
+    }
+
+    /// Cancel one accepted Prepare on the Service. This signed Host RPC never
+    /// enters the Guest, and its acknowledgement uses the normal response proof.
+    async fn cancel_attachment_result(
+        &self,
+        stream_id: &str,
+        prepare_request_id: String,
+    ) -> ActorResult<()> {
+        let payload = serde_json::to_vec(&AttachmentResultCancellation {
+            stream_id: stream_id.to_string(),
+            prepare_request_id,
+        })
+        .map_err(|error| ActrError::Internal(format!("session encoding failed: {error}")))?;
+        let (envelope, pending_call) = self
+            .business_envelope(
+                ATTACHMENT_CANCEL_ROUTE,
+                ATTACHMENT_UPLOAD_TRANSPORT,
+                MessageKind::Request,
+                payload,
+                Duration::from_secs(30),
+            )
+            .await?;
+        let deadline = RpcDeadline::from_timeout_ms(envelope.timeout_ms)?;
+        let pending = PendingCallGuard::new(
+            self.runtime.shared.clone(),
+            envelope.request_id.clone(),
+            pending_call,
+        );
+        let result = self
+            .runtime
+            .gate
+            .send_request_with_type_until(
+                &self.service,
+                PayloadType::RpcReliable,
+                envelope,
+                deadline,
+            )
+            .await;
+        drop(pending);
+        result.map(|_| ())
     }
 
     /// Send a stream chunk to this session's Service. Session metadata is
@@ -644,14 +685,23 @@ impl ActriumPeerSession {
 }
 
 impl ActrRef {
-    /// Unregister a local stream and release any pending Actrium attachment
-    /// result reservation with the same ID. Explicit upload cancellation uses
-    /// this path so the stream can immediately be prepared again.
+    /// Unregister a local stream and cancel the matching Actrium attachment
+    /// result reservation on both peers. Explicit upload cancellation waits for
+    /// the Service acknowledgement so the stream can immediately be prepared again.
     pub async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
-        if let Some(runtime) = self.shared.peer_runtime.as_ref() {
-            runtime.shared.finish_peer_attachment_result(stream_id);
-        }
-        self.app_context().await.unregister_stream(stream_id).await
+        let cancellation = if let Some(runtime) = self.shared.peer_runtime.as_ref()
+            && let Some((session, request_id)) =
+                runtime.shared.take_peer_attachment_result(stream_id)
+            && let Some(session) = session.upgrade()
+        {
+            session
+                .cancel_attachment_result(stream_id, request_id)
+                .await
+        } else {
+            Ok(())
+        };
+        let unregistered = self.app_context().await.unregister_stream(stream_id).await;
+        cancellation.and(unregistered)
     }
 
     /// Connect to a peer Service over the verified Actor channel and Attach.

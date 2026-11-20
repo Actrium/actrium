@@ -32,6 +32,7 @@ pub enum SessionMethod {
     Heartbeat,
     Takeover,
     GetStatus,
+    CancelAttachmentResult,
 }
 
 impl SessionMethod {
@@ -43,6 +44,7 @@ impl SessionMethod {
             "Heartbeat" => Some(Self::Heartbeat),
             "Takeover" => Some(Self::Takeover),
             "GetStatus" => Some(Self::GetStatus),
+            "CancelAttachmentResult" => Some(Self::CancelAttachmentResult),
             _ => None,
         }
     }

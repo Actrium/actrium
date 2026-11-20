@@ -21,16 +21,19 @@ pub const FRONT_HOST_API_V1: &str = "1.0";
 pub const SERVICE_CAPABILITY: &str = "service";
 pub const ATTACHMENT_UPLOAD_TRANSPORT: &str = "uploadAttachment";
 pub const ATTACHMENT_PREPARE_ROUTE: &str = "ask.AskService.PrepareAttachmentUpload";
+pub const ATTACHMENT_CANCEL_ROUTE: &str =
+    "actrium.session.v1.SessionRegistry.CancelAttachmentResult";
 
-/// Add the fixed wire route for a declared reserved upload transport. The
+/// Add the fixed wire routes for a declared reserved upload transport. The
 /// transport alias remains configured for signed DataChunk metadata, while the
-/// prepare RPC is admitted under its actual protobuf route.
+/// Prepare RPC and Host-only cancellation use their exact routes.
 pub fn service_routes(
     declared: &BTreeMap<String, BTreeSet<String>>,
 ) -> BTreeMap<String, BTreeSet<String>> {
     let mut routes = declared.clone();
     if let Some(capabilities) = declared.get(ATTACHMENT_UPLOAD_TRANSPORT) {
         routes.insert(ATTACHMENT_PREPARE_ROUTE.to_owned(), capabilities.clone());
+        routes.insert(ATTACHMENT_CANCEL_ROUTE.to_owned(), capabilities.clone());
     }
     routes
 }
@@ -235,6 +238,7 @@ mod tests {
         assert_eq!(routes.get("notes.save"), Some(&capabilities));
         assert_eq!(routes.get(ATTACHMENT_UPLOAD_TRANSPORT), Some(&capabilities));
         assert_eq!(routes.get(ATTACHMENT_PREPARE_ROUTE), Some(&capabilities));
+        assert_eq!(routes.get(ATTACHMENT_CANCEL_ROUTE), Some(&capabilities));
     }
 
     #[test]

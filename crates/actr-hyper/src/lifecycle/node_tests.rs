@@ -3754,6 +3754,10 @@ fn session_route_matcher_is_exact() {
         ("Heartbeat", SessionMethod::Heartbeat),
         ("Takeover", SessionMethod::Takeover),
         ("GetStatus", SessionMethod::GetStatus),
+        (
+            "CancelAttachmentResult",
+            SessionMethod::CancelAttachmentResult,
+        ),
     ] {
         assert_eq!(
             actrium_session_v1_method(&format!("actrium.session.v1.{suffix}")),

@@ -300,17 +300,13 @@ fn make_service_config(
             keel_api: "1".into(),
         }],
         program_capabilities: BTreeSet::from([READ.to_string()]),
-        routes: BTreeMap::from([
+        routes: actr_hyper::actrium::service_routes(&BTreeMap::from([
             ("echo".to_string(), BTreeSet::from([READ.to_string()])),
-            (
-                PREPARE_ATTACHMENT_ROUTE.to_string(),
-                BTreeSet::from([READ.to_string()]),
-            ),
             (
                 ATTACHMENT_UPLOAD_ROUTE.to_string(),
                 BTreeSet::from([READ.to_string()]),
             ),
-        ]),
+        ])),
         attachment_policy: AttachmentPolicy::Exclusive,
         lease_duration: Duration::from_secs(300),
         heartbeat_interval: Duration::from_secs(30),
