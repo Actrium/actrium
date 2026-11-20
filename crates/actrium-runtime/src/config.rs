@@ -47,6 +47,16 @@ impl ServiceConfig {
     pub const DEFAULT_MAX_COMPLETED_SESSIONS: usize = 1_024;
 
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+        self.validate_with_empty_routes(false)
+    }
+
+    /// A peer-only Front may subscribe to events without exposing any business
+    /// RPC. Its empty route table is deny-all, not an incomplete Service config.
+    pub(crate) fn validate_peer(&self) -> Result<(), ConfigError> {
+        self.validate_with_empty_routes(true)
+    }
+
+    fn validate_with_empty_routes(&self, allow_empty_routes: bool) -> Result<(), ConfigError> {
         if self.service_actor_id.is_empty() || self.runtime_instance_id.is_empty() {
             return Err(ConfigError(
                 "Service and runtime identities are required".into(),
@@ -85,7 +95,9 @@ impl ServiceConfig {
                 return Err(ConfigError("runtime contracts must be unique".into()));
             }
         }
-        if self.routes.is_empty() || self.routes.keys().any(String::is_empty) {
+        if (!allow_empty_routes && self.routes.is_empty())
+            || self.routes.keys().any(String::is_empty)
+        {
             return Err(ConfigError(
                 "explicit, non-empty routes are required".into(),
             ));

@@ -52,7 +52,8 @@ pub struct ActriumRoute {
 /// Configuration for an Actrium Service host.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ActriumServiceConfig {
-    /// Leave empty to use the registered Node's own Actor identity.
+    /// Leave empty to use the registered Node's own Actor identity. An empty
+    /// route table on this peer-only path denies all inbound business RPCs.
     pub service_actor_id: String,
     pub allowed_front_actor_types: Vec<String>,
     pub program: ProgramRelease,
@@ -320,6 +321,7 @@ pub(crate) fn actrium_service_for_node(
     mut config: ActriumServiceConfig,
     policies: Arc<ActriumServicePolicies>,
 ) -> ActrResult<actrium_runtime::InMemorySessionService> {
+    let peer_only = config.service_actor_id.is_empty() && config.routes.is_empty();
     if config.service_actor_id.is_empty() {
         config.service_actor_id = node.actor_id().to_string_repr();
     }
@@ -330,10 +332,13 @@ pub(crate) fn actrium_service_for_node(
             })?;
     let config = config.into_runtime(service_signing_key);
     let policies = policies.for_service(&config);
-    actrium_runtime::InMemorySessionService::new(config, policies).map_err(|error| {
-        ActrError::Internal {
-            msg: format!("invalid service config: {error}"),
-        }
+    let service = if peer_only {
+        actrium_runtime::InMemorySessionService::new_peer(config, policies)
+    } else {
+        actrium_runtime::InMemorySessionService::new(config, policies)
+    };
+    service.map_err(|error| ActrError::Internal {
+        msg: format!("invalid service config: {error}"),
     })
 }
 

@@ -1173,8 +1173,8 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         // Carry that result through the handoff instead of reading stale startup.
         let ownsRecoverySlot = recovery?.id == previousID
         let id = UUID()
-        Self.publishJoinedRecovery(joined: joined, ownsRecoverySlot: ownsRecoverySlot) {
-            self.startup = (id, Task { $0 })
+        Self.publishJoinedRecovery(joined: joined, ownsRecoverySlot: ownsRecoverySlot) { connection in
+            self.startup = (id, Task { connection })
         }
         let task = Task<RuntimeConnection, Error> {
             // Once the owner has published, use the latest connection. Another

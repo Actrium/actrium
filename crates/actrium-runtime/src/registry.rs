@@ -192,7 +192,27 @@ impl InMemorySessionRegistry {
         policies: ServicePolicies,
         clock: Arc<dyn Clock>,
     ) -> Result<Self, ConfigError> {
-        config.validate()?;
+        Self::new_with_validation(config, policies, clock, false)
+    }
+
+    pub(crate) fn new_peer(
+        config: ServiceConfig,
+        policies: ServicePolicies,
+    ) -> Result<Self, ConfigError> {
+        Self::new_with_validation(config, policies, Arc::new(SystemClock), true)
+    }
+
+    fn new_with_validation(
+        config: ServiceConfig,
+        policies: ServicePolicies,
+        clock: Arc<dyn Clock>,
+        allow_empty_routes: bool,
+    ) -> Result<Self, ConfigError> {
+        if allow_empty_routes {
+            config.validate_peer()?;
+        } else {
+            config.validate()?;
+        }
         let runtime_instance_id = config.runtime_instance_id.clone();
         Ok(Self {
             config: Arc::new(config),

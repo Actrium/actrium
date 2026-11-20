@@ -1183,6 +1183,33 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn event_only_actrium_peer_starts_with_empty_routes() {
+        let mut server = MockLoranServer::start()
+            .await
+            .expect("mock loran server should start");
+        let temp = tempdir().expect("temp dir");
+        let config_path = write_test_config(temp.path(), &server);
+        let node = linked_node_for_test(&config_path)
+            .await
+            .expect("linked workload node should be created");
+        let mut config = crate::session::tests::service_config_for_test();
+        config.service_actor_id.clear();
+        config.program_capabilities = vec!["service".into()];
+        config.routes.clear();
+
+        node.clone()
+            .with_actrium_service(config, ActriumServicePolicies::allow_all())
+            .expect("an event-only peer accepts an empty deny-all RPC table");
+        let actr_ref = node
+            .start()
+            .await
+            .expect("the event-only peer starts with subscriptions and no business RPCs");
+        actr_ref.shutdown();
+        actr_ref.wait_for_shutdown().await;
+        server.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn invalid_actrium_service_config_allows_a_corrected_retry() {
         let mut server = MockLoranServer::start()
             .await
@@ -1196,13 +1223,13 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
         // Hosts cannot read the pre-start Node identity through FFI. An empty
         // Service ActorId therefore selects the registered Node's own identity.
         config.service_actor_id.clear();
-        config.routes.clear();
+        config.package_digest.clear();
 
         let error = match node
             .clone()
             .with_actrium_service(config.clone(), ActriumServicePolicies::allow_all())
         {
-            Ok(_) => panic!("empty routes must be rejected"),
+            Ok(_) => panic!("an invalid package digest must be rejected"),
             Err(error) => error,
         };
         assert!(
@@ -1210,7 +1237,7 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
             "unexpected validation error: {error}"
         );
 
-        config.routes = crate::session::tests::service_config_for_test().routes;
+        config.package_digest = crate::session::tests::service_config_for_test().package_digest;
         node.clone()
             .with_actrium_service(config, ActriumServicePolicies::allow_all())
             .expect("the same node accepts a corrected config");

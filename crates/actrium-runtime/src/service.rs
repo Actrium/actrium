@@ -24,6 +24,14 @@ impl InMemorySessionService {
         })
     }
 
+    /// Install the outbound/event-only peer protocol with an explicitly empty,
+    /// deny-all business RPC table. Ordinary Service Hosts still use `new`.
+    pub fn new_peer(config: ServiceConfig, policies: ServicePolicies) -> Result<Self, ConfigError> {
+        Ok(Self {
+            registry: InMemorySessionRegistry::new_peer(config, policies)?,
+        })
+    }
+
     pub fn new_with_clock(
         config: ServiceConfig,
         policies: ServicePolicies,
