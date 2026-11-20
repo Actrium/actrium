@@ -477,6 +477,10 @@ pub(crate) async fn retire_in(
         .bind(name)
         .execute(&mut **tx)
         .await?;
+    sqlx::query("DELETE FROM actor_instance_acl WHERE realm = ?")
+        .bind(name)
+        .execute(&mut **tx)
+        .await?;
     sqlx::query("DELETE FROM pending_registration WHERE realm = ?")
         .bind(name)
         .execute(&mut **tx)

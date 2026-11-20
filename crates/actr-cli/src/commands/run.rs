@@ -43,6 +43,10 @@ pub struct RunCommand {
     #[arg(short = 'd', long = "detach")]
     pub detach: bool,
 
+    /// Join an open Realm and register a Service declared by its Realm Profile.
+    #[arg(long, conflicts_with = "web")]
+    pub open_join: bool,
+
     /// Internal flag used when the detached child re-executes this command.
     #[arg(long = "internal-detached-child", hide = true)]
     pub internal_detached_child: bool,
@@ -135,7 +139,18 @@ impl RunCommand {
         let package_info = self.build_package_info(&manifest);
 
         // 4. Load runtime configuration
-        let config = actr_config::ConfigParser::from_runtime_file(&config_path, package_info)?;
+        let mut config = actr_config::ConfigParser::from_runtime_file(&config_path, package_info)?;
+        if self.open_join {
+            let (profile, key_path) = super::realm_members::join_open_service(
+                &config.realm,
+                &manifest.actor_type(),
+                package.bytes(),
+                &hyper_dir,
+            )
+            .await?;
+            config.issuer_endpoint = profile.issuer.url;
+            config.realm_client_key = Some(key_path);
+        }
 
         info!("📡 Signaling server: {}", config.signaling_url.as_str());
         info!("🔐 Trust anchors: {} configured", config.trust.len());
@@ -157,7 +172,12 @@ impl RunCommand {
             .map_err(|e| ActrCliError::command_error(format!("Failed to attach package: {}", e)))?;
         info!("✅ Package attached");
 
-        let registered = attached.register(&issuer_endpoint).await.map_err(|e| {
+        let registration = if self.open_join {
+            attached.register_open_service(&issuer_endpoint).await
+        } else {
+            attached.register(&issuer_endpoint).await
+        };
+        let registered = registration.map_err(|e| {
             ActrCliError::command_error(format!(
                 "Failed to register with Issuer at {}.\n\n\
                  Possible causes:\n\
@@ -488,7 +508,7 @@ impl RunCommand {
             .read_record_by_wid(&detached_runtime.wid)
             .await?;
 
-        let record = if let Some(mut r) = existing {
+        let mut record = if let Some(mut r) = existing {
             r.pid = detached_runtime.pid;
             r.started_at = Utc::now();
             r.stopped_at = None;
@@ -505,6 +525,10 @@ impl RunCommand {
                 Utc::now(),
             )
         };
+        record.open_join = self.open_join;
+        if self.open_join {
+            record.actr_id = actr_ref.actor_id().to_string_repr();
+        }
 
         detached_runtime.runtime_store.write_record(&record).await
     }
@@ -551,6 +575,9 @@ impl RunCommand {
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
+            if self.open_join {
+                child.arg("--open-join");
+            }
 
             let mut child = child.spawn().map_err(|e| {
                 ActrCliError::command_error(format!(

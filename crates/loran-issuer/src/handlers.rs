@@ -10,7 +10,7 @@ use crate::{
 };
 use actr_protocol::realm_membership::{CLIENT_PROOF_HEADER, ClientProof, ProofOp, Role};
 use actr_protocol::{
-    ErrorResponse, RegisterRequest, RegisterResponse, ReissueCredentialRequest,
+    ErrorResponse, RegisterAuthMode, RegisterRequest, RegisterResponse, ReissueCredentialRequest,
     RenewCredentialRequest, RenewCredentialResponse, register_response, renew_credential_response,
 };
 use axum::{
@@ -342,14 +342,28 @@ async fn authenticate_client(
     }
 }
 
-/// Only the owner registers current or previous Service programs, in any
-/// version. Older Fronts can still call them using their type-wide ACLs.
+/// Ordinary registration of a current or previous primary Service program
+/// requires the owner. OpenService opts in to the active Profile's selection.
 /// Reads the Profile and outgoing programs in one database snapshot.
 async fn check_realm_registration<'e>(
     db: impl sqlx::SqliteExecutor<'e>,
     request: &RegisterRequest,
     signer: &Signer,
 ) -> Result<(), ErrorResponse> {
+    if request.auth_mode == Some(RegisterAuthMode::OpenService as i32) {
+        let allowed =
+            platform::realm::open_service::allows_type(db, &request.realm, &request.actr_type)
+                .await
+                .map_err(|error| membership_error("unavailable", error))?;
+        return if allowed {
+            Ok(())
+        } else {
+            Err(membership_error(
+                "open_service_not_allowed",
+                "OpenService requires an active Open Realm and a Service type declared in its Profile",
+            ))
+        };
+    }
     let program = format!("{}/{}", request.actr_type.publisher, request.actr_type.name);
     let record: Option<(String, bool)> = sqlx::query_as(
         "SELECT document, EXISTS (
@@ -547,8 +561,7 @@ async fn persist_registration_state(
 
     // A revocation that committed after the proof was checked stops the
     // registration; one that commits later disables the Actor recorded here.
-    // Likewise an ownership transfer: the Service is registered only by
-    // whoever is the owner now, under the current Profile's `package.type`.
+    // Recheck the current membership role and Profile before persisting.
     let signer = match membership::check_key_on(&mut tx, &signer.realm, &signer.key_id).await {
         Ok(signer) => signer,
         Err(error) => return Err((error.code.status().into(), error.to_string())),
@@ -557,7 +570,16 @@ async fn persist_registration_state(
         .await
         .map_err(|error| (error.code, error.message))?;
 
-    if let Some(ref acl) = request.acl {
+    if request.auth_mode == Some(RegisterAuthMode::OpenService as i32) {
+        if let Some(acl) = &request.acl {
+            ActorAcl::save_instance_policy(&mut tx, &register_ok.actr_id, acl)
+                .await
+                .map_err(|error| {
+                    platform::recording::error!("Failed to persist instance ACL: {error}");
+                    state_error()
+                })?;
+        }
+    } else if let Some(ref acl) = request.acl {
         use actr_protocol::acl_rule::SourceRealm;
 
         let realm = &register_ok.actr_id.realm;

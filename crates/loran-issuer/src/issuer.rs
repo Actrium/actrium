@@ -401,6 +401,10 @@ impl AIdIssuer {
         }
         // The requested type must be the one this identity was issued for.
         let issued = Self::issued_actor(&mut *Self::db_connection().await?, actor_id).await?;
+        let open_service = Some(actr_protocol::RegisterAuthMode::OpenService as i32);
+        if (issued.auth_mode == open_service) != (request.auth_mode == open_service) {
+            return Err(AidError::InvalidFormat.into());
+        }
         if issued.actor_type != request.actr_type {
             platform::recording::warn!(
                 "Credential reissue type mismatch: actor={}, requested_type={}",
@@ -542,6 +546,10 @@ impl AIdIssuer {
                 request.target.as_deref(),
                 if request.auth_mode == Some(actr_protocol::RegisterAuthMode::Linked as i32) {
                     actr_protocol::RegisterAuthMode::Linked
+                } else if request.auth_mode
+                    == Some(actr_protocol::RegisterAuthMode::OpenService as i32)
+                {
+                    actr_protocol::RegisterAuthMode::OpenService
                 } else {
                     actr_protocol::RegisterAuthMode::Package
                 },
@@ -613,32 +621,24 @@ impl AIdIssuer {
     /// Verify the registration identity according to the explicit request source.
     ///
     /// Returns the package provenance for a package registration, `None` for
-    /// a Linked one. Authorization is not decided here: the Realm client
-    /// proof, membership and Service ownership are checked by the handler.
+    /// a Linked one. The handler checks the Realm client proof, membership
+    /// and authorization under the current Realm Profile.
     async fn verify_registration_identity(
         &self,
         request: &RegisterRequest,
     ) -> Result<Option<Provenance>, AidError> {
-        let auth_mode = match request.auth_mode {
-            Some(value) if value == actr_protocol::RegisterAuthMode::Linked as i32 => {
-                actr_protocol::RegisterAuthMode::Linked
-            }
-            Some(value) if value == actr_protocol::RegisterAuthMode::Package as i32 => {
-                actr_protocol::RegisterAuthMode::Package
-            }
-            _ => actr_protocol::RegisterAuthMode::Unspecified,
-        };
-
-        match auth_mode {
-            actr_protocol::RegisterAuthMode::Unspecified
-            | actr_protocol::RegisterAuthMode::Package => {
-                self.verify_package_identity(request).await.map(Some)
-            }
-            actr_protocol::RegisterAuthMode::Linked => {
-                self.verify_linked_identity(request)?;
-                Ok(None)
-            }
+        if request.auth_mode == Some(actr_protocol::RegisterAuthMode::Linked as i32) {
+            self.verify_linked_identity(request)?;
+            return Ok(None);
         }
+
+        let provenance = self.verify_package_identity(request).await?;
+        if request.auth_mode == Some(actr_protocol::RegisterAuthMode::OpenService as i32)
+            && provenance != Provenance::Publisher
+        {
+            return Err(AidError::PublisherNotVerified);
+        }
+        Ok(Some(provenance))
     }
 
     /// A Linked registration is authorized by the Realm client key proof
@@ -1153,6 +1153,23 @@ impl AIdIssuer {
         let issued = Self::issued_actor(&mut *conn, actor_id).await?;
         let (actor_type, auth_mode) = (&issued.actor_type, issued.auth_mode);
         let type_str = actor_type.to_program_identity();
+        if auth_mode == Some(actr_protocol::RegisterAuthMode::OpenService as i32) {
+            if issued.development {
+                return Err(AidError::PublisherNotVerified);
+            }
+            if !platform::realm::open_service::allows_type(&mut *conn, &actor_id.realm, actor_type)
+                .await
+                .map_err(|error| {
+                    AidError::GenerationFailed(format!(
+                        "Open Service policy lookup failed: {error}"
+                    ))
+                })?
+            {
+                return Err(AidError::Membership(
+                    "open_service_not_allowed: the Realm no longer admits this Service type".into(),
+                ));
+            }
+        }
         if auth_mode == Some(actr_protocol::RegisterAuthMode::Linked as i32) {
             return Ok(issued);
         }
