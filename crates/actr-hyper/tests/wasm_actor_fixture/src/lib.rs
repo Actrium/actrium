@@ -344,6 +344,23 @@ impl MessageDispatcher for DoubleDispatcher {
                 .await?;
                 Ok(Bytes::new())
             }
+            "test/register-scoped-stream" => {
+                let callback_ctx = ctx.clone();
+                ctx.register_stream("test/scoped-stream".into(), move |chunk, sender| {
+                    let callback_ctx = callback_ctx.clone();
+                    Box::pin(async move {
+                        callback_ctx
+                            .send_data_chunk(
+                                &Dest::Peer(sender),
+                                chunk,
+                                actr_protocol::PayloadType::StreamReliable,
+                            )
+                            .await
+                    })
+                })
+                .await?;
+                Ok(Bytes::new())
+            }
             "test/boom-after-await" => {
                 // Exercise Phase 0.5 spike Test 8: perform a host-side
                 // await, then panic once control returns to the guest.

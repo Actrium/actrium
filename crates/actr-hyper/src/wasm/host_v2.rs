@@ -3327,6 +3327,128 @@ async fn run_hook_region(
 mod resident_tests {
     use super::*;
 
+    #[cfg(actr_wasm_fixture_available)]
+    #[tokio::test]
+    async fn scoped_service_registers_and_echoes_data_stream_chunks() {
+        use crate::egress::{EgressBroker, EgressPermit, EgressPolicy, EgressRequest};
+        use actr_pack::egress::{EgressPermissions, PackagePrivacyContract};
+
+        struct DenyEgress;
+        impl EgressPolicy for DenyEgress {
+            fn authorize(&self, _: EgressRequest<'_>) -> actr_protocol::ActorResult<EgressPermit> {
+                Err(ActrError::PermissionDenied("no outbound grants".into()))
+            }
+
+            fn authorize_inbound(
+                &self,
+                _: &InvocationContext,
+                _: &str,
+                _: &str,
+                _: &str,
+            ) -> actr_protocol::ActorResult<()> {
+                Ok(())
+            }
+        }
+
+        let limits = WasmRuntimeLimits::default();
+        let host = crate::wasm::WasmHost::compile_with_limits(
+            include_bytes!(concat!(env!("OUT_DIR"), "/wasm_actor_fixture.wasm")),
+            &limits,
+        )
+        .unwrap();
+        let mut workload = host
+            .instantiate_scoped(
+                None,
+                Some(Arc::new(EgressBroker::new(
+                    Arc::new(DenyEgress),
+                    "test-package".into(),
+                    PackagePrivacyContract {
+                        sha256: "ab".repeat(32),
+                        egress: EgressPermissions::default(),
+                        dependency_digests: Default::default(),
+                    },
+                    None,
+                ))),
+            )
+            .await
+            .unwrap();
+        assert!(workload.uses_explicit_reply_boundary());
+
+        let operations = Arc::new(Mutex::new(Vec::new()));
+        let observed = operations.clone();
+        let bridge: HostAbiFn = Arc::new(move |operation| {
+            observed.lock().unwrap().push(operation);
+            Box::pin(async { HostOperationResult::Done })
+        });
+        let sender = ActrId {
+            serial_number: 1,
+            ..Default::default()
+        };
+        let ctx = InvocationContext {
+            self_id: ActrId {
+                serial_number: 2,
+                ..Default::default()
+            },
+            caller_id: Some(sender.clone()),
+            request_id: "scoped-stream-test".into(),
+        };
+        let envelope = |route: &str, payload: Vec<u8>| {
+            RpcEnvelope {
+                route_key: route.into(),
+                request_id: ctx.request_id.clone(),
+                direction: Some(actr_protocol::Direction::Request as i32),
+                timeout_ms: 5_000,
+                payload: Some(payload.into()),
+                ..Default::default()
+            }
+            .encode_to_vec()
+        };
+        workload
+            .handle(
+                &envelope("test/register-scoped-stream", Vec::new()),
+                ctx.clone(),
+                &bridge,
+            )
+            .await
+            .expect("register the scoped component's stream");
+        let chunk = DataChunk {
+            stream_id: "test/scoped-stream".into(),
+            sequence: 1,
+            payload: b"stream payload".as_slice().into(),
+            ..Default::default()
+        };
+        workload
+            .handle_data_chunk(chunk.clone(), sender.clone(), ctx.clone(), &bridge)
+            .await
+            .expect("deliver to the guest callback and forward its response");
+        assert!(
+            workload
+                .handle(&envelope("test/double", vec![1, 0, 0, 0]), ctx, &bridge)
+                .await
+                .is_err(),
+            "raw RPC must still be blocked",
+        );
+
+        let operations = operations.lock().unwrap();
+        let [
+            HostOperation::RegisterStream(registration),
+            HostOperation::SendDataChunk(send),
+        ] = operations.as_slice()
+        else {
+            panic!("expected one stream registration and one sent chunk");
+        };
+        assert_eq!(registration.stream_id, chunk.stream_id);
+        assert_eq!(send.chunk, chunk);
+        assert_eq!(
+            send.payload_type,
+            actr_protocol::PayloadType::StreamReliable as i32
+        );
+        assert_eq!(
+            crate::workload::decode_dest(&send.dest),
+            Some(actr_framework::Dest::Peer(sender))
+        );
+    }
+
     #[test]
     fn cancelled_egress_releases_slot_and_keeps_dispatched_id() {
         let active = ActiveEgress::default();
