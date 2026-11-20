@@ -552,10 +552,9 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// Internal for the attachment transport wiring tests.
     let attachmentUploadAllowed: Bool
     private let sessions = RealmServiceAttachmentSessionStore()
-    /// Keyed by the chunk stream id, which is unique per upload attempt. The
-    /// caller-supplied attachment id may be reused by a retry, so it cannot
-    /// identify a delivery on its own.
-    private var attachmentDeliveries: [String: @Sendable (RealmServiceAttachmentResultEvent) -> Void] = [:]
+    /// Keyed by the unique registration attempt. Public stream IDs and the
+    /// caller-supplied attachment ID may both be reused by a later upload.
+    private var attachmentDeliveries: [UUID: @Sendable (RealmServiceAttachmentResultEvent) -> Void] = [:]
     private var startup: (id: UUID, task: Task<RuntimeConnection, Error>)?
     private var recovery: (id: UUID, task: Task<RuntimeConnection, Error>)?
     /// The detached old session retained while a verified Local Front
@@ -804,7 +803,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                 // The result delivery must exist before registration: the
                 // Service may answer the prepare RPC and publish its terminal
                 // result while this actor is still suspended on the RPC.
-                attachmentDeliveries[call.streamId] = deliver
+                attachmentDeliveries[attemptId] = deliver
                 let callback = RealmServiceAttachmentResultCallback { [weak self] chunk in
                     let payload = chunk.payload
                     Task {
@@ -815,18 +814,11 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                         )
                     }
                 }
-                do {
-                    try await reference.registerStream(streamId: call.resultStreamId, callback: callback)
-                } catch {
-                    await cleanupAttachmentSession(attachmentId: call.attachmentId, streamId: call.streamId)
-                    throw error
-                }
-                // Cancellation may have run while registration was suspended:
-                // cancelAll() scanned the store before this stream existed, so
-                // unregister it explicitly instead of leaking it.
+                try await reference.registerStream(streamId: call.resultStreamId, callback: callback)
+                // Cancellation may have run while registration was suspended.
+                // The prepare-owning catch below performs the final unregister
+                // only after this late registration has finished.
                 guard await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
-                    attachmentDeliveries.removeValue(forKey: call.streamId)
-                    try? await reference.unregisterStream(streamId: call.resultStreamId)
                     throw RealmServiceAttachmentUploadError.cancelled
                 }
                 var request = Ask_PrepareAttachmentUploadRequest()
@@ -872,7 +864,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                     statusCode: reply.statusCode
                 )
             } catch {
-                await cleanupAttachmentSession(
+                await cleanupPreparingAttachmentSession(
                     attachmentId: call.attachmentId,
                     streamId: call.streamId
                 )
@@ -952,11 +944,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// the result stream; the whole session (both streams) is cleaned up.
     func unregisterAttachmentStream(_ call: RealmServiceAttachmentUnregisterCall) async -> RealmServiceAttachmentUnregisterReply {
         if let session = await sessions.unregister(streamId: call.streamId) {
-            attachmentDeliveries.removeValue(forKey: session.chunkStreamId)
-            if let reference = await startedReference {
-                try? await reference.unregisterStream(streamId: session.resultStreamId)
-                try? await reference.unregisterStream(streamId: session.chunkStreamId)
-            }
+            await teardownAttachmentSession(session)
         }
         return RealmServiceAttachmentUnregisterReply(id: call.id)
     }
@@ -966,14 +954,8 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// owned these sessions is gone.
     func cancelAttachmentUploads() async {
         let removed = await sessions.cancelAll()
-        guard !removed.isEmpty else { return }
         for session in removed {
-            attachmentDeliveries.removeValue(forKey: session.chunkStreamId)
-        }
-        guard let reference = await startedReference else { return }
-        for session in removed {
-            try? await reference.unregisterStream(streamId: session.resultStreamId)
-            try? await reference.unregisterStream(streamId: session.chunkStreamId)
+            await teardownAttachmentSession(session)
         }
     }
 
@@ -1033,32 +1015,52 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                 errorMessage: "The upload result could not be decoded."
             )
         }
-        // Claim the delivery before awaiting cleanup. Only the first result
-        // on this stream may settle the upload; a duplicate chunk that races
-        // through actor reentrancy would otherwise deliver twice.
-        let deliver = attachmentDeliveries.removeValue(forKey: session.chunkStreamId)
-        await unregisterAttachmentStreams(session)
+        // Delivery is attempt-scoped and claimed before cleanup. Only the
+        // first result for this registration may settle the upload.
+        let deliver = attachmentDeliveries.removeValue(forKey: session.attemptId)
+        await teardownAttachmentSession(session)
         deliver?(event)
     }
 
-    /// Terminal cleanup: drop the session and best-effort unregister both
-    /// streams. Safe to call repeatedly. The chunk stream scopes the removal
-    /// to one upload attempt, so a late failure from an abandoned attempt
-    /// cannot delete a retry that reuses the attachment id.
+    /// Starts terminal cleanup for a live upload. A preparing session stays
+    /// reserved until its owning prepare call has finished any late stream
+    /// registration and performs the final transport cleanup.
     private func cleanupAttachmentSession(attachmentId: String, streamId: String) async {
         guard let session = await sessions.cancel(attachmentId: attachmentId, streamId: streamId) else {
             return
         }
-        attachmentDeliveries.removeValue(forKey: session.chunkStreamId)
+        await teardownAttachmentSession(session)
+    }
+
+    /// Finishes the prepare call's own cleanup, including when cancellation
+    /// already claimed the session while registration or the RPC was in flight.
+    private func cleanupPreparingAttachmentSession(attachmentId: String, streamId: String) async {
+        guard let session = await sessions.preparationCleanup(
+            attachmentId: attachmentId,
+            streamId: streamId
+        ) else {
+            return
+        }
+        await teardownAttachmentSession(session, includePreparing: true)
+    }
+
+    private func teardownAttachmentSession(
+        _ session: RealmServiceAttachmentSession,
+        includePreparing: Bool = false
+    ) async {
+        attachmentDeliveries.removeValue(forKey: session.attemptId)
+        guard includePreparing || session.state != .preparing else { return }
         await unregisterAttachmentStreams(session)
     }
 
-    /// Unregisters transport state for a session already claimed or removed
-    /// from the store. No lookup by reusable public stream ID is involved.
+    /// Unregisters transport state and only then releases the session's public
+    /// IDs. Until that point a replacement cannot register under the same IDs.
     private func unregisterAttachmentStreams(_ session: RealmServiceAttachmentSession) async {
-        guard let reference = await startedReference else { return }
-        try? await reference.unregisterStream(streamId: session.resultStreamId)
-        try? await reference.unregisterStream(streamId: session.chunkStreamId)
+        if let reference = await startedReference {
+            try? await reference.unregisterStream(streamId: session.resultStreamId)
+            try? await reference.unregisterStream(streamId: session.chunkStreamId)
+        }
+        await sessions.completeTeardown(session)
     }
 
     /// The runtime reference of an already started connection, if any.
@@ -1308,11 +1310,12 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         // dropped even when startup never produced a usable runtime.
         let removed = await sessions.cancelAll()
         for session in removed {
-            attachmentDeliveries.removeValue(forKey: session.chunkStreamId)
+            attachmentDeliveries.removeValue(forKey: session.attemptId)
             if let reference = connection?.reference {
                 try? await reference.unregisterStream(streamId: session.resultStreamId)
                 try? await reference.unregisterStream(streamId: session.chunkStreamId)
             }
+            await sessions.completeTeardown(session)
         }
         if let connection {
             try? await connection.session.detach()

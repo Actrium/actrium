@@ -1064,17 +1064,39 @@ impl LifecycleService {
         actor_id: &str,
         placement: Placement,
     ) -> Result<ServiceInstance, LifecycleError> {
+        self.migrate_with(actor_id, placement, self.invalidate_and_rotate())
+            .await
+    }
+
+    async fn migrate_with<F>(
+        &self,
+        actor_id: &str,
+        placement: Placement,
+        invalidate: F,
+    ) -> Result<ServiceInstance, LifecycleError>
+    where
+        F: Future<Output = Result<String, LifecycleError>> + Send,
+    {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
         let _lifecycle_guard = self.lock_operation()?;
         let _active_guard = self.lock_active_instance(actor_id)?;
         let mut instance = self.instance(actor_id)?;
-        ensure_transition(&instance, LifecycleState::Migrating)?;
+        if instance.lifecycle_state != LifecycleState::Migrating {
+            ensure_transition(&instance, LifecycleState::Migrating)?;
+        }
         self.mark_offline(&mut instance, DesiredState::Stopped);
-        self.persist_transition(&mut instance, LifecycleState::Migrating)?;
-        instance.runtime_instance_id = self.invalidate_and_rotate().await?;
+        // The destination is migration intent while the checkpoint is
+        // Migrating. Persist it before the first suspension so the active
+        // owner can resume the same durable operation after an interruption.
         instance.placement = placement;
         instance.runtime_location = placement.location().into();
+        if instance.lifecycle_state != LifecycleState::Migrating {
+            self.persist_transition(&mut instance, LifecycleState::Migrating)?;
+        } else {
+            self.persist(&mut instance)?;
+        }
+        instance.runtime_instance_id = invalidate.await?;
         self.persist_transition(&mut instance, LifecycleState::Stopped)?;
         self.release_active_guard(actor_id);
         Ok(instance)
@@ -1561,6 +1583,75 @@ mod tests {
         ));
         let stopped = service.stop(&actor_id).await.unwrap();
         assert_eq!(stopped.lifecycle_state, LifecycleState::Stopped);
+        other.recover().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn interrupted_migration_is_resumable_by_the_active_owner() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let service = LifecycleService::open(temp.path()).unwrap();
+        let other = LifecycleService::open(temp.path()).unwrap();
+        let created = service
+            .create(CreateInstanceRequest {
+                idempotency_key: "interrupted-migration".into(),
+                package_sources: vec!["signed-catalog://actrium/documents/1.0.0".into()],
+                program_release: ProgramRelease {
+                    publisher: "actrium".into(),
+                    name: "documents".into(),
+                    version: "1.0.0".into(),
+                },
+                service_package_digest: "sha256:service-v1".into(),
+                front_package_digest: None,
+                privacy_contract_digest: None,
+                realm_name: "notes@acme.com".into(),
+                workspace: None,
+                metadata: None,
+                requested_permissions: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let actor_id = created.actor_id;
+        service.start(&actor_id).await.unwrap();
+
+        let interrupted = tokio::spawn({
+            let service = service.clone();
+            let actor_id = actor_id.clone();
+            async move {
+                service
+                    .migrate_with(
+                        &actor_id,
+                        Placement::Remote,
+                        std::future::pending::<Result<String, LifecycleError>>(),
+                    )
+                    .await
+            }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let instance = service.instance(&actor_id).unwrap();
+                if instance.lifecycle_state == LifecycleState::Migrating {
+                    assert_eq!(instance.placement, Placement::Remote);
+                    assert_eq!(instance.runtime_location, "remote");
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the interrupted migration persists its destination and checkpoint");
+        interrupted.abort();
+        let _ = interrupted.await;
+
+        assert!(matches!(
+            other
+                .migrate(&actor_id, Placement::Remote)
+                .await
+                .unwrap_err(),
+            LifecycleError::ConcurrentLifecycleOperation
+        ));
+        let stopped = service.migrate(&actor_id, Placement::Remote).await.unwrap();
+        assert_eq!(stopped.lifecycle_state, LifecycleState::Stopped);
+        assert_eq!(stopped.placement, Placement::Remote);
         other.recover().await.unwrap();
     }
 

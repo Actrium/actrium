@@ -174,6 +174,9 @@ struct RealmServiceAttachmentUploadTests {
         #expect(await store.isCurrent(attachmentId: "same-id", streamId: first.streamId))
         let removed = await store.cancel(attachmentId: "same-id", streamId: first.streamId)
         #expect(removed?.chunkStreamId == first.streamId)
+        if let removed {
+            await store.completeTeardown(removed)
+        }
 
         let retry = makePrepareCall(
             attachmentId: "same-id", streamId: "chunk-2", resultStreamId: "result-2"
@@ -307,35 +310,48 @@ struct RealmServiceAttachmentUploadTests {
         }
     }
 
-    @Test func unregisterRemovesTheWholeSessionByEitherStream() async throws {
+    @Test func unregisterReservesTheWholeSessionUntilTeardownCompletes() async throws {
         let (store, call) = try await makeStoreWithUploadingSession()
         let byChunk = await store.unregister(streamId: call.streamId)
         #expect(byChunk?.attachmentId == call.attachmentId)
-        // Session is gone; the result stream no longer resolves either.
+        // Repeated cleanup cannot claim the same attempt twice.
         let again = await store.unregister(streamId: call.resultStreamId)
         #expect(again == nil)
         await #expect(throws: (any Error).self) {
             try await store.planChunk(streamId: call.streamId, sequence: 1, payloadBytes: 1, metadata: [])
         }
+        if let byChunk {
+            await store.completeTeardown(byChunk)
+        }
+        #expect(await store.session(forResultStreamId: call.resultStreamId) == nil)
 
         let (store2, call2) = try await makeStoreWithUploadingSession(attachmentId: "attachment-2")
         let byResult = await store2.unregister(streamId: call2.resultStreamId)
         #expect(byResult?.chunkStreamId == call2.streamId)
+        if let byResult {
+            await store2.completeTeardown(byResult)
+        }
         #expect(await store2.session(forResultStreamId: call2.resultStreamId) == nil)
     }
 
-    @Test func finishAndCancelAllDropSessionsForCleanup() async throws {
+    @Test func finishAndCancelAllDropSessionsAfterCleanup() async throws {
         let (store, call) = try await makeStoreWithUploadingSession()
         #expect(await store.session(forResultStreamId: call.resultStreamId)?.attachmentId == call.attachmentId)
         let finished = await store.finish(attachmentId: call.attachmentId)
         #expect(finished?.resultStreamId == call.resultStreamId)
         #expect(await store.finish(attachmentId: call.attachmentId) == nil)
+        if let finished {
+            await store.completeTeardown(finished)
+        }
 
         let (store2, call2) = try await makeStoreWithUploadingSession(attachmentId: "attachment-2")
         let (store3, call3) = try await makeStoreWithUploadingSession(attachmentId: "attachment-3")
         // cancelAll spans independent store instances' sessions only within itself.
         let all = await store2.cancelAll()
         #expect(all.map(\.attachmentId) == [call2.attachmentId])
+        for session in all {
+            await store2.completeTeardown(session)
+        }
         #expect(await store3.session(forResultStreamId: call3.resultStreamId)?.attachmentId == call3.attachmentId)
     }
 
@@ -343,7 +359,9 @@ struct RealmServiceAttachmentUploadTests {
         let store = RealmServiceAttachmentSessionStore()
         let call = makePrepareCall()
         let firstAttempt = try await store.registerPreparing(call, checksum: md5)
-        _ = await store.unregister(streamId: call.streamId)
+        if let first = await store.unregister(streamId: call.streamId) {
+            await store.completeTeardown(first)
+        }
         let secondAttempt = try await store.registerPreparing(call, checksum: md5)
         #expect(firstAttempt != secondAttempt)
 
@@ -351,7 +369,74 @@ struct RealmServiceAttachmentUploadTests {
         #expect(await store.session(forResultStreamId: call.resultStreamId)?.attemptId == secondAttempt)
         let claimed = await store.claimResult(streamId: call.resultStreamId, attemptId: secondAttempt)
         #expect(claimed?.attemptId == secondAttempt)
+        #expect(await store.session(forResultStreamId: call.resultStreamId)?.attemptId == secondAttempt)
+        if let claimed {
+            await store.completeTeardown(claimed)
+        }
         #expect(await store.session(forResultStreamId: call.resultStreamId) == nil)
+    }
+
+    @Test func teardownHoldsReusableIDsUntilTransportCleanupCompletes() async throws {
+        let store = RealmServiceAttachmentSessionStore()
+        let call = makePrepareCall()
+        let firstAttempt = try await store.registerPreparing(call, checksum: md5)
+        let first = await store.claimResult(streamId: call.resultStreamId, attemptId: firstAttempt)
+        #expect(first?.attemptId == firstAttempt)
+
+        // The transport unregister is still in flight. The old attempt keeps
+        // both public IDs reserved, so no replacement can be unregistered by
+        // that old cleanup.
+        let replacement = makePrepareCall(attachmentId: "replacement")
+        await #expect(throws: (any Error).self) {
+            try await store.registerPreparing(replacement, checksum: md5)
+        }
+        #expect(await store.claimResult(streamId: call.resultStreamId, attemptId: firstAttempt) == nil)
+        if let first {
+            await store.completeTeardown(first)
+        }
+
+        let secondAttempt = try await store.registerPreparing(replacement, checksum: md5)
+        #expect(secondAttempt != firstAttempt)
+        // Even a duplicated completion from the old owner is attempt-scoped.
+        if let first {
+            await store.completeTeardown(first)
+        }
+        #expect(await store.session(forResultStreamId: call.resultStreamId)?.attemptId == secondAttempt)
+        let second = await store.claimResult(streamId: call.resultStreamId, attemptId: secondAttempt)
+        if let second {
+            await store.completeTeardown(second)
+        }
+        #expect(await store.session(forResultStreamId: call.resultStreamId) == nil)
+    }
+
+    @Test func preparingCancellationWaitsForThePrepareOwnerToFinishCleanup() async throws {
+        let store = RealmServiceAttachmentSessionStore()
+        let call = makePrepareCall()
+        let firstAttempt = try await store.registerPreparing(call, checksum: md5)
+        let cancelled = await store.unregister(streamId: call.streamId)
+        #expect(cancelled?.attemptId == firstAttempt)
+        let stillCurrent = await store.isCurrent(
+            attachmentId: call.attachmentId,
+            streamId: call.streamId
+        )
+        #expect(!stillCurrent)
+        await #expect(throws: (any Error).self) {
+            try await store.registerPreparing(call, checksum: md5)
+        }
+
+        // The renderer-facing cancellation cannot finish transport cleanup
+        // before a suspended registerStream call returns. The prepare owner
+        // completes that cleanup and releases the IDs exactly once.
+        let owned = await store.preparationCleanup(
+            attachmentId: call.attachmentId,
+            streamId: call.streamId
+        )
+        #expect(owned?.attemptId == firstAttempt)
+        if let owned {
+            await store.completeTeardown(owned)
+        }
+        let secondAttempt = try await store.registerPreparing(call, checksum: md5)
+        #expect(secondAttempt != firstAttempt)
     }
 
     // MARK: - Binding wiring

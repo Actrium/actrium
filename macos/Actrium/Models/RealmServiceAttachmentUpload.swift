@@ -228,6 +228,10 @@ actor RealmServiceAttachmentSessionStore {
     private var sessions: [String: RealmServiceAttachmentSession] = [:]
     private var chunkStreams: [String: String] = [:]
     private var resultStreams: [String: String] = [:]
+    /// Attempts remain indexed while their transport teardown is in flight.
+    /// Reusable public IDs cannot be registered again until that teardown has
+    /// completed, so a bare transport unregister cannot remove a replacement.
+    private var tearingDown: Set<UUID> = []
 
     init() {}
 
@@ -271,14 +275,16 @@ actor RealmServiceAttachmentSessionStore {
     /// late replies and cancellations from the abandoned attempt must not
     /// mutate it.
     func isCurrent(attachmentId: String, streamId: String) -> Bool {
-        sessions[attachmentId]?.chunkStreamId == streamId
+        guard let session = sessions[attachmentId] else { return false }
+        return session.chunkStreamId == streamId && !tearingDown.contains(session.attemptId)
     }
 
     /// Fixes the discovered peer once the prepare RPC succeeded. Fails when
     /// the attempt was replaced or cancelled while the RPC was in flight.
     func markUploading(attachmentId: String, streamId: String, target: ActrId) throws {
         guard var session = sessions[attachmentId],
-              session.chunkStreamId == streamId else {
+              session.chunkStreamId == streamId,
+              !tearingDown.contains(session.attemptId) else {
             throw RealmServiceAttachmentUploadError.cancelled
         }
         session.target = target
@@ -307,6 +313,9 @@ actor RealmServiceAttachmentSessionStore {
             }
             throw RealmServiceAttachmentUploadError.unknownStream(
                 "No attachment session for stream \(streamId).")
+        }
+        guard !tearingDown.contains(session.attemptId) else {
+            throw RealmServiceAttachmentUploadError.cancelled
         }
         guard session.state == .uploading, let target = session.target else {
             throw RealmServiceAttachmentUploadError.stillPreparing(
@@ -352,46 +361,79 @@ actor RealmServiceAttachmentSessionStore {
         return sessions[attachmentId]
     }
 
-    /// Atomically claims the terminal result for one callback registration.
-    /// A queued callback from an abandoned registration cannot claim or remove
-    /// a replacement that reuses the same public result-stream ID.
+    /// Atomically starts terminal teardown for one callback registration.
+    /// The session stays indexed until `completeTeardown`, keeping its public
+    /// stream IDs reserved throughout the asynchronous transport cleanup.
     func claimResult(streamId: String, attemptId: UUID) -> RealmServiceAttachmentSession? {
         guard let session = session(forResultStreamId: streamId),
-              session.attemptId == attemptId else { return nil }
-        return remove(attachmentId: session.attachmentId)
+              session.attemptId == attemptId,
+              tearingDown.insert(attemptId).inserted else { return nil }
+        return session
     }
 
-    /// Terminal cleanup after a COMPLETED/FAILED result. Returns the removed
-    /// session so the caller can unregister both streams.
+    /// Lets the prepare call finish cleanup when a renderer cancellation won
+    /// the race while stream registration or the prepare RPC was suspended.
+    /// Only that call can know that its late registration has finished.
+    func preparationCleanup(
+        attachmentId: String,
+        streamId: String
+    ) -> RealmServiceAttachmentSession? {
+        guard let session = sessions[attachmentId],
+              session.chunkStreamId == streamId,
+              session.state == .preparing else { return nil }
+        tearingDown.insert(session.attemptId)
+        return session
+    }
+
+    /// Starts terminal cleanup after a COMPLETED/FAILED result.
     func finish(attachmentId: String) -> RealmServiceAttachmentSession? {
-        remove(attachmentId: attachmentId)
+        guard let session = sessions[attachmentId] else { return nil }
+        return beginTeardown(session)
     }
 
-    /// Idempotent per-attempt cancellation. Only removes the session when it
+    /// Idempotent per-attempt cancellation. Only claims the session when it
     /// still belongs to `streamId`, so an abandoned attempt cannot tear down a
     /// retry that reuses the attachment id.
     func cancel(attachmentId: String, streamId: String) -> RealmServiceAttachmentSession? {
-        guard isCurrent(attachmentId: attachmentId, streamId: streamId) else { return nil }
-        return remove(attachmentId: attachmentId)
-    }
-
-    /// Removes the whole session referenced by either its chunk stream or
-    /// its result stream. Unknown stream ids are a no-op so repeated
-    /// unregistrations stay idempotent.
-    func unregister(streamId: String) -> RealmServiceAttachmentSession? {
-        if let attachmentId = chunkStreams[streamId] ?? resultStreams[streamId] {
-            return remove(attachmentId: attachmentId)
+        guard let session = sessions[attachmentId], session.chunkStreamId == streamId else {
+            return nil
         }
-        return nil
+        return beginTeardown(session)
     }
 
-    /// Drops every session (renderer replacement, binding stop).
+    /// Starts teardown of the whole session referenced by either its chunk
+    /// stream or its result stream. Repeated claims are no-ops.
+    func unregister(streamId: String) -> RealmServiceAttachmentSession? {
+        guard let attachmentId = chunkStreams[streamId] ?? resultStreams[streamId],
+              let session = sessions[attachmentId] else { return nil }
+        return beginTeardown(session)
+    }
+
+    /// Claims every session not already being torn down. The existing owner
+    /// of an in-flight teardown retains responsibility for completing it.
     func cancelAll() -> [RealmServiceAttachmentSession] {
-        let all = sessions.values.sorted { $0.attachmentId < $1.attachmentId }
-        sessions.removeAll()
-        chunkStreams.removeAll()
-        resultStreams.removeAll()
+        let all = sessions.values
+            .filter { !tearingDown.contains($0.attemptId) }
+            .sorted { $0.attachmentId < $1.attachmentId }
+        for session in all {
+            tearingDown.insert(session.attemptId)
+        }
         return all
+    }
+
+    /// Releases the public IDs only after transport cleanup has finished.
+    /// Both the attempt token and the current registration must match.
+    func completeTeardown(_ session: RealmServiceAttachmentSession) {
+        guard tearingDown.remove(session.attemptId) != nil,
+              sessions[session.attachmentId]?.attemptId == session.attemptId else { return }
+        _ = remove(attachmentId: session.attachmentId)
+    }
+
+    private func beginTeardown(
+        _ session: RealmServiceAttachmentSession
+    ) -> RealmServiceAttachmentSession? {
+        guard tearingDown.insert(session.attemptId).inserted else { return nil }
+        return session
     }
 
     private func remove(attachmentId: String) -> RealmServiceAttachmentSession? {
