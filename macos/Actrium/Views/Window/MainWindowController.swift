@@ -23,6 +23,26 @@ final class ActriumWindow: NSWindow {
         guard event.type == .leftMouseUp else { return }
         toolbarInteraction?.pointerSequenceEnded(activeTabID: activeTabIDProvider?())
     }
+
+    /// TextKit 1 field editor. The system field editor uses TextKit 2 on
+    /// macOS 26, where a second mouse-down in the address bar spins forever
+    /// in NSTextLayoutManager.enumerateTextLayoutFragmentsFromLocation
+    /// (TextKit 2 layout enumeration never converges). Pinning the window's
+    /// shared field editor to the classic stack avoids that path entirely.
+    private lazy var classicFieldEditor: NSTextView = {
+        let storage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        let container = NSTextContainer()
+        storage.addLayoutManager(layoutManager)
+        layoutManager.addTextContainer(container)
+        let editor = NSTextView(frame: .zero, textContainer: container)
+        editor.isFieldEditor = true
+        return editor
+    }()
+
+    override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
+        classicFieldEditor
+    }
 }
 
 /// Main window controller - manages window chrome with self-drawn toolbar
