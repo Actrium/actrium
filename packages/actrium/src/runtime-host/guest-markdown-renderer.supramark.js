@@ -38,7 +38,7 @@ function MarkdownDocument({ markdown, theme, paddingHorizontal }) {
         handle = next;
       },
       onSelectionChange(range) {
-        if (handle) surface?.update(handle, range !== null && (
+        if (handle) surface?.update(handle, range != null && (
           range.anchor.unitId !== range.focus.unitId || range.anchor.offset !== range.focus.offset
         ));
       },

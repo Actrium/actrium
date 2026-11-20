@@ -10,7 +10,7 @@ export function DocumentSelectionSurface({ tabId, writeText, children }: {
   children: React.ReactNode;
 }) {
   const selection = useMemo(() => createDocumentSelection(available => {
-    NativeModules.DocumentSelection.setAvailable(tabId, available);
+    NativeModules.DocumentSelection?.setAvailable?.(tabId, available);
   }), [tabId]);
 
   useEffect(() => {

@@ -57,6 +57,7 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
     var allowsInput = true {
         didSet {
             guard allowsInput != oldValue else { return }
+            documentInteraction.updateOutsidePressMonitor()
             if allowsInput {
                 scheduleKeyboardFocusRestore()
             } else if let window, window.firstResponder === self {
@@ -164,6 +165,7 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
             else { return }
             if focused {
                 self.lastRendererTextFocus = true
+                self.documentInteraction.clearSelection()
                 // Re-activate after focus churn: SwiftUI may reclaim first
                 // responder once when the click event settles, which resigns
                 // the IME client and blurs the remote input; a later
@@ -500,6 +502,7 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if let window, window !== newWindow {
+            documentInteraction.removeOutsidePressMonitor()
             if window.firstResponder === self { sendKeyboardFocus(false) }
             let center = NotificationCenter.default
             center.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: window)
@@ -511,6 +514,7 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let window else { return }
+        documentInteraction.updateOutsidePressMonitor()
         let center = NotificationCenter.default
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
             center.addObserver(self, selector: #selector(windowKeyStatusChanged(_:)), name: name, object: window)
@@ -761,6 +765,10 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
         input.y = point.y
         input.button = button
         input.modifiers = encodedModifiers(event.modifierFlags)
+        if type == .mouseDown || type == .mouseUp || type == .mouseDragged {
+            input.clickCount = UInt32(clamping: event.clickCount)
+            input.eventNumber = Int64(event.eventNumber)
+        }
         RendererProcessPool.shared.sendInput(input, to: tabId)
     }
 

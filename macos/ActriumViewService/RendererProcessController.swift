@@ -966,6 +966,7 @@ private final class RendererTabSurface {
     /// selections leave a stale anchor whose offset may coincidentally fall
     /// inside the new range but does not describe it.
     private var dragSelectionAnchorRange: NSRange?
+    private var multiClickDragStart: (range: NSRange, granularity: NSSelectionGranularity)?
     /// The control the active drag belongs to. A programmatic focus change
     /// mid-drag (e.g. an RN callback) must not apply this drag's anchor to
     /// a different input.
@@ -1196,8 +1197,8 @@ private final class RendererTabSurface {
                 timestamp: timestamp,
                 windowNumber: window.windowNumber,
                 context: nil,
-                eventNumber: Int(input.button) + 1,
-                clickCount: input.type == .mouseMove ? 0 : 1,
+                eventNumber: input.hasEventNumber ? Int(input.eventNumber) : Int(input.button) + 1,
+                clickCount: input.hasClickCount ? Int(input.clickCount) : (input.type == .mouseMove ? 0 : 1),
                 pressure: input.type == .mouseDown || input.type == .mouseDragged ? 1 : 0
             ) else {
                 return
@@ -1210,13 +1211,15 @@ private final class RendererTabSurface {
             // Editable RN controls keep AppKit's native focus path; routing
             // their clicks through the JS responder revokes first responder.
             if input.type == .mouseDown {
+                textInputPresses.remove(input.button)
                 let ancestors = sequence(first: hitView, next: { $0?.superview })
                     .prefix(while: { $0 != nil }).compactMap { $0 }
                 let textInput = ancestors.first { $0 is NSTextView || $0 is NSTextField }
                 if input.button == 0, let textInput {
+                    mouseTracking.cancel(button: input.button)
                     ServiceReactNativeHost.shared.sendDocumentSelectionCommand("clear", tabId: tabId)
                     textInputPresses.insert(input.button)
-                    focusTextInput(textInput, at: location, modifiers: modifiers)
+                    focusTextInput(textInput, at: location, modifiers: modifiers, clickCount: event.clickCount)
                     // AppKit adds the field editor to the offscreen view
                     // hierarchy on focus. Republish after that update.
                     DispatchQueue.main.async { [weak self] in
@@ -1259,11 +1262,17 @@ private final class RendererTabSurface {
                 }
                 let point = editor.convert(location, from: nil)
                 let index = editor.characterIndexForInsertion(at: point)
-                if index != NSNotFound {
-                    let range = NSRange(
+                if index != NSNotFound, index <= textLength {
+                    var range = NSRange(
                         location: min(anchor, index),
                         length: abs(index - anchor)
                     )
+                    if let start = multiClickDragStart, start.range.upperBound <= textLength {
+                        let caret = NSRange(location: index, length: 0)
+                        let target = editor.selectionRange(forProposedRange: caret, granularity: start.granularity)
+                        range = NSUnionRange(start.range, target)
+                        dragSelectionAnchor = index < start.range.location ? start.range.upperBound : start.range.location
+                    }
                     // Keep the stored selection in sync with what the drag
                     // applies, so a later Shift+click still recognises the
                     // anchor as the creator of the current selection.
@@ -1277,6 +1286,7 @@ private final class RendererTabSurface {
                 }
                 return
             } else if input.type == .mouseDragged {
+                // Without the original press, the drag has no valid gesture target.
                 guard mouseTracking.drag(event, button: input.button) else { return }
             } else if input.type == .mouseUp {
                 if textInputPresses.remove(input.button) != nil {
@@ -1367,6 +1377,7 @@ private final class RendererTabSurface {
             || (responder as? NSTextField)?.isEditable == true
         guard focused != lastReportedTextFocus else { return }
         lastReportedTextFocus = focused
+        if focused { performDocumentSelectionCommand("clear") }
         try? report(focused)
         if focused { publishCaret() }
     }
@@ -1521,12 +1532,15 @@ private final class RendererTabSurface {
         RendererProcessLifetime.shared.controller?.publishCaret(tabId: tabId, rect: nil)
     }
 
-    private func focusTextInput(_ view: NSView, at location: NSPoint, modifiers: NSEvent.ModifierFlags) {
+    private func focusTextInput(
+        _ view: NSView, at location: NSPoint, modifiers: NSEvent.ModifierFlags, clickCount: Int
+    ) {
         // AppKit's native mouse tracking waits synchronously for mouse-up.
         // Renderer mouse-up arrives on the main queue over IPC.
         let focused = window.makeFirstResponder(view)
         let editor = (view as? NSTextField)?.currentEditor() as? NSTextView ?? view as? NSTextView
         focusedEditor = focused ? editor : nil
+        multiClickDragStart = nil
         guard focused, let editor else { return }
         dragOwner = currentControl()
         let point = editor.convert(location, from: nil)
@@ -1572,10 +1586,20 @@ private final class RendererTabSurface {
             publishCaret()
             commit()
         } else {
-            dragSelectionAnchor = index
-            dragSelectionAnchorRange = NSRange(location: index, length: 0)
+            let granularity: NSSelectionGranularity = switch clickCount {
+            case 2: .selectByWord
+            case 3...: .selectByParagraph
+            default: .selectByCharacter
+            }
+            let caret = NSRange(location: index, length: 0)
+            let range = editor.selectionRange(forProposedRange: caret, granularity: granularity)
+            if granularity != .selectByCharacter {
+                multiClickDragStart = (range, granularity)
+            }
+            dragSelectionAnchor = range.location
+            dragSelectionAnchorRange = range
             anchorOwner = currentControl()
-            editor.setSelectedRange(NSRange(location: index, length: 0))
+            editor.setSelectedRange(range)
             publishCaret()
         }
     }

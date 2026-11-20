@@ -34,5 +34,18 @@ struct RendererMouseTrackingRegression {
         tracking.cancel()
         precondition(other.cancellations == 1 && text.cancellations == 0)
         precondition(!tracking.drag(event(.rightMouseDragged), button: 1))
+
+        let replacement = Recorder()
+        tracking.begin(event(.leftMouseDown), button: 0, recognizers: [text])
+        tracking.begin(event(.rightMouseDown), button: 1, recognizers: [other])
+        tracking.begin(event(.leftMouseDown), button: 0, recognizers: [replacement])
+        precondition(text.cancellations == 1, "The previous press must reset before it is replaced")
+        precondition(other.cancellations == 1, "A different button must keep its press")
+        precondition(tracking.drag(event(.leftMouseDragged), button: 0))
+        tracking.end(event(.leftMouseUp), button: 0)
+        precondition(replacement.received == [.leftMouseDown, .leftMouseDragged, .leftMouseUp])
+        tracking.cancel(button: 1)
+        precondition(other.cancellations == 2)
+        precondition(!tracking.drag(event(.rightMouseDragged), button: 1))
     }
 }

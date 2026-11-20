@@ -27,6 +27,28 @@ struct RendererSurfaceKeyboardFocusTests {
         #expect(!surface.validateMenuItem(copy))
     }
 
+    @Test @MainActor func rendererTextInputFocusClearsOnlyItsOwnDocumentSelection() {
+        let window = NSWindow(contentRect: .zero, styleMask: .titled, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let surface = RendererSurfaceHostView(frame: .zero)
+        window.contentView?.addSubview(surface)
+        let tab = UUID()
+        surface.tabId = tab
+        #expect(window.makeFirstResponder(surface))
+        let copy = NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        let notifications = NotificationCenter.default
+        notifications.post(name: .rendererDocumentSelection, object: nil,
+                           userInfo: ["tabId": tab, "active": true])
+        notifications.post(name: .rendererTextInputFocusChanged, object: nil,
+                           userInfo: ["tabId": UUID(), "focused": true])
+        #expect(surface.validateMenuItem(copy))
+
+        notifications.post(name: .rendererTextInputFocusChanged, object: nil,
+                           userInfo: ["tabId": tab, "focused": true])
+        #expect(!surface.validateMenuItem(copy))
+    }
+
     @Test @MainActor func restoresOnlyTheActiveTabWithoutTakingAddressBarFocus() async {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),

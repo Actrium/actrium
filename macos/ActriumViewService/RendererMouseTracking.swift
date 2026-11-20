@@ -7,6 +7,7 @@ final class RendererMouseTracking {
     private var pressed: [UInt32: [NSGestureRecognizer]] = [:]
 
     func begin(_ event: NSEvent, button: UInt32, recognizers: [NSGestureRecognizer]) {
+        cancel(button: button)
         pressed[button] = recognizers
         forward(event, to: recognizers)
     }
@@ -20,6 +21,11 @@ final class RendererMouseTracking {
     func end(_ event: NSEvent, button: UInt32) {
         guard let recognizers = pressed.removeValue(forKey: button) else { return }
         forward(event, to: recognizers)
+    }
+
+    func cancel(button: UInt32) {
+        guard let recognizers = pressed.removeValue(forKey: button) else { return }
+        for recognizer in recognizers { recognizer.reset() }
     }
 
     func cancel() {

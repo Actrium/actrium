@@ -17,15 +17,16 @@ final class RendererDocumentInteraction: NSObject {
         center.addObserver(self, selector: #selector(update(_:)), name: .rendererTextCursor, object: nil)
     }
 
-    deinit {
-        if let outsidePressMonitor { NSEvent.removeMonitor(outsidePressMonitor) }
+    isolated deinit {
+        removeOutsidePressMonitor()
     }
 
     @objc private func update(_ note: Notification) {
         guard let surface, let tab = surface.tabId, note.userInfo?["tabId"] as? UUID == tab,
               let active = note.userInfo?["active"] as? Bool else { return }
         if note.name == .rendererDocumentSelection {
-            setSelection(active)
+            hasSelection = active
+            updateOutsidePressMonitor()
         } else {
             usesTextCursor = active
             guard surface.allowsInput, let window = surface.window, window.isKeyWindow,
@@ -40,12 +41,12 @@ final class RendererDocumentInteraction: NSObject {
         return hit === surface || hit.isDescendant(of: surface)
     }
 
-    private func setSelection(_ active: Bool) {
-        guard active != hasSelection else { return }
-        hasSelection = active
-        if let outsidePressMonitor { NSEvent.removeMonitor(outsidePressMonitor) }
-        outsidePressMonitor = nil
-        guard active else { return }
+    func updateOutsidePressMonitor() {
+        guard hasSelection, let surface, surface.allowsInput, surface.window != nil else {
+            removeOutsidePressMonitor()
+            return
+        }
+        guard outsidePressMonitor == nil else { return }
         // Some window controls handle clicks without becoming first responder.
         outsidePressMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             if let self, let window = self.surface?.window, event.window === window,
@@ -56,9 +57,20 @@ final class RendererDocumentInteraction: NSObject {
         }
     }
 
+    func removeOutsidePressMonitor() {
+        guard let outsidePressMonitor else { return }
+        NSEvent.removeMonitor(outsidePressMonitor)
+        self.outsidePressMonitor = nil
+    }
+
     func reset() {
         usesTextCursor = false
-        setSelection(false)
+        clearSelection()
+    }
+
+    func clearSelection() {
+        hasSelection = false
+        removeOutsidePressMonitor()
     }
 
     func mouseExited() { usesTextCursor = false }
