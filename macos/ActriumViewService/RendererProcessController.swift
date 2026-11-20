@@ -1270,8 +1270,9 @@ private final class RendererTabSurface {
                     if let start = multiClickDragStart, start.range.upperBound <= textLength {
                         let caret = NSRange(location: index, length: 0)
                         let target = editor.selectionRange(forProposedRange: caret, granularity: start.granularity)
-                        range = NSUnionRange(start.range, target)
-                        dragSelectionAnchor = index < start.range.location ? start.range.upperBound : start.range.location
+                        let extended = extendMultiClickSelection(from: start.range, to: target, at: index)
+                        range = extended.range
+                        dragSelectionAnchor = extended.anchor
                     }
                     // Keep the stored selection in sync with what the drag
                     // applies, so a later Shift+click still recognises the

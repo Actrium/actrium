@@ -1,5 +1,9 @@
 import AppKit
 
+func extendMultiClickSelection(from start: NSRange, to target: NSRange, at index: Int) -> (range: NSRange, anchor: Int) {
+    (NSUnionRange(start, target), index < start.location ? start.upperBound : start.location)
+}
+
 /// The offscreen window does not dispatch synthetic events to gesture recognizers.
 /// Keep the original hit path for the lifetime of each physical press.
 @MainActor

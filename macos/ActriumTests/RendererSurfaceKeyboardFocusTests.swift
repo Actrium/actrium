@@ -27,6 +27,24 @@ struct RendererSurfaceKeyboardFocusTests {
         #expect(!surface.validateMenuItem(copy))
     }
 
+    @Test @MainActor func selectionObserversDoNotRetainInteraction() {
+        let window = NSWindow(contentRect: .zero, styleMask: .titled, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let surface = RendererSurfaceHostView(frame: .zero)
+        window.contentView?.addSubview(surface)
+        let tab = UUID()
+        surface.tabId = tab
+        var interaction: RendererDocumentInteraction? = RendererDocumentInteraction(surface: surface)
+        weak let releasedInteraction = interaction
+        NotificationCenter.default.post(name: .rendererDocumentSelection, object: nil,
+                                        userInfo: ["tabId": tab, "active": true])
+        #expect(interaction?.hasSelection == true)
+
+        interaction = nil
+        #expect(releasedInteraction == nil)
+    }
+
     @Test @MainActor func rendererTextInputFocusClearsOnlyItsOwnDocumentSelection() {
         let window = NSWindow(contentRect: .zero, styleMask: .titled, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

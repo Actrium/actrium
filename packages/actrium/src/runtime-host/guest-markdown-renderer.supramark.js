@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Text } from 'react-native';
 import '@supramark/markdown-native-rn';
 import { parse } from '@supramark/core';
@@ -28,6 +28,7 @@ function MarkdownDocument({ markdown, theme, paddingHorizontal }) {
   const styles = useMemo(() => (
     paddingHorizontal === undefined ? undefined : { root: { paddingHorizontal } }
   ), [paddingHorizontal]);
+  // Give each Markdown revision its own handle so late cleanup cannot clear its replacement.
   const selection = useMemo(() => {
     let handle = null;
     return {
@@ -43,7 +44,8 @@ function MarkdownDocument({ markdown, theme, paddingHorizontal }) {
         ));
       },
     };
-  }, [surface]);
+  }, [surface, markdown]);
+  useLayoutEffect(() => () => selection.onHandleReady(null), [selection]);
   useEffect(() => {
     let active = true;
     parse(markdown, { config }).then((root) => displayNodes(root)[0]).then(

@@ -3,28 +3,36 @@ import AppKit
 /// The visible window tracks selection and cursor state.
 /// The renderer supplies the selected text when the user invokes Copy.
 @MainActor
-final class RendererDocumentInteraction: NSObject {
+final class RendererDocumentInteraction {
     private weak var surface: RendererSurfaceHostView?
+    private var observers: [NSObjectProtocol] = []
     private var outsidePressMonitor: Any?
     private(set) var hasSelection = false
     private(set) var usesTextCursor = false
 
     init(surface: RendererSurfaceHostView) {
         self.surface = surface
-        super.init()
         let center = NotificationCenter.default
-        center.addObserver(self, selector: #selector(update(_:)), name: .rendererDocumentSelection, object: nil)
-        center.addObserver(self, selector: #selector(update(_:)), name: .rendererTextCursor, object: nil)
+        let names: [Notification.Name] = [.rendererDocumentSelection, .rendererTextCursor]
+        observers = names.map { name in
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                guard let tabId = note.userInfo?["tabId"] as? UUID,
+                      let active = note.userInfo?["active"] as? Bool else { return }
+                MainActor.assumeIsolated {
+                    self?.update(name, tabId: tabId, active: active)
+                }
+            }
+        }
     }
 
     isolated deinit {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
         removeOutsidePressMonitor()
     }
 
-    @objc private func update(_ note: Notification) {
-        guard let surface, let tab = surface.tabId, note.userInfo?["tabId"] as? UUID == tab,
-              let active = note.userInfo?["active"] as? Bool else { return }
-        if note.name == .rendererDocumentSelection {
+    private func update(_ name: Notification.Name, tabId: UUID, active: Bool) {
+        guard let surface, surface.tabId == tabId else { return }
+        if name == .rendererDocumentSelection {
             hasSelection = active
             updateOutsidePressMonitor()
         } else {

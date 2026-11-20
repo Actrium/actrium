@@ -47,5 +47,16 @@ struct RendererMouseTrackingRegression {
         tracking.cancel(button: 1)
         precondition(other.cancellations == 2)
         precondition(!tracking.drag(event(.rightMouseDragged), button: 1))
+        checkMultiClickDrag()
+    }
+
+    private static func checkMultiClickDrag() {
+        let start = NSRange(location: 4, length: 3)
+        let left = extendMultiClickSelection(from: start, to: NSRange(location: 0, length: 3), at: 1)
+        precondition(left.range == NSRange(location: 0, length: 7) && left.anchor == 7)
+        let right = extendMultiClickSelection(from: start, to: NSRange(location: 8, length: 2), at: 9)
+        precondition(right.range == NSRange(location: 4, length: 6) && right.anchor == 4)
+        let original = extendMultiClickSelection(from: start, to: start, at: 5)
+        precondition(original.range == start && original.anchor == 4)
     }
 }
