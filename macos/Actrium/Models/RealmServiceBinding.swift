@@ -1089,6 +1089,37 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             throw RealmServiceError(message: "The Local Front is refreshing its Service session.")
         }
         if let recovery {
+            if resolveTargetForCall {
+                let id = recovery.id
+                let recovered = try await Self.recoverCallAfterJoining(
+                    recovery: recovery.task,
+                    currentTarget: { $0.target },
+                    discover: { connection in
+                        try await self.eventPeers.resolve(
+                            ifGeneration: eventGeneration,
+                            reference: connection.reference,
+                            serviceType: self.serviceType
+                        )
+                    },
+                    retarget: { connection, target in
+                        try await self.retarget(connection, to: target)
+                    },
+                    restart: {
+                        // A resume-only subscriber or upload may have joined the
+                        // offline old peer first. Its failure must not prevent
+                        // this RPC from discovering and attaching a replacement.
+                        if self.recovery?.id == id {
+                            self.recovery = nil
+                        }
+                        return try await self.readyConnection(
+                            resolveTargetForCall: true,
+                            eventGeneration: eventGeneration
+                        )
+                    }
+                )
+                guard !stopped else { throw CancellationError() }
+                return recovered
+            }
             let recovered = try await recovery.task.value
             guard !stopped else { throw CancellationError() }
             return recovered
@@ -1132,6 +1163,32 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             }
             throw error
         }
+    }
+
+    /// Internal for shared-recovery tests. An RPC joining another caller's
+    /// resume-only recovery still needs its own discovery pass. If that shared
+    /// recovery fails, restart with target-aware recovery instead of exposing
+    /// the old peer's transport error.
+    static func recoverCallAfterJoining<RecoveredConnection: Sendable>(
+        recovery: Task<RecoveredConnection, Error>,
+        currentTarget: (RecoveredConnection) -> ActrBindings.ActrId,
+        discover: (RecoveredConnection) async throws -> ActrBindings.ActrId,
+        retarget: (RecoveredConnection, ActrBindings.ActrId) async throws -> RecoveredConnection,
+        restart: () async throws -> RecoveredConnection
+    ) async throws -> RecoveredConnection {
+        let recovered: RecoveredConnection
+        do {
+            recovered = try await recovery.value
+        } catch {
+            return try await restart()
+        }
+        let target = try await discover(recovered)
+        return try await recoverDiscoveredConnection(
+            currentTarget: currentTarget(recovered),
+            discoveredTarget: target,
+            retarget: { try await retarget(recovered, target) },
+            resume: { recovered }
+        )
     }
 
     /// Internal for recovery-ordering tests. A changed discovery target must
@@ -1199,6 +1256,9 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             try Task.checkCancellation()
             guard !stopped else { throw CancellationError() }
             startup = (UUID(), Task { replacement })
+            // A replacement supersedes a shared recovery that resumed the old
+            // peer. Do not let that recovery's owner reinstall its stale result.
+            recovery = nil
             return replacement
         } catch {
             try? await replacement.session.detach()

@@ -602,6 +602,74 @@ struct RealmServiceAttachmentUploadTests {
         let description: String
     }
 
+    private actor ResumeGate {
+        private var released = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            if released { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func release() {
+            released = true
+            let waiters = self.waiters
+            self.waiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
+    }
+
+    @Test func rpcRecoversAfterJoiningAResumeOnlyCaller() async throws {
+        let oldTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 1)
+        let replacement = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 2)
+        let gate = ResumeGate()
+
+        // The resume-only caller is already in flight against offline A when
+        // the RPC joins. Its transport error must trigger target-aware recovery.
+        let resumeOnly = Task<ActrBindings.ActrId, Error> {
+            await gate.wait()
+            throw SessionError(description: "Unavailable: old Service is offline")
+        }
+        let rpc = Task {
+            try await RealmServiceBinding.recoverCallAfterJoining(
+                recovery: resumeOnly,
+                currentTarget: { $0 },
+                discover: { _ in
+                    Issue.record("A failed join must restart before this discovery pass.")
+                    return oldTarget
+                },
+                retarget: { _, target in target },
+                restart: {
+                    try await RealmServiceBinding.recoverDiscoveredConnection(
+                        currentTarget: oldTarget,
+                        discoveredTarget: replacement,
+                        retarget: { replacement },
+                        resume: {
+                            Issue.record("The RPC must not retry Resume on the unreachable old peer.")
+                            throw SessionError(description: "Unavailable: old Service is offline")
+                        }
+                    )
+                }
+            )
+        }
+        await gate.release()
+        #expect(try await rpc.value == replacement)
+
+        // A successful shared Resume still needs the RPC's discovery pass.
+        let joined = Task<ActrBindings.ActrId, Error> { oldTarget }
+        let retargeted = try await RealmServiceBinding.recoverCallAfterJoining(
+            recovery: joined,
+            currentTarget: { $0 },
+            discover: { _ in replacement },
+            retarget: { _, target in target },
+            restart: {
+                Issue.record("A successful shared recovery must not be restarted.")
+                throw SessionError(description: "Unexpected restart")
+            }
+        )
+        #expect(retargeted == replacement)
+    }
+
     @Test func replacementServiceIsAttachedWithoutResumingTheOldPeer() async throws {
         let oldTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 1)
         let replacement = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 2)
