@@ -22,9 +22,10 @@ use actr_protocol::{ActrError, ActrId};
 use bytes::Bytes;
 use tokio::sync::Mutex;
 
-use crate::lifecycle::dedup::DedupState;
+use crate::lifecycle::dedup::{DedupKey, DedupState};
 use crate::lifecycle::incoming_guard::IncomingGuard;
 use crate::lifecycle::outstanding_replies::{OutstandingReplies, ReplyAttemptId};
+use crate::request_scope::RequestScope;
 use crate::transport::HostTransport;
 
 const DELIVER_PENDING: u8 = 0;
@@ -57,13 +58,13 @@ struct ReplyShared {
     dedup_state: Arc<Mutex<DedupState>>,
     outstanding_replies: Weak<OutstandingReplies>,
     attempt_id: ReplyAttemptId,
-    request_id: String,
-    route_key: String,
+    dedup_key: DedupKey,
     traceparent: Option<String>,
     tracestate: Option<String>,
     incoming_guard: Option<Arc<dyn IncomingGuard>>,
     metadata: Vec<actr_protocol::MetadataEntry>,
     emit_response: bool,
+    scope: Option<Arc<RequestScope>>,
     /// Runtime captured at admission so a movable Reply can be completed
     /// from a non-Tokio callback thread without losing its outcome.
     runtime_handle: Option<tokio::runtime::Handle>,
@@ -105,14 +106,14 @@ impl ReplyDeliver {
         dedup_state: Arc<Mutex<DedupState>>,
         outstanding_replies: Arc<OutstandingReplies>,
         attempt_id: ReplyAttemptId,
-        request_id: String,
-        route_key: String,
+        dedup_key: DedupKey,
         traceparent: Option<String>,
         tracestate: Option<String>,
         incoming_guard: Option<Arc<dyn IncomingGuard>>,
         metadata: Vec<actr_protocol::MetadataEntry>,
         sink: ReplySink,
         emit_response: bool,
+        scope: Option<Arc<RequestScope>>,
     ) -> (Self, Arc<AtomicBool>) {
         let state = Arc::new(AtomicU8::new(DELIVER_PENDING));
         let delivered = Arc::new(AtomicBool::new(false));
@@ -143,13 +144,13 @@ impl ReplyDeliver {
                     dedup_state,
                     outstanding_replies: Arc::downgrade(&outstanding_replies),
                     attempt_id,
-                    request_id,
-                    route_key,
+                    dedup_key,
                     traceparent,
                     tracestate,
                     incoming_guard,
                     metadata,
                     emit_response,
+                    scope,
                     runtime_handle,
                 },
                 sink: sink_clone,
@@ -170,7 +171,7 @@ impl ReplyDeliver {
     pub(crate) fn try_deliver_timeout(&self) -> bool {
         if self.try_deliver(
             ReplyOutcome {
-                request_id: self.shared.request_id.clone(),
+                request_id: self.shared.dedup_key.request_id.clone(),
                 result: Err(ActrError::TimedOut),
                 emit_response: self.shared.emit_response,
             },
@@ -210,7 +211,7 @@ impl ReplyDeliver {
             .is_err()
         {
             tracing::debug!(
-                request_id = %self.shared.request_id,
+                request_id = %self.shared.dedup_key.request_id,
                 "explicit reply: late deliver degraded to no-op (RFC §5 first-write-wins)"
             );
             return false;
@@ -243,7 +244,7 @@ impl ReplyDeliver {
                     .ok();
                 self.delivered.store(false, Ordering::Release);
                 tracing::warn!(
-                    request_id = %self.shared.request_id,
+                    request_id = %self.shared.dedup_key.request_id,
                     "Deliver::deliver has no Tokio runtime; reply remains pending \
                      for the next TTL sweep"
                 );
@@ -255,7 +256,7 @@ impl ReplyDeliver {
     async fn deliver_async(self, outcome: ReplyOutcome, complete_dedup: bool) {
         let ReplyOutcome {
             request_id: _,
-            result,
+            mut result,
             emit_response,
         } = outcome;
 
@@ -265,15 +266,13 @@ impl ReplyDeliver {
             // cache the real result so a retry observes the recorded outcome.
             // Always use the request ID captured when this deliver was
             // admitted, not a mutable/retried request's ID.
+            let mut dedup = self.shared.dedup_state.lock().await;
+            result = RequestScope::check_reply(self.shared.scope.as_deref(), result);
             let cached = match (&result, emit_response) {
                 (Ok(_), false) => Ok(Bytes::new()),
                 _ => result.clone(),
             };
-            self.shared
-                .dedup_state
-                .lock()
-                .await
-                .complete(&self.shared.request_id, cached);
+            dedup.complete(&self.shared.dedup_key, cached);
         }
 
         // Release the outstanding-reply registry slot (RFC-0323 §5/§7 gauge).
@@ -289,6 +288,7 @@ impl ReplyDeliver {
         // NOT done here: per RFC-0323 §4 the EXPLICIT pump ACKs at
         // dispatch-completion (handler return), which already ran before this
         // spawned task fires. Only the reply half runs here.
+        let result = RequestScope::check_reply(self.shared.scope.as_deref(), result);
         if let Some(_msg_id) = &self.sink.msg_id {
             // Mailbox path
             let caller = self
@@ -300,8 +300,8 @@ impl ReplyDeliver {
                 self.shared.ws_gate.clone(),
                 self.shared.rtc_route.clone(),
                 caller,
-                self.shared.request_id.clone(),
-                self.shared.route_key.clone(),
+                self.shared.dedup_key.request_id.clone(),
+                self.shared.dedup_key.route_key.clone(),
                 self.shared.traceparent.clone(),
                 self.shared.tracestate.clone(),
                 self.shared.incoming_guard.clone(),
@@ -315,8 +315,8 @@ impl ReplyDeliver {
             // In-proc path
             crate::lifecycle::node::inproc_send_reply(
                 response_tx.clone(),
-                self.shared.route_key.clone(),
-                self.shared.request_id.clone(),
+                self.shared.dedup_key.route_key.clone(),
+                self.shared.dedup_key.request_id.clone(),
                 self.shared.traceparent.clone(),
                 self.shared.tracestate.clone(),
                 self.shared.incoming_guard.clone(),

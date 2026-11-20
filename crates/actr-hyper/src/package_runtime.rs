@@ -3,7 +3,7 @@
 use std::str::FromStr;
 
 use actr_config::{WasiDataAccess, lock::LockFile};
-use actr_pack::ActorPackageManifest;
+use actr_pack::{ActorPackageManifest, egress::EgressPermissions};
 use actr_protocol::ActrType;
 use semver::{Version, VersionReq};
 
@@ -34,6 +34,7 @@ pub(crate) use actr_pack::actor_package::{WASI_DATA_READ_ONLY, WASI_DATA_READ_WR
 pub(crate) fn resolve_component_host_grants<'a>(
     manifest: &ActorPackageManifest,
     configured_wasi_data: Option<WasiDataGrant<'a>>,
+    scoped_egress: Option<&EgressPermissions>,
 ) -> HyperResult<Option<WasiDataGrant<'a>>> {
     if manifest.workload.profile != "actr.component/1" || manifest.host.profile != "actr.host/1" {
         return Err(HyperError::InvalidManifest(format!(
@@ -52,6 +53,18 @@ pub(crate) fn resolve_component_host_grants<'a>(
         let access = match capability.as_str() {
             WASI_DATA_READ_ONLY => WasiDataAccess::ReadOnly,
             WASI_DATA_READ_WRITE => WasiDataAccess::ReadWrite,
+            "actor.receive" if scoped_egress.is_some() => continue,
+            actr_pack::egress::HTTPS_CAPABILITY
+                if scoped_egress.is_some_and(|scope| !scope.https.is_empty()) =>
+            {
+                continue;
+            }
+            actr_pack::egress::ACTOR_CALL_CAPABILITY
+                if scoped_egress.is_some_and(|scope| !scope.actor.is_empty()) =>
+            {
+                continue;
+            }
+
             _ => {
                 return Err(HyperError::InvalidManifest(format!(
                     "unsupported actr.component/1 required capability `{capability}`"
@@ -285,7 +298,7 @@ service Echo { rpc Echo(Request) returns (Request); }
         let source = include_str!("../../actr-pack/tests/fixtures/registration-v2.toml");
         let manifest = ActorPackageManifest::from_toml(source).unwrap();
         let registration = actr_pack::RegistrationManifest::parse(source.as_bytes()).unwrap();
-        resolve_component_host_grants(&manifest, None).unwrap();
+        resolve_component_host_grants(&manifest, None, None).unwrap();
         assert_eq!(registration.target(), None);
         assert_eq!(
             registration.actor_type().to_program_identity(),
@@ -297,21 +310,21 @@ service Echo { rpc Echo(Request) returns (Request); }
             .host
             .required_capabilities
             .push("unsupported.permission".into());
-        assert!(resolve_component_host_grants(&unsupported, None).is_err());
+        assert!(resolve_component_host_grants(&unsupported, None, None).is_err());
         unsupported = manifest.clone();
         unsupported
             .host
             .optional_capabilities
             .push("actor.call".into());
         unsupported.validate().unwrap();
-        let error = resolve_component_host_grants(&unsupported, None).unwrap_err();
+        let error = resolve_component_host_grants(&unsupported, None, None).unwrap_err();
         assert!(error.to_string().contains("optional capability discovery"));
         unsupported = manifest.clone();
         unsupported.host.api = ">=2.0.0".into();
-        assert!(resolve_component_host_grants(&unsupported, None).is_err());
+        assert!(resolve_component_host_grants(&unsupported, None, None).is_err());
         unsupported = manifest;
         unsupported.workload.profile = "keel.guest/1".into();
-        assert!(resolve_component_host_grants(&unsupported, None).is_err());
+        assert!(resolve_component_host_grants(&unsupported, None, None).is_err());
     }
 
     fn fixture_lock() -> LockFile {

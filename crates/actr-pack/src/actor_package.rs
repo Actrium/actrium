@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
 
+use crate::egress::PackagePrivacyContract;
 use crate::error::PackError;
 use crate::util::{read_zip_entry_bounded, sha256_hex, sha256_zip_entry_bounded};
 use crate::verify::{DEFAULT_MAX_VERIFIED_ENTRIES, DEFAULT_MAX_VERIFIED_ENTRY_BYTES};
@@ -182,7 +183,7 @@ const LEGACY_PUBLISHER_KEY: &str = "manufacturer";
 
 impl ActorPackageManifest {
     /// Check the supported Workload Profile of an already verified package.
-    #[cfg(feature = "profile-validation")]
+    #[cfg(all(feature = "profile-validation", not(target_arch = "wasm32")))]
     pub fn validate_workload_payload(&self, bytes: &[u8]) -> Result<(), PackError> {
         crate::profiles::validate_workload(self, |path| {
             self.read_declared_file(bytes, path, DEFAULT_MAX_VERIFIED_ENTRY_BYTES)
@@ -291,6 +292,18 @@ impl ActorPackageManifest {
         }
         let mut archive = zip::ZipArchive::new(Cursor::new(bytes))?;
         read_zip_entry_bounded(&mut archive, path, max_bytes)
+    }
+
+    /// Read the signed contract and validate its local egress declarations.
+    /// The manifest and archive must already have passed package authentication.
+    pub fn read_privacy_contract(
+        &self,
+        bytes: &[u8],
+        max_bytes: usize,
+    ) -> Result<Option<PackagePrivacyContract>, PackError> {
+        crate::egress::validate_privacy_contract(self, |path| {
+            self.read_declared_file(bytes, path, max_bytes)
+        })
     }
 
     pub fn validate(&self) -> Result<(), PackError> {
@@ -509,6 +522,15 @@ pub fn pack_actor_package(options: &ActorPackOptions) -> Result<Vec<u8>, PackErr
     manifest.signature.key_id =
         crate::compute_key_id(&options.signing_key.verifying_key().to_bytes());
     let manifest_toml = manifest.to_toml()?;
+    crate::egress::validate_privacy_contract(&manifest, |path| {
+        options
+            .payloads
+            .get(path)
+            .map(Vec::as_slice)
+            .ok_or_else(|| {
+                PackError::InvalidPackage(format!("missing Privacy Contract input `{path}`"))
+            })
+    })?;
     let signature = options
         .signing_key
         .sign(manifest_toml.as_bytes())
@@ -680,6 +702,9 @@ pub(crate) fn verify_actor_package_bounded(
 ) -> Result<InspectedActorPackage, PackError> {
     let inspected = inspect_actor_package_bounded(bytes, max_payload_bytes, max_payload_bytes)?;
     inspected.verify_signature(public_key)?;
+    inspected
+        .manifest
+        .read_privacy_contract(bytes, max_payload_bytes)?;
     Ok(inspected)
 }
 
@@ -868,7 +893,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "profile-validation")]
+    #[cfg(all(feature = "profile-validation", not(target_arch = "wasm32")))]
     #[test]
     fn validates_product_v1_proto_imports_in_signed_archives() {
         let key = SigningKey::generate(&mut OsRng);

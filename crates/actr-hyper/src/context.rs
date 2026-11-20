@@ -20,8 +20,8 @@ use actr_protocol::{
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 /// RuntimeContext - Runtime's implementation of Context trait
 ///
@@ -240,6 +240,16 @@ impl RuntimeContext {
         self.reply_claimed.clone()
     }
 
+    #[cfg(feature = "wasm-engine")]
+    pub(crate) fn wasm_reply_deadline(&self) -> Option<tokio::time::Instant> {
+        let deadline = self.reply_deadline?;
+        if let Some(scope) = &self.scope {
+            return Some(scope.deadline());
+        }
+        let now = tokio::time::Instant::now();
+        Some(now + crate::lifecycle::dedup::remaining_reply_budget(deadline))
+    }
+
     #[cfg(test)]
     pub(crate) fn data_chunk_registry_for_test(&self) -> Arc<DataChunkRegistry> {
         self.data_chunk_registry.clone()
@@ -402,6 +412,19 @@ impl RuntimeContext {
         // Sender-side argument validation and the single absolute deadline
         // for this operation. Receivers stay permissive.
         let deadline = crate::transport::RpcDeadline::from_timeout_ms(timeout_ms)?;
+        self.call_raw_with_deadline(target, route_key, payload_type, payload, deadline, None)
+            .await
+    }
+
+    pub(crate) async fn call_raw_with_deadline(
+        &self,
+        target: &Dest,
+        route_key: String,
+        payload_type: PayloadType,
+        payload: Bytes,
+        deadline: crate::transport::RpcDeadline,
+        scoped_dispatch_id: Option<&OnceLock<String>>,
+    ) -> ActorResult<Bytes> {
         crate::outbound::ensure_rpc_payload_type(payload_type)?;
 
         // Per-hop cancellation scope (#390). A context without a scope is a
@@ -417,6 +440,7 @@ impl RuntimeContext {
             return Err(ActrError::TimedOut);
         }
         let guard = scope.guard();
+        let deadline = crate::transport::RpcDeadline::at(scope.deadline());
 
         self.ensure_session_ready_until(crate::timer::ids::RUNTIME_CALL_PREFLIGHT, deadline)
             .await?;
@@ -425,7 +449,6 @@ impl RuntimeContext {
         #[cfg(feature = "opentelemetry")]
         use crate::wire::webrtc::trace::inject_span_context_to_rpc;
 
-        #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
         let mut envelope = RpcEnvelope {
             route_key,
             payload: Some(payload),
@@ -437,10 +460,13 @@ impl RuntimeContext {
             metadata: vec![],
             // Every stage receives the remaining absolute budget; no hop
             // starts a fresh full timeout (#390).
-            timeout_ms: scope.remaining_ms().unwrap_or(1),
+            timeout_ms: scope.remaining_ms().ok_or(ActrError::TimedOut)?,
         };
         #[cfg(feature = "opentelemetry")]
         inject_span_context_to_rpc(&tracing::Span::current(), &mut envelope);
+        if scoped_dispatch_id.is_some() {
+            crate::request_scope::attach_egress_deadline(&mut envelope, scope.deadline())?;
+        }
 
         // In-process hops carry the handoff marker so workload intake can
         // claim the scope (or observe an abandoned root and drop before
@@ -460,7 +486,12 @@ impl RuntimeContext {
         let request_id = envelope.request_id.clone();
         let mut send_started = false;
         let send = async {
+            deadline.ensure_remaining()?;
             send_started = true;
+            if let Some(dispatch_id) = scoped_dispatch_id {
+                // From this point the transport may deliver the RPC.
+                let _ = dispatch_id.set(request_id.clone());
+            }
             gate.send_request_with_type(target_id, payload_type, envelope, deadline)
                 .await
         };
@@ -471,11 +502,12 @@ impl RuntimeContext {
             _ = scope.token().cancelled() => None,
             response = send => Some(response),
         };
+        let result = result.filter(|result| result.is_err() || scope.is_active());
         let result = result.unwrap_or_else(|| {
             if send_started {
                 Err(ActrError::DeliveryUncertain {
                     operation_id: request_id,
-                    cause: "Call scope cancelled after dispatch may have started".into(),
+                    cause: "Call scope ended after dispatch may have started".into(),
                 })
             } else {
                 Err(ActrError::TimedOut)

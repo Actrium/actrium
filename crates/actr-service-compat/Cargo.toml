@@ -22,6 +22,7 @@ workspace = true
 # Core dependencies for service compatibility analysis
 actr-protocol.workspace = true
 proto-fingerprint.workspace = true
+protobuf = "3.7"
 protobuf-parse = "3.7"
 tempfile.workspace = true
 unicase = "2"

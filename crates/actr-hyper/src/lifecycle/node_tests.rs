@@ -2217,9 +2217,9 @@ async fn component_explicit_boundary_non_empty_return_falls_back_to_return() {
     let mut inner = Inner::build(
         config,
         workload,
-        Some(actr_pack::RuntimePackageManifest::Legacy(
+        Some(actr_pack::RuntimePackageManifest::Legacy(Box::new(
             component_package_manifest_for_test(),
-        )),
+        ))),
         None,
         None,
         100,
@@ -2527,11 +2527,17 @@ async fn explicit_handler_err_wins_against_late_send_first_write_wins() {
     tokio::time::sleep(Duration::from_millis(150)).await;
 
     // dedup Done must be the pump's Err — the late Ok must NOT have flipped it.
-    let dedup_outcome = inner
-        .dedup_state
-        .lock()
-        .await
-        .check_or_mark("explicit-race");
+    let dedup_outcome =
+        inner
+            .dedup_state
+            .lock()
+            .await
+            .check_or_mark(&crate::lifecycle::dedup::DedupKey {
+                caller: None,
+                route_key: explicit_envelope("explicit-race").route_key,
+                request_id: "explicit-race".to_string(),
+                is_tell: false,
+            });
     match dedup_outcome {
         crate::lifecycle::dedup::DedupOutcome::Duplicate(Err(
             actr_protocol::ActrError::Internal(_),

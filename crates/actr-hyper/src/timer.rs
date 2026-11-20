@@ -373,13 +373,19 @@ timer_inventory! {
     },
     WASM_GUEST_INVOCATION => {
         id: "wasm.guest_invocation", owner: "wasm_host", category: FailureDeadline,
-        duration: "WasmRuntimeLimits.invocation_timeout", arm: "guest entry starts",
+        duration: "WasmRuntimeLimits.invocation_timeout capped by the request scope", arm: "guest entry starts",
         success: "guest entry returns", interrupt: "host cancellation",
         expiry: "interrupt and poison store", reset: "each guest entry", external: false
     },
+    WASM_EGRESS_DEADLINE => {
+        id: "wasm.egress_deadline", owner: "egress_broker", category: FailureDeadline,
+        duration: "earliest of permit expiry, the 5s operation cap, and the request scope deadline", arm: "authorized egress starts",
+        success: "egress completes with an active grant", interrupt: "permit revocation or request scope cancellation",
+        expiry: "cancel the wait and discard the result", reset: "each authorized operation", external: false
+    },
     WASM_RESIDENT_DISPATCH => {
         id: "wasm.resident_dispatch", owner: "wasm_host_v2", category: FailureDeadline,
-        duration: "DispatchConcurrency.dispatch_timeout", arm: "resident-region dispatch starts",
+        duration: "dispatch and invocation timeouts capped by the request scope", arm: "resident-region dispatch starts",
         success: "region reports completion", interrupt: "generation replacement or shutdown",
         expiry: "emit generation-tagged deadline", reset: "new region only", external: false
     },

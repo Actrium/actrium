@@ -140,7 +140,8 @@ async fn mounted_resident_deadlines_and_host_operations_use_caller_runtime() {
     let guest_for_call = guest.clone();
     with_wasi_runtime(Some(guest), async {
         with_wasi_runtime(Some(caller), async {
-            let _deadline = arm_deadline(1, 2, TEST_TIMEOUT, &deadline_tx);
+            let deadline = tokio::time::Instant::now() + TEST_TIMEOUT;
+            let _deadline = arm_deadline(1, 2, deadline, &deadline_tx);
             let token = state.alloc_invocation(ctx, host_abi);
             let host = state.invocation_host_abi(token);
             with_wasi_runtime(Some(guest_for_call), async {

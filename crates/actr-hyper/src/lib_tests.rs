@@ -53,6 +53,79 @@ pub(crate) async fn attach_wasi_fixture(
 }
 
 #[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
+#[tokio::test]
+async fn metadata_only_contract_does_not_enable_scoped_runtime() {
+    use crate::egress::{EgressPermit, EgressPolicy, EgressRequest};
+    use crate::workload::InvocationContext;
+    use actr_pack::{ActorPackOptions, ActorPackageManifest, PackageFileEntry};
+    use std::collections::BTreeMap;
+
+    struct DenyPolicy;
+    impl EgressPolicy for DenyPolicy {
+        fn authorize(&self, _: EgressRequest<'_>) -> actr_protocol::ActorResult<EgressPermit> {
+            panic!("metadata-only package must not authorize egress")
+        }
+        fn authorize_inbound(
+            &self,
+            _: &InvocationContext,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> actr_protocol::ActorResult<()> {
+            panic!("metadata-only package must not authorize inbound calls")
+        }
+    }
+
+    let root = TempDir::new().unwrap();
+    let key = SigningKey::generate(&mut OsRng);
+    let mut manifest = ActorPackageManifest::from_toml(include_str!(
+        "../../actr-pack/tests/fixtures/registration-v2.toml"
+    ))
+    .unwrap();
+    let privacy = format!(
+        "[privacy_contract]\nschema_version = 1\nrelease_id = {:?}\n",
+        manifest.actor_type()
+    );
+    manifest.files.push(PackageFileEntry {
+        path: "contracts/privacy.toml".into(),
+        role: "contract".into(),
+        media_type: "application/toml".into(),
+        size: 0,
+        sha256: "0".repeat(64),
+    });
+    let package = WorkloadPackage::new(
+        actr_pack::pack_actor_package(&ActorPackOptions {
+            manifest,
+            payloads: BTreeMap::from([
+                (
+                    "workload/echo.wasm".into(),
+                    include_bytes!(env!("ACTR_WASM_FIXTURE")).to_vec(),
+                ),
+                ("contracts/privacy.toml".into(), privacy.into_bytes()),
+            ]),
+            signing_key: key.clone(),
+        })
+        .unwrap(),
+    );
+    let trust = StaticTrust::new(key.verifying_key().to_bytes()).unwrap();
+    let mut config = HyperConfig::new(root.path().join("hyper"), Arc::new(trust));
+    config.egress_policy = Some(Arc::new(DenyPolicy));
+    let hyper = Hyper::new(config).await.unwrap();
+    let node = Node::from_hyper(hyper, linked_runtime_config(&root))
+        .attach(&package)
+        .await
+        .unwrap();
+    let actor = node.attachment.unwrap().node.workload_dispatch;
+    assert!(actor.egress_broker().is_none());
+    assert!(
+        call_wasi_fixture(&actor, "test/echo", b"hello")
+            .await
+            .is_ok()
+    );
+    actor.shutdown().await;
+}
+
+#[cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
 async fn call_wasi_fixture(
     actor: &crate::executor::ActorHandle,
     route: &str,
@@ -1235,7 +1308,8 @@ async fn bootstrap_package_uses_manifest_auth() {
 
     // Verify no legacy PSK keys are written to ActorStore.
     let namespace =
-        storage_namespace_for(&RuntimePackageManifest::Legacy(manifest.manifest)).unwrap();
+        storage_namespace_for(&RuntimePackageManifest::Legacy(Box::new(manifest.manifest)))
+            .unwrap();
     let root = SecureStorageRoot::new(hyper.config().storage_root())
         .await
         .unwrap();
@@ -1334,7 +1408,8 @@ async fn bootstrap_issuer_rejection_creates_no_database() {
 
     // The would-be database path must not exist after a rejected registration.
     let namespace =
-        storage_namespace_for(&RuntimePackageManifest::Legacy(manifest.manifest)).unwrap();
+        storage_namespace_for(&RuntimePackageManifest::Legacy(Box::new(manifest.manifest)))
+            .unwrap();
     let root = SecureStorageRoot::new(hyper.config().storage_root())
         .await
         .unwrap();

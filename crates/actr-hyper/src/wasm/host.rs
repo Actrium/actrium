@@ -33,8 +33,8 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Component as PathComponent, Path};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use actr_config::WasiDataAccess;
@@ -50,6 +50,7 @@ use wasmtime_wasi::p2::bindings::filesystem::preopens::Host as WasiPreopens;
 use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use crate::config::{WasiDataGrant, WasmRuntimeLimits};
+use crate::request_scope::RequestScope;
 use crate::workload::{HostAbiFn, InvocationContext};
 
 use super::host_v2::WasmWorkloadV2;
@@ -79,6 +80,8 @@ fn build_engine(limits: &WasmRuntimeLimits) -> WasmResult<Engine> {
     // We pair it with explicit component-model flags to be self-documenting.
     config.wasm_component_model(true);
     config.wasm_component_model_async(true);
+    config.wasm_component_model_threading(false);
+    config.wasm_shared_everything_threads(false);
     // Explicitly gate the concurrency surface (`run_concurrent`) on. Defaults
     // to true on wasmtime 46; pinned here so a future default flip can never
     // silently turn the V2 concurrent runner into a runtime panic.
@@ -122,6 +125,8 @@ fn build_engine(limits: &WasmRuntimeLimits) -> WasmResult<Engine> {
 /// - issue #346 per-store resource limits (memory/table/instance caps).
 pub(crate) struct HostState {
     wasi: WasiCtx,
+    pub(super) egress: Option<Arc<crate::egress::EgressBroker>>,
+    egress_token: Option<u64>,
     isolate_wasi_runtime: bool,
     table: ResourceTable,
     /// Per-invocation table keyed by `ctx-token`, used by the V2 (0.6.0
@@ -150,17 +155,13 @@ pub(crate) struct HostState {
 }
 
 /// Poll and drop a host ABI future in the runtime that accepted its invocation.
-struct CallerRuntimeFuture {
-    runtime: tokio::runtime::Handle,
-    future: Option<
-        std::pin::Pin<
-            Box<dyn std::future::Future<Output = crate::workload::HostOperationResult> + Send>,
-        >,
-    >,
+pub(super) struct CallerRuntimeFuture<F: std::future::Future + ?Sized> {
+    pub(super) runtime: tokio::runtime::Handle,
+    pub(super) future: Option<std::pin::Pin<Box<F>>>,
 }
 
-impl std::future::Future for CallerRuntimeFuture {
-    type Output = crate::workload::HostOperationResult;
+impl<F: std::future::Future + ?Sized> std::future::Future for CallerRuntimeFuture<F> {
+    type Output = F::Output;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
@@ -176,7 +177,7 @@ impl std::future::Future for CallerRuntimeFuture {
     }
 }
 
-impl Drop for CallerRuntimeFuture {
+impl<F: std::future::Future + ?Sized> Drop for CallerRuntimeFuture<F> {
     fn drop(&mut self) {
         let _guard = self.runtime.enter();
         drop(self.future.take());
@@ -185,9 +186,17 @@ impl Drop for CallerRuntimeFuture {
 
 /// One live invocation's host-facing state, keyed by `ctx-token` in
 /// [`HostState::invocations`].
+pub(super) type ActiveEgress = Arc<std::sync::Mutex<Vec<Arc<OnceLock<String>>>>>;
+pub(super) type EgressIds = Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>;
+
 pub(crate) struct InvocationEntry {
     pub(crate) ctx: InvocationContext,
-    caller_runtime: Option<tokio::runtime::Handle>,
+    pub(super) caller_runtime: Option<tokio::runtime::Handle>,
+    pub(super) request_scope: Option<Arc<RequestScope>>,
+    pub(super) active_egress: ActiveEgress,
+    pub(super) uncertain_egress: EgressIds,
+    pub(super) cancelled_egress: EgressIds,
+    pub(super) pending_reply: Option<ReplyOutcome>,
     pub(crate) host_abi: HostAbiFn,
     pub(crate) reply_deliver: Option<Arc<dyn Deliver>>,
     /// Whether expiry should emit an error RESPONSE. TELL invocations still
@@ -354,6 +363,8 @@ impl HostState {
     pub(crate) fn new(limits: &WasmRuntimeLimits) -> Self {
         Self {
             wasi: WasiCtxBuilder::new().inherit_stdio().build(),
+            egress: None,
+            egress_token: None,
             isolate_wasi_runtime: false,
             table: ResourceTable::new(),
             invocations: HashMap::new(),
@@ -362,6 +373,35 @@ impl HostState {
             next_token: 1,
             limits: StoreResourceLimiter::new(limits),
         }
+    }
+
+    pub(super) fn install_egress(&mut self, egress: Option<Arc<crate::egress::EgressBroker>>) {
+        if egress.is_some() {
+            self.wasi = WasiCtxBuilder::new()
+                .allow_tcp(false)
+                .allow_udp(false)
+                .allow_ip_name_lookup(false)
+                .build();
+        }
+        self.egress = egress;
+    }
+
+    pub(super) fn set_egress_token(&mut self, token: Option<u64>) {
+        self.egress_token = token;
+    }
+
+    pub(super) fn egress_invocation(
+        &self,
+        token: u64,
+    ) -> Option<(&Arc<crate::egress::EgressBroker>, &InvocationEntry)> {
+        if self.egress_token != Some(token) {
+            return None;
+        }
+        let entry = self.invocations.get(&token)?;
+        if entry.reply_completed {
+            return None;
+        }
+        Some((self.egress.as_ref()?, entry))
     }
 
     pub(super) fn set_wasi_runtime_isolation(&mut self, enabled: bool) {
@@ -503,13 +543,14 @@ impl HostState {
     /// thread into the guest's `invocation-ctx` (V2 world). Tokens are
     /// monotonic within a Store's lifetime.
     pub(crate) fn alloc_invocation(&mut self, ctx: InvocationContext, host_abi: HostAbiFn) -> u64 {
-        self.alloc_invocation_with_reply(ctx, host_abi, None, false, None, None)
+        self.alloc_invocation_with_reply(ctx, host_abi, None, false, None, None, None)
     }
 
     /// Allocate an invocation and retain the host-side reply sink used by the
     /// synchronous Rust guest `Reply<T>` bridge. Non-dispatch lifecycle and
     /// observation entries do not need a reply sink and use
     /// [`Self::alloc_invocation`] above.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn alloc_invocation_with_reply(
         &mut self,
         ctx: InvocationContext,
@@ -518,6 +559,7 @@ impl HostState {
         expects_response: bool,
         reply_claimed: Option<Arc<AtomicBool>>,
         reply_deadline: Option<Instant>,
+        request_scope: Option<Arc<RequestScope>>,
     ) -> u64 {
         self.sweep_expired_deferred_replies(crate::lifecycle::dedup::INFLIGHT_TTL, Instant::now());
         // The guest runtime isolates filesystem work; host operations belong to
@@ -549,11 +591,18 @@ impl HostState {
         } else {
             host_abi
         };
-        let token = self.next_token;
-        self.next_token = self.next_token.wrapping_add(1);
-        if self.next_token == 0 {
-            self.next_token = 1;
-        }
+        let token = if self.egress.is_some() {
+            loop {
+                let candidate = uuid::Uuid::new_v4().as_u64_pair().1;
+                if !self.invocations.contains_key(&candidate) {
+                    break candidate;
+                }
+            }
+        } else {
+            let token = self.next_token;
+            self.next_token = self.next_token.wrapping_add(1).max(1);
+            token
+        };
         let reply_claimed = reply_claimed.or_else(|| {
             reply_deliver
                 .as_ref()
@@ -564,6 +613,11 @@ impl HostState {
             InvocationEntry {
                 ctx,
                 caller_runtime,
+                request_scope,
+                active_egress: Arc::default(),
+                uncertain_egress: Arc::default(),
+                cancelled_egress: Arc::default(),
+                pending_reply: None,
                 host_abi,
                 reply_deliver,
                 expects_response,
@@ -587,9 +641,31 @@ impl HostState {
             .get(&token)
             .copied()
             .unwrap_or(token);
-        self.invocations
-            .get(&token)
-            .map(|e| Arc::clone(&e.host_abi))
+        let bridge = self.invocations.get(&token)?.host_abi.clone();
+        if self.egress.is_none() {
+            return Some(bridge);
+        }
+        Some(Arc::new(move |operation| {
+            use crate::workload::{HostOperation, HostOperationResult};
+            if matches!(
+                operation,
+                HostOperation::Call(_)
+                    | HostOperation::CallRaw(_)
+                    | HostOperation::ScopedActorCall { .. }
+                    | HostOperation::Tell(_)
+                    | HostOperation::Discover(_)
+                    | HostOperation::RegisterStream(_)
+                    | HostOperation::SendDataChunk(_)
+            ) {
+                Box::pin(async {
+                    HostOperationResult::Error(actr_protocol::ActrError::PermissionDenied(
+                        "this Service must use scoped egress".into(),
+                    ))
+                })
+            } else {
+                bridge(operation)
+            }
+        }))
     }
 
     pub(crate) fn invocation_exists(&self, token: u64) -> bool {
@@ -685,6 +761,9 @@ impl HostState {
     /// Retire the invocation registered for `token` once its guest call has
     /// completed (success or business error). No-op if already gone.
     pub(crate) fn remove_invocation(&mut self, token: u64) {
+        if self.egress_token == Some(token) {
+            self.egress_token = None;
+        }
         self.invocations.remove(&token);
     }
 
@@ -699,6 +778,9 @@ impl HostState {
     /// a successful EXPLICIT dispatch whose claimed reply is still pending.
     pub(crate) fn finish_invocation(&mut self, token: u64, retain_for_reply: bool) {
         let token = self.effective_invocation_token(token);
+        if self.egress_token == Some(token) {
+            self.egress_token = None;
+        }
         let should_remove = match self.invocations.get_mut(&token) {
             Some(entry) => {
                 entry.dispatch_finished = true;
@@ -736,6 +818,23 @@ impl HostState {
         result: Result<bytes::Bytes, actr_protocol::ActrError>,
     ) -> bool {
         let token = self.effective_invocation_token(token);
+        let result = result.map_err(|error| self.sanitize_guest_error(token, error));
+        if self.egress.is_some()
+            && let Some(entry) = self.invocations.get_mut(&token)
+            && !entry.dispatch_finished
+            && entry.reply_deliver.is_some()
+        {
+            if entry.reply_completed {
+                return true;
+            }
+            entry.pending_reply = Some(ReplyOutcome {
+                request_id: entry.ctx.request_id.clone(),
+                result,
+                emit_response: entry.expects_response,
+            });
+            entry.reply_completed = true;
+            return true;
+        }
         let Some((deliver, request_id, expects_response, caller_runtime)) =
             self.invocations.get(&token).and_then(|entry| {
                 entry.reply_deliver.clone().map(|deliver| {
@@ -760,8 +859,70 @@ impl HostState {
         true
     }
 
+    pub(super) fn sanitize_guest_error(
+        &self,
+        token: u64,
+        error: actr_protocol::ActrError,
+    ) -> actr_protocol::ActrError {
+        if self.egress.is_none() {
+            return error;
+        }
+        if let actr_protocol::ActrError::DeliveryUncertain { operation_id, .. } = &error
+            && self.invocations.get(&token).is_some_and(|entry| {
+                entry
+                    .uncertain_egress
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .contains(operation_id)
+            })
+        {
+            return actr_protocol::ActrError::DeliveryUncertain {
+                operation_id: operation_id.clone(),
+                cause: "scoped egress delivery is uncertain".into(),
+            };
+        }
+        actr_protocol::ActrError::Internal("scoped guest returned an error".into())
+    }
+
     pub(crate) fn invocation_count(&self) -> usize {
         self.invocations.len()
+    }
+
+    pub(super) fn invocation_active_egress(&self, token: u64) -> Option<ActiveEgress> {
+        self.invocations
+            .get(&token)
+            .map(|entry| entry.active_egress.clone())
+    }
+
+    pub(super) fn invocation_uncertain_egress(&self, token: u64) -> Option<EgressIds> {
+        self.invocations
+            .get(&token)
+            .map(|entry| entry.uncertain_egress.clone())
+    }
+
+    pub(super) fn invocation_cancelled_egress(&self, token: u64) -> Option<EgressIds> {
+        self.invocations
+            .get(&token)
+            .map(|entry| entry.cancelled_egress.clone())
+    }
+
+    pub(super) fn flush_pending_reply(&mut self, token: u64) {
+        if let Some(entry) = self.invocations.get_mut(&token)
+            && let Some(outcome) = entry.pending_reply.take()
+            && let Some(deliver) = &entry.reply_deliver
+        {
+            let _guard = entry
+                .caller_runtime
+                .as_ref()
+                .map(tokio::runtime::Handle::enter);
+            deliver.deliver(outcome);
+        }
+    }
+
+    pub(super) fn has_scoped_dispatch(&self) -> bool {
+        self.invocations
+            .values()
+            .any(|entry| entry.request_scope.is_some() && !entry.dispatch_finished)
     }
 
     /// Expire deferred replies whose pump-side outstanding reply has reached
@@ -809,6 +970,7 @@ impl HostState {
     /// trap poisons the store: the whole in-flight set is dead, so the
     /// rebuilt instance starts clean.
     pub(crate) fn clear_invocations(&mut self) {
+        self.egress_token = None;
         self.invocations.clear();
         self.stream_context_tokens.clear();
         self.stream_token_aliases.clear();
@@ -936,9 +1098,18 @@ impl WasmHost {
     /// Builds a fresh [`Linker`] per instance (cheap) inside the V2
     /// instantiation helper, registers WASI p2 as well as the generated
     /// `actr:workload/host@0.6.0` linker, and runs `Component::instantiate_async`.
+    #[cfg(any(test, feature = "test-utils"))]
     pub(crate) async fn instantiate(
         &self,
         wasi_data: Option<WasiDataGrant<'_>>,
+    ) -> WasmResult<WasmWorkloadV2> {
+        self.instantiate_scoped(wasi_data, None).await
+    }
+
+    pub(crate) async fn instantiate_scoped(
+        &self,
+        wasi_data: Option<WasiDataGrant<'_>>,
+        egress: Option<Arc<crate::egress::EgressBroker>>,
     ) -> WasmResult<WasmWorkloadV2> {
         probe_world(&self.component, &self.engine)?;
         WasmWorkloadV2::instantiate(
@@ -948,6 +1119,7 @@ impl WasmHost {
             Arc::clone(&self.epoch_ticker),
             self.uses_explicit_reply_boundary,
             wasi_data,
+            egress,
         )
         .await
     }

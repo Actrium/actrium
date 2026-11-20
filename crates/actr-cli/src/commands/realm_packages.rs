@@ -380,6 +380,7 @@ where
     let mut files = BTreeMap::new();
     let mut locks = BTreeMap::new();
     let mut visited = BTreeSet::new();
+    let mut scoped_digests = BTreeMap::new();
     let mut queue = VecDeque::from(roots);
     while let Some(name) = queue.pop_front() {
         if !visited.insert(name.clone()) {
@@ -417,9 +418,13 @@ where
         }
         let destination = output.join(format!("{}.actr", entry.sha256));
         let (manifest, bytes) = archive(entry, keys, &destination, &get).await?;
-        if name == selection.primary_package {
-            privacy_contract =
-                actr_pack::realm::privacy_contract_digest(&manifest, &bytes, ARCHIVE_LIMIT)?;
+        if let Some(contract) = manifest.read_privacy_contract(&bytes, ARCHIVE_LIMIT)? {
+            if name == selection.primary_package {
+                privacy_contract = Some(contract.sha256);
+            }
+            if !contract.dependency_digests.is_empty() {
+                scoped_digests.insert(name.clone(), contract.dependency_digests);
+            }
         }
         if manifest
             .files
@@ -451,7 +456,7 @@ where
         manifests.insert(name.clone(), manifest);
         files.insert(name.clone(), destination);
     }
-    check_realm_dependencies(selection, &manifests, &locks)?;
+    check_realm_dependencies(selection, &manifests, &locks, &scoped_digests)?;
     if let Some(front) = manifests.get(&selection.front_package) {
         check_realm_pair(&manifests[&selection.primary_package], front)?;
     }

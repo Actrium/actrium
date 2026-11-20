@@ -131,6 +131,10 @@ impl RpcDeadline {
         Self(tokio::time::Instant::now() + timeout)
     }
 
+    pub(crate) fn at(deadline: tokio::time::Instant) -> Self {
+        Self(deadline)
+    }
+
     pub(crate) fn instant(self) -> tokio::time::Instant {
         self.0
     }
