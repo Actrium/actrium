@@ -33,6 +33,7 @@ import {
 } from './attachment-upload';
 import { createHostModules, type ActorCall } from './host-modules';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
+import { bindNativeLocalStorage } from './local-storage';
 import { Supramark } from './guest-markdown-renderer';
 import { DocumentSelectionSurface } from './DocumentSelectionSurface';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
@@ -276,6 +277,13 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       logToNative(`[StandaloneGuestApp] service call ${request.route}`);
       return callHttpService(tab.serviceCallUrl, request);
     };
+    const localStorage = bindNativeLocalStorage(
+      NativeModules.GuestLocalStorage, tab.id, tab.localStorageDocumentId
+    );
+    if (v1?.ok && v1.linkage.links.some(([id]) => id === 'host:local-storage') && !localStorage) {
+      setError('Local storage is unavailable for this application.');
+      return;
+    }
 
     let serviceEventSource: ServiceEventSource | undefined;
     if (hasServiceOnCapability && capabilityManifestJSON) {
@@ -374,6 +382,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
         authorizer.onRevoked(capability, listener),
       trackServiceEventSubscription,
       writeClipboardText,
+      localStorage,
       pickFiles: nativePick && ((input) => nativePick(
         input.source ?? 'files', input.accept ?? [], input.multiple ?? false
       )),
@@ -525,6 +534,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     tab.serviceEventsUrl,
     tab.reloadKey,
     tab.capabilityManifestJSON,
+    tab.localStorageDocumentId,
     permissionsKey,
     capabilitySnapshotAvailable,
     recognizeSpeech,

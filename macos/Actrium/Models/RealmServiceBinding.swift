@@ -111,6 +111,10 @@ final class RealmServiceBindings {
     private var bindingEventGenerations: [UUID: UInt64] = [:]
     var eventHandler: ((UUID, RealmServiceEvent) -> Void)?
 
+    func binding(for tabId: UUID) -> RealmServiceBinding? {
+        bindings[tabId] as? RealmServiceBinding
+    }
+
     private func updateRoutingSnapshot() {
         routingSnapshot.replace(with: subscriptions)
     }
@@ -119,6 +123,39 @@ final class RealmServiceBindings {
         remove(tabId)
         bindings[tabId] = binding
         bindingTabs[binding.id] = tabId
+    }
+
+    /// Keep established Guest subscriptions when only the Realm connection changes.
+    func replaceConnection(
+        _ active: any RealmServiceBindingHandle,
+        with replacement: any RealmServiceBindingHandle,
+        tabId: UUID,
+        isCurrent: () throws -> Bool
+    ) async throws -> Bool {
+        func eventRoutes() -> [UUID: Set<String>] {
+            subscriptions.filter { $0.value.bindingId == active.id }.mapValues { $0.events }
+        }
+
+        guard bindings[tabId] === active, !pendingSubscriptions.values.contains(tabId) else { return false }
+        let routes = eventRoutes()
+        var generation: UInt64?
+        if !routes.isEmpty {
+            eventGeneration &+= 1
+            let nextGeneration = eventGeneration
+            try await replacement.subscribe(events: Array(Set(routes.values.joined())), generation: nextGeneration)
+            generation = nextGeneration
+        }
+        try Task.checkCancellation()
+        guard bindings[tabId] === active, !pendingSubscriptions.values.contains(tabId),
+              eventRoutes() == routes, try isCurrent() else { return false }
+
+        attach(replacement, to: tabId)
+        for (id, events) in routes {
+            subscriptions[id] = (replacement.id, events)
+        }
+        bindingEventGenerations[replacement.id] = generation
+        updateRoutingSnapshot()
+        return true
     }
 
     func remove(_ tabId: UUID) {
@@ -451,6 +488,30 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         let provider: Provider
     }
 
+    struct Connection: Equatable, Sendable {
+        let realm: String
+        let providerId: String
+        let issuerURL: String
+        let signalingURL: String
+        let stunURLs: [String]
+        let turnURLs: [String]
+
+        init(profile: RealmProfileInfo, verifiedProfileBody: Data) throws {
+            let provider = try JSONDecoder().decode(ProfileDocument.self, from: verifiedProfileBody).provider
+            guard let signaling = provider.signaling.sorted(by: { $0.priority < $1.priority }).first,
+                  URL(string: signaling.url)?.scheme?.lowercased() == "wss" else {
+                throw RealmServiceError(message: "The verified Realm profile has invalid signaling information.")
+            }
+            let iceURLs = provider.ice.flatMap(\.urls)
+            realm = profile.realmName
+            providerId = profile.providerId
+            issuerURL = profile.issuerUrl
+            signalingURL = signaling.url
+            stunURLs = iceURLs.filter { $0.hasPrefix("stun:") || $0.hasPrefix("stuns:") }
+            turnURLs = iceURLs.filter { $0.hasPrefix("turn:") || $0.hasPrefix("turns:") }
+        }
+    }
+
     private struct Capabilities: Decodable {
         struct Service: Decodable {
             let rpc: [String]?
@@ -462,8 +523,9 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     let id: UUID
     private let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("actrium-front-" + UUID().uuidString, isDirectory: true)
-    private let profile: RealmProfileInfo
+    nonisolated let connection: Connection
     private let front: Data
+    private let trustedFrontKey: Data
     private let configuration: String
     private let serviceType: ActrBindings.ActrType
     /// Business routes; internal for the attachment transport wiring tests.
@@ -492,59 +554,88 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         capabilitiesJSON: String,
         permissions: [String]
     ) throws {
-        let document = try JSONDecoder().decode(ProfileDocument.self, from: verifiedProfileBody)
-        let provider = document.provider
-        guard let signaling = provider.signaling.sorted(by: { $0.priority < $1.priority }).first,
-              URL(string: signaling.url)?.scheme?.lowercased() == "wss" else {
-            throw RealmServiceError(message: "The verified Realm profile has invalid signaling information.")
-        }
+        let connection = try Connection(profile: profile, verifiedProfileBody: verifiedProfileBody)
         let capabilities = try JSONDecoder().decode(Capabilities.self, from: Data(capabilitiesJSON.utf8))
         let services = ["service", "host:service"].compactMap { capabilities.hostModules[$0] }
         let declaredRoutes = Set(services.flatMap { $0.rpc ?? [] })
-        self.events = Set(services.flatMap { $0.events ?? [] })
-        self.attachmentUploadAllowed = RealmServiceAttachmentUploadPolicy.isPermitted(
-            permissions: permissions,
-            declaredRoutes: declaredRoutes
+        try self.init(
+            connection: connection,
+            front: front,
+            serviceType: serviceType,
+            trustedFrontKey: trustedFrontKey,
+            routes: RealmServiceAttachmentUploadPolicy.businessRoutes(declaredRoutes),
+            events: Set(services.flatMap { $0.events ?? [] }),
+            attachmentUploadAllowed: RealmServiceAttachmentUploadPolicy.isPermitted(
+                permissions: permissions, declaredRoutes: declaredRoutes
+            )
         )
-        // The attachment transport is verified separately and must never be
-        // reachable through the generic RealmService.call business routes.
-        self.routes = RealmServiceAttachmentUploadPolicy.businessRoutes(declaredRoutes)
+    }
+
+    private init(
+        connection: Connection,
+        front: Data,
+        serviceType: ActrBindings.ActrType,
+        trustedFrontKey: Data,
+        routes: Set<String>,
+        events: Set<String>,
+        attachmentUploadAllowed: Bool
+    ) throws {
+        self.connection = connection
         let bindingId = UUID()
         self.id = bindingId
         self.eventRelay = RealmServiceEventRelay(bindingId: bindingId)
-        self.serviceType = serviceType
-        self.profile = profile
         self.front = front
+        self.serviceType = serviceType
+        self.trustedFrontKey = trustedFrontKey
+        self.routes = routes
+        self.events = events
+        self.attachmentUploadAllowed = attachmentUploadAllowed
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
         func literal<T: Encodable>(_ value: T) throws -> String {
             try String(decoding: encoder.encode(value), as: UTF8.self)
         }
-        let iceURLs = provider.ice.flatMap(\.urls)
         self.configuration = try """
         edition = 1
         [signaling]
-        url = \(literal(signaling.url))
+        url = \(literal(connection.signalingURL))
         [issuer_endpoint]
-        url = \(literal(profile.issuerUrl))
+        url = \(literal(connection.issuerURL))
         [deployment]
-        realm = \(literal(profile.realmName))
+        realm = \(literal(connection.realm))
         [hyper]
         data_dir = \(literal(directory.path))
         [discovery]
         visible = false
         [webrtc]
-        stun_urls = \(literal(iceURLs.filter { $0.hasPrefix("stun:") || $0.hasPrefix("stuns:") }))
-        turn_urls = \(literal(iceURLs.filter { $0.hasPrefix("turn:") || $0.hasPrefix("turns:") }))
+        stun_urls = \(literal(connection.stunURLs))
+        turn_urls = \(literal(connection.turnURLs))
         [[acl.rules]]
         permission = "allow"
-        type = \(literal(profile.serviceType))
+        type = \(literal("\(serviceType.publisher)/\(serviceType.name)@\(serviceType.version)"))
         realm = "self"
         [[trust]]
         kind = "static"
         pubkey_b64 = \(literal(trustedFrontKey.base64EncodedString()))
         """
+    }
+
+    func replacingConnection(_ connection: Connection) throws -> RealmServiceBinding {
+        guard !stopped else { throw CancellationError() }
+        return try RealmServiceBinding(
+            connection: connection, front: front, serviceType: serviceType, trustedFrontKey: trustedFrontKey,
+            routes: routes, events: events, attachmentUploadAllowed: attachmentUploadAllowed
+        )
+    }
+
+    /// Prepare a replacement binding without sending a business RPC.
+    func prepareForSwitch() async throws {
+        try Task.checkCancellation()
+        let reference = try await connect()
+        _ = try await reference.discoverService(serviceType: serviceType)
+        guard !stopped else { throw CancellationError() }
+        try Task.checkCancellation()
     }
 
     func call(_ request: RealmServiceCall) async throws -> Data {
@@ -569,6 +660,10 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             requestPayload: request.payload,
             timeoutMs: Int64(request.timeoutMs)
         )
+    }
+
+    func prepareLocalFront() async throws {
+        try await prepareForSwitch()
     }
 
     func subscribe(events requestedEvents: [String], generation: UInt64) async throws {
@@ -626,10 +721,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                       await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
                     throw RealmServiceAttachmentUploadError.cancelled
                 }
-                guard let target = try await reference.discover(targetType: serviceType, count: 1).first else {
-                    throw RealmServiceAttachmentUploadError.unavailable(
-                        "The Realm's selected Service is not online.")
-                }
+                let target = try await reference.discoverService(serviceType: serviceType)
                 guard !stopped,
                       await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
                     throw RealmServiceAttachmentUploadError.cancelled
@@ -880,7 +972,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         let id = UUID()
         let task = Task {
             let membership = try RealmIdentityStore().membership(
-                realm: profile.realmName, providerId: profile.providerId, issuer: profile.issuerUrl
+                realm: connection.realm, providerId: connection.providerId, issuer: connection.issuerURL
             )
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             let configURL = directory.appendingPathComponent("actr.toml")

@@ -70,6 +70,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub mod config;
+#[cfg(all(feature = "wasm-engine", not(target_arch = "wasm32")))]
+pub mod egress;
 pub mod error;
 
 // Runtime error re-exports (from actr_protocol, distinct from HyperError)
@@ -1778,12 +1780,39 @@ pub(crate) async fn load_workload_package_inner(
             (binary_kind, workload, packaged_lock, None)
         }
         RuntimePackageManifest::V2(manifest) => {
+            let privacy_contract = manifest
+                .read_privacy_contract(bytes, max_bytes)
+                .map_err(|error| HyperError::InvalidManifest(error.to_string()))?;
+            let inbound = manifest
+                .host
+                .required_capabilities
+                .iter()
+                .any(|capability| capability == "actor.receive");
+            let scoped_egress = privacy_contract
+                .as_ref()
+                .filter(|contract| {
+                    (inbound || !contract.egress.is_empty()) && inner.config.has_egress_policy()
+                })
+                .map(|contract| &contract.egress);
+            if privacy_contract
+                .as_ref()
+                .is_some_and(|contract| !contract.egress.is_empty())
+                && scoped_egress.is_none()
+            {
+                return Err(HyperError::Config(
+                    "scoped egress requires a trusted Host policy".into(),
+                ));
+            }
             let native = manifest.workload.profile == "actr.native/1";
             let grants = if native {
                 package_runtime::validate_native_host(manifest)?;
                 None
             } else {
-                package_runtime::resolve_component_host_grants(manifest, configured_wasi_data)?
+                package_runtime::resolve_component_host_grants(
+                    manifest,
+                    configured_wasi_data,
+                    scoped_egress,
+                )?
             };
             let packaged_lock = package_runtime::read_v2_lock(bytes, manifest, max_bytes)?;
             let service_spec = service_spec::calculate_v2_service_spec(bytes, manifest, max_bytes)?;
@@ -1797,6 +1826,19 @@ pub(crate) async fn load_workload_package_inner(
                     load_v2_dynclib(inner, &binary, actor_type)?,
                 )
             } else {
+                #[cfg(feature = "wasm-engine")]
+                let egress = privacy_contract
+                    .filter(|contract| inbound || !contract.egress.is_empty())
+                    .zip(inner.config.egress_policy.clone())
+                    .map(|(contract, policy)| {
+                        use sha2::{Digest, Sha256};
+                        Arc::new(egress::EgressBroker::new(
+                            policy,
+                            hex::encode(Sha256::digest(bytes)),
+                            contract,
+                            packaged_lock.as_ref(),
+                        ))
+                    });
                 (
                     BinaryKind::Wasm,
                     instantiate_wasm_component(
@@ -1805,6 +1847,8 @@ pub(crate) async fn load_workload_package_inner(
                         &manifest.workload.entry,
                         actor_type,
                         grants,
+                        #[cfg(feature = "wasm-engine")]
+                        egress,
                     )
                     .await?,
                 )
@@ -1904,6 +1948,8 @@ async fn load_wasm_workload_inner(
         &manifest.binary.target,
         manifest.actr_type_str(),
         None,
+        #[cfg(feature = "wasm-engine")]
+        None,
     )
     .await
 }
@@ -1915,6 +1961,7 @@ async fn instantiate_wasm_component(
     entry: &str,
     actr_type: String,
     wasi_data: Option<config::WasiDataGrant<'_>>,
+    #[cfg(feature = "wasm-engine")] egress: Option<Arc<egress::EgressBroker>>,
 ) -> HyperResult<crate::workload::Workload> {
     #[cfg(feature = "wasm-engine")]
     {
@@ -1931,11 +1978,14 @@ async fn instantiate_wasm_component(
         .map_err(|e| {
             HyperError::Runtime(format!("failed to compile WASM component `{entry}`: {e}"))
         })?;
-        let mut instance = host.instantiate(wasi_data).await.map_err(|e| {
-            HyperError::Runtime(format!(
-                "failed to instantiate WASM component `{entry}`: {e}"
-            ))
-        })?;
+        let mut instance = host
+            .instantiate_scoped(wasi_data, egress)
+            .await
+            .map_err(|e| {
+                HyperError::Runtime(format!(
+                    "failed to instantiate WASM component `{entry}`: {e}"
+                ))
+            })?;
         instance
             .init(&actr_framework::guest::dynclib_abi::InitPayloadV1 {
                 version: actr_framework::guest::dynclib_abi::version::V1,

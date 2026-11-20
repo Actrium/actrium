@@ -8,6 +8,7 @@ struct ActrPackageManifestInfo {
     let version: String?
     let description: String?
     let appId: String?
+    let signedStorageOrigin: String?
     let icon: String?
     let contractName: String?
     let contractVersion: Int?
@@ -20,6 +21,17 @@ struct ActrPackageManifestInfo {
     let capabilityManifestJSON: String?
     let systemAppType: SystemTabType?
     let themeColor: String?
+
+    func storageOrigin(devDirectory: URL?) -> String? {
+        if let signedStorageOrigin { return signedStorageOrigin }
+        return devDirectory.map { "dev:\($0.resolvingSymlinksInPath().standardizedFileURL.path)" }
+    }
+
+    static func signedStorageOrigin(appId: String, signingKey: Data) -> String? {
+        // Actrium's app ID includes @version. Storage follows the program across updates.
+        guard let version = appId.lastIndex(of: "@") else { return nil }
+        return "signed:\(signingKey.base64EncodedString()):\(appId[..<version])"
+    }
 }
 
 enum ActrPackageManifestReader {
@@ -34,6 +46,7 @@ enum ActrPackageManifestReader {
         requireSignature: Bool = false,
         additionalTrustedKeys: [Data] = []
     ) throws -> ActrPackageManifestInfo {
+        let signingKey: Data?
         if requireSignature {
             var trustedKeys = ActrPackageTrustStore.trustedKeys().map(\.publicKey)
             trustedKeys.append(contentsOf: additionalTrustedKeys)
@@ -43,7 +56,7 @@ enum ActrPackageManifestReader {
                 )
             }
             do {
-                try AppleActrPackageManifestReader.verifyManifestSignature(
+                signingKey = try AppleActrPackageManifestReader.verifyManifestSignature(
                     fromRoot: root,
                     trustedKeys: trustedKeys
                 )
@@ -53,6 +66,8 @@ enum ActrPackageManifestReader {
                 )
                 throw error
             }
+        } else {
+            signingKey = nil
         }
         let manifest = try AppleActrPackageManifestReader.read(fromRoot: root)
         logManifest(manifest)
@@ -61,6 +76,9 @@ enum ActrPackageManifestReader {
             version: manifest.version,
             description: manifest.description,
             appId: manifest.appId,
+            signedStorageOrigin: signingKey.flatMap { key in
+                manifest.appId.flatMap { ActrPackageManifestInfo.signedStorageOrigin(appId: $0, signingKey: key) }
+            },
             icon: manifest.icon,
             contractName: manifest.contractName,
             contractVersion: manifest.contractVersion,

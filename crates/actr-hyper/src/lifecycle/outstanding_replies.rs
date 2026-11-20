@@ -25,12 +25,13 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
 
+use crate::lifecycle::dedup::DedupKey;
 use crate::lifecycle::reply_deliver::ReplyDeliver;
 
 pub(crate) type ReplyAttemptId = u64;
 
 struct OutstandingEntry {
-    request_id: String,
+    dedup_key: DedupKey,
     admitted_at: Instant,
     deadline: Option<Instant>,
     /// The exact reply writer for this admission. Keeping it here lets the
@@ -72,7 +73,7 @@ impl OutstandingReplies {
         self.entries.lock().await.insert(
             attempt_id,
             OutstandingEntry {
-                request_id: request_id.to_string(),
+                dedup_key: DedupKey::test_request(request_id),
                 admitted_at: Instant::now(),
                 deadline: None,
                 deliver: None,
@@ -84,7 +85,7 @@ impl OutstandingReplies {
     /// Register the exact `ReplyDeliver` for one explicit reply admission.
     pub(crate) async fn register_with_deliver(
         &self,
-        request_id: &str,
+        dedup_key: DedupKey,
         attempt_id: ReplyAttemptId,
         deliver: ReplyDeliver,
         deadline: Option<Instant>,
@@ -92,7 +93,7 @@ impl OutstandingReplies {
         self.entries.lock().await.insert(
             attempt_id,
             OutstandingEntry {
-                request_id: request_id.to_string(),
+                dedup_key,
                 admitted_at: Instant::now(),
                 deadline,
                 deliver: Some(deliver),
@@ -118,7 +119,7 @@ impl OutstandingReplies {
             let mut entries = self.entries.lock().await;
             let attempt_id = entries
                 .iter()
-                .find(|(_, entry)| entry.request_id == request_id)
+                .find(|(_, entry)| entry.dedup_key.request_id == request_id)
                 .map(|(attempt_id, _)| *attempt_id);
             attempt_id.and_then(|id| entries.remove(&id))
         };
@@ -156,7 +157,7 @@ impl OutstandingReplies {
     /// reply already won remain registered until that delivery task completes;
     /// only an entry whose deliver successfully wins the timeout race is
     /// removed and returned for the dedup-side InFlight eviction.
-    pub(crate) async fn sweep_expired(&self, ttl: Duration, now: Instant) -> Vec<String> {
+    pub(crate) async fn sweep_expired(&self, ttl: Duration, now: Instant) -> Vec<DedupKey> {
         let mut expired_ids = Vec::new();
         let mut remove = Vec::new();
         {
@@ -174,7 +175,7 @@ impl OutstandingReplies {
                     .unwrap_or(true);
                 if timeout_won || entry.deliver.as_ref().is_some_and(ReplyDeliver::is_pending) {
                     remove.push(*attempt_id);
-                    expired_ids.push(entry.request_id.clone());
+                    expired_ids.push(entry.dedup_key.clone());
                 }
             }
             for attempt_id in remove {
@@ -188,7 +189,7 @@ impl OutstandingReplies {
     }
 
     /// Clock-reading form of [`sweep_expired`] for the background sweep task.
-    pub(crate) async fn sweep_expired_now(&self, ttl: Duration) -> Vec<String> {
+    pub(crate) async fn sweep_expired_now(&self, ttl: Duration) -> Vec<DedupKey> {
         self.sweep_expired(ttl, Instant::now()).await
     }
 }

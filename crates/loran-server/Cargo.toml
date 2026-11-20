@@ -97,6 +97,7 @@ jsonwebtoken = { version = "10.3", default-features = false, features = ["aws_lc
 argon2 = "0.5"
 mime_guess = { version = "2", optional = true }
 sqlx.workspace = true
+tempfile = { workspace = true }
 
 # OpenTelemetry dependencies (optional, enabled by feature)
 opentelemetry = { version = "0.32.0", features = ["trace", "logs"], optional = true }
@@ -116,7 +117,6 @@ loran-sdk = { path = "../loran-sdk", version = "0.10.7", features = ["testing"] 
 platform = { path = "../loran-platform", package = "loran-platform", version = "0.10.7" }
 rcgen = "0.14.8"
 stun-protocol = { workspace = true }
-tempfile = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 reqwest = { workspace = true, features = ["json"] }
 urlencoding = "2.1"

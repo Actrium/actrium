@@ -116,31 +116,6 @@ enum TabOutlineItem: Equatable, Hashable {
 
 extension NSPasteboard.PasteboardType {
     static let tabOutlineItem = NSPasteboard.PasteboardType("com.actro.tabOutlineItem")
-    static let tabCrossWindowData = NSPasteboard.PasteboardType("com.actro.tabCrossWindowData")
-}
-
-// Notification for cross-window tab transfer
-extension Notification.Name {
-    static let removeTabFromSourceWindow = Notification.Name("removeTabFromSourceWindow")
-}
-
-// Data structure for cross-window tab transfer
-struct CrossWindowTabData: Codable {
-    let sourceTabId: String
-    let sourceViewModelId: String
-    let title: String
-    let urlString: String?
-    let groupId: String?
-    let unifiedScript: String?
-    let guestExtractedPath: String?
-    let guestEntry: String?
-    let capabilityManifestJSON: String?
-    let permissions: [String]?
-    let leftPanelScript: String?
-    let rightPanelScript: String?
-    let guestScript: String?
-    let htmlContent: String?
-    let backgroundColor: String?
 }
 
 // MARK: - NSViewRepresentable
@@ -160,7 +135,8 @@ struct TabOutlineView: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
 
-        let outlineView = NSOutlineView()
+        let outlineView = TabTransferOutlineView()
+        outlineView.transferOwner = viewModel
         outlineView.headerView = nil
         outlineView.style = .plain
         outlineView.backgroundColor = .clear  // Remove the default background
@@ -186,9 +162,9 @@ struct TabOutlineView: NSViewRepresentable {
         outlineView.delegate = context.coordinator
 
         // Enable drag and drop (including cross-window)
-        outlineView.registerForDraggedTypes([.tabOutlineItem, .tabCrossWindowData])
+        outlineView.registerForDraggedTypes([.tabOutlineItem])
         outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
-        outlineView.setDraggingSourceOperationMask(.move, forLocal: false)  // Enable cross-window drag
+        outlineView.setDraggingSourceOperationMask([], forLocal: false)
 
         // Double click action
         outlineView.target = context.coordinator
@@ -206,6 +182,7 @@ struct TabOutlineView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
+        (nsView.documentView as? TabTransferOutlineView)?.transferOwner = viewModel
         context.coordinator.viewModel = viewModel
         context.coordinator.historyVM = historyVM
         context.coordinator.reloadData()
@@ -220,41 +197,11 @@ struct TabOutlineView: NSViewRepresentable {
         weak var outlineView: NSOutlineView?
 
         private var isReloading = false
-        private let viewModelId: String
 
         init(viewModel: BrowserViewModel, historyVM: HistoryViewModel) {
             self.viewModel = viewModel
             self.historyVM = historyVM
-            self.viewModelId = ObjectIdentifier(viewModel).debugDescription
             super.init()
-
-            // Listen for cross-window tab removal notifications
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(handleRemoveTabFromSource(_:)),
-                name: .removeTabFromSourceWindow,
-                object: nil
-            )
-        }
-
-        deinit {
-            NotificationCenter.default.removeObserver(self)
-        }
-
-        @objc private func handleRemoveTabFromSource(_ notification: Notification) {
-            guard let userInfo = notification.userInfo,
-                  let tabIdString = userInfo["tabId"] as? String,
-                  let sourceViewModelId = userInfo["viewModelId"] as? String,
-                  sourceViewModelId == viewModelId,
-                  let tabId = UUID(uuidString: tabIdString) else {
-                return
-            }
-
-            // This notification is for us - remove the tab (delayed to avoid SwiftUI update conflicts)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                self?.viewModel.removeTabById(tabId)
-                self?.reloadData()
-            }
         }
 
         // MARK: - Data Management
@@ -437,30 +384,6 @@ struct TabOutlineView: NSViewRepresentable {
             // Local tab ID for same-window drops
             pasteboardItem.setString(tab.id.uuidString, forType: .tabOutlineItem)
 
-            // Serialized tab data for cross-window drops
-            let tabData = CrossWindowTabData(
-                sourceTabId: tab.id.uuidString,
-                sourceViewModelId: ObjectIdentifier(viewModel).debugDescription,
-                title: tab.title,
-                urlString: tab.url?.absoluteString,
-                groupId: tab.groupId?.uuidString,
-                unifiedScript: tab.unifiedScript,
-                guestExtractedPath: tab.guestExtractedPath,
-                guestEntry: tab.guestEntry,
-                capabilityManifestJSON: tab.capabilityManifestJSON,
-                permissions: tab.permissions,
-                leftPanelScript: tab.leftPanelScript,
-                rightPanelScript: tab.rightPanelScript,
-                guestScript: tab.guestScript,
-                htmlContent: tab.htmlContent,
-                backgroundColor: tab.backgroundColor
-            )
-
-            if let jsonData = try? JSONEncoder().encode(tabData),
-               let jsonString = String(data: jsonData, encoding: .utf8) {
-                pasteboardItem.setString(jsonString, forType: .tabCrossWindowData)
-            }
-
             return pasteboardItem
         }
 
@@ -471,6 +394,8 @@ struct TabOutlineView: NSViewRepresentable {
                   let tabId = UUID(uuidString: tabIdString) else {
                 return []
             }
+            guard let source = TabWindowTransfer.source(for: info.draggingSource),
+                  source.tabs.contains(where: { $0.id == tabId }) else { return [] }
 
             // Case 1: Dropping at root level (between groups/ungrouped tabs)
             if item == nil {
@@ -524,60 +449,23 @@ struct TabOutlineView: NSViewRepresentable {
                 return false
             }
 
-            // Check if this is a local tab (same window)
-            let isLocalTab = viewModel.tabs.contains(where: { $0.id == tabId })
-
-            // Handle cross-window drop
-            if !isLocalTab {
-                guard let crossWindowDataString = pasteboardItem.string(forType: .tabCrossWindowData),
-                      let crossWindowData = crossWindowDataString.data(using: .utf8),
-                      let tabData = try? JSONDecoder().decode(CrossWindowTabData.self, from: crossWindowData) else {
-                    return false
-                }
-
-                // Create new tab from cross-window data
-                let newTab = Tab(
-                    title: tabData.title,
-                    url: tabData.urlString.flatMap { URL(string: $0) },
-                    htmlContent: tabData.htmlContent,
-                    guestScript: tabData.guestScript,
-                    leftPanelScript: tabData.leftPanelScript,
-                    rightPanelScript: tabData.rightPanelScript,
-                    unifiedScript: tabData.unifiedScript,
-                    guestExtractedPath: tabData.guestExtractedPath,
-                    guestEntry: tabData.guestEntry,
-                    capabilityManifestJSON: tabData.capabilityManifestJSON,
-                    permissions: tabData.permissions ?? [],
-                    backgroundColor: tabData.backgroundColor
-                )
-
-                // Determine target group
-                var targetGroupId: UUID? = nil
+            guard let source = TabWindowTransfer.source(for: info.draggingSource),
+                  source.tabs.contains(where: { $0.id == tabId }) else { return false }
+            if source !== viewModel {
+                var targetGroupId: UUID?
                 if let outlineItem = item as? TabOutlineItem, case .group(let group) = outlineItem {
                     targetGroupId = group.id
                 }
-
-                // Calculate target index
                 let targetIndex = calculateDropTargetIndex(item: item, childIndex: index, targetGroupId: targetGroupId)
-
-                // Insert the new tab (delayed to avoid SwiftUI update conflicts)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                    self?.viewModel.insertTabFromCrossWindow(newTab, at: targetIndex, groupId: targetGroupId)
-                    self?.reloadData()
+                // Resolve the live native source after the SwiftUI update, then commit both sides together.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self, weak source] in
+                    guard let self, let source else { return }
+                    if TabWindowTransfer.moveTab(
+                        tabId, from: source, to: self.viewModel, at: targetIndex, groupId: targetGroupId
+                    ) {
+                        self.reloadData()
+                    }
                 }
-
-                // Notify source window to remove the tab (slightly more delayed)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    NotificationCenter.default.post(
-                        name: .removeTabFromSourceWindow,
-                        object: nil,
-                        userInfo: [
-                            "tabId": tabData.sourceTabId,
-                            "viewModelId": tabData.sourceViewModelId
-                        ]
-                    )
-                }
-
                 return true
             }
 
@@ -811,51 +699,9 @@ struct TabOutlineView: NSViewRepresentable {
         @objc private func moveGroupToNewWindow(_ sender: NSMenuItem) {
             guard let group = sender.representedObject as? TabGroup else { return }
 
-            // Get tabs in this group
-            let groupTabs = viewModel.tabs.filter { $0.groupId == group.id }
-            guard !groupTabs.isEmpty else { return }
-
-            // Serialize full tab data for transfer
-            let tabsData: [[String: Any]] = groupTabs.map { tab in
-                var data: [String: Any] = [
-                    "title": tab.title,
-                ]
-                if let appId = tab.appId { data["appId"] = appId }
-                if tab.legacyActorBridge { data["legacyActorBridge"] = true }
-                if let url = tab.url?.absoluteString { data["urlString"] = url }
-                if let systemType = tab.systemTabType { data["systemTabType"] = systemType.rawValue }
-                if let script = tab.unifiedScript { data["unifiedScript"] = script }
-                if let path = tab.guestExtractedPath { data["guestExtractedPath"] = path }
-                if let entry = tab.guestEntry { data["guestEntry"] = entry }
-                if let manifest = tab.capabilityManifestJSON {
-                    data["capabilityManifestJSON"] = manifest
-                }
-                if let script = tab.leftPanelScript { data["leftPanelScript"] = script }
-                if let script = tab.rightPanelScript { data["rightPanelScript"] = script }
-                if let script = tab.guestScript { data["guestScript"] = script }
-                if let html = tab.htmlContent { data["htmlContent"] = html }
-                data["backgroundColor"] = tab.backgroundColor
-                if let name = tab.contractName { data["contractName"] = name }
-                if let ver = tab.contractVersion { data["contractVersion"] = ver }
-                if !tab.permissions.isEmpty { data["permissions"] = tab.permissions }
-                data["rightPanelDefaultVisible"] = tab.rightPanelDefaultVisible
-                return data
-            }
-
-            let groupData: [String: Any] = [
-                "groupName": group.name,
-                "groupColor": group.color.rawValue,
-                "tabs": tabsData
-            ]
-
-            // Save to UserDefaults for new window to pick up
-            UserDefaults.standard.set(groupData, forKey: "pendingGroupTransfer")
-
-            // Post notification to open new window
-            NotificationCenter.default.post(name: .openNewWindowWithGroup, object: nil)
-
-            // Remove group from current window
-            viewModel.closeGroup(groupId: group.id, historyVM: historyVM)
+            guard viewModel.tabs.contains(where: { $0.groupId == group.id }) else { return }
+            let transfer = TabGroupWindowTransfer(source: viewModel, group: group)
+            NotificationCenter.default.post(name: .openNewWindowWithGroup, object: transfer)
         }
 
         @objc private func closeGroupFromMenu(_ sender: NSMenuItem) {

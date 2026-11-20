@@ -3,6 +3,7 @@ import { api, type RealmInfo } from "../lib/api";
 import { EditRealmAdmission } from "../components/realms/RealmAdmission";
 import { RealmTable } from "../components/realms/RealmTable";
 import { RealmForm } from "../components/realms/RealmForm";
+import { RealmPackages } from "../components/realms/RealmPackages";
 import { HowItWorks } from "../components/ui/HowItWorks";
 import { ServicePageLayout } from "../components/layout/ServicePageLayout";
 
@@ -23,6 +24,7 @@ export function Realms() {
   const [realmWritesEnabled, setRealmWritesEnabled] = useState(false);
   const [memberLimit, setMemberLimit] = useState(1000);
   const [editing, setEditing] = useState<RealmInfo | null>(null);
+  const [editingPackages, setEditingPackages] = useState<string | null>(null);
   const [ownerInvite, setOwnerInvite] = useState<{
     realm: string;
     invite: string;
@@ -77,6 +79,7 @@ export function Realms() {
     }
     setShowForm(false);
     setEditing(null);
+    setEditingPackages(null);
     setRetireConfirm(null);
     setInviteConfirm(null);
   }, [realmWritesEnabled]);
@@ -209,12 +212,17 @@ export function Realms() {
         }}
         onShowMembers={setMembersRealm}
         onEditAdmission={setEditing}
+        onEditPackages={setEditingPackages}
       />
 
       <IdentityReview kind="realm-domains" disabled={!realmWritesEnabled} />
 
       {editing && realmWritesEnabled && (
         <EditRealmAdmission realm={editing} limit={memberLimit} onClose={() => setEditing(null)} onSaved={fetchRealms} />
+      )}
+
+      {editingPackages && realmWritesEnabled && (
+        <RealmPackages realm={editingPackages} onClose={() => setEditingPackages(null)} />
       )}
 
       {showForm && (

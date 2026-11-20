@@ -5,19 +5,13 @@ private let logger = AppLogger.database
 
 /// Manages the app database path and schema using shared Apple SQLite glue.
 final class DatabaseManager {
-    static let shared = DatabaseManager()
+    static let shared = DatabaseManager(path: defaultDatabasePath())
 
     private var db: AppleSQLiteDatabase?
 
     // MARK: - Initialization
 
-    private init() {
-        setupDatabase()
-    }
-
-    private func setupDatabase() {
-        let path = getDatabasePath()
-
+    init(path: String) {
         do {
             db = try AppleSQLiteDatabase(path: path) { message in
                 logger.error("\(message)")
@@ -35,10 +29,14 @@ final class DatabaseManager {
         logger.notice("Initialized at: \(path)")
     }
 
-    private func getDatabasePath() -> String {
+    static func appDataDirectory(in applicationSupport: URL) -> URL {
+        applicationSupport.appendingPathComponent("Actro", isDirectory: true)
+    }
+
+    private static func defaultDatabasePath() -> String {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appFolder = appSupport.appendingPathComponent("Actro", isDirectory: true)
+        let appFolder = Self.appDataDirectory(in: appSupport)
 
         // Create directory if needed
         if !fileManager.fileExists(atPath: appFolder.path) {

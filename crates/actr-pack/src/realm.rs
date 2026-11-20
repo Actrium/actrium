@@ -1,6 +1,8 @@
 //! Verify the Service and Front chosen by a signed Realm Profile.
 mod dependencies;
-pub use dependencies::{check_realm_dependencies, check_realm_package_dependencies};
+pub use dependencies::{
+    check_realm_dependencies, check_realm_dependencies_to, check_realm_package_dependencies,
+};
 
 use actr_protocol::realm_profile::RealmPackage;
 use actr_protocol::{ActrType, PackageSigningKey};
@@ -34,6 +36,7 @@ pub fn verify_realm_archive(
         .verification_key()
         .map_err(PackError::SignatureVerificationFailed)?;
     verified.verify_signature(&key)?;
+    verified.manifest.read_privacy_contract(bytes, limit)?;
     if verified.manifest.actor_type() != reference.r#type {
         return Err(PackError::InvalidPackage(
             "Realm archive Actor type mismatch".into(),
@@ -120,40 +123,7 @@ pub fn privacy_contract_digest(
     archive: &[u8],
     limit: usize,
 ) -> Result<Option<String>, PackError> {
-    const PATH: &str = "contracts/privacy.toml";
-    let Some(entry) = manifest.files.iter().find(|f| f.path == PATH) else {
-        return Ok(None);
-    };
-    if entry.role != "contract" {
-        return Err(PackError::InvalidPackage(
-            "privacy.toml must have role contract".into(),
-        ));
-    }
-    let bytes = manifest.read_declared_file(archive, PATH, limit)?;
-    if sha256_hex(&bytes) != entry.sha256 {
-        return Err(PackError::InvalidPackage(
-            "Privacy Contract digest mismatch".into(),
-        ));
-    }
-    #[derive(serde::Deserialize)]
-    struct Document {
-        privacy_contract: Contract,
-    }
-    #[derive(serde::Deserialize)]
-    struct Contract {
-        schema_version: u32,
-        release_id: String,
-    }
-    let doc: Document = toml::from_str(
-        std::str::from_utf8(&bytes).map_err(|e| PackError::InvalidPackage(e.to_string()))?,
-    )
-    .map_err(|e| PackError::InvalidPackage(format!("invalid Privacy Contract: {e}")))?;
-    if doc.privacy_contract.schema_version != 1
-        || doc.privacy_contract.release_id != manifest.actor_type()
-    {
-        return Err(PackError::InvalidPackage(
-            "Privacy Contract does not match selected Service".into(),
-        ));
-    }
-    Ok(Some(entry.sha256.clone()))
+    Ok(manifest
+        .read_privacy_contract(archive, limit)?
+        .map(|contract| contract.sha256))
 }

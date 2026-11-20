@@ -75,13 +75,17 @@ struct ActrUriNotice: Identifiable {
     var detail: String? = nil
 }
 
-/// Pending invite-code redemption (temporary flow): an actr:// link entered in
-/// the address bar waits for an invite code first; on "Redeem" the
-/// Rust-provided method takes over the follow-up flow.
+/// An invite prompt belongs to the navigation that requested it.
 struct PendingInviteRedeem: Identifiable {
     let id = UUID()
+    let tabId: UUID
+    let navigationNonce: Int
     let uri: String
     let domain: String
+
+    func matches(_ tab: Tab) -> Bool {
+        tab.id == tabId && tab.reloadNonce == navigationNonce
+    }
 }
 
 enum ActrPackageDownloadError: LocalizedError {
@@ -114,7 +118,10 @@ enum ActrPackageDownloadService {
     /// transfer is also rejected when a redirect lands on a different host or
     /// downgrades the scheme, so the host confirmed in the sheet stays the
     /// trust root (04 §3 "confirm before connect").
-    nonisolated static func download(from url: URL) async throws -> URL {
+    nonisolated static func download(
+        from url: URL,
+        in directory: URL = FileManager.default.temporaryDirectory
+    ) async throws -> URL {
         let bytes: URLSession.AsyncBytes
         let response: URLResponse
         do {
@@ -145,8 +152,7 @@ enum ActrPackageDownloadService {
             throw ActrPackageDownloadError.sizeExceeded(maxBytes: ActrPackageDownloadLimits.maxBytes)
         }
 
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("actr-pkg-\(UUID().uuidString).actr")
+        let destination = directory.appendingPathComponent("actr-pkg-\(UUID().uuidString).actr")
         _ = FileManager.default.createFile(atPath: destination.path, contents: nil)
         guard let handle = FileHandle(forWritingAtPath: destination.path) else {
             throw ActrPackageDownloadError.failed(reason: "Could not create the download temporary file")

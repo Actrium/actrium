@@ -125,7 +125,9 @@ pub fn build_self_contained_service_spec_from_files(
     ))
 }
 
-fn self_contained_proto_hash(source: &str) -> anyhow::Result<String> {
+fn self_contained_descriptor(
+    source: &str,
+) -> anyhow::Result<protobuf::descriptor::FileDescriptorProto> {
     let dependencies = protobuf_parse::pure::parse_dependencies(source)?;
     if !dependencies.dependency.is_empty() {
         bail!("the RPC Proto must be self-contained; imports are unsupported");
@@ -140,10 +142,15 @@ fn self_contained_proto_hash(source: &str) -> anyhow::Result<String> {
         .file_descriptor_set()?;
     let descriptor = descriptors
         .file
-        .iter()
+        .into_iter()
         .find(|file| file.name() == "input.proto")
         .context("missing descriptor for input.proto")?;
-    let canonical = proto_fingerprint::normalize::normalize_file(descriptor);
+    Ok(descriptor)
+}
+
+fn self_contained_proto_hash(source: &str) -> anyhow::Result<String> {
+    let descriptor = self_contained_descriptor(source)?;
+    let canonical = proto_fingerprint::normalize::normalize_file(&descriptor);
     let encoded = serde_json::to_string_pretty(&canonical)?;
     Ok(format!("{:x}", Sha256::digest(encoded)))
 }
@@ -153,6 +160,27 @@ pub fn validate_self_contained_rpc_proto(source: &str) -> Result<()> {
     self_contained_proto_hash(source)
         .map(|_| ())
         .map_err(CompatibilityError::ProtoSignError)
+}
+
+/// Return the transport route keys for unary methods in a standalone RPC Proto.
+pub fn self_contained_unary_routes(source: &str) -> Result<std::collections::BTreeSet<String>> {
+    let descriptor =
+        self_contained_descriptor(source).map_err(CompatibilityError::ProtoSignError)?;
+    let package = descriptor.package();
+    let mut routes = std::collections::BTreeSet::new();
+    for service in &descriptor.service {
+        for method in &service.method {
+            if !method.client_streaming() && !method.server_streaming() {
+                let route = if package.is_empty() {
+                    format!("{}.{}", service.name(), method.name())
+                } else {
+                    format!("{package}.{}.{}", service.name(), method.name())
+                };
+                routes.insert(route);
+            }
+        }
+    }
+    Ok(routes)
 }
 
 fn published_proto_name(name: &str) -> &str {

@@ -181,6 +181,8 @@ impl ActorCmd {
 /// ownership cycle; dropping the final strong handle aborts the owning task and
 /// drops the `Workload` (and its `Store`).
 pub(crate) struct ActorHandle {
+    #[cfg(feature = "wasm-engine")]
+    egress_broker: Option<Arc<crate::egress::EgressBroker>>,
     tx: mpsc::Sender<ActorCmd>,
     join: std::sync::Mutex<Option<JoinHandle<()>>>,
     abort: tokio::task::AbortHandle,
@@ -198,6 +200,11 @@ impl std::fmt::Debug for ActorHandle {
 }
 
 impl ActorHandle {
+    #[cfg(feature = "wasm-engine")]
+    pub(crate) fn egress_broker(&self) -> Option<&Arc<crate::egress::EgressBroker>> {
+        self.egress_broker.as_ref()
+    }
+
     async fn await_reply<T>(rx: oneshot::Receiver<ActorResult<T>>) -> ActorResult<T> {
         match rx.await {
             Ok(result) => result,
@@ -478,18 +485,25 @@ pub(crate) fn spawn_runner_with_mode(
     dispatch_timeout: Option<std::time::Duration>,
 ) -> ActorHandle {
     let (tx, rx) = mpsc::channel(RUNNER_QUEUE_CAPACITY);
+    #[cfg(feature = "wasm-engine")]
+    let egress_broker = match &workload {
+        Workload::Wasm(v2) => v2.egress_broker().cloned(),
+        _ => None,
+    };
     let join = match (mode, workload) {
         (RunnerMode::Interleaved, Workload::Linked(handle)) => {
             tokio::spawn(run_loop_interleaved(handle, rx, dispatch_timeout))
         }
         #[cfg(feature = "wasm-engine")]
-        (RunnerMode::Interleaved, Workload::Wasm(v2)) => {
+        (RunnerMode::Interleaved, Workload::Wasm(v2)) if egress_broker.is_none() => {
             tokio::spawn(v2.run_interleaved(rx, dispatch_timeout))
         }
         (_, workload) => tokio::spawn(run_loop(workload, rx)),
     };
     let abort = join.abort_handle();
     ActorHandle {
+        #[cfg(feature = "wasm-engine")]
+        egress_broker,
         tx,
         join: std::sync::Mutex::new(Some(join)),
         abort,

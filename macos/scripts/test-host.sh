@@ -20,3 +20,25 @@ xcrun swiftc -swift-version 5 -framework AppKit \
   "${PROJECT_ROOT}/Tests/RendererMouseTrackingRegression.swift" \
   -o "${TEST_DIR}/renderer-mouse-tracking"
 "${TEST_DIR}/renderer-mouse-tracking"
+
+# Exercise the Realm refresh models without building the full macOS app.
+REALM_TEST_DIR="${TEST_DIR}/RealmModels"
+mkdir -p "${REALM_TEST_DIR}/Sources/Actrium" "${REALM_TEST_DIR}/Tests/ActriumTests"
+cp "${PROJECT_ROOT}"/Actrium/Models/{ActrLinkInvite,RealmFrontTrustStore,RealmFrontUpdate}.swift \
+  "${REALM_TEST_DIR}/Sources/Actrium/"
+cp "${PROJECT_ROOT}"/ActriumTests/{ActrLinkInviteTests,RealmFrontTrustStoreTests,RealmFrontUpdateTests}.swift \
+  "${REALM_TEST_DIR}/Tests/ActriumTests/"
+cat > "${REALM_TEST_DIR}/Package.swift" <<'SWIFT'
+// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "RealmModels",
+    platforms: [.macOS(.v15)],
+    targets: [
+        .target(name: "Actrium"),
+        .testTarget(name: "ActriumTests", dependencies: ["Actrium"])
+    ]
+)
+SWIFT
+xcrun swift test --package-path "${REALM_TEST_DIR}"

@@ -93,6 +93,25 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     /// A new request_id is generated for each RPC call, used to match requests and responses.
     fn request_id(&self) -> &str;
 
+    /// Request a route on an explicitly scoped dependency.
+    async fn call_dependency(
+        &self,
+        _alias: &str,
+        _route: &str,
+        _payload: bytes::Bytes,
+    ) -> ActorResult<bytes::Bytes> {
+        Err(ActrError::PermissionDenied(
+            "scoped Actor RPC is unavailable".into(),
+        ))
+    }
+
+    /// Execute the fixed HTTPS request declared for this alias.
+    async fn https_request(&self, _alias: &str, _body: bytes::Bytes) -> ActorResult<bytes::Bytes> {
+        Err(ActrError::PermissionDenied(
+            "scoped HTTPS is unavailable".into(),
+        ))
+    }
+
     /// Whether the caller is waiting for a response (`call`) or not (`tell`).
     ///
     /// Set per-request by the runtime from the inbound envelope. Used by

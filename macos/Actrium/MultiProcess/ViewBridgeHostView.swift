@@ -1454,8 +1454,8 @@ final class ViewBridgeCoordinator {
             return
         }
 
-        if let rendererHostView, let tabConfig {
-            var config = tabConfig.toDictionary(isOverviewMode: isOverviewMode)
+        if let rendererHostView, var config = rendererHostView.lastConfig {
+            config["isOverviewMode"] = isOverviewMode
             config["leftPanelVisible"] = visible
             rendererHostView.apply(config: config)
             return
@@ -1485,7 +1485,7 @@ final class ViewBridgeCoordinator {
     }
 
     /// Cleaning XPC Resources
-    func cleanup() {
+    func cleanup(releaseRenderer: Bool = true) {
         // Clean up the throttle timer
         throttleTimer?.invalidate()
         throttleTimer = nil
@@ -1528,10 +1528,12 @@ final class ViewBridgeCoordinator {
         // Disconnect ViewBridge Connection
         hostView?.disconnect()
         hostView = nil
+        onConnectionEstablished = nil
         rendererHostView?.prepareForReuse()
+        rendererHostView?.tabId = nil
         rendererHostView = nil
 
-        if let tabId = tabId, allocatedServiceId != nil {
+        if releaseRenderer, let tabId = tabId, allocatedServiceId != nil {
             RendererProcessPool.shared.releaseRenderer(for: tabId)
             ipcLog("📦 Coordinator cleanup: Tab \(String(tabId.uuidString.prefix(8))) released renderer")
         }
@@ -1625,7 +1627,8 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
     }
 
     func removeCoordinator(for tabId: UUID) {
-        coordinators.removeValue(forKey: tabId)
+        coordinators.removeValue(forKey: tabId)?.cleanup(releaseRenderer: false)
+        RendererProcessPool.shared.releaseRenderer(for: tabId)
     }
 
     /// Internal approach: update all coordinators It's... isOverviewMode and notify services
@@ -2384,6 +2387,9 @@ struct UnifiedReactNativeLayer: View {
         if let capabilityManifestJSON = tab.capabilityManifestJSON {
             config["capabilityManifestJSON"] = capabilityManifestJSON
         }
+        if let origin = tab.localStorageOrigin {
+            config["localStorageOrigin"] = origin
+        }
         if let capabilitySnapshotJSON {
             config["capabilitySnapshotJSON"] = capabilitySnapshotJSON
         }
@@ -2541,6 +2547,14 @@ struct UnifiedReactNativeLayer: View {
         }
     }
 
+    func rendererConfigForResend() -> [String: Any] {
+        var config = currentRendererConfig
+        config[RuntimeBridgeContract.containerWidth] = coordinator.currentViewportSize.width
+        config[RuntimeBridgeContract.containerHeight] = coordinator.currentViewportSize.height
+        config["isOverviewMode"] = ViewBridgeCoordinatorManager.shared.currentOverviewMode
+        return config
+    }
+
     private func sendTabConfigIfReady() {
         // Use coordinator Medium viewportSize, because this method could be called from the closed package
         let currentSize = coordinator.currentViewportSize
@@ -2570,55 +2584,7 @@ struct UnifiedReactNativeLayer: View {
         coordinator.lastSentConfigSize = currentSize
         coordinator.lastSentReloadKey = reloadKey
 
-        // Send tab config - Use coordinator the latest size of the
-        var tabConfig: [String: Any] = [
-            RuntimeBridgeContract.tabId: tab.id.uuidString,
-            RuntimeBridgeContract.title: tab.title,
-            "backgroundColor": tab.backgroundColor,
-            RuntimeBridgeContract.containerWidth: currentSize.width,
-            RuntimeBridgeContract.containerHeight: currentSize.height,
-            // 🔑 Read state update from status manager instead of coordinator Local Cache
-            "isOverviewMode": ViewBridgeCoordinatorManager.shared.currentOverviewMode,
-            "reloadKey": reloadKey
-        ]
-
-        // Add optional scripts
-        if let unifiedScript = tab.unifiedScript {
-            tabConfig["unifiedScript"] = unifiedScript
-        }
-        // 15-B B4: verified-bytes source (digest-addressed extraction dir + entry).
-        if let extractedPath = tab.guestExtractedPath {
-            tabConfig["guestExtractedPath"] = extractedPath
-            if let entry = tab.guestEntry {
-                tabConfig["guestEntry"] = entry
-            }
-        }
-        if let capabilityManifestJSON = tab.capabilityManifestJSON {
-            tabConfig["capabilityManifestJSON"] = capabilityManifestJSON
-        }
-        if let capabilitySnapshotJSON {
-            tabConfig["capabilitySnapshotJSON"] = capabilitySnapshotJSON
-        }
-        if let systemTabType = tab.systemTabType {
-            tabConfig[RuntimeBridgeContract.systemAppType] = systemTabType.rawValue
-        }
-        if !tab.permissions.isEmpty {
-            tabConfig["permissions"] = tab.permissions
-        }
-        if let serviceCallUrl = tab.serviceCallUrl {
-            tabConfig["serviceCallUrl"] = serviceCallUrl
-        }
-        if let serviceEventsUrl = tab.serviceEventsUrl {
-            tabConfig["serviceEventsUrl"] = serviceEventsUrl
-        }
-        if let appId = tab.appId {
-            tabConfig["appId"] = appId
-        }
-        if tab.legacyActorBridge {
-            tabConfig["legacyActorBridge"] = true
-        }
-
-        for (key, value) in libraryData { tabConfig[key] = value }
+        let tabConfig = rendererConfigForResend()
 
         NSLog("📤 [sendTabConfig] tab=%@ service=%@ size=%.0fx%.0f systemAppType=%@",
               tabIdShort, serviceId.components(separatedBy: ".").last ?? "",

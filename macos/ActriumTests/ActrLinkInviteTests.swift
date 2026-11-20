@@ -53,7 +53,7 @@ struct ActrLinkInviteTests {
 
     @Test func strippingRemovesArgsAndKeepsOtherParameters() throws {
         let uri = argsLink(invite: invite) + "&tab=notes"
-        let stripped = ActrLinkInvite.strippingInviteArgs(from: uri)
+        let stripped = try #require(ActrLinkInvite.strippingInviteArgs(from: uri))
         let components = try #require(URLComponents(string: stripped))
         #expect(components.queryItems?.contains { $0.name == "args" } == false)
         #expect(components.queryItems?.first { $0.name == "tab" }?.value == "notes")
@@ -62,7 +62,7 @@ struct ActrLinkInviteTests {
     }
 
     @Test func strippingDropsTheQueryWhenArgsWasTheOnlyParameter() throws {
-        let stripped = ActrLinkInvite.strippingInviteArgs(from: argsLink(invite: invite))
+        let stripped = try #require(ActrLinkInvite.strippingInviteArgs(from: argsLink(invite: invite)))
         #expect(stripped == baseLink)
         #expect(try #require(URLComponents(string: stripped)).queryItems == nil)
     }
@@ -73,5 +73,10 @@ struct ActrLinkInviteTests {
             ActrLinkInvite.strippingInviteArgs(from: "\(baseLink)?tab=notes")
                 == "\(baseLink)?tab=notes"
         )
+    }
+
+    @Test func malformedAuthorityCannotReturnAnInviteBearingAddress() {
+        let malformed = "actr://[invalid/echo?args=\(encodedArgs(#"{"invite":"ri_test"}"#))"
+        #expect(ActrLinkInvite.strippingInviteArgs(from: malformed)?.contains("args=") != true)
     }
 }

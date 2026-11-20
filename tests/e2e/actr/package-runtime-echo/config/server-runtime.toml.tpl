@@ -39,3 +39,14 @@ turn_urls = ["turn:127.0.0.1:__ICE_PORT__"]
 [[acl.rules]]
 permission = "allow"
 type = "e2e-actrium-local/pkg-runtime-echo-client-guest@0.1.0"
+
+# Both signed Fronts may call this fixture, with the same ACL throughout the release.
+[[acl.rules]]
+permission = "allow"
+type = "e2e.actrium.example/EchoFront@1.0.0"
+realm = "self"
+
+[[acl.rules]]
+permission = "allow"
+type = "e2e.actrium.example/EchoFront@1.1.0"
+realm = "self"

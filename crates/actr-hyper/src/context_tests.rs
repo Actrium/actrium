@@ -428,6 +428,7 @@ fn dep(actr_type: &str, fingerprint: &str) -> LockedDependency {
         name: actr_type.to_string(),
         alias: actr_type.to_string(),
         actr_type: actr_type.to_string(),
+        package_sha256: None,
         description: None,
         fingerprint: fingerprint.to_string(),
         published_at: None,

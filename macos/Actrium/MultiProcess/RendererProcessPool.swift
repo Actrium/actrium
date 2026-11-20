@@ -73,7 +73,7 @@ struct RendererProcessPoolSnapshot: Sendable, Equatable {
 /// host multiple Tab roots while keeping different fingerprints process-isolated.
 @MainActor
 final class RendererProcessPool: ObservableObject {
-    static let shared = RendererProcessPool()
+    static let shared = RendererProcessPool(localStorage: RendererLocalStorage())
 
     nonisolated static let systemFingerprintPrefix = "system."
 
@@ -145,6 +145,7 @@ final class RendererProcessPool: ObservableObject {
 
     private var workers: [String: Worker] = [:]
     private var tabWorkerMap: [UUID: String] = [:]
+    private let localStorage: RendererLocalStorage
     private let fileImport = RendererFileImport()
     var fileImportWindow: ((UUID, Int) -> NSWindow?)?
     private var fingerprintWorkerMap: [String: String] = [:]
@@ -158,7 +159,8 @@ final class RendererProcessPool: ObservableObject {
     /// event subscriptions can never belong to a replacement renderer.
     private var rendererEpoch: [UUID: Int] = [:]
 
-    private init() {
+    init(localStorage: RendererLocalStorage) {
+        self.localStorage = localStorage
         RealmServiceBindings.shared.eventHandler = { tabId, event in
             RendererProcessPool.shared.forwardServiceEvent(event, tabId: tabId)
         }
@@ -230,6 +232,7 @@ final class RendererProcessPool: ObservableObject {
     }
 
     func releaseRenderer(for tabId: UUID) {
+        localStorage.remove(tabId)
         fileImport.cancel(tabId: tabId)
         // The renderer is going away (close or fingerprint replacement):
         // invalidate late attachment results and cancel the tab's sessions
@@ -283,8 +286,13 @@ final class RendererProcessPool: ObservableObject {
             throw RendererProcessPoolError.rendererExited("Tab has no allocated renderer")
         }
         try await waitUntilReady(worker)
+        try Task.checkCancellation()
+        guard self.worker(for: tabId) === worker else {
+            throw RendererProcessPoolError.rendererExited("Tab changed renderer")
+        }
         fileImport.update(tabId: tabId, reloadKey: config["reloadKey"] as? Int ?? 0)
 
+        let config = localStorage.prepare(tabId: tabId, config: config)
         guard JSONSerialization.isValidJSONObject(config),
               let data = try? JSONSerialization.data(withJSONObject: config),
               let json = String(data: data, encoding: .utf8) else {
@@ -622,6 +630,25 @@ final class RendererProcessPool: ObservableObject {
                 )
                 return
             }
+            if name == GuestLocalStorageCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker else { return }
+                let connection = worker.connection
+                Task {
+                    guard self.worker(for: tabId) === worker else { return }
+                    do {
+                        if let reply = try await self.localStorage.reply(to: userInfoJSON, tabId: tabId),
+                           self.worker(for: tabId) === worker {
+                            try connection.sendHostEvent(
+                                name: GuestLocalStorageCall.responseEvent, userInfoJSON: reply, tabId: tab
+                            )
+                        }
+                    } catch {
+                        AppLogger.reactNative.warning("Renderer local storage request could not be handled.")
+                    }
+                }
+                return
+            }
             if name == GuestFileImportCall.requestEvent {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker else { return }
@@ -942,6 +969,7 @@ final class RendererProcessPool: ObservableObject {
             RealmServiceBindings.shared.cancelAttachmentUploads(tabId)
             RealmServiceBindings.shared.retireSubscriptions(for: tabId)
             tabWorkerMap.removeValue(forKey: tabId)
+            localStorage.remove(tabId)
         }
         if let fingerprint = worker.fingerprint {
             fingerprintWorkerMap.removeValue(forKey: fingerprint)

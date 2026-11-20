@@ -156,6 +156,40 @@ private final class ControlledEventReference: RealmServiceEventReference, @unche
 
 @MainActor
 struct RealmServiceBindingLifecycleTests {
+    @Test func connectionReplacementPreservesSubscriptionsOnlyForTheCurrentNavigation() async throws {
+        let bindings = RealmServiceBindings()
+        let original = ControlledRealmServiceBinding()
+        let replacement = ControlledRealmServiceBinding()
+        await original.setCompletesSubscribeImmediately()
+        await replacement.setCompletesSubscribeImmediately()
+        let tabId = UUID()
+        let subscriptionId = UUID()
+        let event = "notes.changed"
+        var payloads: [Data] = []
+        bindings.attach(original, to: tabId)
+        bindings.eventHandler = { receivedTab, received in
+            #expect(receivedTab == tabId)
+            #expect(received.subscriptionId == subscriptionId)
+            payloads.append(received.payload)
+        }
+        try await bindings.subscribe(RealmServiceEventSubscription(id: subscriptionId, events: [event]), tabId: tabId)
+
+        let stale = try await bindings.replaceConnection(original, with: replacement, tabId: tabId) { false }
+        #expect(!stale)
+        bindings.publish(bindingId: replacement.id, event: event, payload: Data([0]))
+        bindings.publish(bindingId: original.id, event: event, payload: Data([1]))
+        for _ in 0..<20 where payloads.isEmpty { await Task.yield() }
+        #expect(payloads == [Data([1])])
+
+        let current = try await bindings.replaceConnection(original, with: replacement, tabId: tabId) { true }
+        #expect(current)
+        bindings.publish(bindingId: original.id, event: event, payload: Data([0]))
+        bindings.publish(bindingId: replacement.id, event: event, payload: Data([2]))
+        for _ in 0..<20 where payloads.count < 2 { await Task.yield() }
+        #expect(payloads == [Data([1]), Data([2])])
+        bindings.remove(tabId)
+    }
+
     @Test func publishesWhileSubscribeReplyIsPending() async throws {
         let bindings = RealmServiceBindings()
         let binding = ControlledRealmServiceBinding()

@@ -13,8 +13,8 @@ import Foundation
 ///
 /// Cached packages are capped at 2 GiB and evicted least recently used first.
 nonisolated enum ActrPackageCache {
-    /// Test-only cache root. Production code always uses the system caches directory.
-    nonisolated(unsafe) static var rootOverrideForTesting: URL?
+    /// Cache root scoped to a test and the tasks it starts.
+    @TaskLocal static var rootOverrideForTesting: URL?
 
     static let maxCacheBytes: Int64 = 2 * 1024 * 1024 * 1024
 
@@ -118,11 +118,12 @@ nonisolated enum ActrPackageCache {
 
     /// Copies an archive into its digest-addressed location; reuses an existing
     /// copy (same digest implies identical content). Returns the cached path.
-    static func installArchive(at sourceArchiveURL: URL, digest: String) throws -> URL {
+    /// Use `replacingRejectedArchive` with verified bytes to repair a failed cache check.
+    static func installArchive(at sourceArchiveURL: URL, digest: String, replacingRejectedArchive: Bool = false) throws -> URL {
         try withCacheLock {
             let fm = FileManager.default
             let destination = Self.archiveURL(forDigest: digest)
-            if fm.fileExists(atPath: destination.path) {
+            if !replacingRejectedArchive, fm.fileExists(atPath: destination.path) {
                 touchLastUsed(forDigest: digest)
                 return destination
             }
@@ -135,10 +136,16 @@ nonisolated enum ActrPackageCache {
 
             do {
                 try fm.copyItem(at: sourceArchiveURL, to: staging)
-                try fm.moveItem(at: staging, to: destination)
+                if replacingRejectedArchive, fm.fileExists(atPath: destination.path) {
+                    let extracted = Self.extractedURL(forDigest: digest)
+                    if fm.fileExists(atPath: extracted.path) { try fm.removeItem(at: extracted) }
+                    _ = try fm.replaceItemAt(destination, withItemAt: staging)
+                } else {
+                    try fm.moveItem(at: staging, to: destination)
+                }
             } catch {
                 // Another writer landed the same digest first — reuse it.
-                guard fm.fileExists(atPath: destination.path) else { throw error }
+                guard !replacingRejectedArchive, fm.fileExists(atPath: destination.path) else { throw error }
             }
             touchLastUsed(forDigest: digest)
             return destination

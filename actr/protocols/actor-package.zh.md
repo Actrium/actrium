@@ -467,6 +467,13 @@ Host 只按包申请的级别挂载目录。包未申请时不挂载。包申请
 Store 重建沿用实例已打开的目录。重新装载实例时重新评估授权。
 升级前依靠 `wasi_data_dir` 挂载的 Workload，需要声明对应能力后重新打包并签名；
 旧格式包须先转换为 `actr-package/2`。配置了目录但包未声明能力时，Host 记录警告。
+Component 包可在 `[host].required-capabilities` 中声明 `actor.call` 和 `net.https`，分别申请
+按依赖别名调用 unary RPC 和向固定 HTTPS 终端发送请求。每项申请必须与签名
+`contracts/privacy.toml` 内对应的本包出站规则一起声明。Host 须验证契约的发布 ID、
+文件大小和 SHA-256，对 Actor 边检查签名依赖锁与 RPC 契约，并在每次调用时按当前策略授权。
+`actor.receive` 要求 Host 具有可用于该签名契约的入站授权策略。
+出站规则的结构见 [Actrium v1 Program Privacy Contract](../../docs/product/actrium-v1/14-privacy-primitives-and-attestation.zh.md#42-program-privacy-contract)。
+
 当前 Component Profile 尚未定义 Guest 的可选能力查询接口，Host 会拒绝非空的可选能力列表。
 
 ### 7.2 `keel.guest/1`

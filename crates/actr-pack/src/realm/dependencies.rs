@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use actr_protocol::realm_profile::RealmPackageSelection;
 use semver::{Version, VersionReq};
 
-use crate::{ActorPackageManifest, PackError};
+use crate::{ActorPackageManifest, PackError, PackageFileEntry};
 
 /// Check one verified source manifest against its Realm-selected dependencies.
 /// `locked_types` comes from that source's verified dependency lock, when present.
@@ -57,14 +57,19 @@ pub fn check_realm_package_dependencies(
 }
 
 /// Check mapped edges between verified archives, including exported RPC contracts.
+/// The scoped digests come from each verified source package's Privacy Contract and lock.
 /// Callers obtain the dependency closure before calling; cycles need no ordering.
 /// Unfetched, unrelated entries in the Profile are not asserted to be verified.
+/// An unavailable local Front defers its export check to the user-authorized Host.
+/// Its incoming aliases, selected types, locks and source contracts are still checked.
 pub fn check_realm_dependencies(
     selection: &RealmPackageSelection,
     manifests: &BTreeMap<String, ActorPackageManifest>,
     locks: &BTreeMap<String, BTreeMap<String, String>>,
+    scoped_digests: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Result<(), PackError> {
     selection.check().map_err(PackError::InvalidPackage)?;
+    check_egress_cycles(selection, scoped_digests)?;
     let empty_lock = BTreeMap::new();
     for (source, manifest) in manifests {
         check_realm_package_dependencies(
@@ -73,40 +78,176 @@ pub fn check_realm_dependencies(
             manifest,
             locks.get(source).unwrap_or(&empty_lock),
         )?;
+        for (alias, digest) in scoped_digests.get(source).unwrap_or(&empty_lock) {
+            let selected = &selection.packages[source];
+            match selected.dependencies.get(alias) {
+                Some(target) if &selection.packages[target].sha256 != digest => {
+                    return Err(PackError::InvalidPackage(format!(
+                        "{source}.{alias} -> {target}: Realm package digest differs from signed egress lock"
+                    )));
+                }
+                None if manifest
+                    .dependencies
+                    .get(alias)
+                    .is_some_and(|dep| dep.required) =>
+                {
+                    return Err(PackError::InvalidPackage(format!(
+                        "{source}.{alias}: no Realm target for required egress dependency"
+                    )));
+                }
+                _ => {}
+            }
+        }
         for (alias, target) in &selection.packages[source].dependencies {
             let invalid = |message: &str| {
                 PackError::InvalidPackage(format!("{source}.{alias} -> {target}: {message}"))
             };
-            let target_manifest = manifests
-                .get(target)
-                .ok_or_else(|| invalid("target archive has not been verified"))?;
-            if target_manifest.actor_type() != selection.packages[target].r#type {
-                return Err(invalid(
-                    "target manifest type differs from its Realm selection",
-                ));
-            }
-            if let Some(path) = &manifest.dependencies[alias].contract {
-                let contract = manifest
-                    .files
-                    .iter()
-                    .find(|file| &file.path == path && file.role == "contract")
-                    .ok_or_else(|| invalid("dependency contract is not a signed contract file"))?;
-                let matches_export = if target_manifest.workload.profile == "actr.component/1" {
-                    let exported = target_manifest.component_rpc_contract()?;
-                    target_manifest.files.iter().any(|file| {
-                        Some(file.path.as_str()) == exported && file.sha256 == contract.sha256
-                    })
-                } else {
-                    target_manifest
-                        .local_rpc_contracts()
-                        .any(|file| file.sha256 == contract.sha256)
-                };
-                if !matches_export {
-                    return Err(invalid(
-                        "dependency contract differs from the target RPC export",
-                    ));
+            let contract = signed_dependency_contract(manifest, alias, &invalid)?;
+            let Some(target_manifest) = manifests.get(target) else {
+                if selection.packages[target].local_path.is_some() {
+                    continue;
                 }
+                return Err(invalid("target archive has not been verified"));
+            };
+            check_verified_target(
+                &selection.packages[target].r#type,
+                target_manifest,
+                contract,
+                &invalid,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Complete dependencies from a verified source to a specific verified target.
+/// Other mapped edges still have their source declarations checked.
+pub fn check_realm_dependencies_to(
+    selection: &RealmPackageSelection,
+    source: &str,
+    manifest: &ActorPackageManifest,
+    target: &str,
+    target_manifest: &ActorPackageManifest,
+    locked_types: &BTreeMap<String, String>,
+) -> Result<(), PackError> {
+    check_realm_package_dependencies(selection, source, manifest, locked_types)?;
+    for (alias, _) in selection.packages[source]
+        .dependencies
+        .iter()
+        .filter(|(_, mapped)| mapped.as_str() == target)
+    {
+        let invalid = |message: &str| {
+            PackError::InvalidPackage(format!("{source}.{alias} -> {target}: {message}"))
+        };
+        let contract = signed_dependency_contract(manifest, alias, &invalid)?;
+        check_verified_target(
+            &selection.packages[target].r#type,
+            target_manifest,
+            contract,
+            &invalid,
+        )?;
+    }
+    Ok(())
+}
+
+fn signed_dependency_contract<'a>(
+    manifest: &'a ActorPackageManifest,
+    alias: &str,
+    invalid: &impl Fn(&str) -> PackError,
+) -> Result<Option<&'a PackageFileEntry>, PackError> {
+    manifest.dependencies[alias]
+        .contract
+        .as_ref()
+        .map(|path| {
+            manifest
+                .files
+                .iter()
+                .find(|file| &file.path == path && file.role == "contract")
+                .ok_or_else(|| invalid("dependency contract is not a signed contract file"))
+        })
+        .transpose()
+}
+
+fn check_verified_target(
+    expected_type: &str,
+    manifest: &ActorPackageManifest,
+    contract: Option<&PackageFileEntry>,
+    invalid: &impl Fn(&str) -> PackError,
+) -> Result<(), PackError> {
+    if manifest.actor_type() != expected_type {
+        return Err(invalid(
+            "target manifest type differs from its Realm selection",
+        ));
+    }
+    if let Some(contract) = contract {
+        let matches_export = if manifest.workload.profile == "actr.component/1" {
+            let exported = manifest.component_rpc_contract()?;
+            manifest
+                .files
+                .iter()
+                .any(|file| Some(file.path.as_str()) == exported && file.sha256 == contract.sha256)
+        } else {
+            manifest
+                .local_rpc_contracts()
+                .any(|file| file.sha256 == contract.sha256)
+        };
+        if !matches_export {
+            return Err(invalid(
+                "dependency contract differs from the target RPC export",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_egress_cycles(
+    selection: &RealmPackageSelection,
+    scoped_digests: &BTreeMap<String, BTreeMap<String, String>>,
+) -> Result<(), PackError> {
+    let mut pending: BTreeMap<_, Vec<_>> = scoped_digests
+        .iter()
+        .filter_map(|(source, digests)| {
+            let selected = selection.packages.get(source)?;
+            let edges: Vec<_> = selected
+                .dependencies
+                .iter()
+                .filter(|(alias, _)| digests.contains_key(*alias))
+                .collect();
+            Some((source, edges))
+        })
+        .collect();
+    while !pending.is_empty() {
+        let leaves: Vec<_> = pending
+            .iter()
+            .filter(|(_, edges)| {
+                edges
+                    .iter()
+                    .all(|(_, target)| !pending.contains_key(target))
+            })
+            .map(|(source, _)| *source)
+            .collect();
+        if leaves.is_empty() {
+            let mut source = *pending.keys().next().expect("pending graph is nonempty");
+            let mut position = BTreeMap::new();
+            let mut trail = Vec::new();
+            loop {
+                if let Some(&start) = position.get(source) {
+                    return Err(PackError::InvalidPackage(format!(
+                        "cyclic egress digest dependencies: {}",
+                        trail[start..].join(", "),
+                    )));
+                }
+                position.insert(source, trail.len());
+                let &(alias, target) = pending[source]
+                    .iter()
+                    .find(|(_, target)| pending.contains_key(target))
+                    .expect("every pending package has a pending dependency");
+                trail.push(format!("{source}.{alias} -> {target}"));
+                source = target;
             }
+        }
+        for leaf in leaves {
+            pending.remove(leaf);
         }
     }
     Ok(())
@@ -165,6 +306,7 @@ mod tests {
                             sha256: "a".repeat(64),
                             r#type: manifest.actor_type(),
                             dependencies: BTreeMap::new(),
+                            local_path: None,
                             extensions: BTreeMap::new(),
                         },
                     )
@@ -177,9 +319,37 @@ mod tests {
     }
 
     #[test]
+    fn rejects_digest_dependency_cycles_without_rejecting_legacy_realm_cycles() {
+        let (mut selection, _) = fixture();
+        selection
+            .packages
+            .get_mut("target")
+            .unwrap()
+            .dependencies
+            .insert("notebook".into(), "source".into());
+        assert!(check_egress_cycles(&selection, &BTreeMap::new()).is_ok());
+        let scopes = BTreeMap::from([
+            (
+                "source".into(),
+                BTreeMap::from([("index".into(), "a".repeat(64))]),
+            ),
+            (
+                "target".into(),
+                BTreeMap::from([("notebook".into(), "b".repeat(64))]),
+            ),
+        ]);
+        let error = check_egress_cycles(&selection, &scopes)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("source.index -> target"), "{error}");
+        assert!(error.contains("target.notebook -> source"), "{error}");
+    }
+
+    #[test]
     fn checks_alias_version_contract_and_exact_lock() {
         let (selection, manifests) = fixture();
-        check_realm_dependencies(&selection, &manifests, &BTreeMap::new()).unwrap();
+        check_realm_dependencies(&selection, &manifests, &BTreeMap::new(), &BTreeMap::new())
+            .unwrap();
         for failure in ["alias", "version", "contract", "lock", "missing"] {
             let mut selection = selection.clone();
             let mut manifests = manifests.clone();
@@ -226,7 +396,7 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(
-                check_realm_dependencies(&selection, &manifests, &locks).is_err(),
+                check_realm_dependencies(&selection, &manifests, &locks, &BTreeMap::new()).is_err(),
                 "{failure}"
             );
         }
@@ -250,15 +420,20 @@ mod tests {
             .unwrap()
             .dependencies
             .insert("back".into(), "source".into());
-        check_realm_dependencies(&selection, &manifests, &BTreeMap::new()).unwrap();
+        check_realm_dependencies(&selection, &manifests, &BTreeMap::new(), &BTreeMap::new())
+            .unwrap();
         manifests.remove("target");
-        assert!(check_realm_dependencies(&selection, &manifests, &BTreeMap::new()).is_err());
+        assert!(
+            check_realm_dependencies(&selection, &manifests, &BTreeMap::new(), &BTreeMap::new())
+                .is_err()
+        );
         selection
             .packages
             .get_mut("source")
             .unwrap()
             .dependencies
             .clear();
-        check_realm_dependencies(&selection, &manifests, &BTreeMap::new()).unwrap();
+        check_realm_dependencies(&selection, &manifests, &BTreeMap::new(), &BTreeMap::new())
+            .unwrap();
     }
 }
