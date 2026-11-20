@@ -382,6 +382,16 @@ pub(crate) mod tests {
     }
 
     fn front_package_for_test(host_api: &str) -> (Vec<u8>, ed25519_dalek::SigningKey) {
+        front_package_for_test_with_capabilities(
+            host_api,
+            br#"{"schemaVersion":1,"keelApi":"1.0","guestEntry":"workload/guest.js","imports":["host:service"],"hostModules":{"service":{"rpc":["documents/write","documents/read"]}}}"#,
+        )
+    }
+
+    fn front_package_for_test_with_capabilities(
+        host_api: &str,
+        capabilities: &[u8],
+    ) -> (Vec<u8>, ed25519_dalek::SigningKey) {
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&[9; 32]);
         let manifest = actr_pack::ActorPackageManifest {
             format: actr_pack::ACTOR_PACKAGE_FORMAT_V2.to_owned(),
@@ -441,10 +451,7 @@ pub(crate) mod tests {
                 "workload/guest.js".into(),
                 b"globalThis.documents = true;".to_vec(),
             ),
-            (
-                "workload/capabilities.json".into(),
-                br#"{"schemaVersion":1,"keelApi":"1.0","guestEntry":"workload/guest.js","imports":["host:service"],"hostModules":{"service":{"rpc":["documents/write","documents/read"]}}}"#.to_vec(),
-            ),
+            ("workload/capabilities.json".into(), capabilities.to_vec()),
             (
                 "contracts/service.proto".into(),
                 br#"syntax = "proto3";
@@ -510,6 +517,24 @@ service Documents { rpc Read(ReadRequest) returns (ReadResponse); }
                 .iter()
                 .all(|route| route.capabilities == vec!["service"])
         );
+    }
+
+    #[test]
+    fn front_session_metadata_accepts_an_event_only_service() {
+        let (package, signing_key) = front_package_for_test_with_capabilities(
+            "^1.0.0",
+            br#"{"schemaVersion":1,"keelApi":"1.0","guestEntry":"workload/guest.js","imports":["host:service"],"hostModules":{"service":{"events":["documents/changed"]}}}"#,
+        );
+        let metadata = actrium_session_metadata_for_front(
+            package,
+            signing_key.verifying_key().to_bytes().to_vec(),
+            selected_service_type(),
+            "04".repeat(32),
+        )
+        .expect("event-only Service declarations retain their Attach binding");
+
+        assert!(metadata.routes.is_empty());
+        assert_eq!(metadata.program_capabilities, vec!["service"]);
     }
 
     #[test]

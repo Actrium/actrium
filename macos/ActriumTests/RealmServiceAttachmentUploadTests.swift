@@ -633,7 +633,7 @@ struct RealmServiceAttachmentUploadTests {
         }
     }
 
-    @Test func downloadedFrontWithoutCapabilitiesSkipsServiceBinding() throws {
+    @Test func downloadedFrontServiceBindingMatchesDeclaredCapabilities() throws {
         // A verified renderer-only Front has no capability manifest. It must
         // not derive Attach metadata or construct a Service binding.
         let binding: String? = try BrowserViewModel.serviceBindingForDeclaredCapabilities(nil) { _ in
@@ -654,6 +654,10 @@ struct RealmServiceAttachmentUploadTests {
         let serviceCapabilities = #"{"hostModules":{"service":{"rpc":["documents/read"]}}}"#
         let declared = try BrowserViewModel.serviceBindingForDeclaredCapabilities(serviceCapabilities) { $0 }
         #expect(declared == serviceCapabilities)
+
+        let eventCapabilities = #"{"hostModules":{"service":{"events":["documents/changed"]}}}"#
+        let eventBinding = try BrowserViewModel.serviceBindingForDeclaredCapabilities(eventCapabilities) { $0 }
+        #expect(eventBinding == eventCapabilities)
     }
 
     @Test func rpcRecoversAfterJoiningAResumeOnlyCaller() async throws {
@@ -724,6 +728,43 @@ struct RealmServiceAttachmentUploadTests {
         )
         #expect(recovered == reattached)
         #expect(recovered.sessionEpoch == 2)
+    }
+
+    @Test func discoveryFailureKeepsJoinedSessionPublished() async throws {
+        let target = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 1)
+        let expired = RecoveryConnection(target: target, sessionEpoch: 1)
+        let reattached = RecoveryConnection(target: target, sessionEpoch: 2)
+        let resumeOnly = Task<RecoveryConnection, Error> { reattached }
+        var published: RecoveryConnection?
+
+        await #expect(throws: SessionError.self) {
+            try await RealmServiceBinding.recoverCallAfterJoining(
+                recovery: resumeOnly,
+                recover: { joined in
+                    RealmServiceBinding.publishJoinedRecovery(
+                        joined: joined,
+                        ownsRecoverySlot: true,
+                        publish: { published = $0 }
+                    )
+                    _ = try await RealmServiceBinding.joinedRecoveryConnection(
+                        joined: joined,
+                        ownsRecoverySlot: true,
+                        connect: {
+                            Issue.record("The failed handoff must not read expired startup.")
+                            return expired
+                        }
+                    )
+                    throw SessionError(description: "TimedOut: Service discovery failed")
+                },
+                restart: {
+                    Issue.record("A successful re-Attach must not restart after Discovery fails.")
+                    throw SessionError(description: "Unexpected restart")
+                }
+            )
+        }
+        // Discovery failed after the new exclusive lease was acquired. The
+        // next business call must see that lease rather than Attach it again.
+        #expect(published == reattached)
     }
 
     @Test func concurrentRPCsShareOneReplacementAttach() async throws {

@@ -1173,6 +1173,9 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         // Carry that result through the handoff instead of reading stale startup.
         let ownsRecoverySlot = recovery?.id == previousID
         let id = UUID()
+        Self.publishJoinedRecovery(joined: joined, ownsRecoverySlot: ownsRecoverySlot) {
+            self.startup = (id, Task { $0 })
+        }
         let task = Task<RuntimeConnection, Error> {
             // Once the owner has published, use the latest connection. Another
             // RPC may already have finished the replacement before this waiter.
@@ -1235,7 +1238,20 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         return try await recover(joined)
     }
 
-    /// Internal for the same-Actor re-Attach handoff test. While the waiter
+    /// Publish a same-Actor re-Attach before the new recovery can suspend on
+    /// Discovery. The old owner cannot overwrite it because the slot ID changes
+    /// in the same actor turn.
+    static func publishJoinedRecovery<RecoveredConnection>(
+        joined: RecoveredConnection,
+        ownsRecoverySlot: Bool,
+        publish: (RecoveredConnection) -> Void
+    ) {
+        if ownsRecoverySlot {
+            publish(joined)
+        }
+    }
+
+    /// Internal for the same-Actor re-Attach handoff tests. While the waiter
     /// owns the old recovery slot, its joined result is newer than startup.
     static func joinedRecoveryConnection<RecoveredConnection>(
         joined: RecoveredConnection,

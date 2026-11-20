@@ -69,6 +69,7 @@ struct FrontCapabilityManifest {
 #[derive(serde::Deserialize)]
 struct FrontHostModule {
     rpc: Option<Vec<String>>,
+    events: Option<Vec<String>>,
 }
 
 fn invalid(message: impl Into<String>) -> HyperError {
@@ -144,16 +145,24 @@ pub fn front_session_metadata(
     let capability_bytes = read_declared(front_archive, front_manifest, capabilities_path)?;
     let capabilities: FrontCapabilityManifest = serde_json::from_slice(&capability_bytes)
         .map_err(|error| invalid(format!("capability manifest: {error}")))?;
-    let rpc_routes = capabilities
+    let service = capabilities
         .host_modules
         .get(SERVICE_CAPABILITY)
         .or_else(|| capabilities.host_modules.get("host:service"))
-        .and_then(|module| module.rpc.as_ref())
-        .ok_or_else(|| invalid("hostModules.service.rpc is required"))?;
+        .ok_or_else(|| invalid("hostModules.service is required"))?;
+    let rpc_routes = service.rpc.as_deref().unwrap_or(&[]);
+    let events = service.events.as_deref().unwrap_or(&[]);
     let route_names: BTreeSet<&String> = rpc_routes.iter().collect();
-    if route_names.is_empty() || route_names.iter().any(|route| route.is_empty()) {
+    if route_names.iter().any(|route| route.is_empty())
+        || events.iter().any(|event| event.is_empty())
+    {
         return Err(invalid(
-            "hostModules.service.rpc must contain nonempty routes",
+            "hostModules.service RPC routes and events must be nonempty",
+        ));
+    }
+    if route_names.is_empty() && events.is_empty() {
+        return Err(invalid(
+            "hostModules.service must declare an RPC route or event",
         ));
     }
     let routes: BTreeMap<String, BTreeSet<String>> = route_names
