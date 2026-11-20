@@ -14,6 +14,10 @@ class CiTargetsTest(unittest.TestCase):
             "macos/scripts/sign-app.sh",
             "macos/scripts/build-app.sh",
             "macos/scripts/tests/test_sign_app.py",
+            "crates/actrium-core/Cargo.toml",
+            "crates/actrium-core/src/guest_local_storage.rs",
+            "crates/actrium-core/src/guest_local_storage/encryption.rs",
+            "crates/actrium-core/tests/guest_local_storage_encryption.rs",
             "package.json",
             "scripts/actrium/filter-xcodebuild-output.sh",
         ):

@@ -1,6 +1,12 @@
 name: Release Actrium macOS
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a snapshot. Disable to retain a signed DMG for verification only.
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -14,4 +20,11 @@ jobs:
     uses: ./.github/workflows/_actrium-macos-release.yml
     with:
       source_sha: ${{ github.sha }}
-      publish: true
+      publish: ${{ inputs.publish }}
+      signed_dry_run: ${{ !inputs.publish }}
+    secrets:
+      MACOS_SIGNING_P12_BASE64: ${{ secrets.MACOS_SIGNING_P12_BASE64 }}
+      MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+      MACOS_HOST_PROFILE_BASE64: ${{ secrets.MACOS_HOST_PROFILE_BASE64 }}
+      MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+      MACOS_NOTARY_APP_PASSWORD: ${{ secrets.MACOS_NOTARY_APP_PASSWORD }}

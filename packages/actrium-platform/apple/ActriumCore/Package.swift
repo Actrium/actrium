@@ -19,7 +19,11 @@ let package = Package(
             dependencies: [
                 .target(name: "actrium_coreFFI"),
             ],
-            path: "Sources/ActriumCore"
+            path: "Sources/ActriumCore",
+            linkerSettings: [
+                .linkedFramework("Security", .when(platforms: [.macOS])),
+                .linkedFramework("CoreFoundation", .when(platforms: [.macOS])),
+            ]
         ),
         .binaryTarget(
             name: "actrium_coreFFI",

@@ -14,12 +14,13 @@ struct PublisherStorageRecoveryTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("storage.sqlite").path
+        let databaseKey = Data(repeating: 42, count: 32)
         let initial = try PublisherStorageFixture.profile(rotated: false)
         _ = try RealmProfileStore.acceptPublisher(body: initial, domain: "publisher.example", preferences: preferences)
         let identity: String
         let canonical: String
         do {
-            let core = GuestLocalStorage(path: path)
+            let core = try GuestLocalStorage.newEncrypted(path: path, key: databaseKey)
             let database = GuestStorageDatabase(database: core)
             let accepted = try await database.acceptPublisherProfile(body: initial, domain: "publisher.example")
             identity = try #require(accepted.profile.storageIdentity)
@@ -29,7 +30,7 @@ struct PublisherStorageRecoveryTests {
             _ = try await database.acceptPublisherProfile(body: PublisherStorageFixture.profile(rotated: true), domain: "publisher.example")
         }
         // Reopening models a crash after Core committed but before preferences were updated.
-        let reopened = GuestLocalStorage(path: path)
+        let reopened = try GuestLocalStorage.newEncrypted(path: path, key: databaseKey)
         let body = try PublisherStorageFixture.profileAfterRemovingOldProfileKey()
         let recovered = try await RealmProfileStore.acceptPublisher(
             body: body, domain: "publisher.example", preferences: preferences,

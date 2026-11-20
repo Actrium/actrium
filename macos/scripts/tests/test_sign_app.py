@@ -2,6 +2,7 @@
 """Exercise real nested bundle signing without reading the user's Keychain."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import os
 from pathlib import Path
 import plistlib
@@ -15,6 +16,7 @@ import unittest
 MACOS = Path(__file__).resolve().parents[2]
 SIGN_APP = MACOS / "scripts/sign-app.sh"
 BUILD_APP = MACOS / "scripts/build-app.sh"
+PREPARE_HOST_PROFILE = MACOS / "scripts/prepare-host-entitlements.py"
 
 
 @unittest.skipUnless(sys.platform == "darwin", "requires macOS codesign")
@@ -73,7 +75,7 @@ class SigningTests(unittest.TestCase):
         self.app = Path(self.directory.name) / "Actrium.app"
         shutil.copytree(self.template, self.app, symlinks=True)
         self.environment = dict(os.environ)
-        for name in ("IDENTITY_NAME", "KEYCHAIN_PATH", "CODESIGN_TIMESTAMP", "APP_ENTITLEMENTS", "RENDERER_ENTITLEMENTS"):
+        for name in ("IDENTITY_NAME", "KEYCHAIN_PATH", "CODESIGN_TIMESTAMP", "APP_ENTITLEMENTS", "APP_PROVISIONING_PROFILE", "RENDERER_ENTITLEMENTS"):
             self.environment.pop(name, None)
 
     def run_signer(self, **environment: str) -> subprocess.CompletedProcess:
@@ -109,6 +111,54 @@ class SigningTests(unittest.TestCase):
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("interactive builds require a fixed IDENTITY_NAME", result.stderr)
+
+    def test_missing_host_profile_is_rejected_before_changing_the_app(self) -> None:
+        binary = self.app / "Contents/MacOS/Actrium"
+        original = binary.read_bytes()
+        result = self.run_signer(
+            IDENTITY_NAME="Developer ID Application: Signing Fixture",
+            APP_PROVISIONING_PROFILE=str(self.app / "missing.provisionprofile"),
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Host provisioning profile does not exist", result.stderr)
+        self.assertEqual(binary.read_bytes(), original)
+
+    def test_host_keychain_entitlements_use_the_profile_identity(self) -> None:
+        profile = Path(self.directory.name) / "profile.plist"
+        output = Path(self.directory.name) / "entitlements.plist"
+        app_id = "PREFIX1234.io.actrium.signing-fixture"
+        valid_profile = {
+            "Platform": ["OSX"],
+            "ExpirationDate": datetime.utcnow() + timedelta(days=1),
+            "ApplicationIdentifierPrefix": ["PREFIX1234"],
+            "TeamIdentifier": ["TEAM123456"],
+            "Entitlements": {"com.apple.application-identifier": app_id, "get-task-allow": True},
+        }
+        profile.write_bytes(plistlib.dumps(valid_profile))
+        subprocess.run([
+            sys.executable, str(PREPARE_HOST_PROFILE), str(profile),
+            str(self.app / "Contents/Info.plist"), str(MACOS / "Actrium/Actrium.entitlements"), str(output),
+        ], check=True)
+        entitlements = plistlib.loads(output.read_bytes())
+        self.assertEqual(entitlements["com.apple.application-identifier"], app_id)
+        self.assertEqual(entitlements["com.apple.developer.team-identifier"], "TEAM123456")
+        self.assertTrue(entitlements["com.apple.security.cs.allow-jit"])
+        self.assertNotIn("get-task-allow", entitlements)
+
+        invalid_output = output.with_name("invalid-entitlements.plist")
+        for changes, message in (
+            ({"ExpirationDate": datetime.utcnow() - timedelta(days=1)}, "is expired"),
+            ({"Entitlements": {"com.apple.application-identifier": "PREFIX1234.*"}}, "does not match"),
+        ):
+            with self.subTest(message=message):
+                profile.write_bytes(plistlib.dumps({**valid_profile, **changes}))
+                result = subprocess.run([
+                    sys.executable, str(PREPARE_HOST_PROFILE), str(profile),
+                    str(self.app / "Contents/Info.plist"), str(MACOS / "Actrium/Actrium.entitlements"), str(invalid_output),
+                ], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+                self.assertFalse(invalid_output.exists())
 
     def test_signs_nested_code_and_preserves_each_process_entitlements(self) -> None:
         self.sign_fixture()

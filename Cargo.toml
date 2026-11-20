@@ -168,7 +168,7 @@ rand = "0.8"
 
 # === Storage ===
 # Preserve cached statements and checked u64/usize SQLite conversions.
-rusqlite = { version = "0.41.1", default-features = false, features = ["bundled", "cache", "fallible_uint", "serde_json"] }
+rusqlite = { version = "0.43.0", default-features = false, features = ["bundled", "cache", "fallible_uint", "serde_json"] }
 
 # === WASM Runtime ===
 # Pinned to 48.0.9 for Component Model host execution (Rust >= 1.95).

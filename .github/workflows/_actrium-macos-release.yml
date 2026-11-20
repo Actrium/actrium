@@ -6,6 +6,13 @@ on:
       source_sha: { required: true, type: string }
       tag: { required: false, type: string, default: "" }
       publish: { required: true, type: boolean }
+      signed_dry_run: { required: false, type: boolean, default: false }
+    secrets:
+      MACOS_SIGNING_P12_BASE64: { required: false }
+      MACOS_SIGNING_P12_PASSWORD: { required: false }
+      MACOS_HOST_PROFILE_BASE64: { required: false }
+      MACOS_NOTARY_APPLE_ID: { required: false }
+      MACOS_NOTARY_APP_PASSWORD: { required: false }
 
 permissions:
   contents: read
@@ -25,6 +32,7 @@ jobs:
       SOURCE_SHA: ${{ inputs.source_sha }}
       RELEASE_TAG: ${{ inputs.tag }}
       PUBLISH: ${{ inputs.publish }}
+      SIGN_DMG: ${{ inputs.publish || inputs.signed_dry_run }}
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
       CMAKE_POLICY_VERSION_MINIMUM: "3.5"
@@ -65,6 +73,16 @@ jobs:
           fi
           printf 'TAG=%s\nAPP_VERSION=%s\n' "$RELEASE_TAG" "$version" >> "$GITHUB_ENV"
 
+      - name: Check macOS release signing configuration
+        if: inputs.publish || inputs.signed_dry_run
+        env:
+          SIGNING_CONFIGURED: ${{ secrets.MACOS_SIGNING_P12_BASE64 != '' && secrets.MACOS_SIGNING_P12_PASSWORD != '' && secrets.MACOS_HOST_PROFILE_BASE64 != '' && secrets.MACOS_NOTARY_APPLE_ID != '' && secrets.MACOS_NOTARY_APP_PASSWORD != '' && vars.MACOS_SIGNING_IDENTITY != '' && vars.MACOS_NOTARY_TEAM_ID != '' }}
+        run: |
+          if [[ "$SIGNING_CONFIGURED" != true ]]; then
+            echo '::error::Configure the macOS release signing certificate, Host provisioning profile, and notarization credentials.'
+            exit 1
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -96,27 +114,54 @@ jobs:
           bash scripts/actrium/build-actrium-rust-bindings.sh apple-macos
           ACTR_XCFRAMEWORK_TARGETS=macos bash packages/actr-swift/build-xcframework.sh
 
-      - name: Build the unsigned Release DMG
+      - name: Configure the Release bundle version
         run: |
-          export XCODE_XCCONFIG_FILE="$RUNNER_TEMP/release.xcconfig"
+          config="$RUNNER_TEMP/release.xcconfig"
           printf 'MARKETING_VERSION = %s\nCURRENT_PROJECT_VERSION = %s\n' \
-            "$APP_VERSION" "$GITHUB_RUN_NUMBER" > "$XCODE_XCCONFIG_FILE"
+            "$APP_VERSION" "$GITHUB_RUN_NUMBER" > "$config"
+          printf 'XCODE_XCCONFIG_FILE=%s\n' "$config" >> "$GITHUB_ENV"
+
+      - name: Build the signed and notarized Release DMG
+        if: inputs.publish || inputs.signed_dry_run
+        env:
+          APP_BASE64: ${{ secrets.MACOS_SIGNING_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+          HOST_PROFILE_BASE64: ${{ secrets.MACOS_HOST_PROFILE_BASE64 }}
+          USER_NAME: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          ACCOUNT_PASSWORD: ${{ secrets.MACOS_NOTARY_APP_PASSWORD }}
+          IDENTITY_NAME: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          TEAM_ID: ${{ vars.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          umask 077
+          signing_dir=$(mktemp -d "$RUNNER_TEMP/actrium-profile.XXXXXX")
+          trap 'rm -rf "$signing_dir"' EXIT
+          export APP_PROVISIONING_PROFILE="$signing_dir/host.provisionprofile"
+          printf '%s' "$HOST_PROFILE_BASE64" | base64 --decode > "$APP_PROVISIONING_PROFILE"
+          unset HOST_PROFILE_BASE64
+          bash macos/scripts/package-dmg.sh
+
+      - name: Build the unsigned validation DMG
+        if: '!inputs.publish && !inputs.signed_dry_run'
+        run: |
           npm run package:macos:dmg -- --unsigned
 
       - name: Verify the mounted image and checksum
         id: verify
         run: |
           cd macos/dist
-          asset="Actrium_${TAG}_macos-arm64_unsigned.dmg"
+          suffix="_unsigned"
+          if [[ "$SIGN_DMG" == true ]]; then suffix=""; fi
+          asset="Actrium_${TAG}_macos-arm64${suffix}.dmg"
           mv "$DMG_PATH" "$asset"
-          bash ../../../automation/.github/scripts/verify_macos_dmg.sh "$asset" "$APP_VERSION" "$GITHUB_RUN_NUMBER"
+          bash ../../../automation/.github/scripts/verify_macos_dmg.sh "$asset" "$APP_VERSION" "$GITHUB_RUN_NUMBER" "$SIGN_DMG"
+          printf 'MACOS_DMG_ASSET=%s\n' "$asset" >> "$GITHUB_ENV"
 
       - name: Store the dry-run DMG and checksum
         if: "!inputs.publish"
         uses: actions/upload-artifact@v4
         with:
           name: actrium-macos-${{ env.TAG }}
-          path: source/macos/dist/Actrium_${{ env.TAG }}_macos-arm64_unsigned.dmg*
+          path: source/macos/dist/${{ env.MACOS_DMG_ASSET }}*
           if-no-files-found: error
           overwrite: true
 
@@ -134,7 +179,7 @@ jobs:
           fi
           git push origin "refs/tags/$TAG:refs/tags/$TAG"
           notes="$RUNNER_TEMP/release-notes.md"
-          asset="macos/dist/Actrium_${TAG}_macos-arm64_unsigned.dmg"
+          asset="macos/dist/$MACOS_DMG_ASSET"
           if release=$(gh release view "$TAG" --json isPrerelease,isDraft,body); then
             jq -e '.isPrerelease and (if .isDraft then (.body // "" | contains("<!-- actrium-macos-build:start -->")) else true end)' <<< "$release" >/dev/null
             draft=$(jq -r '.isDraft' <<< "$release")
@@ -162,7 +207,7 @@ jobs:
           git fetch --no-tags origin "refs/tags/$TAG"
           test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$SOURCE_SHA"
           gh release view "$TAG" --json isPrerelease,isDraft --jq '.isPrerelease or .isDraft' | grep -qx false
-          asset="macos/dist/Actrium_${TAG}_macos-arm64_unsigned.dmg"
+          asset="macos/dist/$MACOS_DMG_ASSET"
           gh release upload "$TAG" "$asset" "$asset.sha256" --clobber
           gh release view "$TAG" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
 
