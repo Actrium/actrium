@@ -30,6 +30,7 @@ export default defineConfig({
     proxy: {
       "/admin/api": "http://localhost:80",
       "/admin/health": "http://localhost:80",
+      "/actr/ice-config": "http://localhost:80",
     },
   },
   build: {

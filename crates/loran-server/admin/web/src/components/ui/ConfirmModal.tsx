@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X, AlertTriangle } from "lucide-react";
 
 interface ConfirmModalProps {
@@ -24,27 +24,30 @@ export function ConfirmModal({
   onCancel,
   loading = false,
 }: ConfirmModalProps) {
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (isOpen) cancelButton.current?.focus();
+  }, [isOpen]);
+
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onCancel();
-      } else if (e.key === "Enter") {
+      if (e.key === "Escape" && !loading) {
         e.preventDefault();
-        onConfirm();
+        onCancel();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onConfirm, onCancel]);
+  }, [isOpen, loading, onCancel]);
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+      <div role="dialog" aria-modal="true" aria-label={title} className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
         <div className="flex items-start gap-4">
           <div className={`rounded-full p-2 ${isDestructive ? "bg-red-100 text-red-600" : "bg-blue-100 text-blue-600"}`}>
             <AlertTriangle className="h-5 w-5" />
@@ -56,7 +59,10 @@ export function ConfirmModal({
             </div>
           </div>
           <button
+            type="button"
             onClick={onCancel}
+            disabled={loading}
+            aria-label="Close confirmation"
             className="text-gray-400 hover:text-gray-500 transition-colors"
           >
             <X className="h-5 w-5" />
@@ -65,6 +71,8 @@ export function ConfirmModal({
 
         <div className="mt-6 flex justify-end gap-3">
           <button
+            ref={cancelButton}
+            type="button"
             onClick={onCancel}
             disabled={loading}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
@@ -72,6 +80,7 @@ export function ConfirmModal({
             {cancelLabel}
           </button>
           <button
+            type="button"
             onClick={onConfirm}
             disabled={loading}
             className={`rounded-lg px-4 py-2 text-sm font-medium text-white shadow-sm disabled:opacity-50 transition-colors ${

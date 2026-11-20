@@ -19,8 +19,13 @@ use serde_json::{Value, json};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+mod app_members;
+mod app_profiles;
 mod login_admission;
 mod package_release;
+mod service_access;
+pub(super) use app_members::AppManagement;
+pub(super) use service_access::service_access;
 
 // ── State ──────────────────────────────────────────────────────
 
@@ -32,6 +37,12 @@ pub struct AdminApiState {
     pub advertised_ip: String,
     pub metrics_store: MetricsStore,
     pub realm_writes_enabled: bool,
+    pub(super) domain_management: Option<Router>,
+    pub(super) app_management: Option<Arc<AppManagement>>,
+    pub(super) relay: Value,
+    pub(super) access: Value,
+    pub(super) provider: Option<String>,
+    pub(super) package_verifier: tokio::sync::OnceCell<Option<std::ffi::OsString>>,
 }
 
 // ── JWT ────────────────────────────────────────────────────────
@@ -224,12 +235,17 @@ async fn get_node_services(State(state): State<Arc<AdminApiState>>) -> impl Into
 }
 
 async fn get_admin_capabilities(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
+    let package_verifier_available =
+        state.realm_writes_enabled && app_profiles::package_verifier(&state).await.is_some();
     (
         StatusCode::OK,
         Json(json!({
             "realm_writes_enabled": state.realm_writes_enabled,
             "max_members_per_realm": state.service.platform_member_limit(),
             "superv_managed": !state.realm_writes_enabled,
+            "provider_id":state.provider,
+            "owner_device_registration":state.app_management.is_some(),
+            "package_verifier_available":package_verifier_available,
         })),
     )
         .into_response()
@@ -238,7 +254,29 @@ async fn get_admin_capabilities(State(state): State<Arc<AdminApiState>>) -> impl
 async fn list_realms(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
     match state.service.list_realms_direct().await {
         Ok(resp) => {
-            let realms: Vec<Value> = resp.realms.iter().map(realm_info_to_json).collect();
+            let names: Vec<(String, Option<String>)> = match sqlx::query_as(
+                "SELECT realm, json_extract(document, '$.realm.display_name') FROM realm_profile",
+            )
+            .fetch_all(platform::storage::db::get_database().get_pool())
+            .await
+            {
+                Ok(names) => names,
+                Err(_) => {
+                    return grpc_status_to_response(tonic::Status::unavailable(
+                        "Cannot load application names",
+                    ));
+                }
+            };
+            let names: std::collections::HashMap<_, _> = names.into_iter().collect();
+            let realms: Vec<Value> = resp
+                .realms
+                .iter()
+                .map(|realm| {
+                    let mut row = realm_info_to_json(realm);
+                    row["display_name"] = json!(names.get(&realm.realm));
+                    row
+                })
+                .collect();
             (
                 StatusCode::OK,
                 Json(json!({
@@ -603,6 +641,7 @@ async fn retire_realm(
 async fn get_realm_profile(
     State(state): State<Arc<AdminApiState>>,
     Path(realm): Path<String>,
+    Query(options): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     match state.service.get_realm_profile_direct(&realm).await {
         Ok(Some(document)) => {
@@ -612,6 +651,9 @@ async fn get_realm_profile(
                 Json(json!({ "success": true, "profile": profile })),
             )
                 .into_response()
+        }
+        Ok(None) if options.get("optional").is_some_and(|v| v == "true") => {
+            Json(json!({"success":true,"profile":null})).into_response()
         }
         Ok(None) => (
             StatusCode::NOT_FOUND,
@@ -790,8 +832,36 @@ async fn get_service_detail(
     State(state): State<Arc<AdminApiState>>,
     Path(name): Path<String>,
 ) -> impl IntoResponse {
+    let access = &state.access[&name];
+    if name == "publishers" {
+        return Json(json!({"enabled":true, "access":access, "config":null, "status":null}))
+            .into_response();
+    }
+    if name == "relay" {
+        let status = state
+            .service
+            .service_statuses()
+            .await
+            .iter()
+            .find(|s| s.r#type == 7)
+            .map(service_status_to_json);
+        return Json(json!({"enabled": state.relay["enabled"], "config": state.relay["config"], "status": status, "access":access})).into_response();
+    }
     match state.service.get_service_detail_direct(&name).await {
-        Ok(detail) => (StatusCode::OK, Json(serde_json::to_value(detail).unwrap())).into_response(),
+        Ok(mut detail) => {
+            if let Some(status) = detail.status.as_mut().filter(|_| name == "signer")
+                && let Some(port) = status["url"].as_str().and_then(signer_port)
+            {
+                status["port"] = json!(port);
+            }
+            #[derive(Serialize)]
+            struct WithAccess<'a, T> {
+                #[serde(flatten)]
+                detail: T,
+                access: &'a Value,
+            }
+            Json(WithAccess { detail, access }).into_response()
+        }
         Err(status) => grpc_status_to_response(status),
     }
 }
@@ -880,34 +950,73 @@ async fn delete_override(
 
 // ── Network probe endpoint ───────────────────────────────────────
 
+#[derive(Deserialize)]
+struct ProbeQuery {
+    service_type: Option<i32>,
+}
+
 async fn probe_port(
     State(state): State<Arc<AdminApiState>>,
     Path(port): Path<u16>,
+    Query(query): Query<ProbeQuery>,
 ) -> impl IntoResponse {
     use std::time::Instant;
     use tokio::net::TcpStream;
     use tokio::time::{Duration, timeout};
 
-    let addr = format!("{}:{}", state.advertised_ip, port);
+    let (host, port) = if let Some(kind) = query.service_type {
+        // A service-scoped check uses only an endpoint reported by this node.
+        let services = state.service.service_statuses().await;
+        let endpoint = services
+            .iter()
+            .find(|s| s.r#type == kind && matches!(kind, 3 | 4 | 5 | 7))
+            .and_then(|s| {
+                let url = url::Url::parse(s.url.as_deref()?).ok()?;
+                let target = url.port_or_known_default()?;
+                if s.port != Some(u32::from(port)) && target != port {
+                    return None;
+                }
+                Some((url.host_str()?.trim_matches(['[', ']']).to_string(), target))
+            });
+        let Some(endpoint) = endpoint else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error":"No matching TCP service endpoint"})),
+            )
+                .into_response();
+        };
+        endpoint
+    } else {
+        (state.advertised_ip.clone(), port)
+    };
+    let target = match host.parse::<std::net::IpAddr>() {
+        Ok(ip) => std::net::SocketAddr::new(ip, port).to_string(),
+        Err(_) => format!("{host}:{port}"),
+    };
     let start = Instant::now();
 
-    match timeout(Duration::from_secs(5), TcpStream::connect(&addr)).await {
+    match timeout(
+        Duration::from_secs(5),
+        TcpStream::connect((host.as_str(), port)),
+    )
+    .await
+    {
         Ok(Ok(_)) => {
             let latency_ms = start.elapsed().as_millis() as u64;
             (
                 StatusCode::OK,
-                Json(json!({"reachable": true, "latency_ms": latency_ms})),
+                Json(json!({"reachable": true, "latency_ms": latency_ms, "target":target})),
             )
                 .into_response()
         }
         Ok(Err(e)) => (
             StatusCode::OK,
-            Json(json!({"reachable": false, "error": e.to_string()})),
+            Json(json!({"reachable": false, "error": e.to_string(),"target":target})),
         )
             .into_response(),
         Err(_) => (
             StatusCode::OK,
-            Json(json!({"reachable": false, "error": "Connection timed out"})),
+            Json(json!({"reachable": false, "error": "Connection timed out","target":target})),
         )
             .into_response(),
     }
@@ -1032,6 +1141,38 @@ pub fn build_admin_api_router(
             post(issue_owner_invite),
         )
         .route("/admin/api/realms/{realm}/members", get(list_realm_members))
+        .route(
+            "/admin/api/realms/{realm}/management-client",
+            get(app_members::status).post(app_members::attach),
+        )
+        .route(
+            "/admin/api/realms/{realm}/signed-management",
+            post(app_profiles::submit_signed),
+        )
+        .route(
+            "/admin/api/apps/check-selection",
+            post(app_profiles::check_selection),
+        )
+        .route(
+            "/admin/api/realms/{realm}/member-actions",
+            post(app_members::action),
+        )
+        .route(
+            "/admin/api/realms/{realm}/owner-device/join",
+            post(app_members::join_owner_device),
+        )
+        .route(
+            "/admin/api/realms/{realm}/owner-device/status/{key_id}",
+            get(app_members::owner_device_status),
+        )
+        .route(
+            "/admin/api/realms/{realm}/owner-device/invites",
+            post(app_members::issue_owner_device).delete(app_members::ack_owner_device),
+        )
+        .route(
+            "/admin/api/realms/{realm}/operations/{id}/reveal",
+            post(app_members::reveal).delete(app_members::dismiss),
+        )
         .route(
             "/admin/api/identity/realm-domains/{domain}",
             get(get_realm_domain_identity).post(confirm_realm_domain_identity),
@@ -1206,7 +1347,20 @@ fn realm_info_to_json(info: &RealmInfo) -> Value {
     })
 }
 
+fn signer_port(url: &str) -> Option<u32> {
+    url::Url::parse(url)
+        .ok()?
+        .port_or_known_default()
+        .map(u32::from)
+}
+
 fn service_status_to_json(s: &loran_sdk::control::ServiceStatus) -> Value {
+    // Signer publishes its private gRPC listener in its service URL.
+    let port = if s.r#type == 5 {
+        s.url.as_deref().and_then(signer_port).or(s.port)
+    } else {
+        s.port
+    };
     json!({
         "name": s.name,
         "type": s.r#type,
@@ -1216,7 +1370,7 @@ fn service_status_to_json(s: &loran_sdk::control::ServiceStatus) -> Value {
         "failed_requests": s.failed_requests,
         "average_latency_ms": s.average_latency_ms,
         "url": s.url,
-        "port": s.port,
+        "port": port,
         "domain": s.domain,
     })
 }

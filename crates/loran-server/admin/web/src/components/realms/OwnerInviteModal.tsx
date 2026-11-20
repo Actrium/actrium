@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { copyText } from "../../lib/utils";
+import { useState, useEffect } from "react";
 import { X, Copy, Download, AlertTriangle, UserPlus } from "lucide-react";
 
 interface OwnerInviteModalProps {
@@ -16,6 +17,7 @@ interface OwnerInviteModalProps {
  * working.
  */
 export function OwnerInviteModal({ realm, invite, expiresAt, onClose }: OwnerInviteModalProps) {
+  const [copyError,setCopyError]=useState("");
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -40,7 +42,7 @@ export function OwnerInviteModal({ realm, invite, expiresAt, onClose }: OwnerInv
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             <UserPlus className="h-5 w-5 text-amber-500" />
-            Owner Invite
+            Owner recovery invite
           </h2>
           <button
             onClick={onClose}
@@ -58,7 +60,7 @@ export function OwnerInviteModal({ realm, invite, expiresAt, onClose }: OwnerInv
                 <p className="text-sm font-medium text-amber-900">Hand this invite to the owner</p>
                 <p className="text-xs text-amber-700">
                   It is shown only once and can be redeemed once. Whoever redeems it becomes the
-                  Realm&apos;s owner; an existing owner&apos;s clients are revoked. Earlier unused
+                  app&apos;s Owner. Redemption revokes the previous Owner devices. Earlier unused
                   owner invites no longer work.
                 </p>
               </div>
@@ -67,7 +69,7 @@ export function OwnerInviteModal({ realm, invite, expiresAt, onClose }: OwnerInv
 
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-medium text-gray-500 uppercase">Realm</label>
+              <label className="text-xs font-medium text-gray-500 uppercase">App ID</label>
               <p className="text-sm font-mono text-gray-900">{realm}</p>
             </div>
             <div>
@@ -82,7 +84,7 @@ export function OwnerInviteModal({ realm, invite, expiresAt, onClose }: OwnerInv
               )}
               <div className="flex gap-2 mt-2">
                 <button
-                  onClick={() => navigator.clipboard.writeText(invite)}
+                  onClick={() => void copyText(invite).catch(()=>setCopyError("Select the invite code and copy it manually."))}
                   className="flex items-center gap-1.5 rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                   <Copy className="h-3.5 w-3.5" /> Copy
@@ -97,6 +99,7 @@ export function OwnerInviteModal({ realm, invite, expiresAt, onClose }: OwnerInv
             </div>
           </div>
 
+          {copyError && <p role="alert" className="text-sm text-red-700">{copyError}</p>}
           <div className="pt-4 border-t border-gray-100 flex justify-end">
             <button
               onClick={onClose}

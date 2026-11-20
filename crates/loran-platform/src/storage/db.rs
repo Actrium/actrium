@@ -350,12 +350,25 @@ impl Database {
                 used_at INTEGER,
                 used_by_key TEXT,
                 revoked_at INTEGER,
+                owner_device_only INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(realm, invite_id),
                 CHECK((role IS NULL) != (member_id IS NULL))
             )",
         )
         .execute(&mut *tx)
         .await?;
+        let has_device_policy: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('realm_invite') WHERE name='owner_device_only')",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        if !has_device_policy {
+            sqlx::query(
+                "ALTER TABLE realm_invite ADD COLUMN owner_device_only INTEGER NOT NULL DEFAULT 0",
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
 
         // Realm management request nonces, kept until the request expires.
         sqlx::query(
