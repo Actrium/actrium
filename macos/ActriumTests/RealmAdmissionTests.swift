@@ -281,8 +281,8 @@ final class RealmAdmissionTests: XCTestCase {
         XCTAssertGreaterThan(failedProfileFetches, fetchesBeforeRedeeming)
         XCTAssertEqual(redeemedProfile?.realmName, realmName)
         XCTAssertEqual(redeemedProfile?.sequence, 3)
-        refreshingWindow.invalidateRealmLoadsForWindowClose()
-        movedWindow.invalidateRealmLoadsForWindowClose()
+        refreshingWindow.invalidateRealmNavigationForWindowClose()
+        movedWindow.invalidateRealmNavigationForWindowClose()
 
         let unexpectedExchange: RealmJoinService.InviteExchange = { _, _, _, _ in
             XCTFail("Retired or cancelled discovery must not redeem an invite")
@@ -353,10 +353,9 @@ final class RealmAdmissionTests: XCTestCase {
                 savedAddresses.append(contentsOf: tabs.compactMap { $0.url?.absoluteString })
             }
         )
-        defer { viewModel.invalidateRealmLoadsForWindowClose() }
+        defer { viewModel.invalidateRealmNavigationForWindowClose() }
 
         viewModel.navigateCurrentTab(to: linkURL.absoluteString)
-        XCTAssertTrue(viewModel.inviteRedemptionInFlight)
         viewModel.navigateCurrentTab(to: linkURL.absoluteString)
         viewModel.openURLInNewTab(linkURL)
 
@@ -518,7 +517,7 @@ final class RealmAdmissionTests: XCTestCase {
                 .init(id: UUID(), title: "Echo", address: realmAddress)
             ], activeTabIndex: 0)
         }
-        defer { viewModel.invalidateRealmLoadsForWindowClose() }
+        defer { viewModel.invalidateRealmNavigationForWindowClose() }
         XCTAssertEqual(viewModel.currentTab?.url?.absoluteString, webAddress)
         let frontTab = try XCTUnwrap(viewModel.tabs.first { $0.url?.absoluteString == realmAddress })
         await Task.yield()
