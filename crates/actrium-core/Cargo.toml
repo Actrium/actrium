@@ -35,7 +35,7 @@ uniffi = { version = "0.29.2", features = ["build"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 hex = { workspace = true, optional = true }
-libsqlite3-sys = { version = "0.39", features = ["bundled-sqlcipher"], optional = true }
+libsqlite3-sys = { version = "0.40", features = ["bundled-sqlcipher"], optional = true }
 zeroize = { version = "1", optional = true }
 
 [dev-dependencies]
