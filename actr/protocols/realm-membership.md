@@ -235,6 +235,11 @@ Package selection does not change membership or Actor-admission rules.
 A connection ACL carried by a registration applies only to the registering
 Actor's own type; since only the owner can register the Service's program,
 other members cannot rewrite the Service's ACL.
+Before a program becomes the primary Service, existing ACL rules for all its
+versions must have been written by a still-active key of the current owner.
+Actor revocation leaves its type-wide policy in place. Legacy ACL rules do
+not carry owner authorization. The owner can re-register the Service with
+its ACL to approve the policy.
 
 Actor credential claims include the member id, the Realm client key id and
 the role at issuance. A Service **MAY** use them to decide a Front's

@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const LORAN_SCHEMA_VERSION: i64 = 16;
+const LORAN_SCHEMA_VERSION: i64 = 17;
 
 /// Database manager
 #[derive(Clone)]
@@ -50,7 +50,10 @@ impl Database {
         let version: i64 = sqlx::query_scalar("PRAGMA user_version")
             .fetch_one(&mut *connection)
             .await?;
-        if matches!(version, 10 | 11 | 12 | 13 | 14 | 15 | LORAN_SCHEMA_VERSION) {
+        if matches!(
+            version,
+            10 | 11 | 12 | 13 | 14 | 15 | 16 | LORAN_SCHEMA_VERSION
+        ) {
             return Ok(version);
         }
 
@@ -380,11 +383,27 @@ impl Database {
                 from_type TEXT NOT NULL,
                 to_type TEXT NOT NULL,
                 access INTEGER NOT NULL CHECK(access IN (0, 1)),
+                owner_key_id TEXT,
                 FOREIGN KEY(realm) REFERENCES realm(name) ON DELETE CASCADE
             )",
         )
         .execute(&mut *tx)
         .await?;
+        if version != LORAN_SCHEMA_VERSION {
+            let has_provenance: bool = sqlx::query_scalar(
+                "SELECT EXISTS (
+                     SELECT 1 FROM pragma_table_info('actoracl') WHERE name = 'owner_key_id'
+                 )",
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            if !has_provenance {
+                // Older rules have no evidence of an owner-authorized write.
+                sqlx::query("ALTER TABLE actoracl ADD COLUMN owner_key_id TEXT")
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
 
         // Create indexes.
         sqlx::query(
@@ -751,6 +770,36 @@ mod tests {
         .fetch_one(upgraded.get_pool())
         .await?;
         assert_eq!(program, "acme.example/echo");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn v16_acl_rules_retain_their_permissions_without_implied_approval() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let old = Database::new(dir.path()).await?;
+        let pool = old.get_pool();
+        sqlx::query("ALTER TABLE actoracl DROP COLUMN owner_key_id")
+            .execute(pool)
+            .await?;
+        sqlx::query("INSERT INTO realm (name, created_at) VALUES ('acl@example.com', 1)")
+            .execute(pool)
+            .await?;
+        sqlx::query(
+            "INSERT INTO actoracl (realm, source_realm, from_type, to_type, access)
+             VALUES ('acl@example.com', 'acl@example.com', 'acme.com/ui@1.0.0', 'acme.com/echo@1.0.0', 1)",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query("PRAGMA user_version=16").execute(pool).await?;
+        pool.close().await;
+
+        let upgraded = Database::new(dir.path()).await?;
+        let rule: (bool, Option<String>) =
+            sqlx::query_as("SELECT access, owner_key_id FROM actoracl")
+                .fetch_one(upgraded.get_pool())
+                .await?;
+        assert_eq!(rule, (true, None));
         Ok(())
     }
 

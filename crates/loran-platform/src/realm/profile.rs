@@ -219,6 +219,7 @@ async fn record_service_switch(
             actor.to_string_repr()
         )));
     }
+    super::acl::ActorAcl::require_owner_policy(tx, realm, &program).await?;
     let previous = previous.actr_type().map_err(RealmError::Conflict)?;
     sqlx::query(
         "INSERT OR IGNORE INTO realm_previous_service_program (realm, program) VALUES (?, ?)",
@@ -832,6 +833,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn service_switch_and_rollback_check_existing_actor_owners() -> anyhow::Result<()> {
+        use super::super::acl::ActorAcl;
         use actr_protocol::realm_profile::sign_document;
 
         setup_test_db().await?;
@@ -858,6 +860,14 @@ mod tests {
             "INSERT INTO realm_member (realm, member_id, role, status, created_at)
              VALUES (?1, 'owner', 'owner', 'active', 0),
                     (?1, 'viewer', 'viewer', 'active', 0)",
+        )
+        .bind(NAME)
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO realm_client_key (realm, key_id, public_key, member_id, registered_at)
+             VALUES (?1, 'owner-key', zeroblob(32), 'owner', 0),
+                    (?1, 'viewer-key', randomblob(32), 'viewer', 0)",
         )
         .bind(NAME)
         .execute(pool)
@@ -895,6 +905,18 @@ mod tests {
             .bind(actor_type)
             .execute(pool)
             .await?;
+            if expected_sequence == 1 {
+                let rules = [ActorAcl::new(
+                    NAME.into(),
+                    "acme.com/ui@1.1.0".into(),
+                    actor_type.into(),
+                    true,
+                )];
+                let mut tx = pool.begin().await?;
+                let viewer = check_key_on(&mut tx, NAME, "viewer-key").await?;
+                ActorAcl::replace_registration_policy(&mut tx, actor_type, &rules, &viewer).await?;
+                tx.commit().await?;
+            }
 
             target["sequence"] = json!(expected_sequence + 1);
             sign_document(&mut target, "rs-1", &key);
@@ -925,6 +947,29 @@ mod tests {
             .bind(serial)
             .execute(pool)
             .await?;
+            if expected_sequence == 1 {
+                assert!(matches!(
+                    RealmProfileRecord::store_package_release(
+                        &profile, &target, Some(&previous.digest), None, release,
+                    ).await,
+                    Err(RealmError::Conflict(message))
+                        if message.contains(actor_type) && message.contains("needs approval from the current Realm owner")
+                ));
+                assert_eq!(
+                    RealmProfileRecord::get(NAME).await?.unwrap().digest,
+                    previous.digest
+                );
+                let rules = [ActorAcl::new(
+                    NAME.into(),
+                    "acme.com/ui@1.1.0".into(),
+                    actor_type.into(),
+                    true,
+                )];
+                let mut tx = pool.begin().await?;
+                let owner = check_key_on(&mut tx, NAME, "owner-key").await?;
+                ActorAcl::replace_registration_policy(&mut tx, actor_type, &rules, &owner).await?;
+                tx.commit().await?;
+            }
             RealmProfileRecord::store_package_release(
                 &profile,
                 &target,

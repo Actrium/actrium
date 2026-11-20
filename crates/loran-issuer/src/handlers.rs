@@ -583,7 +583,7 @@ async fn persist_registration_state(
             })
             .collect::<Vec<_>>();
 
-        ActorAcl::replace_for_target_in_transaction(&mut tx, realm, &my_type, &replacement)
+        ActorAcl::replace_registration_policy(&mut tx, &my_type, &replacement, &signer)
             .await
             .map_err(|error| {
                 platform::recording::error!(
