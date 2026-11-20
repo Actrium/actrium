@@ -647,6 +647,7 @@ impl HostState {
         }
         Some(Arc::new(move |operation| {
             use crate::workload::{HostOperation, HostOperationResult};
+            // TODO(#486): Require a scoped grant for DataStream registration and sends.
             if matches!(
                 operation,
                 HostOperation::Call(_)
@@ -654,8 +655,6 @@ impl HostState {
                     | HostOperation::ScopedActorCall { .. }
                     | HostOperation::Tell(_)
                     | HostOperation::Discover(_)
-                    | HostOperation::RegisterStream(_)
-                    | HostOperation::SendDataChunk(_)
             ) {
                 Box::pin(async {
                     HostOperationResult::Error(actr_protocol::ActrError::PermissionDenied(
@@ -669,7 +668,6 @@ impl HostState {
     }
 
     pub(crate) fn invocation_exists(&self, token: u64) -> bool {
-        let token = self.effective_invocation_token(token);
         self.invocations.contains_key(&token)
     }
 
@@ -796,7 +794,6 @@ impl HostState {
     /// Record an accepted EXPLICIT reply. The token remains live while the
     /// guest dispatch export is still running, then is retired at completion.
     pub(crate) fn complete_reply(&mut self, token: u64) {
-        let token = self.effective_invocation_token(token);
         let should_remove = match self.invocations.get_mut(&token) {
             Some(entry) => {
                 entry.reply_completed = true;
@@ -817,7 +814,8 @@ impl HostState {
         token: u64,
         result: Result<bytes::Bytes, actr_protocol::ActrError>,
     ) -> bool {
-        let token = self.effective_invocation_token(token);
+        // A deferred Reply owns the RPC that created it, even while stream
+        // operations resolve through the active callback's context.
         let result = result.map_err(|error| self.sanitize_guest_error(token, error));
         if self.egress.is_some()
             && let Some(entry) = self.invocations.get_mut(&token)
@@ -1058,7 +1056,7 @@ impl WasmHost {
                  bump; wasmtime reported: {raw})"
             ))
         })?;
-        // A v0.6 component can import the host interface for ordinary calls,
+        // A component can import the host interface for ordinary calls,
         // logging, or discovery without importing either reply operation.
         // Looking only at the interface name therefore misclassified ordinary
         // RETURN guests as EXPLICIT and swallowed their dispatch bytes. Inspect
@@ -1069,7 +1067,7 @@ impl WasmHost {
                 .component_type()
                 .imports(&engine)
                 .any(|(name, import)| {
-                    name == "actr:workload/host@0.6.0"
+                    name == "actr:workload/host@0.8.0"
                         && matches!(
                             &import.ty,
                             ComponentItem::ComponentInstance(interface)
