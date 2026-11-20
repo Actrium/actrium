@@ -360,7 +360,9 @@ For a provider-signed Realm, use a guarded Service release to change the
 primary program or its dependency graph. A release can reuse the Service
 archive when its signed manifest, dependency locks and RPC contracts allow
 the new selection. Rollback restores the complete previous selection at a
-new sequence. Deployment applies the selection to the running Service.
+new sequence. A saved rollback selection can restore a Local Front. The Host
+checks its archive and RPC contract when opening it with the user's consent.
+Deployment applies the selection to the running Service.
 
 For an externally signed Realm, `publish_profile` preserves the current
 Service program. The provider can also accept a valid signed successor from

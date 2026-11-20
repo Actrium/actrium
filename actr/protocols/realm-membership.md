@@ -223,9 +223,10 @@ The Issuer issues only when all of the following hold:
    identity enrollment also requires the currently bound key and an unexpired
    renewal token;
 3. at registration, resolve `packages[primary_package]` from the verified Profile.
-   The Issuer **MUST** reject an invalid primary reference. If the Actor type's publisher and
-   program name equal those of this primary's `type` (in any version, that is, the
-   instance's Service and its upgrades), the signing key belongs to the owner.
+   The Issuer **MUST** reject an invalid primary reference. Registration of any
+   version of the Realm's current or previous primary Service program requires
+   an owner key. This keeps the outgoing Service's ACL under owner control for
+   clients still using it and for rollback.
    Renewal and reissue do not check the role again, so an ownership transfer
    does not affect a running Service.
 

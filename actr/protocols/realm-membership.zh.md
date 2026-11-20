@@ -161,8 +161,8 @@ Issuer 只在以下条件都满足时签发：
 2. 续期时，签名 key 是该 Actor 当前绑定的 key；重签时，签名 key 属于该 Actor 所属的成员，重签成功后 Actor
    改绑到这把 key（成员可凭 Actor 私钥把自己的 Actor 移到自己的另一个客户端）；
 3. 注册时，Issuer 从已验证的 Profile 解析 `packages[primary_package]`。主包引用无效时 **MUST** 拒绝注册。
-   若 Actor 类型的 publisher 与程序名等于该主包 `type` 的（不论版本，即该实例的
-   Service 及其升级版本），签名 key 属于 owner。续期与重签不再检查角色，owner 转让不影响运行中的 Service。
+   当前及曾被选为主 Service 的程序都只允许 owner 注册，所有版本均适用。
+   这样切换后，旧客户端和回滚继续使用由 owner 管理的 ACL。续期与重签不再检查角色，owner 转让不影响运行中的 Service。
 
 包选择不改变成员权限和 Actor 准入规则。
 

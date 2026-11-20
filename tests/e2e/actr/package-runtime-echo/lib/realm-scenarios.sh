@@ -193,13 +193,22 @@ start_fixture_candidate() {
     expect_server_started "server-next.log" "$CANDIDATE_SERVICE_PID"
 }
 
+fixture_service_acl() {
+    sqlite3 "$LORAN_DB" "SELECT quote(source_realm), from_type, access
+        FROM actoracl WHERE realm = '$REALM' AND to_type = '$1'
+        ORDER BY source_realm, from_type, access;"
+}
+
 run_package_release_roundtrips() {
     local candidate="$DIST_DIR/realm-front-next.actr" selection="$RUN_DIR/front-next-selection.json"
     local request="$RUN_DIR/front-release-request.json" front_sha front_href package_key
     local original_service_type="$PUBLISHER/EchoService@$SERVICE_VERSION"
     local target_service_type="$original_service_type" actors=null
     local next_service="" service_sha="" service_href=""
+    local original_acl=""
     if [ "${REALM_SERVICE_SWITCH:-0}" = 1 ]; then
+        original_acl="$(fixture_service_acl "$original_service_type")"
+        [ -n "$original_acl" ] || fail "Original Service has no ACL to check"
         section "Joint Front and Service identity switch and rollback"
         target_service_type="$PUBLISHER/EchoServiceNext@$SERVICE_VERSION"
         next_service="$DIST_DIR/echo-v2-next.actr"
@@ -246,6 +255,8 @@ run_package_release_roundtrips() {
     kill -0 "$SERVER_PID" 2>/dev/null || fail "Original Service stopped during the release"
     if [ "${REALM_SERVICE_SWITCH:-0}" = 1 ]; then
         kill -0 "$CANDIDATE_SERVICE_PID" 2>/dev/null || fail "Candidate Service stopped during the release"
+        [ "$(fixture_service_acl "$original_service_type")" = "$original_acl" ] ||
+            fail "Original Service ACL changed during switch or rollback"
         grep -E '^SERVICE_(SWITCH|PACKAGE_GATE) ' "$LOG_DIR/front-release.log"
         success "Front reached the original, upgraded, and restored Actor in order"
     else

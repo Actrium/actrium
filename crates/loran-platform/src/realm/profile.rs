@@ -181,10 +181,9 @@ fn read_stored_selection(document: &str) -> Result<StoredSelection, RealmError> 
     Ok(StoredSelection::Legacy(primary))
 }
 
-/// A previously registered Actor may still be usable when its program
-/// becomes the Service. Check the member even if its original key has been
-/// revoked, since another key of the same member can reissue the Actor.
-async fn check_primary_promotion(
+/// Check existing Actor ownership before changing the primary program and
+/// reserve the outgoing program's registration and ACLs for the owner.
+async fn record_service_switch(
     tx: &mut sqlx::SqliteConnection,
     realm: &str,
     previous: &RealmPackage,
@@ -208,7 +207,7 @@ async fn check_primary_promotion(
     )
     .bind(realm)
     .bind(&program)
-    .fetch_optional(tx)
+    .fetch_optional(&mut *tx)
     .await?;
     if let Some(serial) = serial {
         let actor = ActrId {
@@ -220,6 +219,14 @@ async fn check_primary_promotion(
             actor.to_string_repr()
         )));
     }
+    let previous = previous.actr_type().map_err(RealmError::Conflict)?;
+    sqlx::query(
+        "INSERT OR IGNORE INTO realm_previous_service_program (realm, program) VALUES (?, ?)",
+    )
+    .bind(realm)
+    .bind(format!("{}/{}", previous.publisher, previous.name))
+    .execute(tx)
+    .await?;
     Ok(())
 }
 
@@ -462,7 +469,7 @@ impl RealmProfileRecord {
                     "There is no previous selection to roll back to.".into(),
                 ));
             }
-            check_primary_promotion(
+            record_service_switch(
                 &mut tx,
                 name,
                 old.selected().map_err(RealmError::Conflict)?.0,
@@ -510,7 +517,7 @@ impl RealmProfileRecord {
                 accepted
                     .check_successor(selection)
                     .map_err(RealmError::Conflict)?;
-                check_primary_promotion(&mut tx, name, old, new).await?;
+                record_service_switch(&mut tx, name, old, new).await?;
             } else {
                 old.check_primary_successor(new).map_err(|_| {
                     RealmError::Conflict(

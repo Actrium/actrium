@@ -70,9 +70,15 @@ pub(super) async fn verify(
         ));
     }
     if matches!(release, PackageRelease::Service(_)) && report.front.is_none() {
-        return Err(ProfileError::Invalid(
-            "Choose a downloadable Front so the Service release can check the RPC contract.".into(),
-        ));
+        // The issuer checks the saved rollback selection again at commit.
+        // The Host verifies a restored Local Front when the user opens it.
+        let (_, front) = selection.selected().map_err(ProfileError::Invalid)?;
+        if !release.update().rollback || front.local_path.is_none() {
+            return Err(ProfileError::Invalid(
+                "Choose a downloadable Front so the Service release can check the RPC contract."
+                    .into(),
+            ));
+        }
     }
     Ok(())
 }

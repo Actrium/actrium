@@ -285,7 +285,8 @@ Actr Facility Provider 由 Actr Host、用户或 key 持有方的策略选定。
 
 由 Provider 签名的 Realm 通过受保护的 Service 发布更换主程序或依赖链。
 签名清单、依赖锁和 RPC 契约都允许时，可以沿用原 Service 包并更换依赖。
-回滚用更高的序号恢复上一次发布前的整组选包，运行中的 Service 由部署应用选包。
+回滚用更高的序号恢复上一次发布前的整组选包。恢复 Local Front 时，Host 在用户授权打开后校验包和 RPC 契约。
+运行中的 Service 由部署应用选包。
 
 外部签名的 Realm 通过 `publish_profile` 发布时须保留当前 Service 程序。Provider
 也可以从 Realm 域名配置的 `realms` 位置接受有效的签名后继 Profile。切换主程序时，

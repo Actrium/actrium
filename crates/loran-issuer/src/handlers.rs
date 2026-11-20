@@ -342,24 +342,38 @@ async fn authenticate_client(
     }
 }
 
-/// Only the owner registers the Realm's Service: an Actor whose publisher
-/// and program are those of the selected primary package, any version.
-/// Reads the Profile on `db`, which may be the registration transaction.
+/// Only the owner registers current or previous Service programs, in any
+/// version. Older Fronts can still call them using their type-wide ACLs.
+/// Reads the Profile and outgoing programs in one database snapshot.
 async fn check_realm_registration<'e>(
     db: impl sqlx::SqliteExecutor<'e>,
     request: &RegisterRequest,
     signer: &Signer,
 ) -> Result<(), ErrorResponse> {
-    let Some(document) = realm_profile_document(db, &request.realm).await? else {
+    let program = format!("{}/{}", request.actr_type.publisher, request.actr_type.name);
+    let record: Option<(String, bool)> = sqlx::query_as(
+        "SELECT document, EXISTS (
+            SELECT 1 FROM realm_previous_service_program WHERE realm = ?1 AND program = ?2
+         ) FROM realm_profile WHERE realm = ?1",
+    )
+    .bind(&request.realm)
+    .bind(program)
+    .fetch_optional(db)
+    .await
+    .map_err(|error| membership_error("unavailable", error))?;
+    let Some((document, previous_service)) = record else {
         return Ok(());
     };
+    let document = actr_protocol::signed_json::parse(document.as_bytes())
+        .map_err(|error| membership_error("realm_unavailable", error))?;
     let selection = realm_package_selection(document)?;
     let invalid = |message: String| membership_error("realm_unavailable", message);
     let (service, front) = selection.selected().map_err(invalid)?;
     let service = service.actr_type().map_err(invalid)?;
     if signer.role != Role::Owner
-        && service.publisher == request.actr_type.publisher
-        && service.name == request.actr_type.name
+        && (previous_service
+            || (service.publisher == request.actr_type.publisher
+                && service.name == request.actr_type.name))
     {
         return Err(membership_error(
             "service_owner_only",
@@ -1548,6 +1562,39 @@ mod tests {
         persist_registration_state(&request, &register_ok, &editor)
             .await
             .unwrap();
+        assert_eq!(rows().await, [1, 1]);
+
+        let mut switched = profile;
+        switched["packages"]["service"]["type"] = "acme.com/notes-next@1.0.0".into();
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("UPDATE realm_profile SET document = ? WHERE realm = ?")
+            .bind(switched.to_string())
+            .bind(realm)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO realm_previous_service_program (realm, program) VALUES (?, ?)")
+            .bind(realm)
+            .bind("acme.com/notes")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let mut conn = pool.acquire().await.unwrap();
+        let former_owner = membership::check_key_on(&mut conn, realm, &owner.key_id)
+            .await
+            .unwrap();
+        drop(conn);
+        let error = check_realm_registration(pool, &request, &former_owner)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, 403);
+        let (code, message) = persist_registration_state(&request, &register_ok, &owner)
+            .await
+            .unwrap_err();
+        assert_eq!(code, 403);
+        assert!(message.contains("service_owner_only"), "{message}");
         assert_eq!(rows().await, [1, 1]);
     }
 
