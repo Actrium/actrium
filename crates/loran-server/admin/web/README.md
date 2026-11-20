@@ -38,4 +38,7 @@ such as `echo@realm.example` with these files.
 Use a downloadable Front archive for Service cutovers so AFP can verify its
 contract and use it for the readiness call. Unconfigured probes, failed
 verification and unsuccessful RPCs leave the current Profile in place.
-A rollback of a Service release checks the previous Service again.
+A rollback checks the previous Service again when its Front can be downloaded.
+When the recorded previous selection uses a local Front, the Issuer verifies
+the selection and restores it at a new Profile sequence. Actrium checks the
+local archive when opening it.

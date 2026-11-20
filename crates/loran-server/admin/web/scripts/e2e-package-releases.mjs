@@ -64,6 +64,8 @@ const profileOf = async (app) => signed((await http(apiPath(app, "/profile"))).p
 const selectionOf = ({ primary_package, front_package, packages }) => ({ primary_package, front_package, packages });
 
 const cli = process.env.LORAN_ECHO_ACTR_BIN;
+const icePort = Number(process.env.LORAN_ECHO_ICE_PORT || 25513);
+assert(Number.isInteger(icePort) && icePort > 0 && icePort <= 65535);
 function actr(args, input) {
   const result = spawnSync(cli, args, { input, encoding: "utf8", timeout: 30_000 });
   assert.equal(result.status, 0, "Echo fixture actr " + args.slice(0, 2).join(" ") + " failed");
@@ -86,7 +88,7 @@ async function startEcho(app, version, key) {
     "[issuer_endpoint]", "url = " + JSON.stringify(url("/issuer")),
     "[[trust]]", 'kind = "static"', "pubkey_b64 = " + JSON.stringify(publisherKey.public_key),
     "[discovery]", "visible = true",
-    "[webrtc]", 'stun_urls = ["stun:127.0.0.1:25513"]', 'turn_urls = ["turn:127.0.0.1:25513"]',
+    "[webrtc]", "stun_urls = " + JSON.stringify(["stun:127.0.0.1:" + icePort]), "turn_urls = " + JSON.stringify(["turn:127.0.0.1:" + icePort]),
     "[[acl.rules]]", 'permission = "allow"', 'realm = "self"',
     "type = " + JSON.stringify("publisher.afp-p1.test/echo-front@" + version),
   ].join("\n"), { mode: 0o600 });
@@ -116,7 +118,7 @@ async function configureProbe(app, probeKey, route) {
     "[[trust]]", 'kind = "static"', "pubkey_b64 = " + JSON.stringify(publisherKey.public_key),
     "[hyper]", "data_dir = " + JSON.stringify(join(dir, "hyper")),
     "[discovery]", "visible = false",
-    "[webrtc]", 'stun_urls = ["stun:127.0.0.1:25513"]', 'turn_urls = ["turn:127.0.0.1:25513"]',
+    "[webrtc]", "stun_urls = " + JSON.stringify(["stun:127.0.0.1:" + icePort]), "turn_urls = " + JSON.stringify(["turn:127.0.0.1:" + icePort]),
     "[[acl.rules]]", 'permission = "allow"', 'realm = "self"', 'type = "publisher.afp-p1.test/echo@0.1.7"',
     "[[acl.rules]]", 'permission = "allow"', 'realm = "self"', 'type = "publisher.afp-p1.test/echo@0.1.8"',
   ].join("\n"), { mode: 0o600 });
@@ -271,8 +273,91 @@ try {
   await configureProbe(app, probeKey, "echo.v1.EchoService.Unavailable");
   const frontRelease = await http(activeRelease, "PUT", releaseBody(local, restored));
   assert.equal(frontRelease.sequence, restored.sequence + 1);
-  assert.deepEqual(selectionOf(await profileOf(app)), local);
+  const localProfile = await profileOf(app);
+  assert.deepEqual(selectionOf(localProfile), local);
   pass("A Front-only release retains the selected Service and verifies the local Publisher key");
+
+  await configureProbe(app, probeKey, route);
+  await page.goto(url("/admin/apps/" + encodeURIComponent(app)));
+  await page.getByText("Edit app profile", { exact: true }).click();
+  const name = field("App display name");
+  const draftName = "Unsaved cutover name";
+  await name.fill(draftName);
+  await button("Release packages").click();
+  const modal = page.getByRole("heading", { name: "Realm packages", exact: true }).locator("xpath=ancestor::section[1]");
+  await field("Packages JSON").fill(JSON.stringify(target.packages));
+  let failedRefreshes = 0;
+  const failRefresh = async (request) => {
+    if (request.request().method() === "GET") {
+      failedRefreshes++;
+      await request.fulfill({ status: 503, json: { error: "Package state temporarily unavailable" } });
+    } else {
+      await request.fallback();
+    }
+  };
+  await page.route(url(activeRelease), failRefresh);
+  let afterCutover;
+  try {
+    const result = page.waitForResponse(
+      res => res.url() === url(activeRelease) && res.request().method() === "PUT",
+      { timeout: 310_000 },
+    );
+    await button("Update packages").click();
+    assert.equal((await result).status(), 200);
+    afterCutover = await profileOf(app);
+    assert.equal(afterCutover.sequence, localProfile.sequence + 1);
+    assert.deepEqual(selectionOf(afterCutover), target);
+    await modal.getByRole("status").filter({ hasText: "Published Profile " + afterCutover.sequence + "." }).waitFor();
+    await modal.getByText(app + " · Profile " + afterCutover.sequence, { exact: true }).waitFor();
+    await modal.getByRole("alert").filter({ hasText: "Package details may be out of date." }).waitFor();
+    assert(failedRefreshes > 0);
+    assert(await button("Update packages").isDisabled());
+    assert(await button("Rollback").isDisabled());
+    await page.getByText("Provider localhost · Sequence " + afterCutover.sequence, { exact: true }).waitFor();
+    pass("A successful release and its sequence survive a failed package refresh, and stale edits are blocked");
+  } finally {
+    await page.unroute(url(activeRelease), failRefresh);
+  }
+  await modal.getByRole("button", { name: "Close", exact: true }).click();
+  assert.equal(await name.inputValue(), draftName);
+  await button("Save signed profile").click();
+  await page.getByRole("heading", { name: draftName, exact: true, level: 1 }).waitFor();
+  const renamed = await profileOf(app);
+  assert.equal(renamed.realm.display_name, draftName);
+  assert.equal(renamed.sequence, afterCutover.sequence + 1);
+  assert(await button("Save signed profile").isDisabled());
+  pass("Publishing packages preserves the name draft, and saving it updates the signed Profile");
+
+  const updatedName = "Name from a different Admin request";
+  await http(apiPath(app, "/member-actions"), "POST", {
+    action: "update_app", display_name: updatedName, request_id: randomUUID(),
+  });
+  const latest = await profileOf(app);
+  await http(activeRelease, "PUT", releaseBody(local, latest), 400);
+  await http(activeRelease, "PUT", releaseBody(local, renamed, true), 409);
+  const differentLocal = structuredClone(local);
+  differentLocal.packages.front.href = "different-front.actr";
+  await http(activeRelease, "PUT", releaseBody(differentLocal, latest, true), 409);
+  assert.deepEqual(await profileOf(app), latest);
+  pass("A normal Service release or a stale or mismatched rollback cannot restore a Local Front");
+
+  await configureProbe(app, probeKey, "echo.v1.EchoService.Unavailable");
+  await button("Release packages").click();
+  const localRollback = page.waitForResponse(
+    res => res.url() === url(activeRelease) && res.request().method() === "PUT",
+    { timeout: 310_000 },
+  );
+  await button("Rollback").click();
+  const received = await localRollback;
+  assert.equal(received.status(), 200, (await received.json()).error ?? "Local Front rollback failed");
+  const restoredLocal = await profileOf(app);
+  assert.equal(restoredLocal.sequence, latest.sequence + 1);
+  assert.deepEqual(selectionOf(restoredLocal), local);
+  assert.equal(restoredLocal.realm.display_name, updatedName);
+  await modal.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("heading", { name: updatedName, exact: true, level: 1 }).waitFor();
+  assert.equal(await name.inputValue(), updatedName);
+  pass("A recorded Local Front rollback restores the signed selection at a newer sequence");
   await writeFile(join(root, "logs", "package-release-results.json"), JSON.stringify({ tests }, null, 2));
 } catch (error) {
   console.error(error);

@@ -524,7 +524,7 @@ function DetailsPage({ id }: { id: string }) {
                 {ownDomain && (
                   <>
                     <AppProfileEditor
-                      key={data.profile.sequence}
+                      key={id}
                       profile={data.profile}
                       disabled={!manage}
                       onSave={(change) => run(() => memberAction(change))}

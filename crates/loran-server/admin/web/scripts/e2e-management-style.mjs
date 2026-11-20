@@ -53,7 +53,9 @@ async function checkKey(status, key = "") {
 }
 async function style(locator, properties) {
   await locator.waitFor();
-  return locator.evaluate((node, props) => {
+  await page.mouse.move(0, 0);
+  return locator.evaluate(async (node, props) => {
+    await Promise.allSettled(node.getAnimations().map(animation => animation.finished));
     const computed = getComputedStyle(node);
     return Object.fromEntries(props.map(prop => [prop, computed.getPropertyValue(prop)]));
   }, properties);
@@ -85,7 +87,9 @@ async function confirmAction(trigger, title, label, consequence) {
   assert.match(await dialog.innerText(), consequence);
   const rect = await dialog.boundingBox();
   assert(rect.x >= 0 && rect.x + rect.width <= 390 && rect.y >= 0 && rect.y + rect.height <= 844);
-  await button("Cancel", dialog).click();
+  const cancel = button("Cancel", dialog);
+  assert(await cancel.evaluate(node => node === document.activeElement), title + " should focus Cancel");
+  await page.keyboard.press("Enter");
   await dialog.waitFor({ state: "hidden" });
   assert.equal(writes.length, before, title + " must not send a request on cancel");
 
@@ -93,7 +97,9 @@ async function confirmAction(trigger, title, label, consequence) {
     response.url().includes(registryApi) && ["POST", "DELETE"].includes(response.request().method()),
   );
   await trigger.click();
-  await button(label, dialog).click();
+  const confirm = button(label, dialog);
+  await confirm.focus();
+  await page.keyboard.press("Enter");
   assert.equal((await mutation).status(), 200);
   await dialog.waitFor({ state: "hidden" });
   assert.equal(writes.length, before + 1, title + " must submit once");

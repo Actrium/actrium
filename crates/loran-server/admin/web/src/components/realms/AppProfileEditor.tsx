@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { type AppProfile, type MemberAction } from "../../lib/api";
 import { managementButton } from "../ui/ManagementControls";
 
@@ -11,9 +11,14 @@ export function AppProfileEditor({
   disabled: boolean;
   onSave: (change: MemberAction) => Promise<void>;
 }) {
-  const [name, setName] = useState(profile.realm.display_name || "");
+  const publishedName = profile.realm.display_name;
+  const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const changedName = name.trim() !== profile.realm.display_name;
+  const name = draft ?? publishedName;
+  const changedName = name.trim() !== publishedName;
+  useEffect(() => {
+    setDraft(current => current?.trim() === publishedName ? null : current);
+  }, [publishedName]);
   return (
     <details>
       <summary className="cursor-pointer text-sm font-medium">Edit app profile</summary>
@@ -21,6 +26,7 @@ export function AppProfileEditor({
         className="mt-3 space-y-3"
         onSubmit={async (e) => {
           e.preventDefault();
+          if (disabled || !changedName) return;
           setError("");
           try {
             await onSave({ action: "update_app", display_name: name.trim() });
@@ -31,7 +37,8 @@ export function AppProfileEditor({
       >
         <label className="grid gap-1 text-sm">
           App display name
-          <input required className="rounded border p-2" value={name} onChange={(e) => setName(e.target.value)} />
+          <input required className="rounded border p-2" value={name}
+            onChange={event => setDraft(event.target.value === publishedName ? null : event.target.value)} />
         </label>
         <button
           className={managementButton.primary}

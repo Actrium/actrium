@@ -78,9 +78,9 @@ async fn release(
         .await
         .map_err(grpc_status_to_response)?;
     let conflict = if snapshot.sequence != operation.expected_sequence {
-        Some("The Profile changed. Reload the selection before submitting again.")
+        Some("The Profile changed. Reload the selection and try again.")
     } else if operation.rollback && snapshot.previous_selection.as_ref() != Some(&selection) {
-        Some("There is no matching previous package selection to restore.")
+        Some("There is no previous selection to roll back to.")
     } else {
         None
     };
@@ -109,7 +109,16 @@ async fn release(
     let owner = app_members::package_release_owner(state, realm)
         .await
         .map_err(IntoResponse::into_response)?;
-    if kind == PackageSelectionChange::Service {
+    // A recorded rollback to a Local Front has no archive the AFP can use to
+    // probe the Service. The Issuer verifies the selection and rollback again.
+    let restoring_local_front = operation.rollback
+        && selection
+            .selected()
+            .map_err(bad_request)?
+            .1
+            .local_path
+            .is_some();
+    if kind == PackageSelectionChange::Service && !restoring_local_front {
         check_service_readiness(realm, &selection)
             .await
             .map_err(grpc_status_to_response)?;
