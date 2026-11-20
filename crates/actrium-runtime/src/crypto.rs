@@ -182,12 +182,7 @@ pub(crate) fn takeover_signing_bytes_with_attach(
 /// Takeover proof bytes commit to both the old lease and the complete new
 /// Attach request, preventing approval from being replayed with another session.
 pub fn takeover_signing_bytes(request: &TakeoverRequest, attach: &AttachRequest) -> Vec<u8> {
-    let mut output = TAKEOVER_DOMAIN.to_vec();
-    string(&mut output, &request.session_id);
-    u64_value(&mut output, request.lease_epoch);
-    string(&mut output, &request.requesting_front_actor_id);
-    bytes(&mut output, &attach_request_digest(attach));
-    output
+    takeover_signing_bytes_with_attach(request, attach)
 }
 
 pub(crate) fn verify_takeover(

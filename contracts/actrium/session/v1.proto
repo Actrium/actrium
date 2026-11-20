@@ -140,6 +140,16 @@ message DetachRequest {
   uint64 lease_epoch  = 2;
 }
 
+// CancelAttachmentResult — Host-only cancellation of one accepted Prepare.
+// The logical payload is carried in a signed BusinessRequest on route
+// actrium.session.v1.SessionRegistry.CancelAttachmentResult. The current Host
+// transport encodes this shape as JSON with the same field names, not protobuf;
+// neither the request nor its signed response proof enters the Guest.
+message CancelAttachmentResult {
+  string stream_id          = 1;  // Public result stream ID
+  string prepare_request_id = 2;  // Request ID of the accepted Prepare
+}
+
 // Takeover — Authorized transfer of the exclusive lease.
 // Requires independent permission and conflict-policy approval.
 // Atomically invalidates the old session, epoch, and channel.
@@ -358,6 +368,10 @@ message SessionMetadata {
   string route_key                         = 8;  // BusinessRequest.route in Rust
   uint64 deadline_epoch_secs               = 9;
   // Presence is authenticated: absent and present-but-empty are distinct.
+  // Business delivery is at-least-once and request_id is the replay unit.
+  // A caller retrying after an uncertain outcome must mint a fresh request_id;
+  // it may retain idempotency_key as application-level correlation data.
+  // This field does not promise exactly-once execution or result replay.
   optional string idempotency_key          = 10;
   bytes  request_proof                     = 11; // 32-byte HMAC-SHA-256 output
   string service_actor_id                  = 12;

@@ -102,16 +102,7 @@ impl<'a> IncomingMetadata<'a> {
         self.entries.is_empty()
     }
 
-    pub fn get(self, key: &str) -> Option<&'a str> {
-        self.entries
-            .iter()
-            .find(|entry| entry.key == key)
-            .map(|entry| entry.value.as_str())
-    }
-
-    /// Read one optional unsigned integer, rejecting duplicate or malformed
-    /// values. Security metadata must never use first-value-wins semantics.
-    pub fn get_u64(self, key: &str) -> Result<Option<u64>, IncomingMetadataError> {
+    pub fn get(self, key: &str) -> Result<Option<&'a str>, IncomingMetadataError> {
         let mut values = self
             .entries
             .iter()
@@ -126,6 +117,15 @@ impl<'a> IncomingMetadata<'a> {
                 kind: IncomingMetadataErrorKind::Duplicate,
             });
         }
+        Ok(Some(value))
+    }
+
+    /// Read one optional unsigned integer, rejecting duplicate or malformed
+    /// values. Security metadata must never use first-value-wins semantics.
+    pub fn get_u64(self, key: &str) -> Result<Option<u64>, IncomingMetadataError> {
+        let Some(value) = self.get(key)? else {
+            return Ok(None);
+        };
         value
             .parse::<u64>()
             .map(Some)
@@ -339,7 +339,43 @@ pub trait IncomingGuard: Send + Sync + 'static {
     /// Release any per-request state kept by the guard after the request has
     /// been dispatched and its response (if any) has been sent. The default
     /// no-op keeps optional-state guards from needing an empty implementation.
-    async fn finish(&self, _request_id: &str) -> Result<(), IncomingGuardError> {
+    async fn finish(
+        &self,
+        _request_id: &str,
+        _metadata: IncomingMetadata<'_>,
+    ) -> Result<(), IncomingGuardError> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_rejects_duplicate_security_values() {
+        let entries = vec![
+            MetadataEntry {
+                key: "actrium.session.id".to_string(),
+                value: "first".to_string(),
+            },
+            MetadataEntry {
+                key: "actrium.session.id".to_string(),
+                value: "second".to_string(),
+            },
+        ];
+        let metadata = IncomingMetadata::new(&entries);
+        assert_eq!(
+            metadata.get("actrium.session.id"),
+            Err(IncomingMetadataError {
+                key: "actrium.session.id".to_string(),
+                kind: IncomingMetadataErrorKind::Duplicate,
+            })
+        );
+        assert_eq!(
+            metadata.get_u64("actrium.session.id").unwrap_err().kind,
+            IncomingMetadataErrorKind::Duplicate
+        );
+        assert_eq!(metadata.get("missing"), Ok(None));
     }
 }

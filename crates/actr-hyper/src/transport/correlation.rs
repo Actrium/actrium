@@ -522,7 +522,7 @@ mod tests {
             );
             assert_eq!(
                 request.metadata.get("actrium.request.proof"),
-                Some("host-signed-proof")
+                Ok(Some("host-signed-proof"))
             );
             Err(crate::lifecycle::IncomingGuardError::new(
                 crate::lifecycle::IncomingGuardErrorCode::Revoked,

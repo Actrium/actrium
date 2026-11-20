@@ -141,11 +141,7 @@ struct CompletedAttach {
 struct RequestUse {
     fingerprint: Vec<u8>,
     dequeued: bool,
-    timing: ReplayTiming,
-}
-
-struct IdempotencyUse {
-    request_id: String,
+    has_idempotency_key: bool,
     timing: ReplayTiming,
 }
 
@@ -161,7 +157,9 @@ struct State {
     completed: HashMap<String, CompletedAttach>,
     used_nonces: HashMap<Vec<u8>, NonceUse>,
     requests: HashMap<(String, String), RequestUse>,
-    idempotency_keys: HashMap<(String, String), IdempotencyUse>,
+    // Runtime identities are replay tombstones, not cache entries. They live
+    // for this in-memory registry's lifetime and are never TTL/capacity-evicted:
+    // forgetting one would allow an old channel generation to become valid again.
     runtime_instance_ids: HashSet<String>,
     next_epoch: u64,
 }
@@ -230,9 +228,6 @@ impl InMemorySessionRegistry {
         state
             .requests
             .retain(|(session_id, _), _| !session_ids.contains(session_id));
-        state
-            .idempotency_keys
-            .retain(|(session_id, _), _| !session_ids.contains(session_id));
         if state
             .active
             .as_ref()
@@ -260,13 +255,6 @@ impl InMemorySessionRegistry {
             let key = oldest_key(&state.requests, |entry| entry.timing)
                 .expect("an over-capacity map is not empty");
             if let Some((key, entry)) = state.requests.remove_entry(&key) {
-                Self::advance_replay_floor(state, &key.0, entry.timing, now);
-            }
-        }
-        while state.idempotency_keys.len() > capacity {
-            let key = oldest_key(&state.idempotency_keys, |entry| entry.timing)
-                .expect("an over-capacity map is not empty");
-            if let Some((key, entry)) = state.idempotency_keys.remove_entry(&key) {
                 Self::advance_replay_floor(state, &key.0, entry.timing, now);
             }
         }
@@ -299,7 +287,6 @@ impl InMemorySessionRegistry {
         retain_unexpired(&mut state.completed, now, |entry| entry.timing);
         retain_unexpired(&mut state.used_nonces, now, |entry| entry.timing);
         retain_unexpired(&mut state.requests, now, |entry| entry.timing);
-        retain_unexpired(&mut state.idempotency_keys, now, |entry| entry.timing);
 
         // Channel IDs are single-use for the lifetime of the session. They are
         // intentionally not TTL- or capacity-evicted: a Resume that presents an
@@ -367,7 +354,11 @@ impl InMemorySessionRegistry {
             completed: state.completed.len(),
             used_nonces: state.used_nonces.len(),
             requests: state.requests.len(),
-            idempotency_keys: state.idempotency_keys.len(),
+            idempotency_keys: state
+                .requests
+                .values()
+                .filter(|entry| entry.has_idempotency_key)
+                .count(),
             used_channel_ids: state
                 .sessions
                 .values()
@@ -1326,7 +1317,6 @@ impl InMemorySessionRegistry {
         state.active = None;
         state.completed.clear();
         state.requests.clear();
-        state.idempotency_keys.clear();
         // Nonces are compact Attach tombstones. Keep the unexpired ones so an
         // invalidated Attach cannot be replayed into a fresh session.
         self.prune(&mut state, now);
@@ -1555,28 +1545,17 @@ impl InMemorySessionRegistry {
                 "queued request was not admitted by the Guard",
             ));
         }
-        let idempotency_key = if let Some(value) = &request.idempotency_key {
-            if value.is_empty() {
-                return Err(SessionError::denied("idempotency key must not be empty"));
-            }
-            let key = (request.session_id.clone(), value.clone());
-            match state.idempotency_keys.get(&key) {
-                Some(previous) if previous.request_id != request.request_id => {
-                    return Err(SessionError::denied(
-                        "idempotency key was already used by another request",
-                    ));
-                }
-                None if dequeue => {
-                    return Err(SessionError::denied(
-                        "queued idempotency key was not admitted by the Guard",
-                    ));
-                }
-                _ => {}
-            }
-            Some(key)
-        } else {
-            None
-        };
+        // Business delivery is at-least-once. request_id is the replay unit;
+        // idempotency_key is authenticated caller correlation data, not a
+        // second uniqueness constraint. A timed-out call must use a fresh
+        // request_id and may retain the same idempotency_key.
+        if request
+            .idempotency_key
+            .as_ref()
+            .is_some_and(|value| value.is_empty())
+        {
+            return Err(SessionError::denied("idempotency key must not be empty"));
+        }
 
         // Step 8: privacy/assurance and resource limits are rechecked at execution.
         let authorization = Authorization {
@@ -1634,20 +1613,12 @@ impl InMemorySessionRegistry {
                 .expect("checked above")
                 .dequeued = true;
         } else {
-            if let Some(key) = idempotency_key {
-                state.idempotency_keys.insert(
-                    key,
-                    IdempotencyUse {
-                        request_id: request.request_id.clone(),
-                        timing,
-                    },
-                );
-            }
             state.requests.insert(
                 key,
                 RequestUse {
                     fingerprint,
                     dequeued: false,
+                    has_idempotency_key: request.idempotency_key.is_some(),
                     timing,
                 },
             );

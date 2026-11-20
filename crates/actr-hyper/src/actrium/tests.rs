@@ -29,7 +29,7 @@ use super::{
     ATTACHMENT_CANCEL_ROUTE, ATTACHMENT_PREPARE_ROUTE, ATTACHMENT_UPLOAD_TRANSPORT, service_routes,
 };
 use crate::lifecycle::{
-    IncomingDispatchRequest, IncomingGuard, IncomingStreamChunk, SessionRegistry,
+    IncomingDispatchRequest, IncomingGuard, IncomingMetadata, IncomingStreamChunk, SessionRegistry,
 };
 use crate::transport::VerifiedPeerContext;
 
@@ -294,8 +294,22 @@ fn dispatch_request<'a>(
 }
 
 async fn attach(registry: &ActriumServiceRegistry) -> (AttachResponse, SessionSecret) {
-    let channel = front_context();
-    let mut request = attach_request(&channel);
+    attach_on_channel(registry, "channel-1", "attach-1", 42).await
+}
+
+async fn attach_on_channel(
+    registry: &ActriumServiceRegistry,
+    channel_id: &str,
+    attach_id: &str,
+    nonce: u8,
+) -> (AttachResponse, SessionSecret) {
+    let mut front_channel = (*front_context()).clone();
+    front_channel.channel_id = channel_id.into();
+    let mut service_channel = (*service_context()).clone();
+    service_channel.channel_id = channel_id.into();
+    let mut request = attach_request(&front_channel);
+    request.attach_id = attach_id.into();
+    request.tab_session_nonce = vec![nonce; 32];
     sign_attach_request(&mut request, &front_key());
     let digest = attach_request_digest(&request);
     let envelope = request_envelope(
@@ -307,7 +321,7 @@ async fn attach(registry: &ActriumServiceRegistry) -> (AttachResponse, SessionSe
     let response = registry
         .dispatch(
             crate::lifecycle::SessionMethod::Attach,
-            dispatch_request(&envelope, Some(service_context())),
+            dispatch_request(&envelope, Some(Arc::new(service_channel))),
         )
         .await
         .expect("Attach succeeds");
@@ -329,11 +343,22 @@ fn signed_business_request(
     request_id: &str,
     payload: Vec<u8>,
 ) -> RpcEnvelope {
+    signed_business_request_on_channel(response, secret, route, request_id, payload, "channel-1")
+}
+
+fn signed_business_request_on_channel(
+    response: &AttachResponse,
+    secret: &SessionSecret,
+    route: &str,
+    request_id: &str,
+    payload: Vec<u8>,
+    channel_id: &str,
+) -> RpcEnvelope {
     let mut request = BusinessRequest {
         session_id: response.session_id.clone(),
         lease_epoch: response.lease_epoch,
         service_actor_id: service_id().to_string_repr(),
-        channel_id: "channel-1".into(),
+        channel_id: channel_id.into(),
         route: route.into(),
         capability: READ.into(),
         request_id: request_id.into(),
@@ -375,7 +400,10 @@ async fn cancel_attachment(
         )
         .await
         .expect("signed cancellation succeeds");
-    guard.finish(request_id).await.unwrap();
+    guard
+        .finish(request_id, IncomingMetadata::new(&envelope.metadata))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -403,6 +431,7 @@ async fn attach_business_call_and_response_proof_round_trip() {
         route_key: ROUTE.into(),
         direction: Some(Direction::Response as i32),
         payload: Some(Bytes::from_static(b"document body")),
+        metadata: call.metadata.clone(),
         ..Default::default()
     };
     guard.authenticate_response(&mut response).await.unwrap();
@@ -483,7 +512,10 @@ async fn attachment_cancellation_releases_only_its_own_service_reservation() {
             .check(dispatch_request(&prepare, Some(service_context())))
             .await
             .expect("Prepare reserves its result stream");
-        guard.finish(request_id).await.unwrap();
+        guard
+            .finish(request_id, IncomingMetadata::new(&prepare.metadata))
+            .await
+            .unwrap();
         assert_eq!(
             shared
                 .attachment_result_request_id("result")
@@ -605,6 +637,7 @@ async fn tampered_requests_and_responses_are_rejected() {
         route_key: ROUTE.into(),
         direction: Some(Direction::Response as i32),
         payload: Some(Bytes::from_static(b"document body")),
+        metadata: call.metadata.clone(),
         ..Default::default()
     };
     guard.authenticate_response(&mut response).await.unwrap();
@@ -898,6 +931,98 @@ async fn cancelling_call_without_a_response_releases_pending_proof() {
 }
 
 #[tokio::test]
+async fn admitted_requests_are_scoped_to_their_session() {
+    let shared = Arc::new(PeerShared::default());
+    let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
+    let (first, first_secret) = attach(&registry).await;
+    let first_call = business_call(&first, &first_secret);
+    guard
+        .check(dispatch_request(&first_call, Some(service_context())))
+        .await
+        .expect("the original session admits its request");
+
+    // Model takeover/expiry closing a session without running the registry's
+    // explicit Detach cleanup. Its unfinished admission must not squat on the
+    // same request ID in the next session.
+    let channel = super::service::verified_channel(service_context().as_ref()).unwrap();
+    registry
+        .service
+        .detach(
+            DetachRequest {
+                session_id: first.session_id.clone(),
+                lease_epoch: first.lease_epoch,
+            },
+            &channel,
+        )
+        .await
+        .unwrap();
+    let (second, second_secret) = attach_on_channel(&registry, "channel-2", "attach-2", 43).await;
+    let second_call = signed_business_request_on_channel(
+        &second,
+        &second_secret,
+        ROUTE,
+        "call-1",
+        b"read document".to_vec(),
+        "channel-2",
+    );
+    let mut second_context = (*service_context()).clone();
+    second_context.channel_id = "channel-2".into();
+    let second_context = Arc::new(second_context);
+    guard
+        .check(dispatch_request(&second_call, Some(second_context.clone())))
+        .await
+        .expect("the replacement session has independent admission");
+
+    let mut second_response = RpcEnvelope {
+        request_id: "call-1".into(),
+        route_key: ROUTE.into(),
+        direction: Some(Direction::Response as i32),
+        payload: Some(Bytes::from_static(b"document body")),
+        metadata: second_call.metadata.clone(),
+        ..Default::default()
+    };
+    guard
+        .authenticate_response(&mut second_response)
+        .await
+        .expect("the replacement response is signed");
+    assert!(
+        second_response
+            .metadata
+            .iter()
+            .any(|entry| entry.key == metadata::PROOF)
+    );
+    guard
+        .finish("call-1", IncomingMetadata::new(&second_call.metadata))
+        .await
+        .unwrap();
+
+    let mut old_response = RpcEnvelope {
+        request_id: "call-1".into(),
+        route_key: ROUTE.into(),
+        direction: Some(Direction::Response as i32),
+        payload: Some(Bytes::from_static(b"document body")),
+        metadata: first_call.metadata.clone(),
+        ..Default::default()
+    };
+    let error = guard
+        .authenticate_response(&mut old_response)
+        .await
+        .expect_err("the old admission remains, but its detached session has no secret");
+    assert_eq!(
+        error.code,
+        crate::lifecycle::IncomingGuardErrorCode::Revoked
+    );
+    guard
+        .finish("call-1", IncomingMetadata::new(&first_call.metadata))
+        .await
+        .unwrap();
+    guard
+        .authenticate_response(&mut old_response)
+        .await
+        .expect("finishing the old session releases only its own admission");
+}
+
+#[tokio::test]
 async fn finish_releases_admitted_request() {
     let shared = Arc::new(PeerShared::default());
     let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
@@ -915,7 +1040,7 @@ async fn finish_releases_admitted_request() {
         direction: Some(Direction::Response as i32),
         payload: Some(Bytes::from_static(b"document body")),
         timeout_ms: 0,
-        metadata: vec![],
+        metadata: call.metadata.clone(),
         ..Default::default()
     };
     guard
@@ -930,7 +1055,10 @@ async fn finish_releases_admitted_request() {
         "admitted request allows response signing"
     );
 
-    guard.finish("call-1").await.expect("finish succeeds");
+    guard
+        .finish("call-1", IncomingMetadata::new(&call.metadata))
+        .await
+        .expect("finish succeeds");
 
     let mut response_after_finish = RpcEnvelope {
         request_id: "call-1".into(),
@@ -938,7 +1066,7 @@ async fn finish_releases_admitted_request() {
         direction: Some(Direction::Response as i32),
         payload: Some(Bytes::from_static(b"document body")),
         timeout_ms: 0,
-        metadata: vec![],
+        metadata: call.metadata.clone(),
         ..Default::default()
     };
     guard

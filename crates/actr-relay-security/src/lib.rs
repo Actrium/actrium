@@ -577,6 +577,11 @@ impl SecureSession {
                     }
                     if self.initiator {
                         if self.actor.is_some() {
+                            // The initiator's Actor proof is the final handshake
+                            // flight; there is no later acknowledgement message.
+                            // Local readiness therefore follows sending, while a
+                            // responder verification failure still closes the
+                            // channel before any accepted application traffic.
                             received
                                 .outbound
                                 .push(self.actor_local_proof(&mut transport)?);

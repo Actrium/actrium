@@ -156,7 +156,8 @@ impl Clock for SystemClock {
     fn now_epoch_secs(&self) -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
+            // A pre-epoch system clock must fail closed: every expiry and
+            // deadline is in the past rather than treating time as epoch zero.
+            .map_or(u64::MAX, |duration| duration.as_secs())
     }
 }

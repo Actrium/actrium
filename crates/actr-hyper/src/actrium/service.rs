@@ -91,7 +91,7 @@ pub(crate) struct AttachmentResultCancellation {
 
 #[derive(Default)]
 pub(crate) struct Shared {
-    admitted: Mutex<HashMap<String, Admitted>>,
+    admitted: Mutex<HashMap<(String, String), Admitted>>,
     /// Prepare RPCs bind one result stream to the same Host-owned session.
     /// Entries expire and are consumed by the single terminal result chunk.
     attachment_results: Mutex<HashMap<String, PendingAttachmentResult>>,
@@ -578,7 +578,7 @@ impl SessionRegistry for ActriumServiceRegistry {
                     )
                     .await;
                 self.shared.admitted.lock().await.insert(
-                    business.request_id.clone(),
+                    (business.session_id.clone(), business.request_id.clone()),
                     Admitted {
                         guarded: Some(guarded),
                         signing: ResponseContext::from_request(&business),
@@ -630,6 +630,7 @@ fn required(
 ) -> Result<String, IncomingGuardError> {
     metadata
         .get(key)
+        .map_err(IncomingGuardError::invalid_metadata)?
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
         .ok_or_else(|| invalid_metadata(format!("missing session metadata `{key}`")))
@@ -656,7 +657,10 @@ fn proof_fields(metadata: IncomingMetadata<'_>) -> Result<ProofFields, IncomingG
         capability: required(metadata, metadata::CAPABILITY)?,
         issued_at: required_u64(metadata, metadata::ISSUED_AT)?,
         deadline: required_u64(metadata, metadata::DEADLINE)?,
-        idempotency_key: metadata.get(metadata::IDEMPOTENCY_KEY).map(str::to_owned),
+        idempotency_key: metadata
+            .get(metadata::IDEMPOTENCY_KEY)
+            .map_err(IncomingGuardError::invalid_metadata)?
+            .map(str::to_owned),
         proof,
     })
 }
@@ -798,8 +802,9 @@ impl IncomingGuard for ActriumServiceGuard {
         let request_signing_bytes = request_signing_bytes(&business);
         let result_stream = attachment_result_stream(&business.route, &business.payload)?;
         let guard = self.service.guard();
+        let admission_key = (business.session_id.clone(), business.request_id.clone());
         let mut admitted = self.shared.admitted.lock().await;
-        if let Some(entry) = admitted.get_mut(&business.request_id) {
+        if let Some(entry) = admitted.get_mut(&admission_key) {
             // A second observation of the same id is the durable-mailbox
             // dequeue recheck. The dequeued envelope must be byte-identical
             // to the admitted proof input; the registry additionally compares
@@ -845,7 +850,7 @@ impl IncomingGuard for ActriumServiceGuard {
             );
         }
         admitted.insert(
-            business.request_id.clone(),
+            admission_key,
             Admitted {
                 guarded: Some(guarded),
                 signing: ResponseContext::from_request(&business),
@@ -863,8 +868,16 @@ impl IncomingGuard for ActriumServiceGuard {
         // Sign an outbound response to an admitted inbound request. Inbound
         // response verification now happens in `check()` before the pending
         // caller is woken; this hook only produces the Service-side proof.
+        let response_metadata = IncomingMetadata::new(&response.metadata);
+        let Some(session_id) = response_metadata
+            .get(metadata::SESSION_ID)
+            .map_err(IncomingGuardError::invalid_metadata)?
+        else {
+            return Ok(());
+        };
         let admitted = self.shared.admitted.lock().await;
-        let Some(entry) = admitted.get(&response.request_id) else {
+        let Some(entry) = admitted.get(&(session_id.to_owned(), response.request_id.clone()))
+        else {
             return Ok(());
         };
         let signing = entry.signing.clone();
@@ -908,8 +921,22 @@ impl IncomingGuard for ActriumServiceGuard {
         Ok(())
     }
 
-    async fn finish(&self, request_id: &str) -> Result<(), IncomingGuardError> {
-        self.shared.admitted.lock().await.remove(request_id);
+    async fn finish(
+        &self,
+        request_id: &str,
+        metadata: IncomingMetadata<'_>,
+    ) -> Result<(), IncomingGuardError> {
+        let Some(session_id) = metadata
+            .get(metadata::SESSION_ID)
+            .map_err(IncomingGuardError::invalid_metadata)?
+        else {
+            return Ok(());
+        };
+        self.shared
+            .admitted
+            .lock()
+            .await
+            .remove(&(session_id.to_owned(), request_id.to_owned()));
         Ok(())
     }
 

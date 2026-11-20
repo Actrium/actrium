@@ -1692,7 +1692,7 @@ async fn empty_capability_ceiling_stays_empty_across_renewal_and_resume() {
 }
 
 #[tokio::test]
-async fn guard_rejects_idempotency_key_reuse_but_allows_original_dequeue() {
+async fn guard_allows_at_least_once_retry_with_a_fresh_request_id() {
     let front = Front::new("alice");
     let fixture = Fixture::new(std::slice::from_ref(&front));
     let channel = make_channel(&front, "a", 2_000);
@@ -1709,25 +1709,32 @@ async fn guard_rejects_idempotency_key_reuse_but_allows_original_dequeue() {
         .await
         .unwrap();
 
-    let mut duplicate = business(&outcome, &channel, "second-request", READ);
-    duplicate.idempotency_key = first.idempotency_key.clone();
-    duplicate.sign(&outcome.session_secret);
-    assert_code(
-        fixture
-            .service
-            .guard()
-            .authorize(duplicate.clone(), &channel)
-            .await,
-        AttachErrorCode::PermissionDenied,
-    );
+    // A caller whose response was lost retries with a fresh request id. The
+    // authenticated idempotency key remains stable correlation data; business
+    // delivery is explicitly at-least-once.
+    let mut retry = business(&outcome, &channel, "second-request", READ);
+    retry.idempotency_key = first.idempotency_key.clone();
+    retry.sign(&outcome.session_secret);
+    let retry_queued = fixture
+        .service
+        .guard()
+        .authorize(retry.clone(), &channel)
+        .await
+        .unwrap();
     fixture
         .service
         .guard()
         .dequeue(queued, &channel)
         .await
         .unwrap();
+    fixture
+        .service
+        .guard()
+        .dequeue(retry_queued, &channel)
+        .await
+        .unwrap();
     assert_code(
-        fixture.service.guard().authorize(duplicate, &channel).await,
+        fixture.service.guard().authorize(retry, &channel).await,
         AttachErrorCode::PermissionDenied,
     );
 
