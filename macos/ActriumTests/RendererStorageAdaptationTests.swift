@@ -85,13 +85,13 @@ struct RendererStorageAdaptationTests {
         do {
             _ = try await RealmProfileStore.acceptPublisher(
                 body: PublisherStorageFixture.profile(rotated: true, chained: false),
-                domain: "publisher.example", preferences: preferences, database: database, fallbackPins: pins
+                domain: "publisher.example", preferences: preferences, database: database, fallbackPins: { pins }
             )
             Issue.record("Storage enrollment discarded durable Publisher trust.")
         } catch GuestLocalStorageError.IdentityChanged { }
         let profile = try await RealmProfileStore.acceptPublisher(
             body: PublisherStorageFixture.profile(rotated: true), domain: "publisher.example",
-            preferences: preferences, database: database, fallbackPins: pins
+            preferences: preferences, database: database, fallbackPins: { pins }
         )
         #expect(profile.storageIdentity != nil)
     }

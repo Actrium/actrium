@@ -2080,7 +2080,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
         return try await RealmProfileStore.acceptPublisher(
             body: body, domain: domain, preferences: realmPreferences, database: .shared,
-            fallbackPins: readRealmTrust(.publisher, name: domain)
+            fallbackPins: { try self.readRealmTrust(.publisher, name: domain) }
         )
     }
 
