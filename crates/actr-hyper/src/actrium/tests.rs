@@ -1044,12 +1044,9 @@ async fn finish_releases_admitted_request() {
         .authenticate_response(&mut response)
         .await
         .expect("response is signed while admitted");
-    assert!(
-        response
-            .metadata
-            .iter()
-            .any(|entry| entry.key == metadata::PROOF),
-        "admitted request allows response signing"
+    assert_ne!(
+        response.metadata, call.metadata,
+        "admitted request replaces the request proof with a response proof"
     );
 
     guard
@@ -1066,15 +1063,13 @@ async fn finish_releases_admitted_request() {
         metadata: call.metadata.clone(),
         ..Default::default()
     };
+    let metadata_before_finish = response_after_finish.metadata.clone();
     guard
         .authenticate_response(&mut response_after_finish)
         .await
         .expect("finish is idempotent");
-    assert!(
-        !response_after_finish
-            .metadata
-            .iter()
-            .any(|entry| entry.key == metadata::PROOF),
-        "finished request is no longer admitted"
+    assert_eq!(
+        response_after_finish.metadata, metadata_before_finish,
+        "finished request is no longer admitted, so its metadata is not re-signed"
     );
 }
