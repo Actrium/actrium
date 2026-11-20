@@ -66,6 +66,7 @@ async fn realm_package_verifier_fixture() -> Result<()> {
         selection: path("ACTR_REALM_E2E_VERIFY_SELECTION")?,
         output: output.clone(),
         trust_dir: Some(path("ACTR_REALM_E2E_VERIFY_TRUST")?),
+        local_front: None,
         probe_realm: None,
         probe: ServiceProbeArgs::default(),
     };

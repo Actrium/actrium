@@ -234,15 +234,15 @@ Workload, Host requirements, platform policy and dependency locks. See [Actor Pa
 A `local_path` Front with an absolute `href` requires explicit user approval for that path
 before any file access. Absolute paths must be outside protected system directories. On macOS,
 use the canonical `/Users/…` path for files under a home directory.
-A legacy filename hint requires explicit local file selection. The Host checks one read snapshot against the pinned
-Publisher signing key, exact Actor type, Service dependency and RPC contract. In either flow,
+A legacy filename hint requires explicit local file selection. From one read snapshot, the Host
+checks the pinned Publisher signing key, exact Front Actor type, signed RPC declaration and
+dependency on the selected Service type. In either flow,
 the archive must be a regular file on a local volume. The Host rejects symbolic links to the file
 and traverses approved absolute paths without following symbolic links. The Host checks a fixed
 digest and may use a retired package key to verify that archive. With `allow_rebuild` enabled,
 the key must be active. The Host computes a digest for each loaded build and may read a
 replacement of the approved filename on refresh. Realm and Publisher verification still apply
-on refresh. Management tools validate the declaration and downloadable archives, while the
-Host verifies the selected local archive against the verified Service contract.
+on refresh. Management tools validate the declaration and downloadable archives.
 
 The primary Actor type identifies the instance's Service. Finding zero or multiple Actors of that
 type in the Realm is an error. Authorized deployment configuration determines which other packages to
@@ -359,11 +359,14 @@ Actor type with a fixed digest retains its archive digest.
 For a provider-signed Realm, use a guarded Service release to change the
 primary program or its dependency graph. A release can reuse the Service
 archive when its signed manifest, dependency locks and RPC contracts allow
-the new selection. Before a forward release changes the Service program,
+the new selection. A Service release or rollback can select a local Front.
+The release verifier checks its declaration and Publisher signing key along with
+the downloadable archives. An operator can supply the local archive to compare RPC
+contracts before publication. Before a forward release changes the Service program,
 the current owner must have approved the outgoing program's ACLs so that
 the saved selection can be restored. Rollback restores the complete previous
-selection at a new sequence. A saved rollback selection can restore a Local Front. The Host
-checks its archive and RPC contract when opening it with the user's consent.
+selection at a new sequence. A saved rollback selection can restore a local Front. The Host
+checks its archive and declared Service dependency when opening it with the user's consent.
 Deployment applies the selection to the running Service.
 
 For an externally signed Realm, `publish_profile` preserves the current

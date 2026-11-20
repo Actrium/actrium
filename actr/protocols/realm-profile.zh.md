@@ -197,11 +197,11 @@ Service Host 验证 Service 归档，并在接受 Front 前核对所选 Front �
 绝对路径须避开受保护的系统目录。在 macOS 上，主目录下的文件使用 `/Users/…` 路径。
 只有文件名提示的已有 Profile 仍通过本机选包授权。两种方式都只接受本地卷上的普通文件，
 并拒绝文件符号链接。读取已授权的绝对路径时，Host 也拒绝目录符号链接。
-Host 从同一次读取的字节验证固定的 Publisher 签名 key、精确 Actor 类型、Service 依赖和 RPC 契约。
+Host 从同一次读取的字节验证固定的 Publisher 签名 key、精确 Front Actor 类型和签名覆盖的 RPC 声明，
+并核对依赖是否匹配所选 Service 类型。
 固定包核对整包摘要，可以用已退役的包签名 key 验证。`allow_rebuild` 开启时须使用 active key。
 每次加载重新计算构建摘要，刷新可重新读取获准位置的同名文件，
-并重新验证 Realm 与 Publisher。后台只验本地包声明，可下载归档照常验包。Host 用已验证的 Service 契约
-比对本地包。
+并重新验证 Realm 与 Publisher。管理工具校验本地包声明和可下载归档。
 
 主包的 Actor 类型标识实例的 Service。Realm 中该类型的 Actor 数量必须恰好为一。
 授权部署配置决定还要运行哪些包、由哪个 Host 启动，以及每个 Actor 的身份和状态。
@@ -285,8 +285,10 @@ Actr Facility Provider 由 Actr Host、用户或 key 持有方的策略选定。
 
 由 Provider 签名的 Realm 通过受保护的 Service 发布更换主程序或依赖链。
 签名清单、依赖锁和 RPC 契约都允许时，可以沿用原 Service 包并更换依赖。
+Service 发版和回滚都可以选用本地 Front。发版时验证可下载归档、本地 Front 的声明及其 Publisher 签名 key。
+操作人员可以显式提供本地归档，在发布前核对两端 RPC 契约。
 前向发布更换 Service 程序前，当前 owner 须确认原程序的 ACL，才能把原选包作为回滚目标。
-回滚用更高的序号恢复上一次发布前的整组选包。恢复 Local Front 时，Host 在用户授权打开后校验包和 RPC 契约。
+回滚用更高的序号恢复上一次发布前的整组选包。恢复本地 Front 时，Host 在用户授权打开后校验包和声明的 Service 依赖。
 运行中的 Service 由部署应用选包。
 
 外部签名的 Realm 通过 `publish_profile` 发布时须保留当前 Service 程序。Provider

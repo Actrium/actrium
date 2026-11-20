@@ -4,7 +4,7 @@ use actr_pack::{
     realm::{check_realm_dependencies, check_realm_pair, verify_realm_archive},
 };
 use actr_protocol::{
-    AuthorityDescriptor, KeyPinOutcome, KeyPins, KeyStatus, PublisherKeys, RealmSigningKeys,
+    AuthorityDescriptor, KeyPinOutcome, KeyPins, PublisherKeys, RealmSigningKeys,
     realm_profile::{RealmPackage, RealmPackageSelection, RealmProfile, RealmStatus},
     uri::{ActrUri, is_forbidden_address},
 };
@@ -12,6 +12,7 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     fs::File,
@@ -57,6 +58,9 @@ pub struct CheckArgs {
     /// Durable directory for Publisher trust pins when the archive output is temporary.
     #[arg(long, value_name = "DIR")]
     pub trust_dir: Option<PathBuf>,
+    /// Explicitly select the local Front archive to verify and use for readiness probes.
+    #[arg(long, value_name = "FILE")]
+    pub local_front: Option<PathBuf>,
     /// Verify the current Realm Profile and probe the selected Service type.
     #[arg(long, value_name = "REALM", requires = "probe_config")]
     pub probe_realm: Option<String>,
@@ -188,6 +192,32 @@ where
     Ok((verified.manifest, bytes))
 }
 
+fn read_local_front(path: &Path) -> Result<Vec<u8>> {
+    let mut options = File::options();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
+    }
+    #[cfg(not(unix))]
+    ensure!(
+        std::fs::symlink_metadata(path)?.is_file(),
+        "The selected local Front must be a regular file."
+    );
+    let file = options
+        .open(path)
+        .with_context(|| format!("Could not open the selected local Front {}", path.display()))?;
+    ensure!(
+        file.metadata()?.is_file(),
+        "The selected local Front must be a regular file."
+    );
+    let mut bytes = Vec::new();
+    file.take(ARCHIVE_LIMIT as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut temp = NamedTempFile::new_in(path.parent().context("missing cache directory")?)?;
     temp.write_all(bytes)?;
@@ -303,8 +333,16 @@ where
         .chain(&args.additional)
         .cloned()
         .collect();
-    let mut result =
-        prepare_selection(selection, &args.output, &mut cache, &path, roots, &get).await?;
+    let mut result = prepare_selection(
+        selection,
+        &args.output,
+        &mut cache,
+        &path,
+        roots,
+        None,
+        &get,
+    )
+    .await?;
     result["realm"] = json!(args.realm);
     result["sequence"] = json!(profile.sequence);
     Ok(result)
@@ -329,6 +367,15 @@ where
         args.probe_realm.is_some() == probe.is_some(),
         "readiness checks require --probe-realm, --probe-config and --probe-route together"
     );
+    let (_, front) = selection.selected().map_err(anyhow::Error::msg)?;
+    ensure!(
+        args.local_front.is_none() || front.local_path.is_some(),
+        "--local-front requires a selected Front with local_path"
+    );
+    ensure!(
+        probe.is_none() || front.local_path.is_none() || args.local_front.is_some(),
+        "a readiness probe for a local Front requires --local-front FILE"
+    );
     std::fs::create_dir_all(&args.output)?;
     let trust_dir = args.trust_dir.as_deref().unwrap_or(&args.output);
     std::fs::create_dir_all(trust_dir)?;
@@ -349,8 +396,16 @@ where
         Err(error) => return Err(error.into()),
     };
     let roots = selection.packages.keys().cloned().collect();
-    let mut result =
-        prepare_selection(&selection, &args.output, &mut cache, &path, roots, &get).await?;
+    let mut result = prepare_selection(
+        &selection,
+        &args.output,
+        &mut cache,
+        &path,
+        roots,
+        args.local_front.as_deref(),
+        &get,
+    )
+    .await?;
     if let Some((realm, probe)) = args.probe_realm.as_ref().zip(probe) {
         let (profile, _, _) =
             resolve_profile(realm, None, |url| get(url, DOCUMENT_LIMIT), None).await?;
@@ -370,6 +425,7 @@ async fn prepare_selection<F, Fut>(
     cache: &mut Cache,
     path: &Path,
     roots: Vec<String>,
+    local_front: Option<&Path>,
     get: &F,
 ) -> Result<Value>
 where
@@ -408,19 +464,26 @@ where
             }
         };
         queue.extend(entry.dependencies.values().cloned());
-        if let Some(local) = &entry.local_path {
+        let (destination, manifest, bytes) = if let Some(local) = &entry.local_path {
             ensure!(
-                keys.keys.iter().any(|key| key.id == local.signing_key_id
-                    && (key.status == KeyStatus::Active
-                        || (!local.allow_rebuild && key.status == KeyStatus::Retired))
-                    && key.verification_key().is_ok()),
+                keys.keys
+                    .iter()
+                    .any(|key| local.matches_signing_key(key) && key.verification_key().is_ok()),
                 "The publisher does not trust the signing key for {}.",
                 entry.r#type
             );
-            continue;
-        }
-        let destination = output.join(format!("{}.actr", entry.sha256));
-        let (manifest, bytes) = archive(entry, keys, &destination, &get).await?;
+            let Some(front_path) = local_front else {
+                continue;
+            };
+            let bytes = read_local_front(front_path)?;
+            let manifest = verify_realm_archive(entry, &bytes, &keys.keys, ARCHIVE_LIMIT)?.manifest;
+            let digest = hex::encode(Sha256::digest(&bytes));
+            (output.join(format!("{digest}.actr")), manifest, bytes)
+        } else {
+            let destination = output.join(format!("{}.actr", entry.sha256));
+            let (manifest, bytes) = archive(entry, keys, &destination, &get).await?;
+            (destination, manifest, bytes)
+        };
         if let Some(contract) = manifest.read_privacy_contract(&bytes, ARCHIVE_LIMIT)? {
             if name == selection.primary_package {
                 privacy_contract = Some(contract.sha256);
@@ -457,7 +520,7 @@ where
                 );
             }
         }
-        if !destination.exists() {
+        if entry.local_path.is_some() || !destination.exists() {
             write_atomic(&destination, &bytes)?;
         }
         manifests.insert(name.clone(), manifest);
@@ -467,11 +530,12 @@ where
     if let Some(front) = manifests.get(&selection.front_package) {
         check_realm_pair(&manifests[&selection.primary_package], front)?;
     }
+    let verified_files = &files;
     let dependencies: Vec<_> = manifests.iter().flat_map(|(source, manifest)| {
         manifest.dependencies.iter().map(move |(alias, declared)| {
             let target = selection.packages[source].dependencies.get(alias);
             let status = match target {
-                Some(target) if selection.packages[target].local_path.is_some() => "deferred",
+                Some(target) if !verified_files.contains_key(target) => "deferred",
                 Some(_) => "selected",
                 None => "unspecified",
             };
