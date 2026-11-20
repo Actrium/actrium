@@ -81,7 +81,7 @@ A trusted Actr Host can still have vulnerabilities; "trusted" means it sits insi
 - A malicious Keel Guest;
 - A malicious Service workload;
 - A malicious or compromised Marketplace;
-- A malicious Realm, signaling or TURN Actr Facility Provider;
+- A malicious Actr Facility Provider involved in Realm allocation, signaling, or TURN.
 - Another process on the same device;
 - An attacker with local privileges;
 - A stolen device;

@@ -12,8 +12,9 @@ credential.
 ## 1. Scope and model
 
 Realms and Realm Profiles are defined in [Actr Realm Profile](realm-profile.md).
-This document applies only to Realms under DNS domains; a local Realm has no
-members and no invites.
+In this document, a Realm's Actr Facility Provider (AFP) is the provider serving
+the Realm, identified by `provider.id` in its Realm Profile. This document applies
+only to Realms under DNS domains. A local Realm has no members or invites.
 
 - **Member**: a party the Actr Facility Provider records for a Realm, with a
   `member_id` and one role.

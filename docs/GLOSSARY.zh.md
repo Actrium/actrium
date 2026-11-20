@@ -101,8 +101,8 @@ credential、Workspace Provider credential）。正文用规范名，代码类�
 
 | 术语 | 定义 |
 | --- | --- |
-| Actr Facility Provider（AFP） | 一套正在运营的共享基础设施部署（例如某家运营的 Loran），为多个 Realm 提供 Signaling、STUN/TURN 与 Issuer。不是软件供应方。与 Workspace Provider 不是同一概念。 |
-| Actr Facility Provider ID | Actr Facility Provider 自己的 DNS authority（如 `provider.example`）。Realm 与创建时的 Actr Facility Provider 永久绑定，Realm Profile 中 `provider.id` 不可更改；访问 Realm 只使用其 Realm Profile 指定的 Actr Facility Provider，不回退到其他 Actr Facility Provider。 |
+| Actr Facility Provider（AFP，Actr 设施提供方） | 泛指 Actr 生态中承担平台职责的各类提供方和运营方。平台职责包括提供基础设施、分配 Realm／应用实例等。为联网 Realm 提供服务的 AFP 可使用 Loran 这样的示例软件提供部分平台设施。 |
+| Actr Facility Provider ID | 为特定联网 Realm 提供服务的 AFP 的规范化 DNS authority（如 `provider.example`），记录于 Realm Profile 的 `provider.id`。联网 Realm 在创建时绑定该 AFP，`provider.id` 在其生命周期内固定。访问 Realm 只使用其已接受 Realm Profile 指定的 AFP。 |
 | Realm 管理请求 | 发往 `realm-management` 端点的请求：`create_realm`、`publish_profile`、`reissue_owner_invite`、`draft_profile`（字段 `realm` 为完整 Realm 名），只用于 Actr Facility Provider 域名以外的 Realm，是 Realm 签名 key 持有方签名服务签发的 Actr 管理信封（含受托代持的 Actr Facility Provider）。 |
 | Actr 管理信封 | Realm 管理请求、`register_publisher` 与 membership 请求共用的签名请求格式（Actr management envelope）：JCS + detached Ed25519，绑定 `provider_id`、≤5 分钟有效、nonce 防重放；签名 key 分别是 active Realm 签名 key、active Publisher Profile 签名 key 与成员的 Realm 客户端 key。 |
 | pending / active Realm | 创建过程的状态：`create_realm` 后为 pending Realm；持有方以 `publish_profile` 提交签名 Realm Profile 后为 active Realm（Actr Facility Provider 域名下的 Realm 由 Actr Facility Provider 自签，无需此步）。只有 active Realm 签发 Actor credential、接受 Signaling 连接和分配 TURN；过期的 pending Realm 由 Actr Facility Provider 自动清理。 |

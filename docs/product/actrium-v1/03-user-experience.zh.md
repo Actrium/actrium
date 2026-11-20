@@ -127,7 +127,7 @@ sequenceDiagram
     U-->>A: 确认创建
     A->>M: Create(idempotency_key, verified_release, workspace, domain, realm_id, display_name)
     M->>M: 取得 Realm 签名 key 持有方授权
-    M->>M: Actr Facility Provider 创建 pending Realm
+    M->>M: 所选 Actr Facility Provider 分配 pending Realm
     M->>M: 在 package 中写入已验证的 Service 包，签名并激活 Realm Profile
     M->>M: 兑换 owner 邀请，成为该 Realm 的 owner（取得 Realm membership）
     M->>S: 在新 Realm 内持久化身份并启动 Service

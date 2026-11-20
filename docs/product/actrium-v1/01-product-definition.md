@@ -20,6 +20,12 @@ Developers see a constrained small-app platform:
 - the background Service can use the Actor model to compose more complex services;
 - an exact-version package can be downloaded over HTTPS, verified, cached and reproduced.
 
+The Actr ecosystem comprises a platform and applications. The platform provides the facilities and
+services needed to create and run applications. **Actr Facility Provider (AFP)** is a general term
+for the providers and operators that fulfill platform responsibilities in the Actr ecosystem.
+Those responsibilities include providing infrastructure and allocating Realms for application instances.
+For Realm allocation and provider binding, see [Realm, signaling, TURN and identity](07-realm-network-and-identity.md).
+
 ## 2. Current issues
 
 Without first freezing the model, Actrium can easily end up carrying the semantics of a browser, a plugin system, a remote desktop, a native application container and an Actor debugger all at once, which eventually leads to the following problems:
@@ -67,7 +73,7 @@ Publishes programs through a domain name and maintains the Publisher signing key
 
 ### 3.4 Realm signing key holder and Realm owner
 
-The owner of a Realm domain is the Realm signing key holder: it publishes the Realm signing key in the authority descriptor, authorizes Realm creation under that domain after authenticating requesters under its own policy, decides which Actr Facility Provider to use, and is responsible for rotating the Realm signing key; it may also delegate custody of the key to an Actr Facility Provider. No domain, no Realm (except the local Realm).
+The owner of a Realm domain is the Realm signing key holder. The holder publishes the Realm signing key in the authority descriptor, authenticates requesters under its own policy, authorizes Realm creation under its domain, and decides which AFP allocates and serves the Realm. The holder is responsible for rotating the Realm signing key and may delegate custody of it to an AFP. No domain, no Realm (except the local Realm).
 
 The Realm owner is the creator of the application instance and manages that Realm's membership, Actor admission, connection ACL, Realm invitations, client revocation and audit.
 
