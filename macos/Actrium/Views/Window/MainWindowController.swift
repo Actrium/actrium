@@ -24,11 +24,15 @@ final class ActriumWindow: NSWindow {
         toolbarInteraction?.pointerSequenceEnded(activeTabID: activeTabIDProvider?())
     }
 
-    /// TextKit 1 field editor. The system field editor uses TextKit 2 on
-    /// macOS 26, where a second mouse-down in the address bar spins forever
-    /// in NSTextLayoutManager.enumerateTextLayoutFragmentsFromLocation
-    /// (TextKit 2 layout enumeration never converges). Pinning the window's
-    /// shared field editor to the classic stack avoids that path entirely.
+    // MARK: - Classic (TextKit 1) field editor
+
+    /// Shared TextKit 1 editor for AppKit text fields in this window.
+    ///
+    /// On macOS 26 the system field editor uses TextKit 2, and a second
+    /// mouse-down in a single-line, horizontally scrolling field editor (the
+    /// address bar) hangs forever in
+    /// `NSTextLayoutManager.enumerateTextLayoutFragmentsFromLocation`: TextKit 2's
+    /// lazy layout enumeration never converges for that geometry.
     private lazy var classicFieldEditor: NSTextView = {
         let storage = NSTextStorage()
         let layoutManager = NSLayoutManager()
@@ -41,7 +45,16 @@ final class ActriumWindow: NSWindow {
     }()
 
     override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
-        classicFieldEditor
+        // Only AppKit text fields get the TextKit 1 editor. SwiftUI's
+        // `AppKitTextField` force-casts the window's field editor to its
+        // private `_SystemTextFieldFieldEditor`, so it must keep the system
+        // editor; anything else (theme widgets, scrollers, …) is left
+        // untouched as well.
+        guard let object, object is NSTextField,
+              !String(reflecting: type(of: object)).hasPrefix("SwiftUI.") else {
+            return super.fieldEditor(createFlag, for: object)
+        }
+        return classicFieldEditor
     }
 }
 
