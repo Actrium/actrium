@@ -944,18 +944,15 @@ async fn admitted_requests_are_scoped_to_their_session() {
     // Model takeover/expiry closing a session without running the registry's
     // explicit Detach cleanup. Its unfinished admission must not squat on the
     // same request ID in the next session.
-    let channel = super::service::verified_channel(service_context().as_ref()).unwrap();
     registry
-        .service
-        .detach(
+        .detach_without_cleanup_for_test(
             DetachRequest {
                 session_id: first.session_id.clone(),
                 lease_epoch: first.lease_epoch,
             },
-            &channel,
+            service_context().as_ref(),
         )
-        .await
-        .unwrap();
+        .await;
     let (second, second_secret) = attach_on_channel(&registry, "channel-2", "attach-2", 43).await;
     let second_call = signed_business_request_on_channel(
         &second,

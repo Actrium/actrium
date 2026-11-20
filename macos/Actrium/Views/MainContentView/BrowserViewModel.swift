@@ -2029,6 +2029,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     _ = try ActrPackageCache.installArchive(at: downloadedURL, digest: digest, replacingRejectedArchive: true)
                     ActrPackageCache.rememberDownloadURL(packageURL, digest: digest)
                 }
+                // Derive the exact Attach compatibility declarations from the
+                // verified Front payloads and the Service release selected by
+                // the Realm Profile.
+                let sessionMetadata = try ActrBindings.actriumSessionMetadataForFront(
+                    frontArchive: verified.bytes,
+                    trustedFrontKey: verified.trustedKey,
+                    serviceType: verified.serviceType,
+                    servicePackageDigestHex: profile.serviceSha256
+                )
                 logger.notice("🔐 [navigateCurrentTab] Verified Realm Front \(profile.packageType) for Service \(profile.serviceType)")
 
                 // Verify the manifest signature with the publisher keys the
@@ -2064,7 +2073,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         profile: profile,
                         verifiedProfileBody: profileData,
                         front: verified.bytes,
-                        serviceType: verified.serviceType,
+                        metadata: sessionMetadata,
                         trustedFrontKey: verified.trustedKey,
                         capabilitiesJSON: capabilities,
                         permissions: manifest.permissions
@@ -2304,9 +2313,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             frontArchive: archive, trustedPublicKey: trustedKey,
             frontType: profile.packageType, serviceType: profile.serviceType
         )
+        let sessionMetadata = try ActrBindings.actriumSessionMetadataForFront(
+            frontArchive: archive,
+            trustedFrontKey: trustedKey,
+            serviceType: serviceType,
+            servicePackageDigestHex: service.sha256
+        )
         let binding = try RealmServiceBinding(
             profile: profile, verifiedProfileBody: profileData, front: archive,
-            serviceType: serviceType, trustedFrontKey: trustedKey, capabilitiesJSON: capabilities,
+            metadata: sessionMetadata, trustedFrontKey: trustedKey, capabilitiesJSON: capabilities,
             permissions: manifest.permissions
         )
         var installed = false

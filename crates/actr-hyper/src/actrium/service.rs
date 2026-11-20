@@ -460,6 +460,19 @@ impl ActriumServiceRegistry {
             ActriumServiceGuard { service, shared },
         )
     }
+
+    #[cfg(test)]
+    async fn detach_without_cleanup_for_test(
+        &self,
+        detach: DetachRequest,
+        context: &crate::transport::VerifiedPeerContext,
+    ) {
+        let channel = verified_channel(context).expect("valid test channel");
+        self.service
+            .detach(detach, &channel)
+            .await
+            .expect("test session detaches");
+    }
 }
 
 fn decode_payload<T: serde::de::DeserializeOwned>(envelope: &RpcEnvelope) -> ActorResult<T> {
