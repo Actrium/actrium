@@ -900,7 +900,8 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             guard planned.session.target == connection.target else {
                 await cleanupAttachmentSession(
                     attachmentId: planned.session.attachmentId,
-                    streamId: planned.session.chunkStreamId
+                    streamId: planned.session.chunkStreamId,
+                    attemptId: planned.session.attemptId
                 )
                 throw RealmServiceAttachmentUploadError.unavailable(
                     "The Service instance changed after reconnecting; restart the attachment upload.")
@@ -927,7 +928,8 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                 // attempt so a retry reusing the attachment id survives.
                 await cleanupAttachmentSession(
                     attachmentId: planned.session.attachmentId,
-                    streamId: planned.session.chunkStreamId
+                    streamId: planned.session.chunkStreamId,
+                    attemptId: planned.session.attemptId
                 )
                 throw error
             }
@@ -1025,8 +1027,16 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// Starts terminal cleanup for a live upload. A preparing session stays
     /// reserved until its owning prepare call has finished any late stream
     /// registration and performs the final transport cleanup.
-    private func cleanupAttachmentSession(attachmentId: String, streamId: String) async {
-        guard let session = await sessions.cancel(attachmentId: attachmentId, streamId: streamId) else {
+    private func cleanupAttachmentSession(
+        attachmentId: String,
+        streamId: String,
+        attemptId: UUID
+    ) async {
+        guard let session = await sessions.cancel(
+            attachmentId: attachmentId,
+            streamId: streamId,
+            attemptId: attemptId
+        ) else {
             return
         }
         await teardownAttachmentSession(session)

@@ -167,12 +167,20 @@ struct RealmServiceAttachmentUploadTests {
     @Test func aStaleAttemptCannotCancelOrRetargetARetry() async throws {
         let store = RealmServiceAttachmentSessionStore()
         let first = makePrepareCall(attachmentId: "same-id")
-        try await store.registerPreparing(first, checksum: md5)
+        let firstAttempt = try await store.registerPreparing(first, checksum: md5)
         // Cleanup scoped to another attempt is a no-op.
-        let unrelated = await store.cancel(attachmentId: "same-id", streamId: "another-stream")
+        let unrelated = await store.cancel(
+            attachmentId: "same-id",
+            streamId: "another-stream",
+            attemptId: firstAttempt
+        )
         #expect(unrelated == nil)
         #expect(await store.isCurrent(attachmentId: "same-id", streamId: first.streamId))
-        let removed = await store.cancel(attachmentId: "same-id", streamId: first.streamId)
+        let removed = await store.cancel(
+            attachmentId: "same-id",
+            streamId: first.streamId,
+            attemptId: firstAttempt
+        )
         #expect(removed?.chunkStreamId == first.streamId)
         if let removed {
             await store.completeTeardown(removed)
@@ -407,6 +415,51 @@ struct RealmServiceAttachmentUploadTests {
             await store.completeTeardown(second)
         }
         #expect(await store.session(forResultStreamId: call.resultStreamId) == nil)
+    }
+
+    @Test func lateChunkFailureCannotCancelAReregisteredAttempt() async throws {
+        let store = RealmServiceAttachmentSessionStore()
+        let call = makePrepareCall()
+        let firstAttempt = try await store.registerPreparing(call, checksum: md5)
+        try await store.markUploading(
+            attachmentId: call.attachmentId,
+            streamId: call.streamId,
+            target: fixedTarget
+        )
+        let sending = try await store.planChunk(
+            streamId: call.streamId,
+            sequence: 1,
+            payloadBytes: 1,
+            metadata: []
+        )
+        #expect(sending.session.attemptId == firstAttempt)
+
+        // The original attempt finishes teardown and a replacement reuses
+        // every public ID while its chunk send is still suspended.
+        if let original = await store.unregister(streamId: call.streamId) {
+            await store.completeTeardown(original)
+        }
+        let secondAttempt = try await store.registerPreparing(call, checksum: md5)
+        #expect(secondAttempt != firstAttempt)
+
+        let lateCleanup = await store.cancel(
+            attachmentId: sending.session.attachmentId,
+            streamId: sending.session.chunkStreamId,
+            attemptId: sending.session.attemptId
+        )
+        #expect(lateCleanup == nil)
+        #expect(await store.session(forResultStreamId: call.resultStreamId)?.attemptId == secondAttempt)
+        #expect(await store.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId))
+
+        let currentCleanup = await store.cancel(
+            attachmentId: call.attachmentId,
+            streamId: call.streamId,
+            attemptId: secondAttempt
+        )
+        #expect(currentCleanup?.attemptId == secondAttempt)
+        if let currentCleanup {
+            await store.completeTeardown(currentCleanup)
+        }
     }
 
     @Test func preparingCancellationWaitsForThePrepareOwnerToFinishCleanup() async throws {

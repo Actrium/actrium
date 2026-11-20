@@ -391,13 +391,17 @@ actor RealmServiceAttachmentSessionStore {
         return beginTeardown(session)
     }
 
-    /// Idempotent per-attempt cancellation. Only claims the session when it
-    /// still belongs to `streamId`, so an abandoned attempt cannot tear down a
-    /// retry that reuses the attachment id.
-    func cancel(attachmentId: String, streamId: String) -> RealmServiceAttachmentSession? {
-        guard let session = sessions[attachmentId], session.chunkStreamId == streamId else {
-            return nil
-        }
+    /// Idempotent per-attempt cancellation. All three identifiers must still
+    /// match, so a late send failure cannot tear down a replacement that
+    /// reused both public IDs after the original teardown completed.
+    func cancel(
+        attachmentId: String,
+        streamId: String,
+        attemptId: UUID
+    ) -> RealmServiceAttachmentSession? {
+        guard let session = sessions[attachmentId],
+              session.chunkStreamId == streamId,
+              session.attemptId == attemptId else { return nil }
         return beginTeardown(session)
     }
 
