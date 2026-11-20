@@ -345,6 +345,24 @@ public struct Actrium_Ipc_InputEvent: Sendable {
 
   public var characters: String = String()
 
+  public var clickCount: UInt32 {
+    get {_clickCount ?? 0}
+    set {_clickCount = newValue}
+  }
+  /// Returns true if `clickCount` has been explicitly set.
+  public var hasClickCount: Bool {self._clickCount != nil}
+  /// Clears the value of `clickCount`. Subsequent reads from it will return its default value.
+  public mutating func clearClickCount() {self._clickCount = nil}
+
+  public var eventNumber: Int64 {
+    get {_eventNumber ?? 0}
+    set {_eventNumber = newValue}
+  }
+  /// Returns true if `eventNumber` has been explicitly set.
+  public var hasEventNumber: Bool {self._eventNumber != nil}
+  /// Clears the value of `eventNumber`. Subsequent reads from it will return its default value.
+  public mutating func clearEventNumber() {self._eventNumber = nil}
+
   public var tabID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -359,6 +377,7 @@ public struct Actrium_Ipc_InputEvent: Sendable {
     case scroll // = 5
     case keyDown // = 6
     case keyUp // = 7
+    case mouseDragged // = 8
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -375,6 +394,7 @@ public struct Actrium_Ipc_InputEvent: Sendable {
       case 5: self = .scroll
       case 6: self = .keyDown
       case 7: self = .keyUp
+      case 8: self = .mouseDragged
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -389,6 +409,7 @@ public struct Actrium_Ipc_InputEvent: Sendable {
       case .scroll: return 5
       case .keyDown: return 6
       case .keyUp: return 7
+      case .mouseDragged: return 8
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -403,11 +424,15 @@ public struct Actrium_Ipc_InputEvent: Sendable {
       .scroll,
       .keyDown,
       .keyUp,
+      .mouseDragged,
     ]
 
   }
 
   public init() {}
+
+  fileprivate var _clickCount: UInt32? = nil
+  fileprivate var _eventNumber: Int64? = nil
 }
 
 public struct Actrium_Ipc_ExecuteJSRequest: Sendable {
@@ -1621,7 +1646,7 @@ extension Actrium_Ipc_UpdateViewportRequest: SwiftProtobuf.Message, SwiftProtobu
 
 extension Actrium_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".InputEvent"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{1}x\0\u{1}y\0\u{3}scroll_delta_x\0\u{3}scroll_delta_y\0\u{1}button\0\u{1}modifiers\0\u{3}key_code\0\u{1}characters\0\u{4}\u{b}tab_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{1}x\0\u{1}y\0\u{3}scroll_delta_x\0\u{3}scroll_delta_y\0\u{1}button\0\u{1}modifiers\0\u{3}key_code\0\u{1}characters\0\u{3}click_count\0\u{3}event_number\0\u{4}\u{9}tab_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1638,6 +1663,8 @@ extension Actrium_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageI
       case 7: try { try decoder.decodeSingularUInt32Field(value: &self.modifiers) }()
       case 8: try { try decoder.decodeSingularUInt32Field(value: &self.keyCode) }()
       case 9: try { try decoder.decodeSingularStringField(value: &self.characters) }()
+      case 10: try { try decoder.decodeSingularUInt32Field(value: &self._clickCount) }()
+      case 11: try { try decoder.decodeSingularInt64Field(value: &self._eventNumber) }()
       case 20: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
       default: break
       }
@@ -1645,6 +1672,10 @@ extension Actrium_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageI
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.type != .mouseMove {
       try visitor.visitSingularEnumField(value: self.type, fieldNumber: 1)
     }
@@ -1672,6 +1703,12 @@ extension Actrium_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageI
     if !self.characters.isEmpty {
       try visitor.visitSingularStringField(value: self.characters, fieldNumber: 9)
     }
+    try { if let v = self._clickCount {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 10)
+    } }()
+    try { if let v = self._eventNumber {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 11)
+    } }()
     if !self.tabID.isEmpty {
       try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 20)
     }
@@ -1688,6 +1725,8 @@ extension Actrium_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageI
     if lhs.modifiers != rhs.modifiers {return false}
     if lhs.keyCode != rhs.keyCode {return false}
     if lhs.characters != rhs.characters {return false}
+    if lhs._clickCount != rhs._clickCount {return false}
+    if lhs._eventNumber != rhs._eventNumber {return false}
     if lhs.tabID != rhs.tabID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -1695,7 +1734,7 @@ extension Actrium_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageI
 }
 
 extension Actrium_Ipc_InputEvent.EventType: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MOUSE_MOVE\0\u{1}MOUSE_DOWN\0\u{1}MOUSE_UP\0\u{1}MOUSE_ENTERED\0\u{1}MOUSE_EXITED\0\u{1}SCROLL\0\u{1}KEY_DOWN\0\u{1}KEY_UP\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MOUSE_MOVE\0\u{1}MOUSE_DOWN\0\u{1}MOUSE_UP\0\u{1}MOUSE_ENTERED\0\u{1}MOUSE_EXITED\0\u{1}SCROLL\0\u{1}KEY_DOWN\0\u{1}KEY_UP\0\u{1}MOUSE_DRAGGED\0")
 }
 
 extension Actrium_Ipc_ExecuteJSRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

@@ -47,13 +47,17 @@ struct PersistentRendererProcessView: NSViewRepresentable {
     }
 }
 
-final class RendererSurfaceHostView: NSView {
+final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
     weak var coordinator: ViewBridgeCoordinator?
-    var tabId: UUID?
+    var tabId: UUID? {
+        didSet { if tabId != oldValue { documentInteraction.reset() } }
+    }
+    private lazy var documentInteraction = RendererDocumentInteraction(surface: self)
     var fingerprint = ""
     var allowsInput = true {
         didSet {
             guard allowsInput != oldValue else { return }
+            documentInteraction.updateOutsidePressMonitor()
             if allowsInput {
                 scheduleKeyboardFocusRestore()
             } else if let window, window.firstResponder === self {
@@ -161,6 +165,7 @@ final class RendererSurfaceHostView: NSView {
             else { return }
             if focused {
                 self.lastRendererTextFocus = true
+                self.documentInteraction.clearSelection()
                 // Re-activate after focus churn: SwiftUI may reclaim first
                 // responder once when the click event settles, which resigns
                 // the IME client and blurs the remote input; a later
@@ -320,6 +325,7 @@ final class RendererSurfaceHostView: NSView {
     }
 
     override func prepareForReuse() {
+        documentInteraction.reset()
         allowsInput = false
         super.prepareForReuse()
         configureTask?.cancel()
@@ -396,6 +402,7 @@ final class RendererSurfaceHostView: NSView {
     }
 
     private func showPlaceholder() {
+        documentInteraction.reset()
         contextId = 0
         hostLayer?.removeFromSuperlayer()
         hostLayer = nil
@@ -460,6 +467,7 @@ final class RendererSurfaceHostView: NSView {
             options: [
                 .mouseEnteredAndExited,
                 .mouseMoved,
+                .cursorUpdate,
                 .activeInKeyWindow,
                 .inVisibleRect
             ],
@@ -494,6 +502,7 @@ final class RendererSurfaceHostView: NSView {
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if let window, window !== newWindow {
+            documentInteraction.removeOutsidePressMonitor()
             if window.firstResponder === self { sendKeyboardFocus(false) }
             let center = NotificationCenter.default
             center.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: window)
@@ -505,6 +514,7 @@ final class RendererSurfaceHostView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let window else { return }
+        documentInteraction.updateOutsidePressMonitor()
         let center = NotificationCenter.default
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
             center.addObserver(self, selector: #selector(windowKeyStatusChanged(_:)), name: name, object: window)
@@ -666,15 +676,15 @@ final class RendererSurfaceHostView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        forwardMouse(event, type: .mouseMove)
+        forwardMouse(event, type: .mouseDragged)
     }
 
     override func rightMouseDragged(with event: NSEvent) {
-        forwardMouse(event, type: .mouseMove, button: 1)
+        forwardMouse(event, type: .mouseDragged, button: 1)
     }
 
     override func otherMouseDragged(with event: NSEvent) {
-        forwardMouse(event, type: .mouseMove, button: 2)
+        forwardMouse(event, type: .mouseDragged, button: 2)
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -682,7 +692,42 @@ final class RendererSurfaceHostView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
+        documentInteraction.mouseExited()
         forwardMouse(event, type: .mouseExited)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        (allowsInput && documentInteraction.usesTextCursor ? NSCursor.iBeam : NSCursor.arrow).set()
+    }
+
+    private var canCopyDocumentSelection: Bool {
+        allowsInput && window?.firstResponder === self && documentInteraction.hasSelection
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(NSText.copy(_:)) { return canCopyDocumentSelection }
+        return menuItem.action.map { responds(to: $0) } ?? false
+    }
+
+    @objc func copy(_ sender: Any?) {
+        if canCopyDocumentSelection {
+            sendIMEPayload(name: "com.actrium.documentSelectionCommand", payload: ["command": "copy"])
+        }
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        if window?.isKeyWindow == true, canCopyDocumentSelection, modifiers == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "c" {
+            copy(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    func clearDocumentSelection() {
+        guard documentInteraction.hasSelection else { return }
+        sendIMEPayload(name: "com.actrium.documentSelectionCommand", payload: ["command": "clear"])
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -720,6 +765,10 @@ final class RendererSurfaceHostView: NSView {
         input.y = point.y
         input.button = button
         input.modifiers = encodedModifiers(event.modifierFlags)
+        if type == .mouseDown || type == .mouseUp || type == .mouseDragged {
+            input.clickCount = UInt32(clamping: event.clickCount)
+            input.eventNumber = Int64(event.eventNumber)
+        }
         RendererProcessPool.shared.sendInput(input, to: tabId)
     }
 

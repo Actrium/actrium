@@ -608,6 +608,9 @@ final class RendererProcessController {
                     self.surfaces[tabId]?.applyInsertText(op.text)
                 case "com.actrium.textInputBlurRequest":
                     self.surfaces[tabId]?.resignTextInputFocus()
+                case "com.actrium.documentSelectionCommand":
+                    guard let payload = try? JSONDecoder().decode(IMECommandPayload.self, from: Data(json.utf8)) else { return }
+                    self.surfaces[tabId]?.performDocumentSelectionCommand(payload.command)
                 case "com.actrium.textCommand":
                     guard let payload = try? JSONDecoder().decode(IMECommandPayload.self, from: Data(json.utf8)) else { return }
                     self.surfaces[tabId]?.performTextCommand(payload.command)
@@ -952,7 +955,7 @@ private final class RendererTabSurface {
     private var hasCommitted = false
     private var accessibilityObservers: [NSObjectProtocol] = []
     private var accessibilityPublishWork: DispatchWorkItem?
-    private var pressedRecognizers: [UInt32: [NSGestureRecognizer]] = [:]
+    private let mouseTracking = RendererMouseTracking()
     private var textInputPresses: Set<UInt32> = []
     /// Character index where the current text drag started. AppKit's
     /// mouse-tracking selection cannot run here (mouse events arrive
@@ -963,6 +966,7 @@ private final class RendererTabSurface {
     /// selections leave a stale anchor whose offset may coincidentally fall
     /// inside the new range but does not describe it.
     private var dragSelectionAnchorRange: NSRange?
+    private var multiClickDragStart: (range: NSRange, granularity: NSSelectionGranularity)?
     /// The control the active drag belongs to. A programmatic focus change
     /// mid-drag (e.g. an RN callback) must not apply this drag's anchor to
     /// a different input.
@@ -974,6 +978,7 @@ private final class RendererTabSurface {
     /// Last text-input focus state reported to the Host. The Host mirrors
     /// IME composition for whichever surface owns the focused text input.
     private var lastReportedTextFocus = false
+    private var lastTextCursor = false
     private weak var focusedEditor: NSTextView?
     private var lastCaretRect: CGRect?
     /// Snapshot-based undo/redo for Host-mirrored text commits. AppKit's
@@ -1111,11 +1116,17 @@ private final class RendererTabSurface {
 
     func setKeyboardFocus(_ focused: Bool) {
         guard window.hasHostKeyboardFocus != focused else { return }
+        if !focused {
+            ServiceReactNativeHost.shared.sendDocumentSelectionCommand("clear", tabId: tabId)
+            mouseTracking.cancel()
+            textInputPresses.removeAll()
+        }
         window.setHostKeyboardFocus(focused)
         commit()
     }
 
     func close() {
+        mouseTracking.cancel()
         undoHistories.removeAllObjects()
         accessibilityPublishWork?.cancel()
         accessibilityPublishWork = nil
@@ -1177,18 +1188,8 @@ private final class RendererTabSurface {
         let timestamp = ProcessInfo.processInfo.systemUptime
 
         switch input.type {
-        case .mouseDown, .mouseUp, .mouseMove:
-            let type: NSEvent.EventType
-            if input.type == .mouseMove {
-                type = .mouseMoved
-            } else if input.button == 1 {
-                type = input.type == .mouseDown ? .rightMouseDown : .rightMouseUp
-            } else if input.button == 2 {
-                type = input.type == .mouseDown ? .otherMouseDown : .otherMouseUp
-            } else {
-                type = input.type == .mouseDown ? .leftMouseDown : .leftMouseUp
-            }
-
+        case .mouseDown, .mouseUp, .mouseMove, .mouseDragged:
+            guard let type = RendererMouseTracking.eventType(for: input) else { return }
             guard let event = NSEvent.mouseEvent(
                 with: type,
                 location: location,
@@ -1196,23 +1197,29 @@ private final class RendererTabSurface {
                 timestamp: timestamp,
                 windowNumber: window.windowNumber,
                 context: nil,
-                eventNumber: 0,
-                clickCount: input.type == .mouseMove ? 0 : 1,
-                pressure: input.type == .mouseDown ? 1 : 0
+                eventNumber: input.hasEventNumber ? Int(input.eventNumber) : Int(input.button) + 1,
+                clickCount: input.hasClickCount ? Int(input.clickCount) : (input.type == .mouseMove ? 0 : 1),
+                pressure: input.type == .mouseDown || input.type == .mouseDragged ? 1 : 0
             ) else {
                 return
             }
 
             let hitView = hitTest(at: location)
+            if input.type == .mouseMove {
+                updateTextCursor(for: hitView)
+            }
             // Editable RN controls keep AppKit's native focus path; routing
             // their clicks through the JS responder revokes first responder.
             if input.type == .mouseDown {
+                textInputPresses.remove(input.button)
                 let ancestors = sequence(first: hitView, next: { $0?.superview })
                     .prefix(while: { $0 != nil }).compactMap { $0 }
                 let textInput = ancestors.first { $0 is NSTextView || $0 is NSTextField }
                 if input.button == 0, let textInput {
+                    mouseTracking.cancel(button: input.button)
+                    ServiceReactNativeHost.shared.sendDocumentSelectionCommand("clear", tabId: tabId)
                     textInputPresses.insert(input.button)
-                    focusTextInput(textInput, at: location, modifiers: modifiers)
+                    focusTextInput(textInput, at: location, modifiers: modifiers, clickCount: event.clickCount)
                     // AppKit adds the field editor to the offscreen view
                     // hierarchy on focus. Republish after that update.
                     DispatchQueue.main.async { [weak self] in
@@ -1223,9 +1230,8 @@ private final class RendererTabSurface {
                 }
                 window.makeFirstResponder(hitView ?? container)
                 let recognizers = ancestors.flatMap(\.gestureRecognizers)
-                forwardMouse(event, to: recognizers)
-                pressedRecognizers[input.button] = recognizers
-            } else if input.type == .mouseMove, input.button == 0,
+                mouseTracking.begin(event, button: input.button, recognizers: recognizers)
+            } else if input.type == .mouseDragged, input.button == 0,
                       textInputPresses.contains(0),
                       let anchor = dragSelectionAnchor,
                       let editor = resolvedTextView(window.firstResponder) {
@@ -1256,11 +1262,18 @@ private final class RendererTabSurface {
                 }
                 let point = editor.convert(location, from: nil)
                 let index = editor.characterIndexForInsertion(at: point)
-                if index != NSNotFound {
-                    let range = NSRange(
+                if index != NSNotFound, index <= textLength {
+                    var range = NSRange(
                         location: min(anchor, index),
                         length: abs(index - anchor)
                     )
+                    if let start = multiClickDragStart, start.range.upperBound <= textLength {
+                        let caret = NSRange(location: index, length: 0)
+                        let target = editor.selectionRange(forProposedRange: caret, granularity: start.granularity)
+                        let extended = extendMultiClickSelection(from: start.range, to: target, at: index)
+                        range = extended.range
+                        dragSelectionAnchor = extended.anchor
+                    }
                     // Keep the stored selection in sync with what the drag
                     // applies, so a later Shift+click still recognises the
                     // anchor as the creator of the current selection.
@@ -1273,14 +1286,15 @@ private final class RendererTabSurface {
                     }
                 }
                 return
+            } else if input.type == .mouseDragged {
+                // Without the original press, the drag has no valid gesture target.
+                guard mouseTracking.drag(event, button: input.button) else { return }
             } else if input.type == .mouseUp {
                 if textInputPresses.remove(input.button) != nil {
                     dragOwner = nil
                     return
                 }
-                if let recognizers = pressedRecognizers.removeValue(forKey: input.button) {
-                    forwardMouse(event, to: recognizers)
-                }
+                mouseTracking.end(event, button: input.button)
             }
             window.sendEvent(event)
 
@@ -1289,6 +1303,7 @@ private final class RendererTabSurface {
             let delta = NSPoint(x: input.scrollDeltaX, y: input.scrollDeltaY)
             if ActriumScrollRendererContent(hitView, delta) {
                 commit()
+                updateTextCursor(for: hitTest(at: location))
             }
 
         case .keyDown, .keyUp:
@@ -1330,7 +1345,11 @@ private final class RendererTabSurface {
                 publishCaret()
             }
 
-        case .mouseEntered, .mouseExited, .UNRECOGNIZED(_):
+        case .mouseEntered:
+            updateTextCursor(for: hitTest(at: location), force: true)
+        case .mouseExited:
+            lastTextCursor = false
+        case .UNRECOGNIZED(_):
             break
         }
     }
@@ -1338,6 +1357,14 @@ private final class RendererTabSurface {
     private func hitTest(at location: NSPoint) -> NSView? {
         let point = container.superview?.convert(location, from: nil) ?? location
         return container.hitTest(point)
+    }
+
+    private func updateTextCursor(for hitView: NSView?, force: Bool = false) {
+        let active = ActriumRendererUsesTextCursor(hitView)
+        guard force || active != lastTextCursor else { return }
+        lastTextCursor = active
+        RendererProcessController.sendHostEvent(name: "com.actrium.textCursor",
+                                               userInfo: ["active": active], tabId: tabId)
     }
 
 
@@ -1351,6 +1378,7 @@ private final class RendererTabSurface {
             || (responder as? NSTextField)?.isEditable == true
         guard focused != lastReportedTextFocus else { return }
         lastReportedTextFocus = focused
+        if focused { performDocumentSelectionCommand("clear") }
         try? report(focused)
         if focused { publishCaret() }
     }
@@ -1457,6 +1485,17 @@ private final class RendererTabSurface {
         }
     }
 
+    func performDocumentSelectionCommand(_ command: String) {
+        switch command {
+        case "clear": break
+        case "copy":
+            guard window.hasHostKeyboardFocus, !(window.firstResponder is NSTextView),
+                  !(window.firstResponder is NSTextField) else { return }
+        default: return
+        }
+        ServiceReactNativeHost.shared.sendDocumentSelectionCommand(command, tabId: tabId)
+    }
+
     /// Applies Host-forwarded editing actions (menu key equivalents) to the
     /// focused text input. copy/cut/paste/selectAll run through AppKit's own
     /// implementations on the real text storage; undo/redo restore snapshots
@@ -1494,12 +1533,15 @@ private final class RendererTabSurface {
         RendererProcessLifetime.shared.controller?.publishCaret(tabId: tabId, rect: nil)
     }
 
-    private func focusTextInput(_ view: NSView, at location: NSPoint, modifiers: NSEvent.ModifierFlags) {
+    private func focusTextInput(
+        _ view: NSView, at location: NSPoint, modifiers: NSEvent.ModifierFlags, clickCount: Int
+    ) {
         // AppKit's native mouse tracking waits synchronously for mouse-up.
         // Renderer mouse-up arrives on the main queue over IPC.
         let focused = window.makeFirstResponder(view)
         let editor = (view as? NSTextField)?.currentEditor() as? NSTextView ?? view as? NSTextView
         focusedEditor = focused ? editor : nil
+        multiClickDragStart = nil
         guard focused, let editor else { return }
         dragOwner = currentControl()
         let point = editor.convert(location, from: nil)
@@ -1545,10 +1587,20 @@ private final class RendererTabSurface {
             publishCaret()
             commit()
         } else {
-            dragSelectionAnchor = index
-            dragSelectionAnchorRange = NSRange(location: index, length: 0)
+            let granularity: NSSelectionGranularity = switch clickCount {
+            case 2: .selectByWord
+            case 3...: .selectByParagraph
+            default: .selectByCharacter
+            }
+            let caret = NSRange(location: index, length: 0)
+            let range = editor.selectionRange(forProposedRange: caret, granularity: granularity)
+            if granularity != .selectByCharacter {
+                multiClickDragStart = (range, granularity)
+            }
+            dragSelectionAnchor = range.location
+            dragSelectionAnchorRange = range
             anchorOwner = currentControl()
-            editor.setSelectedRange(NSRange(location: index, length: 0))
+            editor.setSelectedRange(range)
             publishCaret()
         }
     }
@@ -1594,22 +1646,6 @@ private final class RendererTabSurface {
         return CGRect(x: localRect.minX, y: localRect.minY, width: 2, height: localRect.height)
     }
 
-    private func forwardMouse(_ event: NSEvent, to recognizers: [NSGestureRecognizer]) {
-        // Synthetic AppKit events do not drive recognizers in this offscreen
-        // window. Release only the recognizers that received the press.
-        for recognizer in recognizers {
-            switch event.type {
-            case .leftMouseDown: recognizer.mouseDown(with: event)
-            case .rightMouseDown: recognizer.rightMouseDown(with: event)
-            case .otherMouseDown: recognizer.otherMouseDown(with: event)
-            case .leftMouseUp: recognizer.mouseUp(with: event)
-            case .rightMouseUp: recognizer.rightMouseUp(with: event)
-            case .otherMouseUp: recognizer.otherMouseUp(with: event)
-            default: break
-            }
-        }
-    }
-
     private func modifierFlags(from encoded: UInt32) -> NSEvent.ModifierFlags {
         var result: NSEvent.ModifierFlags = []
         if encoded & 1 != 0 { result.insert(.shift) }
@@ -1618,5 +1654,23 @@ private final class RendererTabSurface {
         if encoded & 8 != 0 { result.insert(.command) }
         if encoded & 16 != 0 { result.insert(.capsLock) }
         return result
+    }
+}
+
+private extension RendererMouseTracking {
+    static func eventType(for input: Actrium_Ipc_InputEvent) -> NSEvent.EventType? {
+        switch (input.type, input.button) {
+        case (.mouseMove, _): return .mouseMoved
+        case (.mouseDown, 0): return .leftMouseDown
+        case (.mouseDown, 1): return .rightMouseDown
+        case (.mouseDown, 2): return .otherMouseDown
+        case (.mouseDragged, 0): return .leftMouseDragged
+        case (.mouseDragged, 1): return .rightMouseDragged
+        case (.mouseDragged, 2): return .otherMouseDragged
+        case (.mouseUp, 0): return .leftMouseUp
+        case (.mouseUp, 1): return .rightMouseUp
+        case (.mouseUp, 2): return .otherMouseUp
+        default: return nil
+        }
     }
 }

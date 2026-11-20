@@ -24,6 +24,16 @@ private enum NativeHostTransport {
     }
 }
 
+@objc(DocumentSelection)
+final class DocumentSelection: NSObject {
+    @objc func setAvailable(_ tabId: String, active: Bool) {
+        RendererProcessController.sendHostEvent(name: "com.actrium.documentSelection",
+                                               userInfo: ["active": active], tabId: tabId)
+    }
+
+    @objc static func requiresMainQueueSetup() -> Bool { false }
+}
+
 @objc(RealmService)
 final class RealmService: RCTEventEmitter {
     private static weak var instance: RealmService?

@@ -1568,6 +1568,10 @@ final class ServiceReactNativeHost {
         view.setValue(properties, forKey: "appProperties")
     }
 
+    func sendDocumentSelectionCommand(_ command: String, tabId: String) {
+        emitDeviceEvent("actriumDocumentSelection", body: ["tabId": tabId, "command": command])
+    }
+
     /// Emit DeviceEventEmitter event via RCTHost (bridgeless mode)
     private func emitDeviceEvent(_ name: String, body: Any) {
         guard let host = reactHost else {

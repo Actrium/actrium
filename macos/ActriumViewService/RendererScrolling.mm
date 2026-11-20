@@ -3,6 +3,18 @@
 #import <React/RCTUIKit.h>
 #import <React/RCTScrollViewComponentView.h>
 
+BOOL ActriumRendererUsesTextCursor(NSView *hitView)
+{
+    using namespace facebook::react;
+    for (NSView *view = hitView; view; view = view.superview) {
+        if ([view isKindOfClass:NSTextView.class]) return YES;
+        if (![view isKindOfClass:RCTViewComponentView.class]) continue;
+        auto props = std::static_pointer_cast<const ViewProps>([(RCTViewComponentView *)view props]);
+        if (props && props->cursor != Cursor::Auto) return props->cursor == Cursor::Text;
+    }
+    return NO;
+}
+
 static NSScrollView *scrollViewForHit(NSView *hitView)
 {
     for (NSView *view = hitView; view != nil; view = view.superview) {

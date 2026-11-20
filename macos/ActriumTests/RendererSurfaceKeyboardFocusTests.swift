@@ -3,6 +3,70 @@ import Testing
 @testable import Actrium
 
 struct RendererSurfaceKeyboardFocusTests {
+    @Test @MainActor func copyRequiresSelectionInTheFocusedSurface() {
+        let window = NSWindow(contentRect: .zero, styleMask: .titled, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let surface = RendererSurfaceHostView(frame: .zero)
+        let address = NSTextField()
+        window.contentView?.addSubview(surface)
+        window.contentView?.addSubview(address)
+        let tab = UUID()
+        surface.tabId = tab
+        #expect(window.makeFirstResponder(surface))
+        let copy = NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        func select(_ id: UUID) {
+            NotificationCenter.default.post(name: .rendererDocumentSelection, object: nil,
+                                             userInfo: ["tabId": id, "active": true])
+        }
+        select(UUID())
+        #expect(!surface.validateMenuItem(copy))
+        select(tab)
+        #expect(surface.validateMenuItem(copy))
+        #expect(window.makeFirstResponder(address))
+        #expect(!surface.validateMenuItem(copy))
+    }
+
+    @Test @MainActor func selectionObserversDoNotRetainInteraction() {
+        let window = NSWindow(contentRect: .zero, styleMask: .titled, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let surface = RendererSurfaceHostView(frame: .zero)
+        window.contentView?.addSubview(surface)
+        let tab = UUID()
+        surface.tabId = tab
+        var interaction: RendererDocumentInteraction? = RendererDocumentInteraction(surface: surface)
+        weak let releasedInteraction = interaction
+        NotificationCenter.default.post(name: .rendererDocumentSelection, object: nil,
+                                        userInfo: ["tabId": tab, "active": true])
+        #expect(interaction?.hasSelection == true)
+
+        interaction = nil
+        #expect(releasedInteraction == nil)
+    }
+
+    @Test @MainActor func rendererTextInputFocusClearsOnlyItsOwnDocumentSelection() {
+        let window = NSWindow(contentRect: .zero, styleMask: .titled, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let surface = RendererSurfaceHostView(frame: .zero)
+        window.contentView?.addSubview(surface)
+        let tab = UUID()
+        surface.tabId = tab
+        #expect(window.makeFirstResponder(surface))
+        let copy = NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        let notifications = NotificationCenter.default
+        notifications.post(name: .rendererDocumentSelection, object: nil,
+                           userInfo: ["tabId": tab, "active": true])
+        notifications.post(name: .rendererTextInputFocusChanged, object: nil,
+                           userInfo: ["tabId": UUID(), "focused": true])
+        #expect(surface.validateMenuItem(copy))
+
+        notifications.post(name: .rendererTextInputFocusChanged, object: nil,
+                           userInfo: ["tabId": tab, "focused": true])
+        #expect(!surface.validateMenuItem(copy))
+    }
+
     @Test @MainActor func restoresOnlyTheActiveTabWithoutTakingAddressBarFocus() async {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),

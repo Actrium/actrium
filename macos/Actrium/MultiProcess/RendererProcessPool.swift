@@ -33,6 +33,8 @@ extension Notification.Name {
     static let rendererViewportApplied = Notification.Name("rendererViewportApplied")
     static let rendererAccessibilityUpdated = Notification.Name("rendererAccessibilityUpdated")
     static let rendererCaretUpdated = Notification.Name("rendererCaretUpdated")
+    static let rendererDocumentSelection = Notification.Name("rendererDocumentSelection")
+    static let rendererTextCursor = Notification.Name("rendererTextCursor")
     static let rendererTextInputFocusChanged = Notification.Name("rendererTextInputFocusChanged")
 }
 
@@ -618,6 +620,16 @@ final class RendererProcessPool: ObservableObject {
         }
 
         worker.connection.onHostEvent = { [weak self, weak worker] name, userInfoJSON, tab in
+            if name == "com.actrium.documentSelection" || name == "com.actrium.textCursor" {
+                guard let self, let worker, let id = UUID(uuidString: tab), self.worker(for: id) === worker,
+                      let flag = try? JSONDecoder().decode([String: Bool].self, from: Data(userInfoJSON.utf8)),
+                      let active = flag["active"] else { return }
+                NotificationCenter.default.post(
+                    name: name == "com.actrium.textCursor" ? .rendererTextCursor : .rendererDocumentSelection,
+                    object: nil, userInfo: ["tabId": id, "active": active]
+                )
+                return
+            }
             if name == GuestLocalStorageCall.requestEvent {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker else { return }

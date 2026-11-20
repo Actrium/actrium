@@ -6,12 +6,40 @@
 
 using namespace facebook::react;
 
+// Observe the callback Fabric uses to publish contentOffset to its shadow tree.
+@interface RCTScrollViewComponentView (ScrollDelegate) <RCTUIScrollViewDelegate>
+@end
+
+@interface OffsetRecordingScrollView : RCTScrollViewComponentView
+@property (nonatomic) CGPoint reportedOffset;
+@end
+
+@implementation OffsetRecordingScrollView
+- (void)scrollViewDidScroll:(RCTUIScrollView *)scrollView
+{
+    [super scrollViewDidScroll:scrollView];
+    self.reportedOffset = scrollView.contentOffset;
+}
+@end
+
 @interface RendererScrollingTests : XCTestCase
 @end
 
 @implementation RendererScrollingTests
 
-- (NSWindow *)mountList:(RCTScrollViewComponentView *)list
+- (void)testRemoteCursorFollowsTheNearestExplicitFabricStyle
+{
+    RCTViewComponentView *text = [[RCTViewComponentView alloc] initWithFrame:NSZeroRect];
+    auto props = std::make_shared<ViewProps>();
+    props->cursor = Cursor::Text;
+    [text updateProps:props oldProps:[text props]];
+    NSView *child = [NSView new];
+    [text addSubview:child];
+    XCTAssertTrue(ActriumRendererUsesTextCursor(child));
+    XCTAssertFalse(ActriumRendererUsesTextCursor([NSView new]));
+}
+
+- (void)layOutList:(RCTScrollViewComponentView *)list
 {
     auto data = std::make_shared<ScrollViewState>();
     data->contentBoundingRect = {{0, 0}, {300, 600}};
@@ -24,7 +52,11 @@ using namespace facebook::react;
     [list updateLayoutMetrics:layout oldLayoutMetrics:EmptyLayoutMetrics];
     RCTViewComponentView *content = [[RCTViewComponentView alloc] initWithFrame:NSMakeRect(16, 16, 268, 568)];
     [list mountChildComponentView:content index:0];
+}
 
+- (NSWindow *)mountList:(RCTScrollViewComponentView *)list
+{
+    [self layOutList:list];
     NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(-100000, -100000, 300, 300)
         styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
     window.releasedWhenClosed = NO;
@@ -32,6 +64,40 @@ using namespace facebook::react;
     [window orderOut:nil];
     [window.contentView layoutSubtreeIfNeeded];
     return window;
+}
+
+- (void)testScrollPublishesTheOffsetUsedToLocateTextUnderTheMouse
+{
+    OffsetRecordingScrollView *list = [[OffsetRecordingScrollView alloc] initWithFrame:NSZeroRect];
+    NSWindow *window = [self mountList:list];
+    NSPoint pointer = NSMakePoint(40, 100);
+    NSView *document = list.scrollView.documentView;
+    for (NSNumber *delta in @[@0, @(-120), @45]) {
+        XCTAssertTrue(ActriumScrollRendererContent(list, NSMakePoint(0, delta.doubleValue)));
+        NSPoint nativePoint = [document convertPoint:pointer fromView:list];
+        XCTAssertEqualWithAccuracy(pointer.y + list.reportedOffset.y, nativePoint.y, 0.01);
+    }
+    [window close];
+}
+
+- (void)testNestedScrollingPublishesBothOffsetsForTheSameMousePosition
+{
+    OffsetRecordingScrollView *outer = [[OffsetRecordingScrollView alloc] initWithFrame:NSZeroRect];
+    NSWindow *window = [self mountList:outer];
+    OffsetRecordingScrollView *inner = [[OffsetRecordingScrollView alloc] initWithFrame:NSZeroRect];
+    [self layOutList:inner];
+    [outer mountChildComponentView:inner index:1];
+    [window.contentView layoutSubtreeIfNeeded];
+    NSPoint pointer = NSMakePoint(40, 50);
+    NSView *document = inner.scrollView.documentView;
+    NSPoint before = [document convertPoint:pointer fromView:outer];
+    XCTAssertTrue(ActriumScrollRendererContent(outer, NSMakePoint(0, -90)));
+    XCTAssertTrue(ActriumScrollRendererContent(inner, NSMakePoint(0, -55)));
+    NSPoint after = [document convertPoint:pointer fromView:outer];
+    XCTAssertEqualWithAccuracy(after.y - before.y, 145, 0.01);
+    XCTAssertEqualWithAccuracy(outer.reportedOffset.y, 90, 0.01);
+    XCTAssertEqualWithAccuracy(inner.reportedOffset.y, 55, 0.01);
+    [window close];
 }
 
 - (void)testFirstLayoutStopsAtTheContentBottomWithoutResizing
