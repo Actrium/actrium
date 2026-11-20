@@ -124,7 +124,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private struct LoadedRealmFront {
         let address: URL
-        let signingKeyId: String
         let selection: RealmFrontSelection
     }
 
@@ -153,29 +152,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private var loadedRealmFronts: [UUID: LoadedRealmFront] = [:]
     private var realmRefreshes: [UUID: (id: UUID, task: Task<Void, Never>, inviteCode: String?)] = [:]
-    private static var backgroundRealmDocuments: [URL: Task<Data, Error>] = [:]
-    private var realmRefreshObservation: AnyCancellable?
-    @Published private var realmUpdateOffers: [UUID: RealmFrontUpdateOffer] = [:]
-    private var deferredRealmUpdates: [UUID: RealmFrontSelection] = [:]
-
-    var currentRealmUpdate: RealmFrontUpdateOffer? {
-        guard let tab = currentTab, let offer = realmUpdateOffers[tab.id],
-              tab.url == offer.address, tab.reloadNonce == offer.navigationNonce else { return nil }
-        return offer
-    }
-
-    func confirmRealmUpdate(_ offer: RealmFrontUpdateOffer) {
-        guard currentRealmUpdate == offer, let tab = currentTab else { return }
-        realmUpdateOffers.removeValue(forKey: tab.id)
-        cancelRealmRefresh(tab.id)
-        refreshRealmFront(tab, background: false, approved: offer.selection)
-    }
-
-    func deferRealmUpdate(_ offer: RealmFrontUpdateOffer) {
-        guard currentRealmUpdate == offer else { return }
-        deferredRealmUpdates[offer.tabId] = offer.selection
-        realmUpdateOffers.removeValue(forKey: offer.tabId)
-    }
 
     // MARK: - Instance Creation (15-B B6)
     // Confirm → serviceCreate → URI replace (replace, not push; history keeps only the
@@ -258,14 +234,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         currentTabId = startTab.id
         tabSlotPositions[startTab.id] = 0
         actriumMode = .focus(tabId: startTab.id)
-
-        realmRefreshObservation = NotificationCenter.default
-            .publisher(for: NSApplication.didBecomeActiveNotification)
-            .map { _ in () }
-            .merge(with: Timer.publish(every: 300, on: .main, in: .common).autoconnect().map { _ in () })
-            .sink { [weak self] _ in
-                Task { @MainActor [weak self] in self?.refreshLoadedRealmFronts() }
-            }
 
         realmTrustObserver = NotificationCenter.default
             .publisher(for: RealmProfileStore.didRetire, object: realmPreferences)
@@ -396,8 +364,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             deferredRealmLinks.removeValue(forKey: id)
         }
         loadedRealmFronts.removeValue(forKey: id)
-        realmUpdateOffers.removeValue(forKey: id)
-        deferredRealmUpdates.removeValue(forKey: id)
         TabSnapshotCacheManager.shared.invalidate(tabId: id)
         WebViewHolderManager.shared.remove(tabId: id)
         ViewBridgeHostViewManager.shared.remove(tabId: id)
@@ -1571,7 +1537,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         cancelRealmRefresh(tab.id)
         discoverAuthority(
             url: url, domain: info.domain, realmId: realmId, address: address,
-            title: realmDisplay, replacing: tab, background: false, approved: nil, invite: invite
+            title: realmDisplay, replacing: tab, invite: invite
         )
     }
 
@@ -1643,26 +1609,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         refresh.task.cancel()
     }
 
-    private func refreshLoadedRealmFronts() {
-        guard NSApplication.shared.isActive else { return }
-        for tab in tabs where tab.url != nil && loadedRealmFronts[tab.id]?.address == tab.url {
-            refreshRealmFront(tab, background: true)
-        }
-    }
-
-    private func refreshRealmFront(_ tab: Tab, background: Bool, approved: RealmFrontSelection? = nil) {
-        guard realmRefreshes[tab.id] == nil, let address = tab.url,
-              let info = try? ActriumCore.parseActrUri(
-                  uri: address.absoluteString, installationId: InstallationIdProvider.getOrCreate()
-              ), !info.isLocal, let realmId = info.realmId,
-              let discoveryURL = info.discoveryUrl, let url = URL(string: discoveryURL)
-        else { return }
-        discoverAuthority(
-            url: url, domain: info.domain, realmId: realmId, address: address,
-            title: tab.title, replacing: tab, background: background, approved: approved
-        )
-    }
-
     /// Realm discovery (verification-funnel layer 1) followed by Realm
     /// Profile discovery (layer 2): fetch the authority descriptor, validate
     /// it, then fetch and verify the Realm Profile it points to. The package
@@ -1679,8 +1625,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         address: URL,
         title: String,
         replacing tab: Tab,
-        background: Bool,
-        approved: RealmFrontSelection?,
         invite: RealmJoinService.Invite? = nil
     ) {
         let replacingTabId = tab.id
@@ -1700,7 +1644,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 }
                 openSelectedDeferredRealm()
             }
-            var expectedURL = tab.url
             var navigationNonce = tab.reloadNonce
             @MainActor func tabIndex() -> Int? {
                 guard self.realmRefreshes[replacingTabId]?.id == refreshId else { return nil }
@@ -1718,9 +1661,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 if let candidateBinding { Task { await candidateBinding.stop() } }
             }
             do {
-                let data = try await fetchRealmUpdateDocument(
-                    from: url, background: background,
-                    insecureMessage: NSLocalizedString(
+                let data = try await fetchRealmDocument(
+                    url,
+                    NSLocalizedString(
                         "The authority information was served over an insecure connection.",
                         comment: "Actr authority insecure transport error"))
                 guard let body = String(data: data, encoding: .utf8) else {
@@ -1786,9 +1729,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         at: profileURL, realmName: realmName, signingKeysJSON: descriptor.signingKeysJson,
                         preferences: realmPreferences,
                         fetch: {
-                            try await self.fetchRealmUpdateDocument(
-                                from: $0, background: background,
-                                insecureMessage: NSLocalizedString(
+                            try await self.fetchRealmDocument(
+                                $0,
+                                NSLocalizedString(
                                     "The Realm Profile was served over an insecure connection.",
                                     comment: "Actr realm profile insecure transport error"))
                         },
@@ -1803,7 +1746,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     if let retired = verifiedUpdate, retired.profile == nil {
                         try saveRealmTrust(retired.stateJson, .profile, name: realmName)
                     }
-                    if !background { presentRealmLinkError(CoreError.RealmRetired(message: name)) }
+                    presentRealmLinkError(CoreError.RealmRetired(message: name))
                     return
                 }
                 guard let initial = verifiedUpdate, initial.profile != nil else { return }
@@ -1817,55 +1760,50 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     return true
                 }
 
-                let isLoadingTab = expectedURL != address || loadedRealmFronts[replacingTabId]?.address != address
-                if !background || isLoadingTab {
-                    let admitted: Bool
-                    if let invite {
-                        admission = try await redeemQueuedInvite(
-                            admission, invite: invite, load: refreshId, checkCurrent: checkCurrent,
-                            validateProfile: { current in
-                                // A competing navigation may have advanced the accepted
-                                // Profile while the invite was waiting for its turn.
-                                try validateProfile(current.body)
-                                guard let verifiedUpdate, verifiedUpdate.profile != nil else {
-                                    throw CoreError.RealmRetired(message: realmName)
-                                }
-                                try self.saveRealmTrust(verifiedUpdate.stateJson, .profile, name: realmName)
+                let admitted: Bool
+                if let invite {
+                    admission = try await redeemQueuedInvite(
+                        admission, invite: invite, load: refreshId, checkCurrent: checkCurrent,
+                        validateProfile: { current in
+                            // A competing navigation may have advanced the accepted
+                            // Profile while the invite was waiting for its turn.
+                            try validateProfile(current.body)
+                            guard let verifiedUpdate, verifiedUpdate.profile != nil else {
+                                throw CoreError.RealmRetired(message: realmName)
                             }
-                        )
-                        admitted = true
-                    } else if admission.isOpen {
-                        await pendingRealmInvites.wait(for: realmName)
-                        guard try profileIsCurrent() else { return }
-                        try await joinOpenRealm(admission)
-                        admitted = true
-                    } else {
-                        admitted = try await confirmRealmMembership(admission)
-                    }
-
-                    try Task.checkCancellation()
-                    guard try profileIsCurrent() else { return }
-                    guard admitted else {
-                        if !background {
-                            pendingInviteRedeems[replacingTabId] = PendingInviteRedeem(
-                                tabId: replacingTabId, navigationNonce: navigationNonce,
-                                uri: address.absoluteString, domain: domain
-                            )
+                            try self.saveRealmTrust(verifiedUpdate.stateJson, .profile, name: realmName)
                         }
-                        return
-                    }
-                    markRedeemed(realmName)
+                    )
+                    admitted = true
+                } else if admission.isOpen {
+                    await pendingRealmInvites.wait(for: realmName)
+                    guard try profileIsCurrent() else { return }
+                    try await joinOpenRealm(admission)
+                    admitted = true
+                } else {
+                    admitted = try await confirmRealmMembership(admission)
                 }
 
-                guard let accepted = verifiedUpdate, let availableProfile = accepted.profile,
+                try Task.checkCancellation()
+                guard try profileIsCurrent() else { return }
+                guard admitted else {
+                    pendingInviteRedeems[replacingTabId] = PendingInviteRedeem(
+                        tabId: replacingTabId, navigationNonce: navigationNonce,
+                        uri: address.absoluteString, domain: domain
+                    )
+                    return
+                }
+                markRedeemed(realmName)
+
+                guard let accepted = verifiedUpdate, let profile = accepted.profile,
                       let index = tabIndex() else { return }
-                let currentProfileData = admission.body
-                let profileBody = String(decoding: currentProfileData, as: UTF8.self)
+                let profileData = admission.body
+                let profileBody = String(decoding: profileData, as: UTF8.self)
+                let isLoadingTab = tab.url != address || loadedRealmFronts[replacingTabId]?.address != address
                 if isLoadingTab, localFrontApprovals[replacingTabId] == nil {
                     unloadRealmFront(at: index)
                     tabs[index].title = title
                     tabs[index].url = address
-                    expectedURL = address
                     navigationNonce = tabs[index].reloadNonce
                     objectWillChange.send()
                     persistBrowserPageSession()
@@ -1884,26 +1822,21 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     guard snapshot.profile != nil else { return nil }
                     return RealmFrontSelection(front: snapshot.frontSelectionKey, service: snapshot.serviceSelectionKey)
                 }
-                let canReloadLocalFront = !background && previous?.selection == available
-                    && localFrontApprovals[replacingTabId] != nil
-                    && availableProfile.packages.contains { $0.reference == availableProfile.frontPackage && $0.localPath != nil }
-                let action = canReloadLocalFront ? .loadAvailable : RealmFrontRefreshAction(
+                let front = profile.packages.first { $0.reference == profile.frontPackage }
+                let reloadLocalFront = localFrontApprovals[replacingTabId] != nil && front?.localPath != nil
+                let loadedFront = LoadedRealmFront(address: address, selection: available)
+                let prepareService: Bool
+                switch RealmFrontRefreshAction(
                     running: previous?.selection,
                     installed: installedSelection,
                     available: available,
-                    approved: approved
-                )
-                let profile: RealmProfileInfo
-                let profileData: Data
-                let next: LoadedRealmFront
-                switch action {
+                    reloadLocalFront: reloadLocalFront
+                ) {
                 case .keepRunning:
-                    realmUpdateOffers.removeValue(forKey: replacingTabId)
-                    deferredRealmUpdates.removeValue(forKey: replacingTabId)
                     let bindings = RealmServiceBindings.shared
                     if let activeBinding = bindings.binding(for: replacingTabId) {
                         let connection = try RealmServiceBinding.Connection(
-                            profile: availableProfile, verifiedProfileBody: currentProfileData
+                            profile: profile, verifiedProfileBody: profileData
                         )
                         if connection != activeBinding.connection {
                             let replacement = try await activeBinding.replacingConnection(connection)
@@ -1916,71 +1849,38 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                             }
                             guard replaced else { return }
                             candidateBinding = nil
-                            logger.notice("Realm \(realmName): refreshed Service connection at Profile sequence \(availableProfile.sequence)")
+                            logger.notice("Realm \(realmName): refreshed Service connection at Profile sequence \(profile.sequence)")
                         }
                     }
-                    loadedRealmFronts[replacingTabId] = LoadedRealmFront(
-                        address: address, signingKeyId: accepted.signingKeyId, selection: available
-                    )
+                    loadedRealmFronts[replacingTabId] = loadedFront
                     if let index = tabIndex() { tabs[index].realmProfileSigner = (realmName, accepted.signingKeyId) }
                     try saveRealmTrust(profileBody, .installedProfile, name: installedProfileName)
                     return
-                case .offerUpdate(let baseline):
-                    let offer = RealmFrontUpdateOffer(
-                        tabId: replacingTabId, address: address, navigationNonce: navigationNonce,
-                        previous: baseline, selection: available
-                    )
-                    if (!background || deferredRealmUpdates[replacingTabId] != available),
-                       realmUpdateOffers[replacingTabId] != offer {
-                        realmUpdateOffers[replacingTabId] = offer
-                        logger.notice("Realm \(realmName): update available at Profile sequence \(availableProfile.sequence)")
-                    }
-                    // A restored tab can reopen its installed version while the offer is visible.
-                    guard previous == nil, let installed, let installedBody, let restored = installed.profile else { return }
-                    profile = restored
-                    profileData = Data(installedBody.utf8)
-                    next = LoadedRealmFront(
-                        address: address, signingKeyId: installed.signingKeyId,
-                        selection: baseline
-                    )
-                case .loadAvailable:
-                    profile = availableProfile
-                    profileData = currentProfileData
-                    next = LoadedRealmFront(
-                        address: address, signingKeyId: accepted.signingKeyId, selection: available
-                    )
+                case .loadAvailable(let needsPreparation):
+                    prepareService = needsPreparation
                 }
                 logger.notice("📄 [navigateCurrentTab] Realm Profile accepted: \(profile.displayName) (\(profile.realmName)), sequence=\(profile.sequence), package=\(profile.packageHref)")
 
-                let front = profile.packages.first { $0.reference == profile.frontPackage }
-                if background, front?.localPath != nil { return }
                 let publisher = try await realmPublisher(for: profile.packageType)
                 try Task.checkCancellation()
                 guard try profileIsCurrent() else { return }
                 let publisherDomain = publisher.domain
                 if let front, let localPath = front.localPath {
-                    let selectedProfile = RealmProfileStore.AcceptedRealm(info: profile, signingKeyId: next.signingKeyId)
+                    let selectedProfile = RealmProfileStore.AcceptedRealm(info: profile, signingKeyId: accepted.signingKeyId)
                     if let installedTabId = try await loadLocalRealmFront(
                         front, policy: localPath, accepted: selectedProfile, profileData: profileData,
                         publisher: publisher, address: address.absoluteString, tabId: replacingTabId,
                         isCurrent: { (try? profileIsCurrent()) == true }
                     ) {
-                        loadedRealmFronts[installedTabId] = next
+                        loadedRealmFronts[installedTabId] = loadedFront
                         let installedName = "\(realmName)/\(installedTabId.uuidString)"
                         do {
-                            try saveRealmTrust(String(decoding: profileData, as: UTF8.self), .installedProfile, name: installedName)
+                            try saveRealmTrust(profileBody, .installedProfile, name: installedName)
                         } catch {
                             logger.warning("Realm \(realmName): could not save installed Profile: \(error)")
                         }
-                        if action == .loadAvailable {
-                            realmUpdateOffers.removeValue(forKey: installedTabId)
-                            deferredRealmUpdates.removeValue(forKey: installedTabId)
-                        }
                     }
                     return
-                }
-                if localFrontApprovals[replacingTabId] != nil, approved != available {
-                    throw RealmServiceError(message: "The Realm changed the Front source. Open its Realm address again.")
                 }
                 let packageKeys = publisher.packageSigningKeys
 
@@ -2059,15 +1959,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         permissions: manifest.permissions
                     )
                 }
-                guard let storageIndex = tabIndex() else { return }
+                if prepareService, let candidateBinding {
+                    try await candidateBinding.prepareForSwitch()
+                }
+                guard try profileIsCurrent(), let storageIndex = tabIndex() else { return }
                 let preparedStorage = try await RendererProcessPool.shared.prepareLocalStorage(
                     tabId: replacingTabId, reloadKey: tabs[storageIndex].reloadNonce,
                     origin: manifest.storageOrigin(devDirectory: nil), publisherIdentity: publisher.storageIdentity,
                     manifest: manifest.capabilityManifestJSON, permissions: manifest.permissions
                 )
-                if approved != nil, let candidateBinding {
-                    try await candidateBinding.prepareForSwitch()
-                }
                 try Task.checkCancellation()
                 guard try profileIsCurrent() else { return }
                 try await RealmProfileStore.withPublisherKeys([
@@ -2099,24 +1999,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         RealmServiceBindings.shared.remove(replacingTabId)
                     }
                     localFrontApprovals.removeValue(forKey: replacingTabId)
-                    loadedRealmFronts[replacingTabId] = next
+                    loadedRealmFronts[replacingTabId] = loadedFront
                     if let index = tabs.firstIndex(where: { $0.id == replacingTabId }) {
-                        tabs[index].realmProfileSigner = (realmName, next.signingKeyId)
+                        tabs[index].realmProfileSigner = (realmName, accepted.signingKeyId)
                     }
-                    if action == .loadAvailable {
-                        realmUpdateOffers.removeValue(forKey: replacingTabId)
-                        deferredRealmUpdates.removeValue(forKey: replacingTabId)
-                        do {
-                            try saveRealmTrust(profileBody, .installedProfile, name: installedProfileName)
-                        } catch {
-                            logger.warning("Realm \(realmName): could not save installed Profile: \(error)")
-                        }
-                    } else if let offer = realmUpdateOffers[replacingTabId], let tab = tabs.first(where: { $0.id == replacingTabId }) {
-                        // Import increments the tab's navigation nonce.
-                        realmUpdateOffers[replacingTabId] = RealmFrontUpdateOffer(
-                            tabId: offer.tabId, address: offer.address, navigationNonce: tab.reloadNonce,
-                            previous: offer.previous, selection: offer.selection
-                        )
+                    do {
+                        try saveRealmTrust(profileBody, .installedProfile, name: installedProfileName)
+                    } catch {
+                        logger.warning("Realm \(realmName): could not save installed Profile: \(error)")
                     }
                     logger.notice("Realm \(realmName): activated Front \(profile.packageType), Profile sequence \(profile.sequence), digest \(digest)")
                     objectWillChange.send()
@@ -2129,7 +2019,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 if case CoreError.RealmRetired = error, tabs[index].url == address {
                     unloadRealmFront(at: index)
                 }
-                if !background { presentRealmLinkError(error) }
+                presentRealmLinkError(error)
             }
         }
         realmRefreshes[replacingTabId] = (refreshId, task, invite?.code)
@@ -2303,16 +2193,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             )
             tab.realmProfileSigner = (profile.realmName, accepted.signingKeyId)
             let position = tabSlotPositions.removeValue(forKey: tabId) ?? index
-            let offer = realmUpdateOffers[tabId]
-            let deferred = deferredRealmUpdates[tabId]
             releaseTabRuntime(tabId, preserveRealmLoad: true)
-            if let offer {
-                realmUpdateOffers[tab.id] = RealmFrontUpdateOffer(
-                    tabId: tab.id, address: offer.address, navigationNonce: tab.reloadNonce,
-                    previous: offer.previous, selection: offer.selection
-                )
-            }
-            deferredRealmUpdates[tab.id] = deferred
             leftPanelVisibility[tabId] = nil
             RealmServiceBindings.shared.attach(binding, to: tab.id)
             localFrontApprovals[tab.id] = LocalFrontApproval(scope: scope, file: file)
@@ -2384,19 +2265,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private func saveRealmTrust(_ value: String, _ kind: RealmFrontTrustStore.Kind, name: String) throws {
         try RealmFrontTrustStore.save(value, kind, name: name, directory: realmTrustDirectory)
-    }
-
-    /// Coalesce background fetches without sharing a tab's trust or approval state.
-    private func fetchRealmUpdateDocument(from url: URL, background: Bool, insecureMessage: String) async throws -> Data {
-        guard background else {
-            return try await fetchRealmDocument(url, insecureMessage)
-        }
-        if let request = Self.backgroundRealmDocuments[url] { return try await request.value }
-        let fetch = fetchRealmDocument
-        let request = Task { try await fetch(url, insecureMessage) }
-        Self.backgroundRealmDocuments[url] = request
-        defer { Self.backgroundRealmDocuments.removeValue(forKey: url) }
-        return try await request.value
     }
 
     /// Small bounded fetch for discovery documents (authority descriptor,

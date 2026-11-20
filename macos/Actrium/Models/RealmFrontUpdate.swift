@@ -1,41 +1,23 @@
-import Foundation
-
 struct RealmFrontSelection: Equatable {
     let front: String
     let service: String
 }
 
-struct RealmFrontUpdateOffer: Equatable {
-    let tabId: UUID
-    let address: URL
-    let navigationNonce: Int
-    let previous: RealmFrontSelection
-    let selection: RealmFrontSelection
-
-    var title: String {
-        if previous.service == selection.service { return String(localized: "Realm Front update available") }
-        if previous.front == selection.front { return String(localized: "Realm Service update available") }
-        return String(localized: "Realm Front and Service update available")
-    }
-}
-
 enum RealmFrontRefreshAction: Equatable {
     case keepRunning
-    case offerUpdate(from: RealmFrontSelection)
-    case loadAvailable
+    case loadAvailable(prepareService: Bool)
 
     init(
         running: RealmFrontSelection?,
         installed: RealmFrontSelection?,
         available: RealmFrontSelection,
-        approved: RealmFrontSelection?
+        reloadLocalFront: Bool = false
     ) {
-        if running == available {
+        if running == available && !reloadLocalFront {
             self = .keepRunning
-        } else if approved != available, let previous = running ?? installed, previous != available {
-            self = .offerUpdate(from: previous)
         } else {
-            self = .loadAvailable
+            let previous = running ?? installed
+            self = .loadAvailable(prepareService: previous.map { $0 != available } ?? false)
         }
     }
 }
