@@ -2029,15 +2029,6 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     _ = try ActrPackageCache.installArchive(at: downloadedURL, digest: digest, replacingRejectedArchive: true)
                     ActrPackageCache.rememberDownloadURL(packageURL, digest: digest)
                 }
-                // Derive the exact Attach compatibility declarations from the
-                // verified Front payloads and the Service release selected by
-                // the Realm Profile.
-                let sessionMetadata = try ActrBindings.actriumSessionMetadataForFront(
-                    frontArchive: verified.bytes,
-                    trustedFrontKey: verified.trustedKey,
-                    serviceType: verified.serviceType,
-                    servicePackageDigestHex: profile.serviceSha256
-                )
                 logger.notice("🔐 [navigateCurrentTab] Verified Realm Front \(profile.packageType) for Service \(profile.serviceType)")
 
                 // Verify the manifest signature with the publisher keys the
@@ -2068,8 +2059,19 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 let manifest = try readPackageManifest(
                     fromRoot: frontDirectory, requireSignature: true, additionalTrustedKeys: publisherKeys
                 )
-                candidateBinding = try manifest.capabilityManifestJSON.map { capabilities in
-                    try RealmServiceBinding(
+                candidateBinding = try Self.serviceBindingForDeclaredCapabilities(
+                    manifest.capabilityManifestJSON
+                ) { capabilities in
+                    // Only Fronts that declare Service capabilities need Attach
+                    // compatibility metadata. A verified renderer-only Front
+                    // must remain loadable without a Service binding.
+                    let sessionMetadata = try ActrBindings.actriumSessionMetadataForFront(
+                        frontArchive: verified.bytes,
+                        trustedFrontKey: verified.trustedKey,
+                        serviceType: verified.serviceType,
+                        servicePackageDigestHex: profile.serviceSha256
+                    )
+                    return try RealmServiceBinding(
                         profile: profile,
                         verifiedProfileBody: profileData,
                         front: verified.bytes,
@@ -2401,6 +2403,16 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             await rollbackLocalFrontHandoff()
             throw error
         }
+    }
+
+    /// Internal for downloaded-Front regression tests. Attach metadata and the
+    /// Service binding are constructed only for Fronts that declare capabilities.
+    nonisolated static func serviceBindingForDeclaredCapabilities<ServiceBinding>(
+        _ capabilitiesJSON: String?,
+        make: (String) throws -> ServiceBinding
+    ) rethrows -> ServiceBinding? {
+        guard let capabilitiesJSON else { return nil }
+        return try make(capabilitiesJSON)
     }
 
     nonisolated private static func realmArchiveDigest(_ bytes: Data) -> String {

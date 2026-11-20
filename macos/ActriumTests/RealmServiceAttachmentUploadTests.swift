@@ -619,6 +619,28 @@ struct RealmServiceAttachmentUploadTests {
         }
     }
 
+    private actor AttachmentCounter {
+        private(set) var count = 0
+
+        func attach(_ target: ActrBindings.ActrId) -> ActrBindings.ActrId {
+            count += 1
+            return target
+        }
+    }
+
+    @Test func downloadedFrontWithoutCapabilitiesSkipsServiceBinding() throws {
+        // A verified renderer-only Front has no capability manifest. It must
+        // not derive Attach metadata or construct a Service binding.
+        let binding: String? = try BrowserViewModel.serviceBindingForDeclaredCapabilities(nil) { _ in
+            Issue.record("Attach metadata must not be derived without Service capabilities.")
+            throw SessionError(description: "Unexpected Attach metadata derivation")
+        }
+        #expect(binding == nil)
+
+        let declared = try BrowserViewModel.serviceBindingForDeclaredCapabilities(#"{"routes":[]}"#) { $0 }
+        #expect(declared == #"{"routes":[]}"#)
+    }
+
     @Test func rpcRecoversAfterJoiningAResumeOnlyCaller() async throws {
         let oldTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 1)
         let replacement = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 2)
@@ -633,12 +655,10 @@ struct RealmServiceAttachmentUploadTests {
         let rpc = Task {
             try await RealmServiceBinding.recoverCallAfterJoining(
                 recovery: resumeOnly,
-                currentTarget: { $0 },
-                discover: { _ in
-                    Issue.record("A failed join must restart before this discovery pass.")
-                    return oldTarget
+                recover: {
+                    Issue.record("A failed join must restart before target-aware recovery.")
+                    throw SessionError(description: "Unexpected successful recovery")
                 },
-                retarget: { _, target in target },
                 restart: {
                     try await RealmServiceBinding.recoverDiscoveredConnection(
                         currentTarget: oldTarget,
@@ -654,20 +674,50 @@ struct RealmServiceAttachmentUploadTests {
         }
         await gate.release()
         #expect(try await rpc.value == replacement)
+    }
 
-        // A successful shared Resume still needs the RPC's discovery pass.
-        let joined = Task<ActrBindings.ActrId, Error> { oldTarget }
-        let retargeted = try await RealmServiceBinding.recoverCallAfterJoining(
-            recovery: joined,
-            currentTarget: { $0 },
-            discover: { _ in replacement },
-            retarget: { _, target in target },
-            restart: {
-                Issue.record("A successful shared recovery must not be restarted.")
-                throw SessionError(description: "Unexpected restart")
-            }
-        )
-        #expect(retargeted == replacement)
+    @Test func concurrentRPCsShareOneReplacementAttach() async throws {
+        let oldTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 1)
+        let replacement = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 2)
+        let resumeGate = ResumeGate()
+        let replacementGate = ResumeGate()
+        let attachments = AttachmentCounter()
+        let resumeOnly = Task<ActrBindings.ActrId, Error> {
+            await resumeGate.wait()
+            return oldTarget
+        }
+
+        // This is the single task published by recoverJoinedCall. Both RPCs
+        // joining the successful Resume must await it rather than retargeting A
+        // independently and contending for B's exclusive lease.
+        let replacementRecovery = Task<ActrBindings.ActrId, Error> {
+            await replacementGate.wait()
+            return try await RealmServiceBinding.recoverDiscoveredConnection(
+                currentTarget: oldTarget,
+                discoveredTarget: replacement,
+                retarget: { await attachments.attach(replacement) },
+                resume: { oldTarget }
+            )
+        }
+        func joinRPC() async throws -> ActrBindings.ActrId {
+            try await RealmServiceBinding.recoverCallAfterJoining(
+                recovery: resumeOnly,
+                recover: { try await replacementRecovery.value },
+                restart: {
+                    Issue.record("A successful shared Resume must not be restarted.")
+                    throw SessionError(description: "Unexpected restart")
+                }
+            )
+        }
+        let first = Task { try await joinRPC() }
+        let second = Task { try await joinRPC() }
+        await resumeGate.release()
+        await replacementGate.release()
+
+        #expect(try await first.value == replacement)
+        #expect(try await second.value == replacement)
+        let attachCount = await attachments.count
+        #expect(attachCount == 1)
     }
 
     @Test func replacementServiceIsAttachedWithoutResumingTheOldPeer() async throws {

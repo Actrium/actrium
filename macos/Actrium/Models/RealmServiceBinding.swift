@@ -557,7 +557,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// caller-supplied attachment ID may both be reused by a later upload.
     private var attachmentDeliveries: [UUID: @Sendable (RealmServiceAttachmentResultEvent) -> Void] = [:]
     private var startup: (id: UUID, task: Task<RuntimeConnection, Error>)?
-    private var recovery: (id: UUID, task: Task<RuntimeConnection, Error>)?
+    private var recovery: (id: UUID, task: Task<RuntimeConnection, Error>, discoversTarget: Bool)?
     /// The detached old session retained while a verified Local Front
     /// replacement attaches. Ordinary calls stay blocked until commit/rollback.
     private var localFrontHandoff: RuntimeConnection?
@@ -1089,20 +1089,15 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             throw RealmServiceError(message: "The Local Front is refreshing its Service session.")
         }
         if let recovery {
-            if resolveTargetForCall {
+            if resolveTargetForCall && !recovery.discoversTarget {
                 let id = recovery.id
                 let recovered = try await Self.recoverCallAfterJoining(
                     recovery: recovery.task,
-                    currentTarget: { $0.target },
-                    discover: { connection in
-                        try await self.eventPeers.resolve(
-                            ifGeneration: eventGeneration,
-                            reference: connection.reference,
-                            serviceType: self.serviceType
+                    recover: {
+                        try await self.recoverJoinedCall(
+                            replacingRecovery: id,
+                            eventGeneration: eventGeneration
                         )
-                    },
-                    retarget: { connection, target in
-                        try await self.retarget(connection, to: target)
                     },
                     restart: {
                         // A resume-only subscriber or upload may have joined the
@@ -1120,6 +1115,9 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                 guard !stopped else { throw CancellationError() }
                 return recovered
             }
+            // Target-aware recovery already includes discovery and any fresh
+            // Attach. Every RPC joins that same transition instead of racing
+            // an exclusive lease with an independent retarget.
             let recovered = try await recovery.task.value
             guard !stopped else { throw CancellationError() }
             return recovered
@@ -1147,7 +1145,48 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             }
             return try await self.resumeOrReattach(connection)
         }
-        recovery = (id, task)
+        recovery = (id: id, task: task, discoversTarget: resolveTargetForCall)
+        return try await awaitRecovery(id: id, task: task)
+    }
+
+    /// Upgrade one completed resume-only recovery to a shared target-aware
+    /// transition. Publishing the new task before any suspension ensures that
+    /// concurrent RPC waiters cannot independently Attach the replacement.
+    private func recoverJoinedCall(
+        replacingRecovery previousID: UUID,
+        eventGeneration: UInt64?
+    ) async throws -> RuntimeConnection {
+        if let recovery, recovery.id != previousID {
+            return try await readyConnection(
+                resolveTargetForCall: true,
+                eventGeneration: eventGeneration
+            )
+        }
+        let id = UUID()
+        let task = Task<RuntimeConnection, Error> {
+            // Use the latest published connection. Another RPC may already have
+            // finished the replacement before this waiter enters the actor.
+            let connection = try await self.connect()
+            let target = try await self.eventPeers.resolve(
+                ifGeneration: eventGeneration,
+                reference: connection.reference,
+                serviceType: self.serviceType
+            )
+            return try await Self.recoverDiscoveredConnection(
+                currentTarget: connection.target,
+                discoveredTarget: target,
+                retarget: { try await self.retarget(connection, to: target) },
+                resume: { connection }
+            )
+        }
+        recovery = (id: id, task: task, discoversTarget: true)
+        return try await awaitRecovery(id: id, task: task)
+    }
+
+    private func awaitRecovery(
+        id: UUID,
+        task: Task<RuntimeConnection, Error>
+    ) async throws -> RuntimeConnection {
         do {
             let recovered = try await task.value
             guard !stopped else { throw CancellationError() }
@@ -1165,30 +1204,20 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         }
     }
 
-    /// Internal for shared-recovery tests. An RPC joining another caller's
-    /// resume-only recovery still needs its own discovery pass. If that shared
-    /// recovery fails, restart with target-aware recovery instead of exposing
-    /// the old peer's transport error.
+    /// Internal for shared-recovery tests. The recovery closure must enter the
+    /// binding's shared target-aware transition; waiters must never Discover
+    /// and retarget independently after the same Resume completes.
     static func recoverCallAfterJoining<RecoveredConnection: Sendable>(
         recovery: Task<RecoveredConnection, Error>,
-        currentTarget: (RecoveredConnection) -> ActrBindings.ActrId,
-        discover: (RecoveredConnection) async throws -> ActrBindings.ActrId,
-        retarget: (RecoveredConnection, ActrBindings.ActrId) async throws -> RecoveredConnection,
+        recover: () async throws -> RecoveredConnection,
         restart: () async throws -> RecoveredConnection
     ) async throws -> RecoveredConnection {
-        let recovered: RecoveredConnection
         do {
-            recovered = try await recovery.value
+            _ = try await recovery.value
         } catch {
             return try await restart()
         }
-        let target = try await discover(recovered)
-        return try await recoverDiscoveredConnection(
-            currentTarget: currentTarget(recovered),
-            discoveredTarget: target,
-            retarget: { try await retarget(recovered, target) },
-            resume: { recovered }
-        )
+        return try await recover()
     }
 
     /// Internal for recovery-ordering tests. A changed discovery target must
