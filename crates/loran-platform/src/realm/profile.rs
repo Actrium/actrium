@@ -140,7 +140,24 @@ fn read_selection(document: &str) -> Result<RealmPackageSelection, RealmError> {
         .map_err(|e| RealmError::DatabaseError(format!("invalid stored package selection: {e}")))
 }
 
-fn stored_primary(document: &str) -> Result<(RealmPackage, bool), RealmError> {
+enum StoredSelection {
+    Complete(RealmPackageSelection),
+    Legacy(RealmPackage),
+}
+
+impl StoredSelection {
+    fn primary(&self) -> Result<&RealmPackage, RealmError> {
+        match self {
+            Self::Complete(selection) => selection
+                .selected()
+                .map(|(service, _)| service)
+                .map_err(RealmError::Conflict),
+            Self::Legacy(primary) => Ok(primary),
+        }
+    }
+}
+
+fn read_stored_selection(document: &str) -> Result<StoredSelection, RealmError> {
     #[derive(serde::Deserialize)]
     struct StoredPackages {
         #[serde(
@@ -154,15 +171,14 @@ fn stored_primary(document: &str) -> Result<(RealmPackage, bool), RealmError> {
     let previous: StoredPackages = serde_json::from_str(document)
         .map_err(|e| RealmError::DatabaseError(format!("invalid stored Realm packages: {e}")))?;
     if let Some(selection) = previous.selection {
-        let (service, _) = selection.selected().map_err(RealmError::Conflict)?;
-        return Ok((service.clone(), true));
+        return Ok(StoredSelection::Complete(selection));
     }
     let value = previous.package.ok_or_else(|| {
         RealmError::Conflict("the accepted Profile has no primary Service".into())
     })?;
     let primary = serde_json::from_value(value)
         .map_err(|e| RealmError::DatabaseError(format!("invalid stored primary Service: {e}")))?;
-    Ok((primary, false))
+    Ok(StoredSelection::Legacy(primary))
 }
 
 /// A previously registered Actor may still be usable when its program
@@ -459,10 +475,17 @@ impl RealmProfileRecord {
             .await?;
             let previous = previous
                 .ok_or_else(|| RealmError::Conflict("Realm Profile baseline changed".into()))?;
-            let (old, complete) = stored_primary(&previous)?;
+            let previous = read_stored_selection(&previous)?;
+            let old = previous.primary()?;
             let new = selection.selected().map_err(RealmError::Conflict)?.0;
-            if matches!(write, ProfileWrite::Fetch) && complete {
-                check_primary_promotion(&mut tx, name, &old, new).await?;
+            if let (ProfileWrite::Fetch, StoredSelection::Complete(accepted)) = (&write, &previous)
+            {
+                // Signer removal resets the refresh's sequence baseline.
+                // A stored selection still constrains a Service program change.
+                accepted
+                    .check_successor(selection)
+                    .map_err(RealmError::Conflict)?;
+                check_primary_promotion(&mut tx, name, old, new).await?;
             } else {
                 old.check_primary_successor(new).map_err(|_| {
                     RealmError::Conflict(

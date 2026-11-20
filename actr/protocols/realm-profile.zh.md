@@ -290,7 +290,7 @@ Actr Facility Provider 由 Actr Host、用户或 key 持有方的策略选定。
 外部签名的 Realm 通过 `publish_profile` 发布时须保留当前 Service 程序。Provider
 也可以从 Realm 域名配置的 `realms` 位置接受有效的签名后继 Profile。切换主程序时，
 包括回滚和刷新，Provider 会核对新程序已有的 Actor 注册。活跃成员持有的未撤销 Actor
-须归 Realm owner 所有。
+须归 Realm owner 所有。即使原签名 key 已被移除，刷新时仍会对照已保存的选包执行切换校验。
 
 Issuer key、端点、`display_name` 和 `policy` 也可在更高序号更新。
 仅变更元数据或轮换密钥时，草稿和签名 Profile **MUST** 保留已接受的包选择。

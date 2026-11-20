@@ -367,7 +367,9 @@ Service program. The provider can also accept a valid signed successor from
 the Realm domain's configured `realms` endpoint. When accepting a new
 primary program, including during rollback or refresh, the provider checks
 that its unrevoked Actor registrations from active members belong to the
-Realm owner.
+Realm owner. The provider checks the package selection against the stored
+selection during a refresh, including after removal of the previous signing
+key.
 
 Issuer keys, endpoints, `display_name` and `policy` may also change at a higher sequence.
 For metadata-only updates and key rotations, drafts and signed Profiles **MUST** retain the accepted selection.

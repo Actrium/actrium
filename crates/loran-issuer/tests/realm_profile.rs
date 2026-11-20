@@ -762,19 +762,34 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
         RealmStatus::Retired
     );
 
-    // rs-1 is revoked: its Profiles lose their baseline. A Profile signed by
-    // a still-listed key replaces it, even at a lower sequence.
+    // Revoking rs-1 resets the sequence baseline. The replacement still has
+    // to pass the package selection checks against the accepted record.
+    let rotated_member = acme.member(2, &["rs-2"]);
     documents.insert(
         "https://acme.com/.well-known/actr".into(),
-        acme.descriptor(&acme.member(2, &["rs-2"])),
+        acme.descriptor(&rotated_member),
     );
-    documents.insert(
-        "https://acme.com/realms/two".into(),
-        acme.profile(two, 1, "active", "rs-2", &issuer[two]),
-    );
+    let before_rotation = RealmProfileRecord::get(two).await.unwrap().unwrap();
+    let mut replacement: Value =
+        serde_json::from_slice(&acme.profile(two, 1, "active", "rs-2", &issuer[two])).unwrap();
+    replacement.as_object_mut().unwrap().remove("signature");
+    replacement["packages"][&primary]["type"] = "acme.com/notes-next@1.0.0".into();
+    let profile_url = "https://acme.com/realms/two";
+    let service_only = serde_json::to_vec(&acme.sign(replacement.clone(), "rs-2")).unwrap();
+    let current_keys: RealmSigningKeys = serde_json::from_value(rotated_member).unwrap();
+    RealmProfile::verify(&service_only, two, &current_keys).unwrap();
+    documents.insert(profile_url.into(), service_only);
+    refresh(&profiles, &documents).await;
+    let record = RealmProfileRecord::get(two).await.unwrap().unwrap();
+    assert_eq!(record.digest, before_rotation.digest);
+
+    replacement["packages"][&front]["type"] = "acme.com/notes-ui@2.0.0".into();
+    let switched_after_rotation = serde_json::to_vec(&acme.sign(replacement, "rs-2")).unwrap();
+    documents.insert(profile_url.into(), switched_after_rotation.clone());
     refresh(&profiles, &documents).await;
     let record = RealmProfileRecord::get(two).await.unwrap().unwrap();
     assert_eq!(record.sequence, 1);
+    assert_eq!(record.document.as_bytes(), switched_after_rotation);
     assert!(Realm::get(two).await.unwrap().unwrap().enabled);
 
     // Without any valid Profile the Realm is suspended.
