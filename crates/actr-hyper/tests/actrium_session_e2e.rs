@@ -465,7 +465,6 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     let prepare = PrepareAttachmentRequest {
         id: String::new(),
         result_stream_id: "attachment-result".to_string(),
-        ..Default::default()
     }
     .encode_to_vec();
     let prepared = session
@@ -492,7 +491,6 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
             PrepareAttachmentRequest {
                 id: "reject".into(),
                 result_stream_id: "reused-attachment-result".into(),
-                ..Default::default()
             }
             .encode_to_vec(),
             Duration::from_secs(30),
@@ -508,7 +506,6 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     let accepted = PrepareAttachmentRequest {
         id: String::new(),
         result_stream_id: "reused-attachment-result".into(),
-        ..Default::default()
     }
     .encode_to_vec();
     session
@@ -548,7 +545,6 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
             PrepareAttachmentRequest {
                 id: "late-old".into(),
                 result_stream_id: "late-attachment-result".into(),
-                ..Default::default()
             }
             .encode_to_vec(),
             Duration::from_secs(30),
@@ -569,7 +565,6 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
             PrepareAttachmentRequest {
                 id: "late-new".into(),
                 result_stream_id: "late-attachment-result".into(),
-                ..Default::default()
             }
             .encode_to_vec(),
             Duration::from_secs(30),
