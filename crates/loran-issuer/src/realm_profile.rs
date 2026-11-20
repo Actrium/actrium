@@ -833,7 +833,7 @@ async fn store_fetched(
 ) -> Result<(), ProfileError> {
     let document = std::str::from_utf8(document)
         .map_err(|_| ProfileError::Invalid("Realm Profile is not UTF-8".to_string()))?;
-    RealmProfileRecord::store(profile, document, Some(previous_digest), None, None).await?;
+    RealmProfileRecord::store_fetched(profile, document, previous_digest).await?;
     Ok(())
 }
 

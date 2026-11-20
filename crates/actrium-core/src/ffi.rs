@@ -6252,7 +6252,7 @@ mod tests {
             verify_realm_front_package(archive.clone(), public.clone(), wrong)
                 .unwrap_err()
                 .to_string()
-                .contains("ui.service -> notes")
+                .contains("demo.example/service@2.0.0 is selected")
         );
         let mut changed = archive;
         changed.push(0);
@@ -6401,7 +6401,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("notes.frontend -> ui: dependency contract differs"),
+                .contains("notes.frontend -> ui: The RPC definitions do not match."),
             "{error}"
         );
     }

@@ -279,13 +279,18 @@ Actr Facility Provider 由 Actr Host、用户或 key 持有方的策略选定。
 
 变更包选择 **MUST** 同时提交两个引用与完整的 `packages`，整体替换。
 任何变更（含更换下载地址）都须递增 `sequence` 并重新签名。
-`provider.id` 固定。更换主 Service 的 Publisher 或程序名须走受保护的 Service 发布，
-并在同一份 Profile 中选中精确 Actor 类型不同的 Front。旧的单包 Profile 须先在保持
-Service 身份的情况下补齐选包。Realm 可独立更换兼容的 Front。使用固定摘要的精确 Actor 类型保留原归档摘要。
+`provider.id` 固定。更换主 Service 的 Publisher 或程序名时，同一份 Profile 须选中
+精确 Actor 类型不同的 Front。旧的单包 Profile 须先在保持 Service 身份的情况下补齐选包。
+使用固定摘要的精确 Actor 类型保留原归档摘要。
 
-Service 包的签名清单、依赖锁和 RPC 契约都允许时，可以沿用原包并更换依赖。
-Service 依赖链上的改动通过受保护的 Service 发布提交。回滚用更高的序号恢复
-上一次发布前的整组选包。Profile 发布记录选包，运行中 Service 的依赖切换由部署负责。
+由 Provider 签名的 Realm 通过受保护的 Service 发布更换主程序或依赖链。
+签名清单、依赖锁和 RPC 契约都允许时，可以沿用原 Service 包并更换依赖。
+回滚用更高的序号恢复上一次发布前的整组选包，运行中的 Service 由部署应用选包。
+
+外部签名的 Realm 通过 `publish_profile` 发布时须保留当前 Service 程序。Provider
+也可以从 Realm 域名配置的 `realms` 位置接受有效的签名后继 Profile。切换主程序时，
+包括回滚和刷新，Provider 会核对新程序已有的 Actor 注册。活跃成员持有的未撤销 Actor
+须归 Realm owner 所有。
 
 Issuer key、端点、`display_name` 和 `policy` 也可在更高序号更新。
 仅变更元数据或轮换密钥时，草稿和签名 Profile **MUST** 保留已接受的包选择。

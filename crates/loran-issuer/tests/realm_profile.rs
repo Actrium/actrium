@@ -717,29 +717,30 @@ async fn refreshes_other_domains_profiles_under_the_key_pin() {
     )
     .await;
 
-    // A newer Profile is taken from the domain's realms location.
+    // A newer Profile is taken from the domain's realms location, including
+    // a paired program change that has no local package release receipt.
     let mut documents = Documents::new();
     documents.insert(
         "https://acme.com/.well-known/actr".into(),
         acme.descriptor(&member),
     );
-    documents.insert(
-        "https://acme.com/realms/one".into(),
-        acme.profile(one, 2, "active", "rs-1", &issuer[one]),
-    );
+    let mut successor: Value =
+        serde_json::from_slice(&acme.profile(one, 2, "active", "rs-1", &issuer[one])).unwrap();
+    let primary = successor["primary_package"].as_str().unwrap().to_owned();
+    let front = successor["front_package"].as_str().unwrap().to_owned();
+    successor["packages"][&primary]["type"] = "acme.com/notes-next@1.0.0".into();
+    successor["packages"][&front]["type"] = "acme.com/notes-ui@2.0.0".into();
+    successor.as_object_mut().unwrap().remove("signature");
+    let switched = serde_json::to_vec(&acme.sign(successor, "rs-1")).unwrap();
+    documents.insert("https://acme.com/realms/one".into(), switched.clone());
     documents.insert(
         "https://acme.com/realms/two".into(),
         acme.profile(two, 4, "active", "rs-1", &issuer[two]),
     );
     refresh(&profiles, &documents).await;
-    assert_eq!(
-        RealmProfileRecord::get(one)
-            .await
-            .unwrap()
-            .unwrap()
-            .sequence,
-        2
-    );
+    let record = RealmProfileRecord::get(one).await.unwrap().unwrap();
+    assert_eq!(record.sequence, 2);
+    assert_eq!(record.document.as_bytes(), switched);
     // Rollback is refused.
     assert_eq!(
         RealmProfileRecord::get(two)

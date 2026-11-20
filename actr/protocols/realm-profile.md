@@ -350,19 +350,24 @@ pending Realm that is not activated in time expires and is removed.
 
 A selection update **MUST** replace the entire selection by submitting both selectors and the complete `packages` map together.
 Every change, including a new download URL, requires a higher `sequence` and a new signature.
-`provider.id` is fixed. Changing the primary Service's publisher or program
-requires a guarded Service release and a different exact Actor type for the
-selected Front in the same Profile. A legacy single-package Profile must first
-select a complete pair while preserving the Service's program identity. The
-Realm may independently select another compatible Front. Each exact Actor
-type with a fixed digest retains its archive digest.
+`provider.id` is fixed. A change to the primary Service's publisher or
+program requires a different exact Actor type for the selected Front in
+the same Profile. A legacy single-package Profile must first select a
+complete pair while preserving the Service's program identity. Each exact
+Actor type with a fixed digest retains its archive digest.
 
-A release can select different dependencies for the same Service package
-when its signed manifest, dependency locks and RPC contracts allow the
-selection. A change anywhere in the Service's dependency graph uses a
-guarded Service release. Rollback restores the complete previous selection
-at a new sequence. Profile publication records the selection. Activation
-of any running Service dependencies is handled by the deployment.
+For a provider-signed Realm, use a guarded Service release to change the
+primary program or its dependency graph. A release can reuse the Service
+archive when its signed manifest, dependency locks and RPC contracts allow
+the new selection. Rollback restores the complete previous selection at a
+new sequence. Deployment applies the selection to the running Service.
+
+For an externally signed Realm, `publish_profile` preserves the current
+Service program. The provider can also accept a valid signed successor from
+the Realm domain's configured `realms` endpoint. When accepting a new
+primary program, including during rollback or refresh, the provider checks
+that its unrevoked Actor registrations from active members belong to the
+Realm owner.
 
 Issuer keys, endpoints, `display_name` and `policy` may also change at a higher sequence.
 For metadata-only updates and key rotations, drafts and signed Profiles **MUST** retain the accepted selection.

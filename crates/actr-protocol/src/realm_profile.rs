@@ -164,7 +164,8 @@ impl RealmPackage {
         }
     }
 
-    fn same_program(&self, next: &Self) -> Result<bool, String> {
+    /// Compare the publisher and program name, independent of the version.
+    pub fn same_program(&self, next: &Self) -> Result<bool, String> {
         let old = self.actr_type()?;
         let new = next.actr_type()?;
         Ok(old.publisher == new.publisher && old.name == new.name)
