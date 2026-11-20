@@ -256,22 +256,83 @@ enum RealmProfileStore {
         return accepted.profile
     }
 
-    /// Reevaluate a verified snapshot's key against the latest accepted Publisher Profile.
+    struct KeyRequirement {
+        let publicKey: Data
+        let domain: String
+        var localFront: LocalRealmFront? = nil
+    }
+
     static func requirePublisherKey(
-        _ publicKey: Data, domain: String, localFront: LocalRealmFront? = nil, preferences: UserDefaults
+        _ publicKey: Data, domain: String, localFront: LocalRealmFront? = nil,
+        database: GuestStorageDatabase
+    ) async throws {
+        try await requirePublisherKeys([KeyRequirement(publicKey: publicKey, domain: domain, localFront: localFront)], database: database)
+    }
+
+    static func requirePublisherKeys(
+        _ requirements: [KeyRequirement], database: GuestStorageDatabase
+    ) async throws {
+        try await withPublisherKeys(requirements, database: database) { }
+    }
+
+    /// Keep the trust ordering gate until the synchronous Front commit has finished.
+    static func withPublisherKeys<T>(
+        _ requirements: [KeyRequirement], database: GuestStorageDatabase,
+        commit: () throws -> T
+    ) async throws -> T {
+        try await database.withPublisherTrust {
+            let domains = Array(Set(requirements.map(\.domain))).sorted()
+            let profiles = try await database.acceptedPublishers(domains: domains)
+            try validatePublisherKeys(requirements, profiles: profiles)
+            try Task.checkCancellation()
+            return try commit()
+        }
+    }
+
+    private static func validatePublisherKeys(
+        _ requirements: [KeyRequirement], profiles: [PublisherProfileInfo]
     ) throws {
-        guard let saved = preferences.dictionary(forKey: publisherKey(domain)),
-              let body = saved["body"] as? String, let pins = saved["pins"] as? String else {
-            throw RealmServiceError(message: "The accepted Publisher Profile is unavailable.")
+        for requirement in requirements {
+            guard let profile = profiles.first(where: { $0.domain == requirement.domain }) else {
+                throw RealmServiceError(message: "The accepted Publisher is unavailable.")
+            }
+            let allowed = requirement.localFront.map { profile.verificationKey(for: $0) == requirement.publicKey }
+                ?? profile.fixedArchiveVerificationKeys.contains(requirement.publicKey)
+            guard allowed else {
+                throw RealmServiceError(message: "The Publisher key is no longer trusted for this package.")
+            }
         }
-        let current = try ActriumCore.acceptRealmPackagePublisher(
-            body: body, domain: domain, previousPinsJson: pins
-        ).profile
-        let allowed = localFront.map { current.verificationKey(for: $0) == publicKey }
-            ?? current.fixedArchiveVerificationKeys.contains(publicKey)
-        guard allowed else {
-            throw RealmServiceError(message: "The Publisher key is no longer trusted for this package.")
+    }
+
+    /// Keep main's verification snapshot while the shared database owns storage identity/history.
+    static func acceptPublisher(
+        body: String, domain: String, preferences: UserDefaults, database: GuestStorageDatabase,
+        fallbackPins: () throws -> String? = { nil }
+    ) async throws -> PublisherProfileInfo {
+        let storedPins = try await database.acceptedPublisherPins(domain: domain)
+        let bootstrap = try publisherBootstrap(domain: domain, preferences: preferences, fallbackPins: fallbackPins, storedPins: storedPins)
+        let accepted = try await database.acceptPublisherProfile(
+            body: body, domain: domain, previousPins: bootstrap.pins, previousProfile: bootstrap.body
+        )
+        preferences.set(["body": body, "pins": accepted.pinsJson], forKey: publisherKey(domain))
+        return accepted.profile
+    }
+
+    private static func publisherBootstrap(
+        domain: String, preferences: UserDefaults, fallbackPins: () throws -> String?, storedPins: String?
+    ) throws -> (pins: String?, body: String?) {
+        if let storedPins { return (storedPins, nil) }
+        let key = publisherKey(domain)
+        let saved = preferences.dictionary(forKey: key)
+        let pins = saved?["pins"] as? String ?? preferences.string(forKey: key)
+        if preferences.object(forKey: key) != nil && pins == nil {
+            throw CoreError.AuthorityDescriptorInvalid(message: "Saved Publisher trust could not be read; it was not reset.")
         }
+        let previousBody = saved?["body"] as? String
+        if saved?["body"] != nil && previousBody == nil {
+            throw CoreError.AuthorityDescriptorInvalid(message: "Saved Publisher Profile could not be read; it was not reset.")
+        }
+        return (try pins ?? fallbackPins(), previousBody)
     }
 
     private static func authorityState(_ realmName: String, preferences: UserDefaults) -> [String: Any]? {

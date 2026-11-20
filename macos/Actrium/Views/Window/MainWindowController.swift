@@ -23,6 +23,39 @@ final class ActriumWindow: NSWindow {
         guard event.type == .leftMouseUp else { return }
         toolbarInteraction?.pointerSequenceEnded(activeTabID: activeTabIDProvider?())
     }
+
+    // MARK: - Classic (TextKit 1) field editor
+
+    /// Shared TextKit 1 editor for AppKit text fields in this window.
+    ///
+    /// On macOS 26 the system field editor uses TextKit 2, and a second
+    /// mouse-down in a single-line, horizontally scrolling field editor (the
+    /// address bar) hangs forever in
+    /// `NSTextLayoutManager.enumerateTextLayoutFragmentsFromLocation`: TextKit 2's
+    /// lazy layout enumeration never converges for that geometry.
+    private lazy var classicFieldEditor: NSTextView = {
+        let storage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        let container = NSTextContainer()
+        storage.addLayoutManager(layoutManager)
+        layoutManager.addTextContainer(container)
+        let editor = NSTextView(frame: .zero, textContainer: container)
+        editor.isFieldEditor = true
+        return editor
+    }()
+
+    override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
+        // Only AppKit text fields get the TextKit 1 editor. SwiftUI's
+        // `AppKitTextField` force-casts the window's field editor to its
+        // private `_SystemTextFieldFieldEditor`, so it must keep the system
+        // editor; anything else (theme widgets, scrollers, …) is left
+        // untouched as well.
+        guard let object, object is NSTextField,
+              !String(reflecting: type(of: object)).hasPrefix("SwiftUI.") else {
+            return super.fieldEditor(createFlag, for: object)
+        }
+        return classicFieldEditor
+    }
 }
 
 /// Main window controller - manages window chrome with self-drawn toolbar

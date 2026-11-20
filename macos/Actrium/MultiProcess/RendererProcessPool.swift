@@ -71,7 +71,7 @@ struct RendererProcessPoolSnapshot: Sendable, Equatable {
 /// host multiple Tab roots while keeping different fingerprints process-isolated.
 @MainActor
 final class RendererProcessPool: ObservableObject {
-    static let shared = RendererProcessPool(localStorage: RendererLocalStorage())
+    static let shared = RendererProcessPool(localStorage: RendererLocalStorage(access: .shared))
 
     nonisolated static let systemFingerprintPrefix = "system."
 
@@ -145,6 +145,7 @@ final class RendererProcessPool: ObservableObject {
     private var tabWorkerMap: [UUID: String] = [:]
     private let localStorage: RendererLocalStorage
     private let fileImport = RendererFileImport()
+    var documentWindow: ((UUID, Int) -> NSWindow?)?
     var fileImportWindow: ((UUID, Int) -> NSWindow?)?
     private var fingerprintWorkerMap: [String: String] = [:]
     private var systemWorkerId: String?
@@ -275,6 +276,19 @@ final class RendererProcessPool: ObservableObject {
 
     // MARK: - Tab protocol
 
+    func prepareLocalStorage(
+        tabId: UUID, reloadKey: Int, origin: String?, publisherIdentity: String?,
+        manifest: String?, permissions: [String]
+    ) async throws -> PreparedLocalStorage? {
+        var config: [String: Any] = ["permissions": permissions]
+        config["localStorageOrigin"] = origin
+        config["localStoragePublisherIdentity"] = publisherIdentity
+        config["capabilityManifestJSON"] = manifest
+        return try await localStorage.prepareForActivation(
+            config: config, window: documentWindow?(tabId, reloadKey)
+        )
+    }
+
     @discardableResult
     func prepareTab(
         tabId: UUID,
@@ -288,9 +302,15 @@ final class RendererProcessPool: ObservableObject {
         guard self.worker(for: tabId) === worker else {
             throw RendererProcessPoolError.rendererExited("Tab changed renderer")
         }
-        fileImport.update(tabId: tabId, reloadKey: config["reloadKey"] as? Int ?? 0)
+        let window = documentWindow?(tabId, config["reloadKey"] as? Int ?? 0)
+        let resolvedConfig = try await localStorage.resolveOrigin(config: config, window: window)
+        try Task.checkCancellation()
+        guard self.worker(for: tabId) === worker else {
+            throw RendererProcessPoolError.rendererExited("Tab changed renderer")
+        }
+        fileImport.update(tabId: tabId, reloadKey: resolvedConfig["reloadKey"] as? Int ?? 0)
 
-        let config = localStorage.prepare(tabId: tabId, config: config)
+        let config = localStorage.prepare(tabId: tabId, config: resolvedConfig)
         guard JSONSerialization.isValidJSONObject(config),
               let data = try? JSONSerialization.data(withJSONObject: config),
               let json = String(data: data, encoding: .utf8) else {

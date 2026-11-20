@@ -75,6 +75,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         _ = TabProcessManager.shared
 
         // Prewarm the browser-style homogeneous Renderer pool.
+        RendererProcessPool.shared.documentWindow = { [weak self] tabId, reloadKey in
+            self?.documentController(tabId: tabId, reloadKey: reloadKey)?.window
+        }
         RendererProcessPool.shared.fileImportWindow = { [weak self] tabId, reloadKey in
             self?.fileImportWindow(tabId: tabId, reloadKey: reloadKey)
         }
@@ -97,10 +100,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
+    private func documentController(tabId: UUID, reloadKey: Int) -> MainWindowController? {
+        windowControllers.first { controller in
+            controller.viewModel.tabs.contains { $0.id == tabId && $0.reloadNonce == reloadKey }
+        }
+    }
+
     private func fileImportWindow(tabId: UUID, reloadKey: Int) -> NSWindow? {
-        guard let controller = windowControllers.first(where: { $0.viewModel.currentTabId == tabId }),
+        guard let controller = documentController(tabId: tabId, reloadKey: reloadKey),
+              controller.viewModel.currentTabId == tabId,
               controller.viewModel.actriumMode == .focus(tabId: tabId),
-              let tab = controller.viewModel.currentTab, tab.reloadNonce == reloadKey,
+              let tab = controller.viewModel.currentTab,
               RendererFileImport.isDeclared(manifest: tab.capabilityManifestJSON, permissions: tab.permissions),
               CapabilityPermissionStore.shared.hasGrant(
                 tabId: tabId, appId: tab.appId, capability: GuestFileImportCall.capability

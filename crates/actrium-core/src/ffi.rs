@@ -918,6 +918,7 @@ pub struct PublisherPackageKeyInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublisherProfileInfo {
     pub domain: String,
+    pub storage_identity: Option<String>,
     pub profile_sequence: u64,
     /// RFC 3339; past this point the profile must be re-fetched.
     pub profile_expires_at: String,
@@ -1607,6 +1608,7 @@ pub fn pin_realm_front_publisher(
     Ok(PinnedPublisherInfo {
         profile: PublisherProfileInfo {
             domain,
+            storage_identity: None,
             profile_sequence: keys.sequence,
             profile_expires_at: keys.profile_expires_at,
             package_signing_keys,
@@ -1615,8 +1617,8 @@ pub fn pin_realm_front_publisher(
     })
 }
 
-/// Validate the well-known document served by a publisher domain and
-/// extract its package signing keys.
+/// Legacy field parser; this does not establish signature or key-history trust.
+/// Storage callers use `GuestLocalStorage::accept_publisher_profile` instead.
 pub fn accept_publisher_profile(
     body: String,
     domain: String,
@@ -1650,6 +1652,7 @@ pub fn accept_publisher_profile(
 
     Ok(PublisherProfileInfo {
         domain,
+        storage_identity: None,
         profile_sequence: publisher
             .get("sequence")
             .and_then(|value| value.as_u64())
@@ -1726,6 +1729,7 @@ pub fn accept_realm_package_publisher(
     Ok(PublisherProfileAcceptance {
         profile: PublisherProfileInfo {
             domain,
+            storage_identity: None,
             profile_sequence: keys.sequence,
             profile_expires_at: keys.profile_expires_at,
             package_signing_keys,

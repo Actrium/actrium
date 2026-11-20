@@ -568,11 +568,23 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
  */
 public protocol GuestLocalStorageProtocol: AnyObject, Sendable {
 
+    func acceptPublisherProfile(body: String, domain: String, previousPinsJson: String?, previousProfileBody: String?) throws  -> PublisherProfileAcceptance
+
+    func acceptedPublisherPins(domain: String) throws  -> String?
+
+    func acceptedPublishers(domains: [String]) throws  -> [PublisherProfileInfo]
+
     func getItem(origin: String, key: String) throws  -> String?
+
+    func keepStorageSeparate(origin: String, publisherIdentity: String) throws  -> String
 
     func removeItem(origin: String, key: String) throws
 
+    func resolveSignedOrigin(origin: String, publisherIdentity: String?, migrationApproval: String?) throws  -> String
+
     func setItem(origin: String, key: String, value: String) throws
+
+    func storageMigrationToken(origin: String, publisherIdentity: String) throws  -> String?
 
 }
 /**
@@ -638,11 +650,47 @@ public convenience init(path: String) {
 
 
 
+open func acceptPublisherProfile(body: String, domain: String, previousPinsJson: String?, previousProfileBody: String?)throws  -> PublisherProfileAcceptance  {
+    return try  FfiConverterTypePublisherProfileAcceptance_lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_accept_publisher_profile(self.uniffiClonePointer(),
+        FfiConverterString.lower(body),
+        FfiConverterString.lower(domain),
+        FfiConverterOptionString.lower(previousPinsJson),
+        FfiConverterOptionString.lower(previousProfileBody),$0
+    )
+})
+}
+
+open func acceptedPublisherPins(domain: String)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publisher_pins(self.uniffiClonePointer(),
+        FfiConverterString.lower(domain),$0
+    )
+})
+}
+
+open func acceptedPublishers(domains: [String])throws  -> [PublisherProfileInfo]  {
+    return try  FfiConverterSequenceTypePublisherProfileInfo.lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_accepted_publishers(self.uniffiClonePointer(),
+        FfiConverterSequenceString.lower(domains),$0
+    )
+})
+}
+
 open func getItem(origin: String, key: String)throws  -> String?  {
     return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
     uniffi_actrium_core_fn_method_guestlocalstorage_get_item(self.uniffiClonePointer(),
         FfiConverterString.lower(origin),
         FfiConverterString.lower(key),$0
+    )
+})
+}
+
+open func keepStorageSeparate(origin: String, publisherIdentity: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_keep_storage_separate(self.uniffiClonePointer(),
+        FfiConverterString.lower(origin),
+        FfiConverterString.lower(publisherIdentity),$0
     )
 })
 }
@@ -655,6 +703,16 @@ open func removeItem(origin: String, key: String)throws   {try rustCallWithError
 }
 }
 
+open func resolveSignedOrigin(origin: String, publisherIdentity: String?, migrationApproval: String?)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_resolve_signed_origin(self.uniffiClonePointer(),
+        FfiConverterString.lower(origin),
+        FfiConverterOptionString.lower(publisherIdentity),
+        FfiConverterOptionString.lower(migrationApproval),$0
+    )
+})
+}
+
 open func setItem(origin: String, key: String, value: String)throws   {try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
     uniffi_actrium_core_fn_method_guestlocalstorage_set_item(self.uniffiClonePointer(),
         FfiConverterString.lower(origin),
@@ -662,6 +720,15 @@ open func setItem(origin: String, key: String, value: String)throws   {try rustC
         FfiConverterString.lower(value),$0
     )
 }
+}
+
+open func storageMigrationToken(origin: String, publisherIdentity: String)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_storage_migration_token(self.uniffiClonePointer(),
+        FfiConverterString.lower(origin),
+        FfiConverterString.lower(publisherIdentity),$0
+    )
+})
 }
 
 
@@ -5525,6 +5592,7 @@ public func FfiConverterTypePublisherProfileAcceptance_lower(_ value: PublisherP
  */
 public struct PublisherProfileInfo {
     public var domain: String
+    public var storageIdentity: String?
     public var profileSequence: UInt64
     /**
      * RFC 3339; past this point the profile must be re-fetched.
@@ -5534,11 +5602,12 @@ public struct PublisherProfileInfo {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(domain: String, profileSequence: UInt64,
+    public init(domain: String, storageIdentity: String?, profileSequence: UInt64,
         /**
          * RFC 3339; past this point the profile must be re-fetched.
          */profileExpiresAt: String, packageSigningKeys: [PublisherPackageKeyInfo]) {
         self.domain = domain
+        self.storageIdentity = storageIdentity
         self.profileSequence = profileSequence
         self.profileExpiresAt = profileExpiresAt
         self.packageSigningKeys = packageSigningKeys
@@ -5555,6 +5624,9 @@ extension PublisherProfileInfo: Equatable, Hashable {
         if lhs.domain != rhs.domain {
             return false
         }
+        if lhs.storageIdentity != rhs.storageIdentity {
+            return false
+        }
         if lhs.profileSequence != rhs.profileSequence {
             return false
         }
@@ -5569,6 +5641,7 @@ extension PublisherProfileInfo: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(domain)
+        hasher.combine(storageIdentity)
         hasher.combine(profileSequence)
         hasher.combine(profileExpiresAt)
         hasher.combine(packageSigningKeys)
@@ -5585,6 +5658,7 @@ public struct FfiConverterTypePublisherProfileInfo: FfiConverterRustBuffer {
         return
             try PublisherProfileInfo(
                 domain: FfiConverterString.read(from: &buf),
+                storageIdentity: FfiConverterOptionString.read(from: &buf),
                 profileSequence: FfiConverterUInt64.read(from: &buf),
                 profileExpiresAt: FfiConverterString.read(from: &buf),
                 packageSigningKeys: FfiConverterSequenceTypePublisherPackageKeyInfo.read(from: &buf)
@@ -5593,6 +5667,7 @@ public struct FfiConverterTypePublisherProfileInfo: FfiConverterRustBuffer {
 
     public static func write(_ value: PublisherProfileInfo, into buf: inout [UInt8]) {
         FfiConverterString.write(value.domain, into: &buf)
+        FfiConverterOptionString.write(value.storageIdentity, into: &buf)
         FfiConverterUInt64.write(value.profileSequence, into: &buf)
         FfiConverterString.write(value.profileExpiresAt, into: &buf)
         FfiConverterSequenceTypePublisherPackageKeyInfo.write(value.packageSigningKeys, into: &buf)
@@ -8167,6 +8242,14 @@ public enum GuestLocalStorageError: Swift.Error {
 
     case DatabaseFailure(message: String)
 
+    case InvalidPublisher(message: String)
+
+    case IdentityChanged(message: String)
+
+    case MigrationRequired(message: String)
+
+    case MigrationConflict(message: String)
+
 }
 
 
@@ -8199,6 +8282,22 @@ public struct FfiConverterTypeGuestLocalStorageError: FfiConverterRustBuffer {
             message: try FfiConverterString.read(from: &buf)
         )
 
+        case 5: return .InvalidPublisher(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 6: return .IdentityChanged(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 7: return .MigrationRequired(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
+        case 8: return .MigrationConflict(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -8218,6 +8317,14 @@ public struct FfiConverterTypeGuestLocalStorageError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(3))
         case .DatabaseFailure(_ /* message is ignored*/):
             writeInt(&buf, Int32(4))
+        case .InvalidPublisher(_ /* message is ignored*/):
+            writeInt(&buf, Int32(5))
+        case .IdentityChanged(_ /* message is ignored*/):
+            writeInt(&buf, Int32(6))
+        case .MigrationRequired(_ /* message is ignored*/):
+            writeInt(&buf, Int32(7))
+        case .MigrationConflict(_ /* message is ignored*/):
+            writeInt(&buf, Int32(8))
 
 
         }
@@ -8811,6 +8918,31 @@ fileprivate struct FfiConverterSequenceTypePublisherPackageKeyInfo: FfiConverter
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypePublisherPackageKeyInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypePublisherProfileInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [PublisherProfileInfo]
+
+    public static func write(_ value: [PublisherProfileInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePublisherProfileInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PublisherProfileInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PublisherProfileInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePublisherProfileInfo.read(from: &buf))
         }
         return seq
     }
@@ -12366,13 +12498,31 @@ private let initializationResult: InitializationResult = {
     if (uniffi_actrium_core_checksum_func_verify_realm_package_publisher() != 59675) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_accept_publisher_profile() != 43094) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publisher_pins() != 15617) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_accepted_publishers() != 2251) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_actrium_core_checksum_method_guestlocalstorage_get_item() != 63346) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_keep_storage_separate() != 53449) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_method_guestlocalstorage_remove_item() != 23454) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_resolve_signed_origin() != 29707) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_actrium_core_checksum_method_guestlocalstorage_set_item() != 45632) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_storage_migration_token() != 44068) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_constructor_guestlocalstorage_new() != 18051) {
