@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { type AppProfile, type MemberAction } from "../../lib/api";
+import { managementButton } from "../ui/ManagementControls";
 
 export function AppProfileEditor({
   profile,
@@ -33,7 +34,7 @@ export function AppProfileEditor({
           <input required className="rounded border p-2" value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <button
-          className="rounded border px-3 py-2 text-sm disabled:opacity-50"
+          className={managementButton.primary}
           disabled={disabled || !changedName}
         >
           Save signed profile

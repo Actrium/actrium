@@ -6,6 +6,7 @@ import { SignedAppRequest } from "../components/realms/SignedAppRequest";
 import { RealmForm } from "../components/realms/RealmForm";
 import { ServicePageLayout } from "../components/layout/ServicePageLayout";
 import { IdentityReview } from "../components/identity/IdentityReview";
+import { managementButton } from "../components/ui/ManagementControls";
 
 export function Realms() {
   const navigate = useNavigate();
@@ -30,7 +31,7 @@ export function Realms() {
         <button
           disabled={!caps?.realm_writes_enabled}
           onClick={() => setShowForm(true)}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"
+          className={managementButton.primary}
         >
           Create app
         </button>

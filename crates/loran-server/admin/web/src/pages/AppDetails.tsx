@@ -18,11 +18,12 @@ import { RealmPackages } from "../components/realms/RealmPackages";
 import { OwnerInviteModal } from "../components/realms/OwnerInviteModal";
 import { EditRealmAdmission } from "../components/realms/RealmAdmission";
 import { ConfirmModal } from "../components/ui/ConfirmModal";
+import { managementButton, managementCard } from "../components/ui/ManagementControls";
 import { ServicePageLayout } from "../components/layout/ServicePageLayout";
 
-const section = "space-y-3 rounded-xl border border-gray-200 bg-white p-5";
-const button = "rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm disabled:opacity-50 hover:bg-gray-50";
-const field = "rounded-lg border border-gray-300 px-3 py-2 text-sm";
+const section = managementCard + " space-y-3 p-5";
+const button = managementButton.secondary;
+const field = "min-w-0 max-w-full rounded-lg border border-gray-300 px-3 py-2 text-sm";
 interface Details {
   app: RealmInfo;
   profile: AppProfile | null;
@@ -254,7 +255,7 @@ function DetailsPage({ id }: { id: string }) {
                     className={field}
                     placeholder="Owner device invite"
                   />
-                  <button disabled={!writable || !active} className={button}>
+                  <button disabled={!writable || !active} className={managementButton.primary}>
                     Authorize Admin
                   </button>
                 </form>
@@ -300,7 +301,7 @@ function DetailsPage({ id }: { id: string }) {
                   onChange={(e) => setDays(Number(e.target.value))}
                 />
               </label>
-              <button disabled={!manage || !!pendingInvite} className={button}>
+              <button disabled={!manage || !!pendingInvite} className={managementButton.primary}>
                 Generate invite
               </button>
             </form>
@@ -368,7 +369,7 @@ function DetailsPage({ id }: { id: string }) {
                     {new Date(i.expires_at).toLocaleString()}
                   </span>
                   <button
-                    className={button}
+                    className={managementButton.danger}
                     disabled={!manage}
                     onClick={() =>
                       ask("Revoke invitation", i.invite_id, () =>
@@ -410,7 +411,7 @@ function DetailsPage({ id }: { id: string }) {
                       Make {m.role === "viewer" ? "Editor" : "Viewer"}
                     </button>
                     <button
-                      className={button}
+                      className={managementButton.danger}
                       disabled={!manage}
                       onClick={() =>
                         ask(
@@ -423,7 +424,7 @@ function DetailsPage({ id }: { id: string }) {
                       Transfer ownership
                     </button>
                     <button
-                      className={button}
+                      className={managementButton.danger}
                       disabled={!manage}
                       onClick={() =>
                         ask("Remove member", "All devices of " + m.member_id + " will be revoked.", () =>
@@ -444,7 +445,7 @@ function DetailsPage({ id }: { id: string }) {
                     {!c.revoked_at && (
                       <button
                         disabled={!manage}
-                        className={button}
+                        className={managementButton.danger}
                         onClick={() =>
                           ask(
                             "Revoke device",
@@ -558,9 +559,9 @@ function DetailsPage({ id }: { id: string }) {
             <section className={section}>
               <h2 className="font-semibold text-red-800">Recovery and retirement</h2>
               {canManageLifecycle ? (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <button
-                    className={button}
+                    className={managementButton.danger}
                     disabled={!writable || data.app.status !== "active"}
                     onClick={() =>
                       ask(
@@ -576,7 +577,7 @@ function DetailsPage({ id }: { id: string }) {
                     Recover Owner
                   </button>
                   <button
-                    className={button}
+                    className={managementButton.danger}
                     disabled={!writable}
                     onClick={() =>
                       ask("Retire app", "Retirement is permanent. The App ID cannot be reused.", async () => {

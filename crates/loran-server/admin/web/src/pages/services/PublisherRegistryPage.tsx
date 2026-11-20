@@ -1,24 +1,26 @@
 import { ServiceAccessCard } from "./ServiceAccessCard";
-import { useState, useEffect, useCallback } from 'react';
-import { Building2, CheckCircle, Clock, XCircle, AlertTriangle, Key, ShieldOff, Timer } from 'lucide-react';
+import { Fragment, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { CheckCircle, Clock, XCircle, AlertTriangle, ShieldOff, Timer } from "lucide-react";
 import { api, type ServiceDetail, publisherApi, type PublisherRecord, type PublisherKeyHistory } from '../../lib/api';
 import { IdentityReview } from '../../components/identity/IdentityReview';
+import { ServicePageLayout } from "../../components/layout/ServicePageLayout";
+import { ConfirmModal } from "../../components/ui/ConfirmModal";
+import {
+  ManagementDisclosure, ManagementStatus, ManagementTable,
+  managementBadge, managementButton, managementCard, managementCell, managementRow,
+} from "../../components/ui/ManagementControls";
 
 // ── Status badge ──────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: PublisherRecord['status'] }) {
-  const config = {
-    active: { color: 'bg-green-100 text-green-800', icon: CheckCircle, label: 'Active' },
-    suspended: { color: 'bg-orange-100 text-orange-800', icon: AlertTriangle, label: 'Suspended' },
-    revoked: { color: 'bg-red-100 text-red-800', icon: XCircle, label: 'Revoked' },
-  }[status];
-  const Icon = config.icon;
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${config.color}`}>
-      <Icon size={12} />
-      {config.label}
-    </span>
-  );
+  const variants = {
+    pending: { tone: "info", label: "Pending" },
+    active: { tone: "success", label: "Active" },
+    suspended: { tone: "warning", label: "Suspended" },
+    revoked: { tone: "danger", label: "Revoked" },
+  } as const;
+  const { tone, label } = variants[status];
+  return <ManagementStatus tone={tone}>{label}</ManagementStatus>;
 }
 
 // ── Key Expiry Badge ──────────────────────────────────────────────
@@ -67,7 +69,7 @@ function KeyExpiryBadge({ expiresAt }: { expiresAt?: number }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${colorClass}`}
+      className={managementBadge + " " + colorClass}
       title={`Expires: ${expiryDate.toLocaleString()}${remaining > 0 ? ` (${days} days remaining)` : ' (EXPIRED)'}`}
     >
       <Icon size={11} />
@@ -78,92 +80,81 @@ function KeyExpiryBadge({ expiresAt }: { expiresAt?: number }) {
 
 // ── Key History Panel ────────────────────────────────────────────────
 
-function KeyHistoryPanel({ publisher, onRevoked }: { publisher: PublisherRecord; onRevoked: () => void }) {
+interface RegistryConfirmation {
+  title: string;
+  confirmLabel: string;
+  message: ReactNode;
+  destructive?: boolean;
+  execute: () => Promise<void>;
+}
+
+function KeyHistoryPanel({ publisher, disabled, onConfirm }: {
+  publisher: PublisherRecord;
+  disabled: boolean;
+  onConfirm: (confirmation: RegistryConfirmation) => void;
+}) {
   const [keys, setKeys] = useState<PublisherKeyHistory[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [revoking, setRevoking] = useState<number | null>(null);
 
   useEffect(() => {
+    let current = true;
     setLoading(true);
+    setError(null);
     publisherApi.listKeys(publisher.id)
-      .then(setKeys)
-      .catch(e => setError(String(e)))
-      .finally(() => setLoading(false));
-  }, [publisher.id]);
-
-  const handleRevoke = async (k: PublisherKeyHistory) => {
-    if (!confirm(`Revoke key ${k.key_id}?\n\nThis is an emergency action. All packages signed with this key will fail verification immediately.`)) return;
-    setRevoking(k.id);
-    try {
-      await publisherApi.revokeHistoricalKey(k.id);
-      setKeys(prev => prev ? prev.map(x => x.id === k.id ? { ...x, status: 'revoked' } : x) : prev);
-      onRevoked();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setRevoking(null);
-    }
-  };
+      .then(value => { if (current) setKeys(value); })
+      .catch(e => { if (current) setError(String(e)); })
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [publisher.id, publisher.key_id]);
 
   const ts = (t: number) => new Date(t * 1000).toLocaleDateString();
 
   return (
-    <div className="bg-gray-50 border-t border-gray-100 px-6 py-4">
-      <div className="flex items-center gap-2 mb-3">
-        <Key size={13} className="text-gray-400" />
-        <span className="text-xs font-semibold text-gray-600 uppercase">Key History — {publisher.name}</span>
-        <span className="text-xs text-gray-400 ml-1">(Retired keys still verify old packages until manually revoked)</span>
-      </div>
+    <div className="w-[100cqw] space-y-2 border-t border-gray-100 bg-gray-50 p-4">
+      <h3 className="break-all text-sm font-semibold text-gray-800">Key History — {publisher.name}</h3>
+      <p className="text-xs text-gray-500">Retired keys still verify old packages until manually revoked.</p>
       {loading && <div className="text-xs text-gray-400">Loading...</div>}
-      {error && <div className="text-xs text-red-600">{error}</div>}
+      {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
       {!loading && keys !== null && keys.length === 0 && (
         <div className="text-xs text-gray-400">No historical keys.</div>
       )}
       {!loading && keys && keys.length > 0 && (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-gray-400 uppercase">
-              <th className="text-left pb-1 pr-4 font-medium">Key ID</th>
-              <th className="text-left pb-1 pr-4 font-medium">Status</th>
-              <th className="text-left pb-1 pr-4 font-medium">Active from</th>
-              <th className="text-left pb-1 pr-4 font-medium">Retired at</th>
-              <th className="text-left pb-1 font-medium">Action</th>
+        <ManagementTable label="Key history" columns={["Key ID", "Status", "Active from", "Retired at", "Action"]}>
+          {keys.map(key => (
+            <tr key={key.id} className={managementRow}>
+              <td className={managementCell + " font-mono text-xs"}>{key.key_id}</td>
+              <td className={managementCell}>
+                <ManagementStatus tone={key.status === "retired" ? "neutral" : "danger"}>
+                  {key.status === "retired" ? "Retired" : "Revoked"}
+                </ManagementStatus>
+              </td>
+              <td className={managementCell}>{ts(key.created_at)}</td>
+              <td className={managementCell}>{ts(key.retired_at)}</td>
+              <td className={managementCell}>
+                {key.status === "retired" && (
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    className={managementButton.danger}
+                    onClick={() => onConfirm({
+                      title: "Revoke historical key",
+                      confirmLabel: "Revoke",
+                      message: <>Revoke <code className="break-all">{key.key_id}</code>? Packages signed with this key will fail verification immediately.</>,
+                      destructive: true,
+                      execute: async () => {
+                        await publisherApi.revokeHistoricalKey(key.id);
+                        setKeys(previous => previous?.map(entry => entry.id === key.id ? { ...entry, status: "revoked" } : entry) ?? null);
+                      },
+                    })}
+                  >
+                    <ShieldOff size={14} aria-hidden="true" /> Revoke
+                  </button>
+                )}
+              </td>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {keys.map(k => (
-              <tr key={k.id} className="hover:bg-white">
-                <td className="py-1.5 pr-4 font-mono text-gray-800">{k.key_id}</td>
-                <td className="py-1.5 pr-4">
-                  {k.status === 'retired' ? (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-gray-100 rounded text-gray-600">
-                      <Clock size={10} /> retired
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-red-100 rounded text-red-700">
-                      <XCircle size={10} /> revoked
-                    </span>
-                  )}
-                </td>
-                <td className="py-1.5 pr-4 text-gray-500">{ts(k.created_at)}</td>
-                <td className="py-1.5 pr-4 text-gray-500">{ts(k.retired_at)}</td>
-                <td className="py-1.5">
-                  {k.status === 'retired' && (
-                    <button
-                      onClick={() => void handleRevoke(k)}
-                      disabled={revoking === k.id}
-                      title="Emergency revoke: packages signed with this key will fail verification"
-                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-500 text-white rounded text-[11px] hover:bg-red-600 disabled:opacity-50"
-                    >
-                      <ShieldOff size={10} /> Revoke
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          ))}
+        </ManagementTable>
       )}
     </div>
   );
@@ -203,10 +194,13 @@ export function PublisherRegistryPage() {
     api.getServiceDetail("publishers").then(setDetail).catch(e => setDetailError(e.message));
   }, []);
   const [publishers, setPublishers] = useState<PublisherRecord[]>([]);
-  const [selectedPublisher, setSelectedPublisher] = useState<PublisherRecord | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const actionBusy = useRef(false);
+  const [confirmation, setConfirmation] = useState<RegistryConfirmation | null>(null);
+  const selectedPublisher = publishers.find(publisher => publisher.id === selectedId);
 
   const loadData = useCallback(async () => {
     try {
@@ -221,36 +215,21 @@ export function PublisherRegistryPage() {
 
   useEffect(() => { void loadData(); }, [loadData]);
 
-  const handleSuspend = async (publisher: PublisherRecord) => {
-    if (!confirm(`Suspend "${publisher.name}"?`)) return;
-    setActionLoading(publisher.id);
-    try { await publisherApi.suspend(publisher.id); await loadData(); }
-    catch (e) { setError(String(e)); }
-    finally { setActionLoading(null); }
-  };
-
-  const handleReinstate = async (publisher: PublisherRecord) => {
-    setActionLoading(publisher.id);
-    try { await publisherApi.reinstate(publisher.id); await loadData(); }
-    catch (e) { setError(String(e)); }
-    finally { setActionLoading(null); }
-  };
-
-  const handleDelete = async (publisher: PublisherRecord) => {
-    if (!confirm(`Delete "${publisher.name}" and its signing-key history? This cannot be undone.`)) return;
-    setActionLoading(publisher.id);
-    try { await publisherApi.delete(publisher.id); await loadData(); }
-    catch (e) { setError(String(e)); }
-    finally { setActionLoading(null); }
-  };
-
-  const handleRevokeActiveKey = async (publisher: PublisherRecord) => {
-    if (!confirm(`Revoke the current package signing key of "${publisher.name}" (${publisher.key_id})?\n\nThis is an emergency action for a compromised key. Packages signed with it fail verification at once. Register a Publisher Profile with a new key to restore package verification.`)) return;
-    setActionLoading(publisher.id);
-    try { await publisherApi.revokeActiveKey(publisher.id); await loadData(); }
-    catch (e) { setError(String(e)); }
-    finally { setActionLoading(null); }
-  };
+  async function runAction(execute: () => Promise<void>) {
+    if (actionBusy.current) return;
+    actionBusy.current = true;
+    setActionLoading(true);
+    try {
+      await execute();
+      await loadData();
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      setConfirmation(null);
+      actionBusy.current = false;
+      setActionLoading(false);
+    }
+  }
 
   const stats = {
     total: publishers.length,
@@ -258,126 +237,148 @@ export function PublisherRegistryPage() {
     suspended: publishers.filter(m => m.status === 'suspended').length,
   };
 
-  if (loading) return <div className="p-8 text-gray-500">Loading...</div>;
-
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Building2 size={24} /> Publisher Registry
-          </h1>
-          <p className="text-gray-500 text-sm mt-1">Review registered publishers and their signing keys.</p>
+    <ServicePageLayout title="Publisher Registry" description="Review registered publishers and their signing keys.">
+      {loading ? <p role="status" className="text-sm text-gray-600">Loading publishers…</p> : <>
+        {detail ? <ServiceAccessCard service="publishers" data={detail} publisher={selectedPublisher?.name} /> :
+          <p role="status" className="text-sm text-gray-600">{detailError || "Loading service access…"}</p>}
+
+        <HowItWorks />
+
+        {error && (
+          <div role="alert" className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{error}</div>
+        )}
+
+        {/* Stats */}
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            { label: 'Total', value: stats.total, color: 'text-gray-700' },
+            { label: 'Active', value: stats.active, color: 'text-green-700' },
+            { label: 'Suspended', value: stats.suspended, color: 'text-orange-700' },
+          ].map(s => (
+            <div key={s.label} className={managementCard + " p-4"}>
+              <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
+              <div className="text-gray-500 text-sm">{s.label}</div>
+            </div>
+          ))}
         </div>
-      </div>
 
-      {detail ? <ServiceAccessCard service="publishers" data={detail} publisher={selectedPublisher?.name} /> :
-        <p role="status" className="text-sm text-gray-600">{detailError || "Loading service access…"}</p>}
-
-      <HowItWorks />
-
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{error}</div>
-      )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          { label: 'Total', value: stats.total, color: 'text-gray-700' },
-          { label: 'Active', value: stats.active, color: 'text-green-700' },
-          { label: 'Suspended', value: stats.suspended, color: 'text-orange-700' },
-        ].map(s => (
-          <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-4">
-            <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
-            <div className="text-gray-500 text-sm">{s.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Publisher Registry Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="font-semibold text-gray-800">Publishers</h2>
-          {selectedPublisher && (
-            <button onClick={() => setSelectedPublisher(null)} className="text-xs text-gray-500 hover:text-gray-800">
-              Close key history
-            </button>
-          )}
-        </div>
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
-            <tr>
-              {['Name', 'Status', 'Key ID', 'Key Expires', 'Actions'].map(h => (
-                <th key={h} className="px-4 py-2 text-left font-medium">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {publishers.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No publishers registered</td></tr>
+        {/* Publisher Registry Table */}
+        <div className={managementCard + " overflow-hidden"}>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-4 py-3">
+            <h2 className="font-semibold text-gray-800">Publishers</h2>
+            {selectedPublisher && (
+              <button type="button" onClick={() => setSelectedId(null)} className={managementButton.secondary}>
+                Close key history
+              </button>
             )}
-            {publishers.map(publisher => {
-              const isSelected = selectedPublisher?.id === publisher.id;
-              return (
-                <>
-                  <tr
-                    key={publisher.id}
-                    className={`hover:bg-gray-50 cursor-pointer ${isSelected ? 'bg-blue-50' : ''}`}
-                    onClick={() => setSelectedPublisher(isSelected ? null : publisher)}
-                  >
-                    <td className="px-4 py-3 font-mono font-medium text-gray-900">{publisher.name}</td>
-                    <td className="px-4 py-3"><StatusBadge status={publisher.status} /></td>
-                    <td className="px-4 py-3 text-gray-500 font-mono text-[11px] truncate max-w-[120px]" title={publisher.key_id}>{publisher.key_id || '—'}</td>
-                    <td className="px-4 py-3">
-                      <KeyExpiryBadge expiresAt={publisher.key_expires_at} />
-                    </td>
-                    <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                      <div className="flex gap-1">
-                        {publisher.status === 'active' && (
+          </div>
+          <ManagementTable label="Publishers" columns={["Name", "Status", "Key ID", "Key Expires", "Actions"]}>
+              {publishers.length === 0 && (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No publishers registered</td></tr>
+              )}
+              {publishers.map(publisher => {
+                const isSelected = selectedId === publisher.id;
+                const historyId = "publisher-key-history-" + publisher.id;
+                const toggleHistory = () => setSelectedId(isSelected ? null : publisher.id);
+                return (
+                  <Fragment key={publisher.id}>
+                    <tr
+                      className={managementRow + " cursor-pointer hover:bg-gray-50" + (isSelected ? " bg-blue-50" : "")}
+                      onClick={toggleHistory}
+                    >
+                      <td className={managementCell}>
+                        <ManagementDisclosure
+                          expanded={isSelected}
+                          controls={historyId}
+                          onClick={(event) => { event.stopPropagation(); toggleHistory(); }}
+                        >
+                          <span className="whitespace-nowrap font-mono">{publisher.name}</span>
+                        </ManagementDisclosure>
+                      </td>
+                      <td className={managementCell}><StatusBadge status={publisher.status} /></td>
+                      <td className={managementCell + " font-mono text-xs text-gray-600"}>{publisher.key_id || "—"}</td>
+                      <td className={managementCell}>
+                        <KeyExpiryBadge expiresAt={publisher.key_expires_at} />
+                      </td>
+                      <td className={managementCell} onClick={e => e.stopPropagation()}>
+                        <div className="flex w-max gap-2">
+                          {publisher.status === 'active' && (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmation({
+                                title: "Suspend publisher",
+                                confirmLabel: "Suspend",
+                                message: <>Suspend <strong className="break-all">{publisher.name}</strong>? Key lookup stops while the publisher is suspended. You can reinstate it later.</>,
+                                execute: () => publisherApi.suspend(publisher.id),
+                              })}
+                              disabled={actionLoading}
+                              className={managementButton.secondary}
+                            >Suspend</button>
+                          )}
+                          {publisher.status === 'active' && publisher.key_id && (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmation({
+                                title: "Revoke current key",
+                                confirmLabel: "Revoke key",
+                                message: <>Revoke <code className="break-all">{publisher.key_id}</code> for <strong className="break-all">{publisher.name}</strong>? Packages signed with this key will fail verification immediately. Any staged replacement key will also be revoked. The publisher must register a fresh key to restore verification.</>,
+                                destructive: true,
+                                execute: () => publisherApi.revokeActiveKey(publisher.id),
+                              })}
+                              disabled={actionLoading}
+                              title="Emergency revoke of the current package signing key"
+                              className={managementButton.danger}
+                            ><ShieldOff size={14} aria-hidden="true" /> Revoke key</button>
+                          )}
+                          {publisher.status === 'suspended' && (
+                            <button
+                              type="button"
+                              onClick={() => void runAction(() => publisherApi.reinstate(publisher.id))}
+                              disabled={actionLoading}
+                              className={managementButton.primary}
+                            >Reinstate</button>
+                          )}
                           <button
-                            onClick={() => void handleSuspend(publisher)}
-                            disabled={actionLoading === publisher.id}
-                            className="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
-                          >Suspend</button>
-                        )}
-                        {publisher.status === 'active' && publisher.key_id && (
-                          <button
-                            onClick={() => void handleRevokeActiveKey(publisher)}
-                            disabled={actionLoading === publisher.id}
-                            title="Emergency revoke of the current package signing key"
-                            className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-red-700 text-white rounded hover:bg-red-800 disabled:opacity-50"
-                          ><ShieldOff size={11} /> Revoke key</button>
-                        )}
-                        {publisher.status === 'suspended' && (
-                          <button
-                            onClick={() => void handleReinstate(publisher)}
-                            disabled={actionLoading === publisher.id}
-                            className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
-                          >Reinstate</button>
-                        )}
-                        <button
-                          onClick={() => void handleDelete(publisher)}
-                          disabled={actionLoading === publisher.id}
-                          className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
-                        >Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                  {isSelected && (
-                    <tr key={`${publisher.id}-history`}>
-                      <td colSpan={5} className="p-0">
-                        <KeyHistoryPanel publisher={publisher} onRevoked={() => void loadData()} />
+                            type="button"
+                            onClick={() => setConfirmation({
+                              title: "Delete publisher",
+                              confirmLabel: "Delete",
+                              message: <>Permanently delete <strong className="break-all">{publisher.name}</strong> and its signing-key history?</>,
+                              destructive: true,
+                              execute: () => publisherApi.delete(publisher.id),
+                            })}
+                            disabled={actionLoading}
+                            className={managementButton.danger}
+                          >Delete</button>
+                        </div>
                       </td>
                     </tr>
-                  )}
-                </>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                    <tr id={historyId} hidden={!isSelected}>
+                      <td colSpan={5} className="p-0">
+                        {isSelected && <KeyHistoryPanel publisher={publisher} disabled={actionLoading} onConfirm={setConfirmation} />}
+                      </td>
+                    </tr>
+                  </Fragment>
+                );
+              })}
+          </ManagementTable>
+        </div>
 
-      <IdentityReview kind="publishers" />
-    </div>
+        <IdentityReview kind="publishers" />
+      </>}
+      {confirmation && (
+        <ConfirmModal
+          isOpen
+          title={confirmation.title}
+          message={confirmation.message}
+          confirmLabel={confirmation.confirmLabel}
+          isDestructive={confirmation.destructive}
+          loading={actionLoading}
+          onConfirm={() => void runAction(confirmation.execute)}
+          onCancel={() => { if (!actionBusy.current) setConfirmation(null); }}
+        />
+      )}
+    </ServicePageLayout>
   );
 }

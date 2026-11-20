@@ -448,7 +448,7 @@ export interface PublisherRecord {
   public_key: string;
   key_id: string;
   contact?: string;
-  status: 'active' | 'suspended' | 'revoked';
+  status: 'pending' | 'active' | 'suspended' | 'revoked';
   created_at: number;
   updated_at?: number;
   verified_at?: number;
