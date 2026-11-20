@@ -241,12 +241,29 @@ enum RealmProfileStore {
         try await requirePublisherKeys([KeyRequirement(publicKey: publicKey, domain: domain, localFront: localFront)], database: database)
     }
 
-    /// Recheck all Front and Service keys against one current SQLite snapshot.
     static func requirePublisherKeys(
         _ requirements: [KeyRequirement], database: GuestStorageDatabase
     ) async throws {
-        let domains = Array(Set(requirements.map(\.domain))).sorted()
-        let profiles = try await database.acceptedPublishers(domains: domains)
+        try await withPublisherKeys(requirements, database: database) { }
+    }
+
+    /// Keep the trust ordering gate until the synchronous Front commit has finished.
+    static func withPublisherKeys<T>(
+        _ requirements: [KeyRequirement], database: GuestStorageDatabase,
+        commit: () throws -> T
+    ) async throws -> T {
+        try await database.withPublisherTrust {
+            let domains = Array(Set(requirements.map(\.domain))).sorted()
+            let profiles = try await database.acceptedPublishers(domains: domains)
+            try validatePublisherKeys(requirements, profiles: profiles)
+            try Task.checkCancellation()
+            return try commit()
+        }
+    }
+
+    private static func validatePublisherKeys(
+        _ requirements: [KeyRequirement], profiles: [PublisherProfileInfo]
+    ) throws {
         for requirement in requirements {
             guard let profile = profiles.first(where: { $0.domain == requirement.domain }) else {
                 throw RealmServiceError(message: "The accepted Publisher is unavailable.")

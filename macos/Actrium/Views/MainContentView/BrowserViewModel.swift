@@ -1999,58 +1999,59 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 }
                 try Task.checkCancellation()
                 guard try profileIsCurrent() else { return }
-                try await RealmProfileStore.requirePublisherKey(
-                    verified.trustedKey, domain: publisherDomain, database: .shared
-                )
-                try Task.checkCancellation()
-                guard try profileIsCurrent() else { return }
-                guard let publisherIdentity = publisher.storageIdentity else {
-                    throw GuestLocalStorageError.InvalidPublisher(message: "Verified Publisher identity is missing.")
-                }
-                guard importACTRPackage(
-                    from: cachedArchiveURL,
-                    knownDigest: digest,
-                    presentInstanceCreation: false,
-                    requireSignature: true,
-                    additionalTrustedKeys: publisherKeys,
-                    publisherStorageIdentity: publisherIdentity,
-                    preparedLocalStorage: preparedStorage,
-                    replacingTabId: replacingTabId,
-                    realmAddress: address
-                ) != nil else {
-                    throw CoreError.RealmProfileInvalid(message: "Could not load the verified Front")
-                }
-                CapabilityPermissionStore.shared.clearSessionGrants(tabId: replacingTabId)
-                if let binding = candidateBinding {
-                    RealmServiceBindings.shared.attach(binding, to: replacingTabId)
-                    candidateBinding = nil
-                } else {
-                    RealmServiceBindings.shared.remove(replacingTabId)
-                }
-                localFrontApprovals.removeValue(forKey: replacingTabId)
-                loadedRealmFronts[replacingTabId] = next
-                if let index = tabs.firstIndex(where: { $0.id == replacingTabId }) {
-                    tabs[index].realmProfileSigner = (realmName, next.signingKeyId)
-                }
-                if action == .loadAvailable {
-                    realmUpdateOffers.removeValue(forKey: replacingTabId)
-                    deferredRealmUpdates.removeValue(forKey: replacingTabId)
-                    do {
-                        try saveRealmTrust(profileBody, .installedProfile, name: installedProfileName)
-                    } catch {
-                        logger.warning("Realm \(realmName): could not save installed Profile: \(error)")
+                try await RealmProfileStore.withPublisherKeys([
+                    .init(publicKey: verified.trustedKey, domain: publisherDomain)
+                ], database: .shared) {
+                    try Task.checkCancellation()
+                    guard try profileIsCurrent() else { return }
+                    guard let publisherIdentity = publisher.storageIdentity else {
+                        throw GuestLocalStorageError.InvalidPublisher(message: "Verified Publisher identity is missing.")
                     }
-                } else if let offer = realmUpdateOffers[replacingTabId], let tab = tabs.first(where: { $0.id == replacingTabId }) {
-                    // Import increments the tab's navigation nonce.
-                    realmUpdateOffers[replacingTabId] = RealmFrontUpdateOffer(
-                        tabId: offer.tabId, address: offer.address, navigationNonce: tab.reloadNonce,
-                        previous: offer.previous, selection: offer.selection
-                    )
+                    guard importACTRPackage(
+                        from: cachedArchiveURL,
+                        knownDigest: digest,
+                        presentInstanceCreation: false,
+                        requireSignature: true,
+                        additionalTrustedKeys: publisherKeys,
+                        publisherStorageIdentity: publisherIdentity,
+                        preparedLocalStorage: preparedStorage,
+                        replacingTabId: replacingTabId,
+                        realmAddress: address
+                    ) != nil else {
+                        throw CoreError.RealmProfileInvalid(message: "Could not load the verified Front")
+                    }
+                    CapabilityPermissionStore.shared.clearSessionGrants(tabId: replacingTabId)
+                    if let binding = candidateBinding {
+                        RealmServiceBindings.shared.attach(binding, to: replacingTabId)
+                        candidateBinding = nil
+                    } else {
+                        RealmServiceBindings.shared.remove(replacingTabId)
+                    }
+                    localFrontApprovals.removeValue(forKey: replacingTabId)
+                    loadedRealmFronts[replacingTabId] = next
+                    if let index = tabs.firstIndex(where: { $0.id == replacingTabId }) {
+                        tabs[index].realmProfileSigner = (realmName, next.signingKeyId)
+                    }
+                    if action == .loadAvailable {
+                        realmUpdateOffers.removeValue(forKey: replacingTabId)
+                        deferredRealmUpdates.removeValue(forKey: replacingTabId)
+                        do {
+                            try saveRealmTrust(profileBody, .installedProfile, name: installedProfileName)
+                        } catch {
+                            logger.warning("Realm \(realmName): could not save installed Profile: \(error)")
+                        }
+                    } else if let offer = realmUpdateOffers[replacingTabId], let tab = tabs.first(where: { $0.id == replacingTabId }) {
+                        // Import increments the tab's navigation nonce.
+                        realmUpdateOffers[replacingTabId] = RealmFrontUpdateOffer(
+                            tabId: offer.tabId, address: offer.address, navigationNonce: tab.reloadNonce,
+                            previous: offer.previous, selection: offer.selection
+                        )
+                    }
+                    logger.notice("Realm \(realmName): activated Front \(profile.packageType), Profile sequence \(profile.sequence), digest \(digest)")
+                    objectWillChange.send()
+                    persistBrowserPageSession()
+                    schedulePackageCacheEviction()
                 }
-                logger.notice("Realm \(realmName): activated Front \(profile.packageType), Profile sequence \(profile.sequence), digest \(digest)")
-                objectWillChange.send()
-                persistBrowserPageSession()
-                schedulePackageCacheEviction()
             } catch {
                 guard !Task.isCancelled, let index = tabIndex() else { return }
                 logger.warning("Realm \(realmName): Front refresh failed: \(error)")
@@ -2239,49 +2240,53 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         try await requireCurrentPublisherKeys()
         guard isCurrent() else { return nil }
         try await binding.prepareLocalFront()
-        try await requireCurrentPublisherKeys()
-        guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else { return nil }
+        return try await RealmProfileStore.withPublisherKeys([
+            .init(publicKey: trustedKey, domain: publisher.domain, localFront: policy),
+            .init(publicKey: verified.servicePublicKey, domain: servicePublisher.domain)
+        ], database: .shared) {
+            guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else { return nil }
 
-        // New renderer identity prevents late messages from the old Guest
-        // from using the new binding or inheriting its approvals.
-        var tab = Tab(
-            title: manifest.name ?? front.href, url: sourceURL,
-            appId: "actrium.local-front/\(profile.realmName)/\(digest)",
-            groupId: tabs[index].groupId, unifiedScript: script, guestExtractedPath: root.path,
-            guestEntry: entry, capabilityManifestJSON: capabilities,
-            localStorageOrigin: manifest.storageOrigin(devDirectory: nil),
-            localStoragePublisherIdentity: publisher.storageIdentity, preparedLocalStorage: preparedStorage,
-            contractName: manifest.contractName,
-            contractVersion: manifest.contractVersion, permissions: manifest.permissions,
-            leftPanelDefaultVisible: manifest.leftPanelDefaultVisible,
-            rightPanelDefaultVisible: manifest.rightPanelDefaultVisible, backgroundColor: manifest.themeColor
-        )
-        tab.realmProfileSigner = (profile.realmName, accepted.signingKeyId)
-        let position = tabSlotPositions.removeValue(forKey: tabId) ?? index
-        let offer = realmUpdateOffers[tabId]
-        let deferred = deferredRealmUpdates[tabId]
-        releaseTabRuntime(tabId, preserveRealmLoad: true)
-        if let offer {
-            realmUpdateOffers[tab.id] = RealmFrontUpdateOffer(
-                tabId: tab.id, address: offer.address, navigationNonce: tab.reloadNonce,
-                previous: offer.previous, selection: offer.selection
+            // New renderer identity prevents late messages from the old Guest
+            // from using the new binding or inheriting its approvals.
+            var tab = Tab(
+                title: manifest.name ?? front.href, url: sourceURL,
+                appId: "actrium.local-front/\(profile.realmName)/\(digest)",
+                groupId: tabs[index].groupId, unifiedScript: script, guestExtractedPath: root.path,
+                guestEntry: entry, capabilityManifestJSON: capabilities,
+                localStorageOrigin: manifest.storageOrigin(devDirectory: nil),
+                localStoragePublisherIdentity: publisher.storageIdentity, preparedLocalStorage: preparedStorage,
+                contractName: manifest.contractName,
+                contractVersion: manifest.contractVersion, permissions: manifest.permissions,
+                leftPanelDefaultVisible: manifest.leftPanelDefaultVisible,
+                rightPanelDefaultVisible: manifest.rightPanelDefaultVisible, backgroundColor: manifest.themeColor
             )
+            tab.realmProfileSigner = (profile.realmName, accepted.signingKeyId)
+            let position = tabSlotPositions.removeValue(forKey: tabId) ?? index
+            let offer = realmUpdateOffers[tabId]
+            let deferred = deferredRealmUpdates[tabId]
+            releaseTabRuntime(tabId, preserveRealmLoad: true)
+            if let offer {
+                realmUpdateOffers[tab.id] = RealmFrontUpdateOffer(
+                    tabId: tab.id, address: offer.address, navigationNonce: tab.reloadNonce,
+                    previous: offer.previous, selection: offer.selection
+                )
+            }
+            deferredRealmUpdates[tab.id] = deferred
+            leftPanelVisibility[tabId] = nil
+            RealmServiceBindings.shared.attach(binding, to: tab.id)
+            localFrontApprovals[tab.id] = LocalFrontApproval(scope: scope, file: file)
+            tabSlotPositions[tab.id] = position
+            leftPanelVisibility[tab.id] = manifest.leftPanelDefaultVisible
+            tabs[index] = tab
+            if currentTabId == tabId {
+                currentTabId = tab.id
+                if actriumMode.isInFocusMode { actriumMode = .focus(tabId: tab.id) }
+            }
+            installed = true
+            persistBrowserPageSession()
+            schedulePackageCacheEviction()
+            return tab.id
         }
-        deferredRealmUpdates[tab.id] = deferred
-        leftPanelVisibility[tabId] = nil
-        RealmServiceBindings.shared.attach(binding, to: tab.id)
-        localFrontApprovals[tab.id] = LocalFrontApproval(scope: scope, file: file)
-        tabSlotPositions[tab.id] = position
-        leftPanelVisibility[tab.id] = manifest.leftPanelDefaultVisible
-        tabs[index] = tab
-        if currentTabId == tabId {
-            currentTabId = tab.id
-            if actriumMode.isInFocusMode { actriumMode = .focus(tabId: tab.id) }
-        }
-        installed = true
-        persistBrowserPageSession()
-        schedulePackageCacheEviction()
-        return tab.id
     }
 
     nonisolated private static func realmArchiveDigest(_ bytes: Data) -> String {

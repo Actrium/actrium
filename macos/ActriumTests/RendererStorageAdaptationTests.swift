@@ -105,9 +105,10 @@ struct RendererStorageAdaptationTests {
             "capabilityManifestJSON": #"{"hostModules":{"local-storage":{"rpc":["setItem"]}}}"#,
         ])
         let document = try #require((config["localStorageDocumentId"] as? String).flatMap(UUID.init(uuidString:)))
+        let deadline = (DispatchTime.now() + .seconds(2)).uptimeNanoseconds
         let request = GuestLocalStorageCall(
             id: UUID(), documentId: document, operation: .setItem, key: "key", value: "changed",
-            deadlineUptimeNanoseconds: (DispatchTime.now() + .milliseconds(250)).uptimeNanoseconds
+            deadlineUptimeNanoseconds: deadline
         )
         let task = Task { try await broker.reply(to: String(decoding: JSONEncoder().encode(request), as: UTF8.self), tabId: tab) }
         defer { store.resume.signal() }
@@ -115,7 +116,8 @@ struct RendererStorageAdaptationTests {
         let timeout = Task { try await Task.sleep(for: .seconds(5)); store.started.continuation.finish() }
         defer { timeout.cancel() }
         try #require(await iterator.next() != nil)
-        try await Task.sleep(for: .milliseconds(300))
+        let now = DispatchTime.now().uptimeNanoseconds
+        if now < deadline { try await Task.sleep(nanoseconds: deadline - now + 10_000_000) }
         store.resume.signal()
         let reply = try JSONDecoder().decode(GuestLocalStorageReply.self, from: Data(try #require(try await task.value).utf8))
         #expect(reply.errorCode == .timeout)

@@ -10,7 +10,10 @@ final class GuestStorageDatabase {
     private var database: GuestLocalStorage?
     private let queue = DispatchQueue(label: "com.actrium.guest-storage", qos: .userInitiated)
     private let pendingLimit: Int
+    private var publisherTrustBusy = false
+    private var publisherTrustWaiters: [CheckedContinuation<Void, Never>] = []
     private(set) var pendingOperationCount = 0
+    var pendingPublisherTrustCount: Int { publisherTrustWaiters.count + (publisherTrustBusy ? 1 : 0) }
 
     init(database: GuestLocalStorage? = nil, pendingLimit: Int = 128) {
         self.database = database
@@ -34,9 +37,27 @@ final class GuestStorageDatabase {
     }
 
     func acceptPublisherProfile(body: String, domain: String, previousPins: String? = nil, previousProfile: String? = nil) async throws -> PublisherProfileAcceptance {
-        try await run {
-            try $0.acceptPublisherProfile(body: body, domain: domain, previousPinsJson: previousPins, previousProfileBody: previousProfile)
+        try await withPublisherTrust {
+            try await run {
+                try $0.acceptPublisherProfile(body: body, domain: domain, previousPinsJson: previousPins, previousProfileBody: previousProfile)
+            }
         }
+    }
+
+    /// Serialize Publisher updates with the final validation-and-activation operation.
+    func withPublisherTrust<T>(_ operation: () async throws -> T) async throws -> T {
+        if publisherTrustBusy {
+            guard publisherTrustWaiters.count < pendingLimit else { throw GuestStorageDatabaseError.busy }
+            await withCheckedContinuation { publisherTrustWaiters.append($0) }
+        } else {
+            publisherTrustBusy = true
+        }
+        defer {
+            if publisherTrustWaiters.isEmpty { publisherTrustBusy = false }
+            else { publisherTrustWaiters.removeFirst().resume() }
+        }
+        try Task.checkCancellation()
+        return try await operation()
     }
 
     func acceptedPublisherPins(domain: String) async throws -> String? {
