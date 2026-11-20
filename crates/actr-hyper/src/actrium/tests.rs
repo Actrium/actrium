@@ -378,6 +378,15 @@ fn business_call(response: &AttachResponse, secret: &SessionSecret) -> RpcEnvelo
     signed_business_request(response, secret, ROUTE, "call-1", b"read document".to_vec())
 }
 
+fn response_metadata(request: &RpcEnvelope) -> Vec<MetadataEntry> {
+    let mut entries = request.metadata.clone();
+    // Response envelopes inherit session routing metadata, not the inbound
+    // request proof. Leaving that proof in a fixture would make presence-only
+    // assertions pass even when authenticate_response never signs anything.
+    entries.retain(|entry| entry.key != metadata::PROOF);
+    entries
+}
+
 async fn cancel_attachment(
     registry: &ActriumServiceRegistry,
     guard: &super::ActriumServiceGuard,
@@ -431,7 +440,7 @@ async fn attach_business_call_and_response_proof_round_trip() {
         route_key: ROUTE.into(),
         direction: Some(Direction::Response as i32),
         payload: Some(Bytes::from_static(b"document body")),
-        metadata: call.metadata.clone(),
+        metadata: response_metadata(&call),
         ..Default::default()
     };
     guard.authenticate_response(&mut response).await.unwrap();
@@ -637,7 +646,7 @@ async fn tampered_requests_and_responses_are_rejected() {
         route_key: ROUTE.into(),
         direction: Some(Direction::Response as i32),
         payload: Some(Bytes::from_static(b"document body")),
-        metadata: call.metadata.clone(),
+        metadata: response_metadata(&call),
         ..Default::default()
     };
     guard.authenticate_response(&mut response).await.unwrap();
@@ -975,7 +984,7 @@ async fn admitted_requests_are_scoped_to_their_session() {
         route_key: ROUTE.into(),
         direction: Some(Direction::Response as i32),
         payload: Some(Bytes::from_static(b"document body")),
-        metadata: second_call.metadata.clone(),
+        metadata: response_metadata(&second_call),
         ..Default::default()
     };
     guard
@@ -998,7 +1007,7 @@ async fn admitted_requests_are_scoped_to_their_session() {
         route_key: ROUTE.into(),
         direction: Some(Direction::Response as i32),
         payload: Some(Bytes::from_static(b"document body")),
-        metadata: first_call.metadata.clone(),
+        metadata: response_metadata(&first_call),
         ..Default::default()
     };
     let error = guard
@@ -1037,16 +1046,19 @@ async fn finish_releases_admitted_request() {
         direction: Some(Direction::Response as i32),
         payload: Some(Bytes::from_static(b"document body")),
         timeout_ms: 0,
-        metadata: call.metadata.clone(),
+        metadata: response_metadata(&call),
         ..Default::default()
     };
     guard
         .authenticate_response(&mut response)
         .await
         .expect("response is signed while admitted");
-    assert_ne!(
-        response.metadata, call.metadata,
-        "admitted request replaces the request proof with a response proof"
+    assert!(
+        response
+            .metadata
+            .iter()
+            .any(|entry| entry.key == metadata::PROOF),
+        "admitted request gains a response proof"
     );
 
     guard
@@ -1060,16 +1072,18 @@ async fn finish_releases_admitted_request() {
         direction: Some(Direction::Response as i32),
         payload: Some(Bytes::from_static(b"document body")),
         timeout_ms: 0,
-        metadata: call.metadata.clone(),
+        metadata: response_metadata(&call),
         ..Default::default()
     };
-    let metadata_before_finish = response_after_finish.metadata.clone();
     guard
         .authenticate_response(&mut response_after_finish)
         .await
         .expect("finish is idempotent");
-    assert_eq!(
-        response_after_finish.metadata, metadata_before_finish,
-        "finished request is no longer admitted, so its metadata is not re-signed"
+    assert!(
+        !response_after_finish
+            .metadata
+            .iter()
+            .any(|entry| entry.key == metadata::PROOF),
+        "finished request is no longer admitted"
     );
 }

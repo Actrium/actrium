@@ -602,6 +602,33 @@ struct RealmServiceAttachmentUploadTests {
         let description: String
     }
 
+    @Test func replacementServiceIsAttachedWithoutResumingTheOldPeer() async throws {
+        let oldTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 1)
+        let replacement = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 2)
+
+        // A is unreachable while its old lease is still valid. Discovering B
+        // must select a fresh Attach without first attempting to Resume A.
+        let recovered = try await RealmServiceBinding.recoverDiscoveredConnection(
+            currentTarget: oldTarget,
+            discoveredTarget: replacement,
+            retarget: { replacement },
+            resume: {
+                Issue.record("The unreachable old Service must not be resumed.")
+                throw SessionError(description: "Unavailable: old Service is offline")
+            }
+        )
+        #expect(recovered == replacement)
+
+        // An unchanged target keeps the existing lease and normal Resume path.
+        let resumed = try await RealmServiceBinding.recoverDiscoveredConnection(
+            currentTarget: oldTarget,
+            discoveredTarget: oldTarget,
+            retarget: { replacement },
+            resume: { oldTarget }
+        )
+        #expect(resumed == oldTarget)
+    }
+
     @Test func onlyTerminalSessionErrorsTriggerAFreshAttach() {
         // A rebuilt channel generation or an expired lease cannot be repaired
         // by Resume alone; the Host must Attach a new session.

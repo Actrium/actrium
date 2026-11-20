@@ -538,6 +538,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     nonisolated let connection: Connection
     private let front: Data
     private let metadata: ActriumSessionMetadata
+    private let frontType: String
     private let trustedFrontKey: Data
     private let configuration: String
     private let serviceType: ActrBindings.ActrType
@@ -581,6 +582,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             connection: connection,
             front: front,
             metadata: metadata,
+            frontType: profile.packageType,
             serviceType: ActrBindings.ActrType(
                 publisher: metadata.program.publisher,
                 name: metadata.program.name,
@@ -599,6 +601,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         connection: Connection,
         front: Data,
         metadata: ActriumSessionMetadata,
+        frontType: String,
         serviceType: ActrBindings.ActrType,
         trustedFrontKey: Data,
         routes: Set<String>,
@@ -611,6 +614,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         self.eventRelay = RealmServiceEventRelay(bindingId: bindingId)
         self.front = front
         self.metadata = metadata
+        self.frontType = frontType
         self.serviceType = serviceType
         self.trustedFrontKey = trustedFrontKey
         self.routes = routes
@@ -653,8 +657,8 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     func replacingConnection(_ connection: Connection) throws -> RealmServiceBinding {
         guard !stopped else { throw CancellationError() }
         return try RealmServiceBinding(
-            connection: connection, front: front, metadata: metadata, serviceType: serviceType,
-            trustedFrontKey: trustedFrontKey, routes: routes, events: events,
+            connection: connection, front: front, metadata: metadata, frontType: frontType,
+            serviceType: serviceType, trustedFrontKey: trustedFrontKey, routes: routes, events: events,
             attachmentUploadAllowed: attachmentUploadAllowed
         )
     }
@@ -673,19 +677,10 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             throw RealmServiceError(message: "The Service call is outside this tab's declared capabilities.")
         }
         let eventGeneration = await eventPeers.activeGeneration()
-        var connection = try await readyConnection()
-        guard !stopped else { throw CancellationError() }
-        // Resolve the unique Service for both business RPC and event routing.
-        // If it changed while the Front stayed online, move the authenticated
-        // Attach session before issuing the call rather than using a stale peer.
-        let target = try await eventPeers.resolve(
-            ifGeneration: eventGeneration,
-            reference: connection.reference,
-            serviceType: serviceType
+        let connection = try await readyConnection(
+            resolveTargetForCall: true,
+            eventGeneration: eventGeneration
         )
-        if target != connection.target {
-            connection = try await retarget(connection, to: target)
-        }
         guard !stopped else { throw CancellationError() }
         return try await connection.session.call(
             route: request.route,
@@ -1085,7 +1080,10 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// Return a connection whose session is valid on the current verified
     /// channel. Actor reentrancy is serialized through one shared recovery
     /// task, so concurrent requests cannot Resume or re-Attach independently.
-    private func readyConnection() async throws -> RuntimeConnection {
+    private func readyConnection(
+        resolveTargetForCall: Bool = false,
+        eventGeneration: UInt64? = nil
+    ) async throws -> RuntimeConnection {
         guard !stopped else { throw CancellationError() }
         guard localFrontHandoff == nil else {
             throw RealmServiceError(message: "The Local Front is refreshing its Service session.")
@@ -1100,6 +1098,22 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         // Every reentrant caller then awaits this same Resume/re-Attach.
         let task = Task<RuntimeConnection, Error> {
             let connection = try await self.connect()
+            if resolveTargetForCall {
+                // Discover before touching the old session. If A is offline and
+                // B is now the unique Service, resuming A first would surface a
+                // transport error and hide the available replacement.
+                let target = try await self.eventPeers.resolve(
+                    ifGeneration: eventGeneration,
+                    reference: connection.reference,
+                    serviceType: self.serviceType
+                )
+                return try await Self.recoverDiscoveredConnection(
+                    currentTarget: connection.target,
+                    discoveredTarget: target,
+                    retarget: { try await self.retarget(connection, to: target) },
+                    resume: { try await self.resumeOrReattach(connection) }
+                )
+            }
             return try await self.resumeOrReattach(connection)
         }
         recovery = (id, task)
@@ -1118,6 +1132,20 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             }
             throw error
         }
+    }
+
+    /// Internal for recovery-ordering tests. A changed discovery target must
+    /// attach the replacement without first resuming the unreachable old peer.
+    static func recoverDiscoveredConnection<RecoveredConnection>(
+        currentTarget: ActrBindings.ActrId,
+        discoveredTarget: ActrBindings.ActrId,
+        retarget: () async throws -> RecoveredConnection,
+        resume: () async throws -> RecoveredConnection
+    ) async throws -> RecoveredConnection {
+        if discoveredTarget != currentTarget {
+            return try await retarget()
+        }
+        return try await resume()
     }
 
     static func requiresReattach(_ error: Error) -> Bool {
@@ -1268,7 +1296,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     private var serviceConfiguration: ActriumServiceConfig {
         ActriumServiceConfig(
             serviceActorId: "",
-            allowedFrontActorTypes: [profile.packageType],
+            allowedFrontActorTypes: [frontType],
             program: metadata.program,
             packageDigest: metadata.packageDigest,
             guestDigest: metadata.guestDigest,
