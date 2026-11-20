@@ -294,14 +294,13 @@ fn dispatch_request<'a>(
 }
 
 async fn attach(registry: &ActriumServiceRegistry) -> (AttachResponse, SessionSecret) {
-    attach_on_channel(registry, "channel-1", "attach-1", 42).await
+    attach_on_channel(registry, "channel-1", "attach-1").await
 }
 
 async fn attach_on_channel(
     registry: &ActriumServiceRegistry,
     channel_id: &str,
     attach_id: &str,
-    nonce: u8,
 ) -> (AttachResponse, SessionSecret) {
     let mut front_channel = (*front_context()).clone();
     front_channel.channel_id = channel_id.into();
@@ -309,7 +308,7 @@ async fn attach_on_channel(
     service_channel.channel_id = channel_id.into();
     let mut request = attach_request(&front_channel);
     request.attach_id = attach_id.into();
-    request.tab_session_nonce = vec![nonce; 32];
+    request.tab_session_nonce = rand::random::<[u8; 32]>().to_vec();
     sign_attach_request(&mut request, &front_key());
     let digest = attach_request_digest(&request);
     let envelope = request_envelope(
@@ -962,7 +961,7 @@ async fn admitted_requests_are_scoped_to_their_session() {
             service_context().as_ref(),
         )
         .await;
-    let (second, second_secret) = attach_on_channel(&registry, "channel-2", "attach-2", 43).await;
+    let (second, second_secret) = attach_on_channel(&registry, "channel-2", "attach-2").await;
     let second_call = signed_business_request_on_channel(
         &second,
         &second_secret,
