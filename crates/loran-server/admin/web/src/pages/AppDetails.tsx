@@ -27,7 +27,7 @@ interface Details {
   app: RealmInfo;
   profile: AppProfile | null;
   members: RealmMembersResponse;
-  device: ManagementClient;
+  device: ManagementClient | null;
   capabilities: AdminCapabilities;
 }
 type InviteAction = Extract<MemberAction, { action: "invite_member" | "invite_owner_device" }>;
@@ -77,7 +77,7 @@ function DetailsPage({ id }: { id: string }) {
       api.getRealm(id),
       api.appProfile(id),
       api.listRealmMembers(id),
-      api.managementClient(id),
+      api.managementClient(id).catch(() => null),
       api.getCapabilities(),
     ]);
     if (!app.realm) throw Error("App not found");
@@ -134,7 +134,8 @@ function DetailsPage({ id }: { id: string }) {
   }
   const writable = data?.capabilities.realm_writes_enabled && !busy;
   const active = data?.app.enabled && data?.app.status === "active";
-  const manage = Boolean(writable && active && data?.device.connected);
+  const device = data?.device;
+  const manage = Boolean(writable && active && device?.connected);
   const ownDomain = data && id.split("@")[1] === data.capabilities.provider_id;
   const canManageLifecycle = Boolean(data && (ownDomain || data.profile === null));
   return (
@@ -211,26 +212,28 @@ function DetailsPage({ id }: { id: string }) {
               />
             )}
           </section>
-          <section className={section}>
-            <h2 className="font-semibold">Owner management device</h2>
-            <p className="text-sm">
-              {data.device.connected
-                ? "Authorized by the current Owner"
-                : data.device.available
-                  ? "Ask the Owner to issue an add-device invite for their own membership."
-                  : "Owner management requires the Issuer and Signer services."}
+          <section className={section} aria-labelledby="owner-management-device">
+            <h2 id="owner-management-device" className="font-semibold">Owner management device</h2>
+            <p className="text-sm" role={device === null ? "status" : undefined}>
+              {device === null
+                ? "Owner authorization could not be confirmed. Refresh the page to try again."
+                : device?.connected
+                  ? "Authorized by the current Owner"
+                  : device?.available
+                    ? "Ask the Owner to issue an add-device invite for their own membership."
+                    : "Owner management requires the Issuer and Signer services."}
             </p>
-            {!data.device.connected && data.device.available && (
+            {device?.available && !device.connected && (
               <p className="text-xs text-gray-600">
                 From the Owner’s client, run{" "}
                 <code>actr realm invite --key OWNER_KEY_FILE --member OWNER_MEMBER_ID</code> and paste the
                 resulting invite here.
               </p>
             )}
-            {data.device.connected ? (
-              <code className="text-xs">{data.device.key_id}</code>
+            {device?.connected ? (
+              <code className="text-xs">{device.key_id}</code>
             ) : (
-              data.device.available && (
+              device?.available && (
                 <form
                   className="flex flex-wrap gap-2"
                   onSubmit={(e) => {
@@ -347,7 +350,7 @@ function DetailsPage({ id }: { id: string }) {
                   </button>
                   <button
                     className={button}
-                    disabled={busy}
+                    disabled={busy || !device?.connected}
                     onClick={() => void run(finishInvite)}
                   >
                     Done

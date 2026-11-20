@@ -455,6 +455,54 @@ try {
     await membership(secondOwner, "list_members");
     await membership(viewer, "create_invite", { role: "editor", invite_expires_at: future(3600) }, "reject");
   });
+  await step("Owner device status failure preserves App details and independent actions", async () => {
+    const deviceStatus = url(endpoint(realm, "/management-client"));
+    const ownerSection = page.getByRole("region", { name: "Owner management device" });
+    const viewerRow = page.getByText(viewerId, { exact: true }).locator("../..");
+    let failedReads = 0;
+    const failStatus = async (route) => {
+      if (route.request().method() === "GET") {
+        failedReads++;
+        await route.fulfill({ status: 503, json: { error: "Owner device status unavailable" } });
+      } else {
+        await route.fallback();
+      }
+    };
+    await page.route(deviceStatus, failStatus);
+    try {
+      await reloadDetails();
+      await ownerSection.getByRole("status").filter({
+        hasText: "Owner authorization could not be confirmed. Refresh the page to try again.",
+      }).waitFor();
+      assert(failedReads > 0);
+      assert(await page.getByRole("heading", { name: "Application", exact: true }).isVisible());
+      assert(await page.getByRole("heading", { name: "Realm profile", exact: true }).isVisible());
+      assert(await page.getByText(/^Provider .+ · Sequence \d+$/).isVisible());
+      assert(await page.getByText("Invitation required", { exact: true }).isVisible());
+      assert(await viewerRow.isVisible());
+      assert.equal(await ownerSection.getByLabel("Owner device invite").count(), 0);
+      assert.equal(await page.getByRole("alert").count(), 0);
+      for (const control of [button("Generate invite"), button("Make Editor", viewerRow), button("Release packages")]) {
+        assert(await control.isDisabled());
+      }
+      assert(await button("Edit admission").isEnabled());
+      await button("Recover Owner").click();
+      await page.getByRole("heading", { name: "Recover Owner", exact: true }).waitFor();
+      await button("Cancel").click();
+      await button("Suspend app").click();
+      await button("Resume app").click();
+      await button("Suspend app").waitFor();
+      assert(await button("Generate invite").isDisabled());
+    } finally {
+      await page.unroute(deviceStatus, failStatus);
+    }
+    await reloadDetails();
+    await ownerSection.getByText("Authorized by the current Owner", { exact: true }).waitFor();
+    assert.equal(await ownerSection.getByRole("status").count(), 0);
+    for (const control of [button("Generate invite"), button("Make Editor", viewerRow), button("Release packages")]) {
+      assert(await control.isEnabled());
+    }
+  });
   await step("Retry preserves an invite, conflicting retries fail, revocation prevents redemption", async () => {
     const id = randomUUID(),
       action = { request_id: id, action: "invite_member", role: "viewer", days: 1 };
