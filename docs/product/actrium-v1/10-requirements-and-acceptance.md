@@ -54,7 +54,7 @@
 | FR-PKG-019 | Packages MUST satisfy dependency versions, exact locks and the RPC contract declared by the Front for its required Service. |
 | FR-PKG-020 | Verify every executed archive independently. Listing MUST NOT automatically start, authorize or revoke Actors. |
 | FR-PKG-021 | A selection update MUST replace both selectors and the full map, increase `sequence` and re-sign. Metadata-only updates and key rotation preserve the selection. |
-| FR-PKG-022 | The AFP MUST resolve the primary entry and restrict registration of that program, at any version, to owner clients. |
+| FR-PKG-022 | The AFP serving the Realm MUST resolve the primary entry and restrict registration of that program, at any version, to owner clients. |
 | FR-PKG-023 | On creation or update, the caller MUST compare both selectors and the entire signed map with the request. |
 | FR-PKG-024 | The primary program identity stays fixed. An immutable release cannot change digest; mirror changes still require re-signing. |
 

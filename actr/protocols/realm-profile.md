@@ -4,9 +4,9 @@ Language: **English** | [简体中文](realm-profile.zh.md)
 
 Status: initial draft.
 
-This document defines how an Actr Host or Actr Facility Provider (AFP)
-resolves a Realm name to a verified Realm Profile, the `actr.realm/v1` format,
-and the Realm management requests an Actr Facility Provider accepts.
+This document defines how an Actr Host or the provider serving a Realm resolves
+a Realm name to a verified Realm Profile. It defines the `actr.realm/v1` format
+and the Realm management requests that the provider accepts.
 
 ## 1. Scope
 
@@ -15,16 +15,23 @@ application instance creates a new Realm. A Realm is named `<realm_id>@<domain>`
 for example `k7m2q9xh@acme.com`; the syntax is defined in
 [Actr URI](uri.md), Section 5.1.
 
-A Realm Profile is a signed public document naming the instance’s Service, Front, any additional packages, and the Issuer and Actr Facility Provider that serve the Realm. A Realm signing key of the Realm domain signs
-it, so the Realm Profile can be stored anywhere: on the domain's own static
-hosting, at an Actr Facility Provider, or embedded in a Realm invitation. Where it was
-fetched from does not affect its validity.
+**Actr Facility Provider (AFP)** is a general term for the providers and
+operators that fulfill platform responsibilities in the Actr ecosystem. Those
+responsibilities include providing infrastructure and allocating Realms for
+application instances.
 
-A Realm is served by one Actr Facility Provider for its whole life. An Actr Facility Provider
-is a running deployment, run by some operator, that provides the Realm's
-signaling, TURN, and Issuer. Moving an application to another operator means
-creating a new Realm there and migrating application data; the old Realm is
-retired.
+In this specification, a networked Realm's AFP handles allocation and
+management of the Realm and provides its Issuer and the signaling and ICE
+endpoints listed in its Realm Profile. Each networked Realm binds to the AFP
+identified by `provider.id` in its Realm Profile for its entire lifetime. To move
+to another AFP, create a new Realm there, migrate the application data, and
+retire the old Realm.
+
+A Realm Profile is a signed public document naming the instance's Service,
+Front, and any additional packages, along with the Issuer and AFP serving the
+Realm. A Realm signing key of the Realm domain signs it. The domain or an AFP
+can host the Realm Profile, and a Realm invite can carry it. Where the profile
+was fetched from does not affect its validity.
 
 This document does not define the signaling, identity, or ICE protocols an
 Actr Facility Provider exposes, the Actor credential format, or application
@@ -71,8 +78,10 @@ installation, encoded as 26 characters of lowercase RFC 4648 base32 without
 padding.
 
 Actr Hosts **MUST NOT** resolve `.actr.alt` names through DNS or send them to
-any Actr Facility Provider. Local Realms have no Realm Profile, no Actr Facility Provider, and
-no Realm management requests; the Actr Host stores the selected Service and Front locally with their exact types, sources (download URLs or local files) and archive digests.
+any Actr Facility Provider. Local Realms have no Realm Profile, no AFP
+binding, and no Realm management requests. The Actr Host stores the selected
+Service and Front locally with their exact types, sources (download URLs or
+local files) and archive digests.
 A local Realm name is usable only on that installation. The rest of this
 document applies to DNS Realm domains only.
 
@@ -128,7 +137,7 @@ A Realm Profile is a UTF-8 JSON object. Member names use snake_case.
 | `packages[ref].dependencies` | Optional map from a dependency alias in that package's manifest to a selected key in `packages`. See Section 4.3. |
 | `issuer.url` | Registration and verification endpoint of the Issuer. |
 | `issuer.keys` | Realm issuer public keys used to verify Actor credentials, 1 to 3 entries (Section 6.1). |
-| `provider.id` | Actr Facility Provider ID: the Actr Facility Provider's canonical DNS authority. It never changes during the Realm's life. |
+| `provider.id` | The canonical DNS authority of the AFP bound to the Realm (Actr Facility Provider ID). It stays fixed for the lifetime of the Realm. |
 | `provider.signaling` | Signaling endpoints. Entries sharing a `control_plane_id` are replicas or failover entries of one Actr Facility Provider control plane, not a federation. |
 | `provider.ice` | STUN and TURN endpoints. TURN entries name the `credential_audience` for short-lived TURN credentials. |
 | `policy` | `membership` is `invite-only` (default) or `open`. Optional positive integers `open_joins_per_minute` and `max_members` limit admissions. See [Realm Membership](realm-membership.md#41-redemption). |
@@ -328,9 +337,9 @@ publishes it, the Actr Facility Provider keeps using the old key.
 
 ### 7.1 Creation
 
-The Actr Host, the user, or the key holder's policy chooses the Actr Facility
-Provider. Every step is authorized by the Realm signing key holder
-(Section 7.3).
+The Actr Host, the user, or the Realm signing key holder's policy selects the
+AFP that will allocate and serve the Realm. The Realm signing key holder
+authorizes every step of allocation (Section 7.3).
 
 1. A `create_realm` request (Section 8) goes to the chosen Actr Facility Provider.
    The Actr Facility Provider creates a pending Realm, prepares its Realm issuer key
@@ -414,7 +423,7 @@ Discovery, Section 4.3):
 
 | `op` | Purpose |
 | --- | --- |
-| `create_realm` | The request includes both selectors and the complete `packages` map. The optional `policy` defaults to invite-only. The AFP pins the selection and policy in the pending Realm and its first draft. |
+| `create_realm` | The request includes both selectors and the complete `packages` map. The optional `policy` defaults to invite-only. The receiving AFP allocates a pending Realm and pins the selection and policy in that Realm and its first draft. |
 | `publish_profile` | Submit a signed Realm Profile in `profile`. The first submission activates the pending Realm and the response carries an owner invite (`owner_invite`) once; later submissions with a higher sequence are updates (including retirement). |
 | `reissue_owner_invite` | Issue a new owner invite (response `owner_invite`) and invalidate the Realm's earlier unused owner invites; used to recover when the owner has lost all its clients (Actr Realm Membership, Section 5). |
 | `get_admission` | A domain-signed request for one Realm returns its policy, active-member count, effective member cap and invite-free joins per minute. |

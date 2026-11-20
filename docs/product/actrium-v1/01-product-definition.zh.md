@@ -20,6 +20,10 @@ Actrium 要把 Actor 程序变成普通用户可以理解、安装、创建、�
 - 后台 Service 可以使用 Actor 模型组合更复杂的服务；
 - 一个精确版本的包可以经 HTTPS 下载、验证、缓存和复现。
 
+Actr 生态分为平台和应用两部分。平台为应用提供创建和运行所需的设施与服务。
+**AFP（Actr Facility Provider，Actr 设施提供方）**泛指 Actr 生态中承担平台职责的各类提供方和运营方。
+平台职责包括提供基础设施、分配 Realm／应用实例等。联网 Realm 的分配与绑定见 [Realm、信令、TURN 与身份](07-realm-network-and-identity.zh.md)。
+
 ## 2. 当前问题
 
 如果不先冻结模型，Actrium 很容易同时承担浏览器、插件系统、远程桌面、原生应用容器和 Actor 调试器等多套语义，最终出现以下问题：
@@ -67,7 +71,7 @@ Actrium 要把 Actor 程序变成普通用户可以理解、安装、创建、�
 
 ### 3.4 Realm 签名 key 持有方与 Realm 所有者
 
-Realm 域名的所有者即 Realm 签名 key 持有方：在 authority descriptor 中发布 Realm 签名 key，按自己的策略认证请求方后授权在该域名下创建 Realm，决定使用哪个 Actr Facility Provider，并负责 Realm 签名 key 轮换；也可以委托 Actr Facility Provider 代持 key。没有域名就不分配 Realm（本机 Realm 除外）。
+Realm 域名的所有者即 Realm 签名 key 持有方。持有方在 authority descriptor 中发布 Realm 签名 key，按自己的策略认证请求方并授权创建 Realm，确定由哪个 AFP 分配并服务该 Realm。持有方负责 Realm 签名 key 轮换，也可以委托 AFP 代持 Realm 签名 key。没有域名就不分配 Realm（本机 Realm 除外）。
 
 Realm 所有者即应用实例的创建者，管理该实例 Realm 的成员身份、Actor 准入、连接 ACL、Realm 邀请、客户端撤销与审计。
 

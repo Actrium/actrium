@@ -120,7 +120,7 @@ Realm name = <realm_id>@<domain>                      # networked, e.g. k7m2q9xh
 - The Realm domain belongs to its owner and serves only as a naturally unique, ownership-verifiable name; it carries no infrastructure. A local Realm uses the pseudo-domain `<installation-id>.actr.alt` (generated at random at install time, never resolved via DNS), belonging to that Actrium installation;
 - the domain's Realm signing key is the long-term trust root for its Realm Profiles and signs each instance's package selection.
 - the RealmId is unique within the domain, immutable after creation, and never reused after retirement;
-- one Actr Facility Provider (Signaling, TURN, Issuer) hosts a large number of Realms; a Realm is bound to one Actr Facility Provider at creation and can never switch afterward;
+- an Actr Facility Provider (AFP) that serves networked Realms can allocate and host multiple Realms. Each networked Realm binds to one AFP at creation, and `provider.id` in its Realm Profile stays fixed for its lifetime.
 - the Actr Facility Provider records the members of a networked Realm: exactly one owner (the creator, transferable), the rest editors or viewers; members join with a one-time Realm invitation, and each client registers one Realm client key. A local Realm has no members.
 
 A Publisher domain names a program (who publishes it); a Realm domain names a deployment (who operates it). The same Program Release can run at `notes@acme.com` and also at `notes@foo.org`.
