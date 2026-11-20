@@ -2405,13 +2405,26 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
     }
 
+    private struct ServiceCapabilityManifest: Decodable {
+        struct Module: Decodable {
+            let rpc: [String]?
+        }
+        let hostModules: [String: Module]
+    }
+
     /// Internal for downloaded-Front regression tests. Attach metadata and the
-    /// Service binding are constructed only for Fronts that declare capabilities.
+    /// Service binding are constructed only for declared, nonempty Service RPCs.
     nonisolated static func serviceBindingForDeclaredCapabilities<ServiceBinding>(
         _ capabilitiesJSON: String?,
         make: (String) throws -> ServiceBinding
-    ) rethrows -> ServiceBinding? {
+    ) throws -> ServiceBinding? {
         guard let capabilitiesJSON else { return nil }
+        let capabilities = try JSONDecoder().decode(
+            ServiceCapabilityManifest.self,
+            from: Data(capabilitiesJSON.utf8)
+        )
+        let service = capabilities.hostModules["service"] ?? capabilities.hostModules["host:service"]
+        guard let routes = service?.rpc, !routes.isEmpty else { return nil }
         return try make(capabilitiesJSON)
     }
 

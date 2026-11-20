@@ -1093,8 +1093,9 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                 let id = recovery.id
                 let recovered = try await Self.recoverCallAfterJoining(
                     recovery: recovery.task,
-                    recover: {
+                    recover: { joined in
                         try await self.recoverJoinedCall(
+                            joined: joined,
                             replacingRecovery: id,
                             eventGeneration: eventGeneration
                         )
@@ -1153,20 +1154,33 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// transition. Publishing the new task before any suspension ensures that
     /// concurrent RPC waiters cannot independently Attach the replacement.
     private func recoverJoinedCall(
+        joined: RuntimeConnection,
         replacingRecovery previousID: UUID,
         eventGeneration: UInt64?
     ) async throws -> RuntimeConnection {
+        guard !stopped else { throw CancellationError() }
+        guard localFrontHandoff == nil else {
+            throw RealmServiceError(message: "The Local Front is refreshing its Service session.")
+        }
         if let recovery, recovery.id != previousID {
             return try await readyConnection(
                 resolveTargetForCall: true,
                 eventGeneration: eventGeneration
             )
         }
+        // If the original owner has not published yet, the joined task may have
+        // replaced an expired session with a fresh Attach to the same Actor.
+        // Carry that result through the handoff instead of reading stale startup.
+        let ownsRecoverySlot = recovery?.id == previousID
         let id = UUID()
         let task = Task<RuntimeConnection, Error> {
-            // Use the latest published connection. Another RPC may already have
-            // finished the replacement before this waiter enters the actor.
-            let connection = try await self.connect()
+            // Once the owner has published, use the latest connection. Another
+            // RPC may already have finished the replacement before this waiter.
+            let connection = try await Self.joinedRecoveryConnection(
+                joined: joined,
+                ownsRecoverySlot: ownsRecoverySlot,
+                connect: { try await self.connect() }
+            )
             let target = try await self.eventPeers.resolve(
                 ifGeneration: eventGeneration,
                 reference: connection.reference,
@@ -1209,15 +1223,29 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// and retarget independently after the same Resume completes.
     static func recoverCallAfterJoining<RecoveredConnection: Sendable>(
         recovery: Task<RecoveredConnection, Error>,
-        recover: () async throws -> RecoveredConnection,
+        recover: (RecoveredConnection) async throws -> RecoveredConnection,
         restart: () async throws -> RecoveredConnection
     ) async throws -> RecoveredConnection {
+        let joined: RecoveredConnection
         do {
-            _ = try await recovery.value
+            joined = try await recovery.value
         } catch {
             return try await restart()
         }
-        return try await recover()
+        return try await recover(joined)
+    }
+
+    /// Internal for the same-Actor re-Attach handoff test. While the waiter
+    /// owns the old recovery slot, its joined result is newer than startup.
+    static func joinedRecoveryConnection<RecoveredConnection>(
+        joined: RecoveredConnection,
+        ownsRecoverySlot: Bool,
+        connect: () async throws -> RecoveredConnection
+    ) async throws -> RecoveredConnection {
+        if ownsRecoverySlot {
+            return joined
+        }
+        return try await connect()
     }
 
     /// Internal for recovery-ordering tests. A changed discovery target must

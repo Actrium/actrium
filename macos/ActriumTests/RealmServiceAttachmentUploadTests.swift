@@ -602,6 +602,11 @@ struct RealmServiceAttachmentUploadTests {
         let description: String
     }
 
+    private struct RecoveryConnection: Sendable, Equatable {
+        let target: ActrBindings.ActrId
+        let sessionEpoch: UInt64
+    }
+
     private actor ResumeGate {
         private var released = false
         private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -637,8 +642,18 @@ struct RealmServiceAttachmentUploadTests {
         }
         #expect(binding == nil)
 
-        let declared = try BrowserViewModel.serviceBindingForDeclaredCapabilities(#"{"routes":[]}"#) { $0 }
-        #expect(declared == #"{"routes":[]}"#)
+        let localStorageOnly = #"{"hostModules":{"local-storage":{"rpc":["getItem","setItem"]}}}"#
+        let rendererOnly: String? = try BrowserViewModel.serviceBindingForDeclaredCapabilities(
+            localStorageOnly
+        ) { _ in
+            Issue.record("Non-Service capabilities must not derive Attach metadata.")
+            throw SessionError(description: "Unexpected Service binding")
+        }
+        #expect(rendererOnly == nil)
+
+        let serviceCapabilities = #"{"hostModules":{"service":{"rpc":["documents/read"]}}}"#
+        let declared = try BrowserViewModel.serviceBindingForDeclaredCapabilities(serviceCapabilities) { $0 }
+        #expect(declared == serviceCapabilities)
     }
 
     @Test func rpcRecoversAfterJoiningAResumeOnlyCaller() async throws {
@@ -655,7 +670,7 @@ struct RealmServiceAttachmentUploadTests {
         let rpc = Task {
             try await RealmServiceBinding.recoverCallAfterJoining(
                 recovery: resumeOnly,
-                recover: {
+                recover: { _ in
                     Issue.record("A failed join must restart before target-aware recovery.")
                     throw SessionError(description: "Unexpected successful recovery")
                 },
@@ -674,6 +689,41 @@ struct RealmServiceAttachmentUploadTests {
         }
         await gate.release()
         #expect(try await rpc.value == replacement)
+    }
+
+    @Test func joinedRecoveryKeepsFreshSameTargetSession() async throws {
+        let target = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 1)
+        let expired = RecoveryConnection(target: target, sessionEpoch: 1)
+        let reattached = RecoveryConnection(target: target, sessionEpoch: 2)
+        let resumeOnly = Task<RecoveryConnection, Error> { reattached }
+
+        // Schedule the waiter before the original owner publishes startup. The
+        // resume-only task has already re-Attached epoch 2 to the same Actor.
+        let recovered = try await RealmServiceBinding.recoverCallAfterJoining(
+            recovery: resumeOnly,
+            recover: { joined in
+                let connection = try await RealmServiceBinding.joinedRecoveryConnection(
+                    joined: joined,
+                    ownsRecoverySlot: true,
+                    connect: {
+                        Issue.record("The handoff must not read the expired startup session.")
+                        return expired
+                    }
+                )
+                return try await RealmServiceBinding.recoverDiscoveredConnection(
+                    currentTarget: connection.target,
+                    discoveredTarget: target,
+                    retarget: { expired },
+                    resume: { connection }
+                )
+            },
+            restart: {
+                Issue.record("A successful re-Attach must not restart recovery.")
+                throw SessionError(description: "Unexpected restart")
+            }
+        )
+        #expect(recovered == reattached)
+        #expect(recovered.sessionEpoch == 2)
     }
 
     @Test func concurrentRPCsShareOneReplacementAttach() async throws {
@@ -702,7 +752,7 @@ struct RealmServiceAttachmentUploadTests {
         func joinRPC() async throws -> ActrBindings.ActrId {
             try await RealmServiceBinding.recoverCallAfterJoining(
                 recovery: resumeOnly,
-                recover: { try await replacementRecovery.value },
+                recover: { _ in try await replacementRecovery.value },
                 restart: {
                     Issue.record("A successful shared Resume must not be restarted.")
                     throw SessionError(description: "Unexpected restart")
