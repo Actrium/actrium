@@ -14,7 +14,9 @@ const callers = {
   signer: "Internal gRPC clients authorized to request signatures",
 };
 type Service = keyof typeof callers;
-type ProfileService = "stun" | "turn" | "signaling" | "issuer";
+type IceService = "stun" | "turn";
+type ProfileService = IceService | "signaling" | "issuer";
+const iceConfigPath = "/actr/ice-config";
 
 function Address({ value, label }: { value: string; label: string }) {
   const [result, setResult] = useState("");
@@ -119,6 +121,44 @@ function addressScope(host: string) {
   return "Configured address · reachability untested";
 }
 
+async function loadPublishedIce(signal: AbortSignal): Promise<string[]> {
+  const response = await fetch(iceConfigPath, { signal, cache: "no-store" });
+  if (response.status === 404) return [];
+  if (!response.ok) throw Error("Could not read the published ICE endpoints");
+  const published: { ice_servers?: { urls: unknown }[] } = await response.json();
+  if (!Array.isArray(published.ice_servers)) throw Error("Invalid ICE publication");
+  return published.ice_servers.flatMap(server =>
+    Array.isArray(server?.urls) ? server.urls.filter((url): url is string => typeof url === "string") : [],
+  );
+}
+
+function IceEndpoint({ url }: { url: string }) {
+  let endpoint: URL | undefined;
+  try {
+    endpoint = new URL(url.replace(":", "://"));
+  } catch {
+    // Keep the published value available to copy.
+  }
+  const scheme = endpoint?.protocol.slice(0, -1);
+  const transport = endpoint?.searchParams.get("transport");
+  // RFC 7064 and RFC 7065 define the default ports.
+  const port = endpoint?.port || (scheme?.endsWith("s") ? "5349" : "3478");
+  return <div className="space-y-2 rounded-lg bg-gray-50 px-3 py-2">
+    <Address value={url} label={url} />
+    {endpoint?.hostname && <>
+      <dl className="grid grid-cols-2 gap-x-5 gap-y-2 lg:grid-cols-4">
+        <Field label="Protocol">{scheme?.toUpperCase()}{transport && " / " + transport.toUpperCase()}</Field>
+        <Field label="Host">{endpoint.hostname}</Field>
+        <Field label="Port">{port}</Field>
+        <Field label="Address scope">{addressScope(endpoint.hostname)}</Field>
+      </dl>
+      {isLoopback(endpoint.hostname) && <p className="text-xs text-amber-900">
+        Loopback address. On another device this address points back to that device.
+      </p>}
+    </>}
+  </div>;
+}
+
 function profileUrls(profile: AppProfile, service: ProfileService): string[] {
   if (service === "issuer") return profile.issuer?.url ? [profile.issuer.url] : [];
   if (service === "signaling") return profile.provider.signaling?.map(s => s.url) ?? [];
@@ -126,7 +166,7 @@ function profileUrls(profile: AppProfile, service: ProfileService): string[] {
 }
 
 // Fetch only the selected App's published document. Older profiles can lack an endpoint.
-function PublishedAddresses({ service }: { service: ProfileService }) {
+function PublishedAddresses({ service, currentUrls }: { service: ProfileService; currentUrls?: string[] }) {
   const appSelectId = useId();
   const [apps, setApps] = useState<RealmInfo[]>([]);
   const [app, setApp] = useState("");
@@ -144,6 +184,8 @@ function PublishedAddresses({ service }: { service: ProfileService }) {
     return () => { active = false; };
   }, [app]);
   const urls = profile ? profileUrls(profile, service) : [];
+  const differs = currentUrls && (urls.some(url => !currentUrls.includes(url)) ||
+    currentUrls.some(url => !urls.includes(url)));
   return <div className="mt-3 space-y-2">
     <div className="flex flex-wrap items-center gap-2">
       <label htmlFor={appSelectId} className="text-xs text-gray-600">App</label>
@@ -156,6 +198,7 @@ function PublishedAddresses({ service }: { service: ProfileService }) {
     {error ? <p role="alert">{error}</p> : app && (profile === undefined ? "Loading profile…" :
       profile === null ? "No published Realm Profile." : urls.length ? <>
         <p className="text-xs text-gray-500">Realm Profile · revision {profile.sequence}</p>
+        {differs && <p className="text-xs text-amber-800">These App Profile addresses differ from the current AFP publication.</p>}
         {urls.map((url, i) => <Address key={i} value={url} label="published endpoint" />)}
       </> : "This Realm Profile has no endpoint for this service.")}
   </div>;
@@ -179,6 +222,17 @@ export function ServiceAccessCard({ service, data, publisher, onRefresh }: {
   const [editField, setEditField] = useState<ResolvedField | null>(null);
   const [reloading, setReloading] = useState(false);
   const [reloadMessage, setReloadMessage] = useState("");
+  const [publishedIce, setPublishedIce] = useState<string[] | null>();
+  const ice = service === "stun" || service === "turn";
+  useEffect(() => {
+    if (!ice) return;
+    const controller = new AbortController();
+    void loadPublishedIce(controller.signal).then(
+      urls => { if (!controller.signal.aborted) setPublishedIce(urls); },
+      () => { if (!controller.signal.aborted) setPublishedIce(null); },
+    );
+    return () => controller.abort();
+  }, [ice, data]);
   const access = data.access;
   const settings = (data.config_fields ?? []).filter(field => field.dynamic);
   const externalRelay = service === "relay" && !data.enabled && !!access?.url && access.source === "relay.public_url";
@@ -217,15 +271,14 @@ export function ServiceAccessCard({ service, data, publisher, onRefresh }: {
     }
   }
 
-  const ice = service === "stun" || service === "turn";
   const profileService = ice || service === "issuer" || service === "signaling" ? service : null;
-  const url = access?.url;
+  const iceUrls = ice ? publishedIce?.filter(url => url.startsWith(service + ":") || url.startsWith(service + "s:")) : undefined;
+  const url = ice ? undefined : access?.url;
   let endpoint: URL | undefined;
   if (url) {
-    try { endpoint = new URL(ice ? url.replace(":", "://") : url); } catch { /* Display the configured value for diagnosis. */ }
+    try { endpoint = new URL(url); } catch { /* Display the configured value for diagnosis. */ }
   }
   const scheme = endpoint?.protocol.slice(0, -1);
-  const transport = ice ? "UDP" : "TCP";
   const port = endpoint?.port || (scheme === "https" || scheme === "wss" ? "443" : scheme === "http" || scheme === "ws" ? "80" : undefined);
   const protocol = service === "signer" ? `gRPC / ${access?.mtls ? "HTTP/2 with mTLS" : "cleartext HTTP/2"}` : scheme?.toUpperCase();
   const label = service === "publishers" ? "Admin list API · GET" : service === "signer" ? "Internal gRPC endpoint" :
@@ -233,25 +286,35 @@ export function ServiceAccessCard({ service, data, publisher, onRefresh }: {
   const turnMode = { static: "Configured long-term users", realm: "Realm-scoped credentials from Issuer", rest: "External REST credential issuer" };
   return <section aria-label="Service access" className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
     <h2 className="font-semibold text-gray-800">Service access</h2>
+    {ice && <section aria-label="Published ICE endpoints" className="space-y-2">
+      <h3 className="text-sm font-medium text-gray-700">Published {service.toUpperCase()} endpoints</h3>
+      <p className="text-xs text-gray-500">Address source <code>{iceConfigPath}</code></p>
+      {publishedIce === undefined ? <p className="text-sm">Loading published endpoints…</p> :
+        publishedIce === null ? <p className="text-sm">Published ICE endpoints are temporarily unavailable.</p> :
+          iceUrls?.length ? iceUrls.map((value, index) => <IceEndpoint key={`${value}-${index}`} url={value} />) :
+            <p className="text-sm">No {service.toUpperCase()} endpoint is published.</p>}
+    </section>}
     {!data.enabled && <p className="text-sm text-gray-600">
       {service === "relay" ? "Local relay is disabled on this node." : "Disabled on this node."}
     </p>}
     {(data.enabled || externalRelay) && (!access ? <p>Listener configuration unavailable.</p> : <>
-      <div className="rounded-lg bg-gray-50 px-3 py-2">
+      {!ice && <div className="rounded-lg bg-gray-50 px-3 py-2">
         <p className="mb-1 text-xs font-medium text-gray-600">{label}</p>
         {url && endpoint ? <Address value={url} label={label} /> : <p>{url ? "Invalid configured endpoint" : "No endpoint advertised"} {url && <code>{url}</code>}</p>}
-      </div>
+      </div>}
       <dl className="grid grid-cols-2 gap-x-5 gap-y-3 lg:grid-cols-4">
-        <Field label="Protocol">{protocol ?? "Unavailable"} / {transport}</Field>
-        <Field label="Host">{endpoint?.hostname ?? "Unavailable"}</Field>
-        <Field label="Port">{port ?? "Unavailable"}</Field>
-        {!ice && <Field label={service === "signer" ? "gRPC method path" : "Path"}>
-          {service === "signer" ? "/signer.v1.Signer/{method}" : endpoint?.pathname || "Unavailable"}</Field>}
-        {endpoint && <Field label="Address scope">{addressScope(endpoint.hostname)}</Field>}
-        {data.enabled && <Field label="Local listener">{access.listen} / {transport}</Field>}
-        <Field label="Address source">{access.source}</Field>
+        {!ice && <>
+          <Field label="Protocol">{protocol ?? "Unavailable"} / TCP</Field>
+          <Field label="Host">{endpoint?.hostname ?? "Unavailable"}</Field>
+          <Field label="Port">{port ?? "Unavailable"}</Field>
+          <Field label={service === "signer" ? "gRPC method path" : "Path"}>
+            {service === "signer" ? "/signer.v1.Signer/{method}" : endpoint?.pathname || "Unavailable"}
+          </Field>
+          {endpoint && <Field label="Address scope">{addressScope(endpoint.hostname)}</Field>}
+          {data.enabled && <Field label="Local listener">{access.listen} / TCP</Field>}
+          <Field label="Address source">{access.source}</Field>
+        </>}
         <Field label="Used by">{callers[service]}</Field>
-        {ice && access.shared && <Field label="Shared listener">STUN and TURN</Field>}
         {service === "turn" && <>
           <Field label="UDP relay port range">{String(data.config?.relay_port_range ?? "Unavailable")}</Field>
           {renderSetting(TURN_REALM)}
@@ -282,6 +345,14 @@ export function ServiceAccessCard({ service, data, publisher, onRefresh }: {
           <Address value={window.location.origin + endpoint.pathname} label="management origin URL" /></Field></dl>
       </div>}
     </>)}
+    {ice && data.enabled && access && <details className="border-t border-gray-100 pt-3 text-sm text-gray-600">
+      <summary className="cursor-pointer">Listener details</summary>
+      <dl className="mt-3 grid grid-cols-2 gap-3">
+        <Field label="Local listener">{access.listen} / UDP</Field>
+        <Field label="Listener configuration">{access.source}</Field>
+        {access.shared && <Field label="Shared listener">STUN and TURN</Field>}
+      </dl>
+    </details>}
     {extraSettings.length > 0 && (
       <div className="space-y-3 border-t border-gray-100 pt-4">
         <h3 className="text-sm font-semibold text-gray-800">{service === "signaling" ? "Rate limits" : "Service settings"}</h3>
@@ -302,7 +373,7 @@ export function ServiceAccessCard({ service, data, publisher, onRefresh }: {
     )}
     {profileService && <details className="border-t border-gray-100 pt-3 text-sm text-gray-600" onToggle={e => setCompare(e.currentTarget.open)}>
       <summary className="cursor-pointer">Published address by App</summary>
-      {compare && <PublishedAddresses service={profileService} />}
+      {compare && <PublishedAddresses service={profileService} currentUrls={iceUrls} />}
     </details>}
     {editField && (
       <ConfigFieldModal field={editField}

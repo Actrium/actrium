@@ -16,7 +16,6 @@ pub(in crate::service::http) fn service_access(
     relay_endpoint: Option<&str>,
 ) -> Value {
     let ice = &cfg.bind.ice;
-    let ice_address = host_port(&ice.advertised_ip, ice.advertised_port);
     let ice_listen = host_port(&ice.ip, ice.port);
     let local_issuer = cfg
         .services
@@ -31,10 +30,11 @@ pub(in crate::service::http) fn service_access(
     } else {
         "rest"
     };
+    // STUN/TURN publication is read from /actr/ice-config on the browser's origin.
     let mut access = json!({
-        "stun": {"url":format!("stun:{ice_address}"), "listen":ice_listen,
+        "stun": {"url":null, "listen":ice_listen,
             "source":"bind.ice", "shared":cfg.is_turn_enabled()},
-        "turn": {"url":format!("turn:{ice_address}?transport=udp"), "listen":ice_listen,
+        "turn": {"url":null, "listen":ice_listen,
             "source":"bind.ice", "shared":cfg.is_stun_enabled(), "turn_auth":turn_auth,
             "issuer_ttl_secs":token_ttl.filter(|_| turn_auth == "realm")},
         "signer": {"url":cfg.signer_client_endpoint(),
@@ -85,7 +85,9 @@ mod tests {
             "wss://node.example:443/signaling/ws"
         );
         assert_eq!(info["stun"]["listen"], "[::]:5000");
-        assert_eq!(info["turn"]["url"], "turn:[2001:db8::5]:6000?transport=udp");
+        assert_eq!(info["turn"]["listen"], "[::]:5000");
+        assert!(info["stun"]["url"].is_null());
+        assert!(info["turn"]["url"].is_null());
         assert_eq!(info["relay"]["url"], "wss://relay.example/channels");
         assert_eq!(info["relay"]["listen"], "0.0.0.0:9000");
         assert_eq!(info["issuer"]["url"], "https://node.example:443/issuer");
