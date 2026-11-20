@@ -30,6 +30,7 @@ pub use generated::signaling::*;
 pub use generated::webrtc::*;
 
 // Stateless, self-contained extensions and utilities
+pub mod actor_key_proof;
 pub mod actr_ext;
 pub mod authority;
 pub mod error;

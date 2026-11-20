@@ -76,6 +76,9 @@ message IdentityClaims {
   // Set when the package was signed by a key that is not a trusted Publisher
   // key: a local development identity, not the Publisher's.
   optional bool     development = 12;
+  // Long-term Actor Ed25519 verifying key (32 bytes), independent of the
+  // Publisher signing key and the Realm client key used to authorize requests.
+  optional bytes    actor_public_key = 13;
 }
 
 // Realm member role (`actr/protocols/realm-membership.md`).
@@ -229,6 +232,15 @@ message RegisterRequest {
   // resolve to a trusted Publisher key; the package then registers as a
   // development identity.
   optional bytes signing_public_key = 18;
+
+  // Long-term Actor Ed25519 verifying key (32 bytes). This is distinct from
+  // signing_public_key, which authenticates the package Publisher manifest.
+  optional bytes actor_public_key = 19;
+  // Ed25519 signature (64 bytes) over actor_key_proof_message(request,
+  // REGISTER for /register, REISSUE for /reissue). The signed message binds the
+  // operation, Realm, Actor type, Actor public key, and SHA-256 of the canonical
+  // protobuf encoding of this request with actor_key_proof cleared.
+  optional bytes actor_key_proof = 20;
 }
 
 message RegisterResponse {

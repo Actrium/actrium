@@ -23,6 +23,7 @@ use bytes::Bytes;
 use tokio::sync::Mutex;
 
 use crate::lifecycle::dedup::{DedupKey, DedupState};
+use crate::lifecycle::incoming_guard::IncomingGuard;
 use crate::lifecycle::outstanding_replies::{OutstandingReplies, ReplyAttemptId};
 use crate::request_scope::RequestScope;
 use crate::transport::HostTransport;
@@ -60,6 +61,8 @@ struct ReplyShared {
     dedup_key: DedupKey,
     traceparent: Option<String>,
     tracestate: Option<String>,
+    incoming_guard: Option<Arc<dyn IncomingGuard>>,
+    metadata: Vec<actr_protocol::MetadataEntry>,
     emit_response: bool,
     scope: Option<Arc<RequestScope>>,
     /// Runtime captured at admission so a movable Reply can be completed
@@ -106,6 +109,8 @@ impl ReplyDeliver {
         dedup_key: DedupKey,
         traceparent: Option<String>,
         tracestate: Option<String>,
+        incoming_guard: Option<Arc<dyn IncomingGuard>>,
+        metadata: Vec<actr_protocol::MetadataEntry>,
         sink: ReplySink,
         emit_response: bool,
         scope: Option<Arc<RequestScope>>,
@@ -142,6 +147,8 @@ impl ReplyDeliver {
                     dedup_key,
                     traceparent,
                     tracestate,
+                    incoming_guard,
+                    metadata,
                     emit_response,
                     scope,
                     runtime_handle,
@@ -297,6 +304,8 @@ impl ReplyDeliver {
                 self.shared.dedup_key.route_key.clone(),
                 self.shared.traceparent.clone(),
                 self.shared.tracestate.clone(),
+                self.shared.incoming_guard.clone(),
+                self.shared.metadata.clone(),
                 emit_response,
                 result,
                 self.sink.span.clone(),
@@ -310,6 +319,8 @@ impl ReplyDeliver {
                 self.shared.dedup_key.request_id.clone(),
                 self.shared.traceparent.clone(),
                 self.shared.tracestate.clone(),
+                self.shared.incoming_guard.clone(),
+                self.shared.metadata.clone(),
                 emit_response,
                 result,
                 self.sink.span.clone(),

@@ -34,6 +34,7 @@ fn identity_with_expiry(
             public_key: *issuer.verifying_key().as_bytes(),
             expires_at: issuer_expiry,
         },
+        actor_certificate: None,
     };
     key.certify(issued, endpoint, 1000).unwrap()
 }

@@ -217,6 +217,7 @@ impl Nodes {
                 storage_root: None,
                 wasi_data_dir: None,
                 wasi_data_access: actr_config::WasiDataAccess::default(),
+                actrium: None,
             };
             let mut node = Node::from_hyper(hyper, config)
                 .link(RecordingWorkload(journals[i].clone()))

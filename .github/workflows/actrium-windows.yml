@@ -25,6 +25,7 @@ on:
     paths:
       - "windows/**"
       - "crates/actrium-core/**"
+      - "crates/actrium-runtime/**"
       - "scripts/actrium/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -34,6 +35,7 @@ on:
     paths:
       - "windows/**"
       - "crates/actrium-core/**"
+      - "crates/actrium-runtime/**"
       - "scripts/actrium/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -82,6 +84,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: windows-verify
+
+      # Exercises real Windows create + rename + directory-flush persistence,
+      # including updates to an existing instance.json.
+      - name: Test durable lifecycle persistence
+        run: cargo test -p actrium-runtime --test service_lifecycle
 
       - name: Build actrium_core.dll
         run: cargo build --release -p actrium-core

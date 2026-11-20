@@ -2,7 +2,7 @@
 
 use crate::transport::{
     ConnType, DataLane, NetworkError, NetworkResult, SecureCell, SecureChannelState,
-    SecureDataLane, WebSocketDataLane, WireHandle, WsSink,
+    SecureDataLane, VerifiedPeerContext, WebSocketDataLane, WireHandle, WsSink,
 };
 use actr_protocol::PayloadType;
 use async_trait::async_trait;
@@ -155,11 +155,33 @@ impl WebSocketConnection {
         )
     }
 
+    /// Install an Actrium Actor channel without publishing application I/O.
+    /// Only `publish_actrium_verified` can make this strict cell sendable.
+    pub(crate) fn from_actrium_encrypted_parts(
+        sink: crate::transport::lane::WsWrite,
+        stream: impl Stream<Item = Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
+        + Send
+        + 'static,
+        write_cancel: CancellationToken,
+    ) -> Self {
+        Self::from_parts_with_secure_cell(
+            sink,
+            stream,
+            SecureCell::new_actrium(SecureChannelState::Handshaking),
+            Some(write_cancel),
+        )
+    }
+
     pub(crate) fn mark_relay_verified(&self) -> bool {
         self.secure.set_state_validated(
             SecureChannelState::Handshaking,
             SecureChannelState::Verified,
         )
+    }
+
+    pub(crate) fn publish_actrium_verified(&self, context: VerifiedPeerContext) -> bool {
+        self.secure
+            .publish_verified(SecureChannelState::Handshaking, context)
     }
 
     fn from_parts_with_state(
@@ -170,11 +192,26 @@ impl WebSocketConnection {
         initial: SecureChannelState,
         relay_write_cancel: Option<CancellationToken>,
     ) -> Self {
+        Self::from_parts_with_secure_cell(
+            sink,
+            stream,
+            SecureCell::new(initial),
+            relay_write_cancel,
+        )
+    }
+
+    fn from_parts_with_secure_cell(
+        sink: crate::transport::lane::WsWrite,
+        stream: impl Stream<Item = Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
+        + Send
+        + 'static,
+        secure: SecureCell,
+        relay_write_cancel: Option<CancellationToken>,
+    ) -> Self {
         let router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>> =
             Arc::new(RwLock::new([None, None, None, None, None]));
         let connected = Arc::new(AtomicBool::new(true));
 
-        let secure = SecureCell::new(initial);
         let teardown = Arc::new(CancelOnDrop(CancellationToken::new()));
         Self::spawn_dispatcher(
             stream,
@@ -199,7 +236,7 @@ impl WebSocketConnection {
 
     /// The relay adapter owns dialing; this virtual channel is already installed.
     pub async fn connect(&self) -> NetworkResult<()> {
-        if self.connected.load(Ordering::Acquire) && self.secure.state().is_sendable() {
+        if self.connected.load(Ordering::Acquire) && self.secure.is_io_sendable() {
             Ok(())
         } else {
             Err(NetworkError::WebSocketClosed(
@@ -439,6 +476,10 @@ impl WebSocketConnection {
 impl WireHandle for WebSocketConnection {
     fn connection_type(&self) -> ConnType {
         ConnType::WebSocket
+    }
+
+    fn verified_peer_context(&self) -> Option<Arc<crate::transport::VerifiedPeerContext>> {
+        self.secure.verified_peer()
     }
 
     fn priority(&self) -> u8 {

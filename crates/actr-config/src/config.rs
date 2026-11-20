@@ -117,6 +117,36 @@ pub struct RuntimeConfig {
 
     /// Maximum access the deployment permits for the WASI data directory.
     pub wasi_data_access: WasiDataAccess,
+
+    /// Actrium v1 Service-host settings from the `[actrium]` section.
+    ///
+    /// When present, `actr run` installs the Attach server and accepts
+    /// session Attaches from the configured Front package.
+    pub actrium: Option<ActriumConfig>,
+}
+
+/// Actrium v1 Service-host settings.
+///
+/// v1 compatibility is exact: a Service accepts Attach from one Front
+/// package. The Front package is verified with the same trust anchors as the
+/// Service package, and all session metadata (Front Actor type, Guest digest,
+/// routes, protocol fingerprint) is derived from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActriumConfig {
+    /// Verified Front package whose Guest attaches to this Service.
+    pub front_package: PathBuf,
+    /// Exclusive lease duration granted by Attach.
+    pub lease_duration: std::time::Duration,
+    /// Caller heartbeat interval.
+    pub heartbeat_interval: std::time::Duration,
+    /// Grace period before an expired lease is reaped.
+    pub grace_period: std::time::Duration,
+}
+
+impl ActriumConfig {
+    pub const DEFAULT_LEASE_DURATION: std::time::Duration = std::time::Duration::from_secs(300);
+    pub const DEFAULT_HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+    pub const DEFAULT_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(60);
 }
 
 /// Access to a WASM workload's private data directory.
@@ -661,6 +691,7 @@ mod tests {
             storage_root: None,
             wasi_data_dir: None,
             wasi_data_access: WasiDataAccess::default(),
+            actrium: None,
         };
 
         assert_eq!(config.actr_type().name, "test-service");

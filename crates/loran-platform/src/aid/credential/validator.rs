@@ -56,9 +56,16 @@ impl AIdCredentialValidator {
         let cache = Self::get_cache()?;
         let key_id = credential.key_id;
 
-        let (verifying_key, _expires_at) = Self::accepted_cached_key(&cache, realm, key_id)
+        let (verifying_key, expires_at) = Self::accepted_cached_key(&cache, realm, key_id)
             .await?
             .ok_or(AidError::InvalidFormat)?; // key_id not found in cache
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| AidError::InvalidFormat)?
+            .as_secs();
+        if expires_at != 0 && expires_at <= now {
+            return Err(AidError::InvalidFormat);
+        }
 
         let claims = AIdCredentialVerifier::verify(credential, &verifying_key)?;
 
@@ -238,6 +245,7 @@ mod tests {
             client_key: "0000000000000000".to_string(),
             role: actr_protocol::MemberRole::Owner as i32,
             development: None,
+            actor_public_key: Some(vec![7; 32].into()),
         }
     }
 
@@ -292,6 +300,14 @@ mod tests {
                 provider: "other.example".to_string(),
                 ..claims()
             },
+            IdentityClaims {
+                audience: "actr.other".to_string(),
+                ..claims()
+            },
+            IdentityClaims {
+                expires_at: now().saturating_sub(1),
+                ..claims()
+            },
         ];
         for bad in mismatches {
             let result =
@@ -310,6 +326,26 @@ mod tests {
         assert!(
             result.is_err(),
             "credential of another Realm must be rejected"
+        );
+
+        AIdCredentialValidator::populate_key(
+            REALM,
+            KEY_ID,
+            &key.verifying_key(),
+            now().saturating_sub(1),
+        )
+        .await
+        .unwrap();
+        assert!(
+            AIdCredentialValidator::check(
+                &sign(&key, &claims()),
+                REALM,
+                PROVIDER,
+                "actr.signaling",
+            )
+            .await
+            .is_err(),
+            "an expired issuer key must not verify new credentials"
         );
     }
 

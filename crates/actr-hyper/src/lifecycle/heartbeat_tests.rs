@@ -57,6 +57,7 @@ fn test_credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) ->
         client_key: "0000000000000000".to_string(),
         role: actr_protocol::MemberRole::Owner as i32,
         development: None,
+        actor_public_key: None,
     };
     AIdCredential {
         key_id,
@@ -475,13 +476,11 @@ async fn membership_heartbeat_never_drives_disconnected_socket() {
     });
     let manager = CredentialManager::new(
         session,
-        RegistrationContext::Linked {
-            request: RegisterRequest {
-                actr_type: test_actr_type(),
-                realm: actor_id.realm.clone(),
-                ..Default::default()
-            },
-        },
+        RegistrationContext::linked_for_test(RegisterRequest {
+            actr_type: test_actr_type(),
+            realm: actor_id.realm.clone(),
+            ..Default::default()
+        }),
         "http://127.0.0.1:1",
         None,
     );
@@ -536,13 +535,11 @@ async fn run_membership_heartbeat_ticks(
     let credential = test_credential_for_actor(&actor_id, 7, 4_000_000_000);
     let manager = CredentialManager::new(
         session,
-        RegistrationContext::Linked {
-            request: RegisterRequest {
-                actr_type: test_actr_type(),
-                realm: actor_id.realm.clone(),
-                ..Default::default()
-            },
-        },
+        RegistrationContext::linked_for_test(RegisterRequest {
+            actr_type: test_actr_type(),
+            realm: actor_id.realm.clone(),
+            ..Default::default()
+        }),
         "http://127.0.0.1:1",
         None,
     );
@@ -824,13 +821,11 @@ async fn credential_warning_triggers_credential_manager_renewal() {
     });
     let manager = CredentialManager::new(
         session.clone(),
-        RegistrationContext::Linked {
-            request: RegisterRequest {
-                actr_type: test_actr_type(),
-                realm: actor_id.realm.clone(),
-                ..Default::default()
-            },
-        },
+        RegistrationContext::linked_for_test(RegisterRequest {
+            actr_type: test_actr_type(),
+            realm: actor_id.realm.clone(),
+            ..Default::default()
+        }),
         server.url(),
         None,
     );
@@ -1162,13 +1157,11 @@ async fn connected_heartbeat_403_reports_terminal_realm_denied() {
     });
     let engine = CredentialManager::new(
         session,
-        RegistrationContext::Linked {
-            request: RegisterRequest {
-                actr_type: test_actr_type(),
-                realm: actor_id.realm.clone(),
-                ..Default::default()
-            },
-        },
+        RegistrationContext::linked_for_test(RegisterRequest {
+            actr_type: test_actr_type(),
+            realm: actor_id.realm.clone(),
+            ..Default::default()
+        }),
         "http://127.0.0.1:1".to_string(),
         None,
     );

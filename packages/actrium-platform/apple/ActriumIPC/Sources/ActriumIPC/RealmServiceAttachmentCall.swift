@@ -4,6 +4,7 @@ public enum RealmServiceAttachmentIPC {
     public static let chunkSizeBytes = 48 * 1024
     public static let maxBytes = 7 * 1024 * 1024
     public static let prepareTimeoutMs = 20_000
+    public static let chunkTimeoutMs = 20_000
     public static let prepareRoute = "ask.AskService.PrepareAttachmentUpload"
 }
 

@@ -359,7 +359,7 @@ class LoranRelayClient {
     return true;
   }
 
-  async prepareChannel(channel, peer, generation) {
+  async prepareChannel(channel, peer, generation, initiator = false) {
     if (!this.validId(channel) || !this.validEndpoint(peer)) throw new Error('Invalid relay channel');
     const existing = this.channels.get(channel);
     if (existing) {
@@ -367,7 +367,7 @@ class LoranRelayClient {
       return existing;
     }
     const key = `${generation}:${channel}`;
-    const handler = await this.prepare(channel, peer, key);
+    const handler = await this.prepare(channel, peer, key, initiator);
     if (this.stopped || this.generation !== generation || !this.socket) { if (handler.closed) await handler.closed(); throw new Error('Stale relay channel'); }
     const entry = { channel, peer, key, handler, ready: false, active: false };
     this.channels.set(channel, entry);
@@ -401,7 +401,7 @@ class LoranRelayClient {
     switch (message.type) {
       case 'incoming':
         try {
-          await this.prepareChannel(message.channel, message.peer, generation);
+          await this.prepareChannel(message.channel, message.peer, generation, false);
           this.control({ type: 'accept', channel: message.channel });
         } catch (_) {
           if (this.validId(message.channel)) this.control({ type: 'reject', channel: message.channel });
@@ -409,7 +409,7 @@ class LoranRelayClient {
         }
         break;
       case 'connected': {
-        const entry = await this.prepareChannel(message.channel, message.peer, generation);
+        const entry = await this.prepareChannel(message.channel, message.peer, generation, true);
         if (message.request != null) entry.request = message.request;
         if (!entry.active) {
           entry.active = true;
@@ -597,13 +597,13 @@ function startRelayForClient(clientId) {
         return endpoint.href;
       } finally { clearTimeout(timer); }
     },
-    prepare: async (channel, endpoint, key) => {
+    prepare: async (channel, endpoint, key, initiator) => {
       const rawSend = (payload) => {
         if (relay.channels.get(channel)?.key !== key) throw new Error('Stale encrypted relay channel');
         if (payload === null) relay.closeChannel(channel);
         else relay.send(channel, payload);
       };
-      const peer = await wasm_bindgen.prepare_relay_connection(clientId, endpoint, key, rawSend);
+      const peer = await wasm_bindgen.prepare_relay_connection(clientId, endpoint, key, rawSend, initiator);
       let announced = false;
       const notify = (connected) => {
         try {

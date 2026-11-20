@@ -53,6 +53,10 @@ impl TestSignalingServer {
         self.controlled().pause_relay_enrollment();
     }
 
+    pub fn enable_actor_certificates(&self) {
+        self.controlled().enable_actor_certificates();
+    }
+
     /// Start the test server on the specified port.
     pub async fn start_on_port(port: u16) -> anyhow::Result<Self> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();

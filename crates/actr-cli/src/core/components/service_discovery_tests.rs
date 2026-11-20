@@ -59,7 +59,10 @@ fn build_signaling_request_with_identity_uses_url_query_params() {
 #[test]
 fn cli_discovery_register_request_uses_linked_auth_mode() {
     let discovery = NetworkServiceDiscovery::new(sample_context(Some("rs_test_secret")));
-    let request = discovery.build_linked_register_request(discovery.required_realm().unwrap());
+    let actor_key = SigningKey::from_bytes(&[23; 32]);
+    let request = discovery
+        .build_linked_register_request(discovery.required_realm().unwrap(), &actor_key)
+        .unwrap();
 
     assert_eq!(request.auth_mode, Some(RegisterAuthMode::Linked as i32));
     assert_eq!(request.manifest_raw, None);
@@ -67,6 +70,91 @@ fn cli_discovery_register_request_uses_linked_auth_mode() {
     assert_eq!(request.target, None);
     assert_eq!(request.actr_type.name, "cli-client");
     assert_eq!(request.realm, "test@example.com");
+    assert_eq!(
+        request.actor_public_key.as_deref(),
+        Some(actor_key.verifying_key().as_bytes().as_slice())
+    );
+    assert_ne!(request.actor_public_key, request.signing_public_key);
+    verify_actor_key_proof(&request, ActorKeyProofOperation::Register).unwrap();
+}
+
+#[test]
+fn cli_discovery_actor_key_is_persistent_and_scoped_to_identity() {
+    let directory = tempfile::tempdir().unwrap();
+    let discovery = NetworkServiceDiscovery::new(sample_context(Some("rs_test_secret")));
+    let first = load_or_create_actor_key(
+        directory.path(),
+        "test@example.com",
+        &discovery.context.package_actr_type,
+    )
+    .unwrap();
+    let second = load_or_create_actor_key(
+        directory.path(),
+        "test@example.com",
+        &discovery.context.package_actr_type,
+    )
+    .unwrap();
+    assert_eq!(first.to_bytes(), second.to_bytes());
+
+    let other_realm = load_or_create_actor_key(
+        directory.path(),
+        "other@example.com",
+        &discovery.context.package_actr_type,
+    )
+    .unwrap();
+    assert_ne!(first.to_bytes(), other_realm.to_bytes());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let identity = actor_key_identity("test@example.com", &discovery.context.package_actr_type);
+        let mode = std::fs::metadata(actor_key_path(directory.path(), &identity))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+}
+
+#[test]
+fn cli_discovery_rejects_modified_actor_proof() {
+    let discovery = NetworkServiceDiscovery::new(sample_context(Some("rs_test_secret")));
+    let actor_key = SigningKey::from_bytes(&[23; 32]);
+    let mut request = discovery
+        .build_linked_register_request(discovery.required_realm().unwrap(), &actor_key)
+        .unwrap();
+    request.realm = "attacker@example.com".into();
+    assert_eq!(
+        verify_actor_key_proof(&request, ActorKeyProofOperation::Register),
+        Err(actr_protocol::actor_key_proof::ActorKeyProofError::InvalidSignature)
+    );
+}
+
+#[test]
+fn cli_discovery_requires_credential_bound_to_the_same_actor_key() {
+    let actor_key = SigningKey::from_bytes(&[23; 32]);
+    let credential_for = |public_key: Option<Vec<u8>>| AIdCredential {
+        claims: IdentityClaims {
+            actor_public_key: public_key.map(Into::into),
+            ..Default::default()
+        }
+        .encode_to_vec()
+        .into(),
+        ..Default::default()
+    };
+
+    let bound = credential_for(Some(actor_key.verifying_key().to_bytes().to_vec()));
+    verify_credential_actor_key(&bound, &actor_key).unwrap();
+
+    let wrong = credential_for(Some(
+        SigningKey::from_bytes(&[99; 32])
+            .verifying_key()
+            .to_bytes()
+            .to_vec(),
+    ));
+    assert!(verify_credential_actor_key(&wrong, &actor_key).is_err());
+    let missing = credential_for(None);
+    assert!(verify_credential_actor_key(&missing, &actor_key).is_err());
 }
 
 #[test]

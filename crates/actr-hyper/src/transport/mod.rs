@@ -32,6 +32,7 @@ pub use actr_framework::Dest;
 // Secure-channel seam (RFC-0563): state, physical-session cell, and lane gate.
 // `SecureChannelState` is `pub` (returned by the `WireHandle::secure_channel_state`
 // trait method); the cell and lane decorator are `pub(crate)`.
+pub use secure_channel::VerifiedPeerContext;
 pub(crate) use secure_channel::{SecureCell, SecureChannelState, SecureDataLane};
 
 // DataLane core abstraction (trait kept pub for sw-host/peer_transport).
