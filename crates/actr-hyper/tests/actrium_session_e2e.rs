@@ -465,6 +465,7 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     let prepare = PrepareAttachmentRequest {
         id: String::new(),
         result_stream_id: "attachment-result".to_string(),
+        ..Default::default()
     }
     .encode_to_vec();
     let prepared = session
@@ -476,7 +477,10 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
         )
         .await
         .expect("prepare RPC is bound to the Attach session");
-    assert_eq!(prepared, prepare);
+    let prepared = PrepareAttachmentRequest::decode(prepared.as_slice()).unwrap();
+    let transport_result_stream = prepared.result_stream_id;
+    assert_ne!(transport_result_stream, "attachment-result");
+    assert!(transport_result_stream.starts_with("actrium-result-"));
 
     // An application-level rejection is still a successful, authenticated RPC.
     // It must release the Front reservation immediately; explicit cancellation
@@ -488,6 +492,7 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
             PrepareAttachmentRequest {
                 id: "reject".into(),
                 result_stream_id: "reused-attachment-result".into(),
+                ..Default::default()
             }
             .encode_to_vec(),
             Duration::from_secs(30),
@@ -503,6 +508,7 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     let accepted = PrepareAttachmentRequest {
         id: String::new(),
         result_stream_id: "reused-attachment-result".into(),
+        ..Default::default()
     }
     .encode_to_vec();
     session
@@ -531,6 +537,98 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
         .unregister_stream("reused-attachment-result")
         .await
         .expect("clean up the reused result stream");
+
+    // Reusing the caller-visible stream must not allow abandoned upload work
+    // to complete a newer Prepare. The Host gives each attempt a distinct
+    // transport stream and restores the public ID only after verification.
+    let old_prepare = session
+        .call(
+            PREPARE_ATTACHMENT_ROUTE,
+            READ,
+            PrepareAttachmentRequest {
+                id: "late-old".into(),
+                result_stream_id: "late-attachment-result".into(),
+                ..Default::default()
+            }
+            .encode_to_vec(),
+            Duration::from_secs(30),
+        )
+        .await
+        .expect("prepare the abandoned upload");
+    let old_transport_stream = PrepareAttachmentRequest::decode(old_prepare.as_slice())
+        .unwrap()
+        .result_stream_id;
+    front
+        .unregister_stream("late-attachment-result")
+        .await
+        .expect("cancel the abandoned upload");
+    let new_prepare = session
+        .call(
+            PREPARE_ATTACHMENT_ROUTE,
+            READ,
+            PrepareAttachmentRequest {
+                id: "late-new".into(),
+                result_stream_id: "late-attachment-result".into(),
+                ..Default::default()
+            }
+            .encode_to_vec(),
+            Duration::from_secs(30),
+        )
+        .await
+        .expect("reuse the public result stream for a new upload");
+    let new_transport_stream = PrepareAttachmentRequest::decode(new_prepare.as_slice())
+        .unwrap()
+        .result_stream_id;
+    assert_ne!(old_transport_stream, new_transport_stream);
+
+    let (late_results, mut late_result_rx) = tokio::sync::mpsc::unbounded_channel();
+    front
+        .app_context()
+        .await
+        .register_stream("late-attachment-result".into(), move |chunk, _| {
+            let late_results = late_results.clone();
+            Box::pin(async move {
+                late_results.send(chunk).unwrap();
+                Ok(())
+            })
+        })
+        .await
+        .expect("register the replacement result callback");
+    for (stream_id, payload) in [
+        (old_transport_stream, b"abandoned result".as_slice()),
+        (new_transport_stream, b"replacement result".as_slice()),
+    ] {
+        service
+            .app_context()
+            .await
+            .send_data_chunk(
+                &Dest::Peer(front.actor_id()),
+                DataChunk {
+                    stream_id,
+                    sequence: 0,
+                    payload: Bytes::copy_from_slice(payload),
+                    ..Default::default()
+                },
+                PayloadType::StreamReliable,
+            )
+            .await
+            .expect("send an attempt-specific terminal result");
+    }
+    let replacement = tokio::time::timeout(Duration::from_secs(10), late_result_rx.recv())
+        .await
+        .expect("the replacement attempt receives its own result")
+        .expect("the replacement result receiver is open");
+    assert_eq!(replacement.stream_id, "late-attachment-result");
+    assert_eq!(
+        replacement.payload,
+        Bytes::from_static(b"replacement result")
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), late_result_rx.recv())
+            .await
+            .is_err(),
+        "the abandoned attempt must not deliver to the replacement callback"
+    );
 
     let (chunks, mut received) = tokio::sync::mpsc::unbounded_channel();
     service
@@ -595,7 +693,7 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
         .send_data_chunk(
             &Dest::Peer(front.actor_id()),
             DataChunk {
-                stream_id: "attachment-result".into(),
+                stream_id: transport_result_stream,
                 sequence: 0,
                 payload: Bytes::from_static(b"terminal upload result"),
                 ..Default::default()

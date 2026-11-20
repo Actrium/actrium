@@ -277,7 +277,7 @@ impl DataChunkRegistry {
 
     async fn authorize_chunk(
         inner: &RegistryInner,
-        chunk: &DataChunk,
+        chunk: &mut DataChunk,
         sender_id: &ActrId,
         peer_context: &Option<Arc<VerifiedPeerContext>>,
     ) -> bool {
@@ -504,7 +504,14 @@ impl DataChunkRegistry {
         peer_context: Option<Arc<VerifiedPeerContext>>,
         payload_type: PayloadType,
     ) {
-        let stream_id = chunk.stream_id.clone();
+        let stream_id = self
+            .inner
+            .incoming_guard
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .and_then(|guard| guard.stream_alias(&chunk.stream_id))
+            .unwrap_or_else(|| chunk.stream_id.clone());
 
         let (tx, callback) = match self.worker_tx(&stream_id).await {
             Some(worker) => worker,
@@ -766,13 +773,13 @@ impl DataChunkRegistry {
                     break;
                 }
                 maybe = rx.recv() => match maybe {
-                    Some(queued) => {
+                    Some(mut queued) => {
                         let Some(current) = registry.upgrade() else {
                             return;
                         };
                         if !Self::authorize_chunk(
                             &current,
-                            &queued.chunk,
+                            &mut queued.chunk,
                             &queued.sender_id,
                             &queued.peer_context,
                         )

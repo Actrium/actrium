@@ -467,6 +467,7 @@ async fn attachment_cancellation_releases_only_its_own_service_reservation() {
     let (attach, secret) = attach(&registry).await;
     let prepare_payload = PrepareAttachmentRequest {
         result_stream_id: "result".to_string(),
+        ..Default::default()
     }
     .encode_to_vec();
 
@@ -737,7 +738,7 @@ async fn heartbeat_status_and_stream_chunks_use_the_same_guard() {
         key: metadata::ROUTE.into(),
         value: ROUTE.into(),
     });
-    let chunk = actr_protocol::DataChunk {
+    let mut chunk = actr_protocol::DataChunk {
         stream_id: "stream-1".into(),
         sequence: 0,
         payload: Bytes::from_static(b"chunk"),
@@ -746,7 +747,7 @@ async fn heartbeat_status_and_stream_chunks_use_the_same_guard() {
     };
     let sender = front_id();
     let request =
-        IncomingStreamChunk::new(&chunk, &sender).with_peer_context(Some(service_context()));
+        IncomingStreamChunk::new(&mut chunk, &sender).with_peer_context(Some(service_context()));
     guard
         .check_stream(request)
         .await

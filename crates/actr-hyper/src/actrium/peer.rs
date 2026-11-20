@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 use super::service::{
     AttachmentResultCancellation, PendingCall, PendingCallGuard, Shared as PeerShared,
-    TakeoverPayload, attachment_prepare_accepted, attachment_result_stream,
+    TakeoverPayload, attachment_prepare_accepted, fresh_attachment_result_stream,
 };
 use super::{ATTACHMENT_CANCEL_ROUTE, metadata};
 use crate::actr_ref::ActrRef;
@@ -389,18 +389,28 @@ impl ActriumPeerSession {
         payload: Vec<u8>,
         timeout: Duration,
     ) -> ActorResult<Vec<u8>> {
-        let result_stream =
-            attachment_result_stream(route, &payload).map_err(|error| error.into_actr_error())?;
+        let (result_stream, transport_stream, payload) =
+            match fresh_attachment_result_stream(route, &payload)
+                .map_err(|error| error.into_actr_error())?
+            {
+                Some((result_stream, transport_stream, payload)) => {
+                    (Some(result_stream), Some(transport_stream), payload)
+                }
+                None => (None, None, payload),
+            };
         let (envelope, pending) = self
             .business_envelope(route, capability, MessageKind::Request, payload, timeout)
             .await?;
         let request_id = envelope.request_id.clone();
         let deadline = RpcDeadline::from_timeout_ms(envelope.timeout_ms)?;
-        if let Some(stream_id) = result_stream.as_ref() {
+        if let (Some(stream_id), Some(transport_stream_id)) =
+            (result_stream.as_ref(), transport_stream)
+        {
             self.runtime
                 .shared
                 .register_peer_attachment_result(
                     stream_id.clone(),
+                    transport_stream_id,
                     request_id.clone(),
                     capability.to_string(),
                     self,
@@ -695,18 +705,24 @@ impl ActrRef {
     /// result reservation on both peers. Explicit upload cancellation waits for
     /// the Service acknowledgement so the stream can immediately be prepared again.
     pub async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
+        // Remove the old callback before releasing its reservation. A retry may
+        // register the same caller-visible stream while the Host cancellation is
+        // in flight, but this call must never unregister that replacement.
+        let unregistered = self.app_context().await.unregister_stream(stream_id).await;
         let cancellation = if let Some(runtime) = self.shared.peer_runtime.as_ref()
-            && let Some((session, request_id, capability)) =
-                runtime.shared.take_peer_attachment_result(stream_id)
-            && let Some(session) = session.upgrade()
+            && let Some(reservation) = runtime.shared.take_peer_attachment_result(stream_id)
+            && let Some(session) = reservation.session.upgrade()
         {
             session
-                .cancel_attachment_result(stream_id, request_id, &capability)
+                .cancel_attachment_result(
+                    &reservation.transport_stream_id,
+                    reservation.request_id,
+                    &reservation.capability,
+                )
                 .await
         } else {
             Ok(())
         };
-        let unregistered = self.app_context().await.unregister_stream(stream_id).await;
         cancellation.and(unregistered)
     }
 

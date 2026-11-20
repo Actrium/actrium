@@ -191,21 +191,24 @@ impl<'a> IncomingDispatchRequest<'a> {
 }
 
 /// One inbound stream chunk presented to [`IncomingGuard`]. The sender comes
-/// from the authenticated transport record, not from chunk metadata.
-#[derive(Clone, Debug)]
+/// from the authenticated transport record, not from chunk metadata. A guard
+/// may restore a Host-owned transport alias after authenticating the original
+/// wire fields.
+#[derive(Debug)]
 pub struct IncomingStreamChunk<'a> {
-    pub chunk: &'a DataChunk,
+    pub chunk: &'a mut DataChunk,
     pub sender: &'a ActrId,
     pub metadata: IncomingMetadata<'a>,
     pub peer_context: Option<Arc<VerifiedPeerContext>>,
 }
 
 impl<'a> IncomingStreamChunk<'a> {
-    pub fn new(chunk: &'a DataChunk, sender: &'a ActrId) -> Self {
+    pub fn new(chunk: &'a mut DataChunk, sender: &'a ActrId) -> Self {
+        let metadata = IncomingMetadata::new(&chunk.metadata);
         Self {
             chunk,
             sender,
-            metadata: IncomingMetadata::new(&chunk.metadata),
+            metadata,
             peer_context: None,
         }
     }
@@ -213,6 +216,10 @@ impl<'a> IncomingStreamChunk<'a> {
     pub fn with_peer_context(mut self, context: Option<Arc<VerifiedPeerContext>>) -> Self {
         self.peer_context = context;
         self
+    }
+
+    pub fn into_chunk(self) -> &'a mut DataChunk {
+        self.chunk
     }
 }
 
@@ -304,6 +311,13 @@ pub trait IncomingGuard: Send + Sync + 'static {
         &self,
         response: &mut RpcEnvelope,
     ) -> Result<(), IncomingGuardError>;
+
+    /// Resolve a Host-owned wire stream alias for callback routing. This is
+    /// only a lookup; `check_stream` must still authenticate and consume the
+    /// corresponding reservation immediately before delivery.
+    fn stream_alias(&self, _stream_id: &str) -> Option<String> {
+        None
+    }
 
     /// Authorize a stream chunk immediately before callback delivery.
     async fn check_stream(

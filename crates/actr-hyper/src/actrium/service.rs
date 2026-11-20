@@ -46,11 +46,25 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// Only field 8 is needed to bind the terminal result stream. Prost skips the
-/// remaining fields while the complete request payload remains covered by the
-/// Front's prepare-RPC proof.
+/// The Front Host rewrites field 8 to an attempt-specific transport stream and
+/// restores the caller's stream ID after authenticating the terminal result.
+/// All declared fields are retained when the request is encoded again.
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
 pub(crate) struct PrepareAttachmentRequest {
+    #[prost(string, tag = "1")]
+    pub(crate) id: String,
+    #[prost(string, tag = "2")]
+    pub(crate) filename: String,
+    #[prost(int32, tag = "3")]
+    pub(crate) r#type: i32,
+    #[prost(string, tag = "4")]
+    pub(crate) stream_id: String,
+    #[prost(string, tag = "5")]
+    pub(crate) checksum: String,
+    #[prost(string, tag = "6")]
+    pub(crate) checksum_algorithm: String,
+    #[prost(uint64, tag = "7")]
+    pub(crate) size_bytes: u64,
     #[prost(string, tag = "8")]
     pub(crate) result_stream_id: String,
 }
@@ -96,9 +110,10 @@ struct PendingAttachmentResult {
 }
 
 pub(crate) struct PeerAttachmentResult {
-    session: Weak<ActriumPeerSession>,
-    request_id: String,
-    capability: String,
+    pub(crate) session: Weak<ActriumPeerSession>,
+    pub(crate) request_id: String,
+    pub(crate) capability: String,
+    pub(crate) transport_stream_id: String,
     expires_at: u64,
 }
 
@@ -118,6 +133,7 @@ impl Shared {
     pub(crate) fn register_peer_attachment_result(
         &self,
         stream_id: String,
+        transport_stream_id: String,
         request_id: String,
         capability: String,
         session: &Arc<ActriumPeerSession>,
@@ -125,7 +141,12 @@ impl Shared {
         let now = now_secs();
         let mut results = self.peer_attachment_results();
         results.retain(|_, entry| entry.expires_at > now && entry.session.strong_count() > 0);
-        if results.contains_key(&stream_id) || results.len() >= MAX_PENDING_ATTACHMENT_RESULTS {
+        if results.contains_key(&stream_id)
+            || results
+                .values()
+                .any(|entry| entry.transport_stream_id == transport_stream_id)
+            || results.len() >= MAX_PENDING_ATTACHMENT_RESULTS
+        {
             return Err(IncomingGuardError::new(
                 IncomingGuardErrorCode::Unavailable,
                 "the attachment result stream is already pending or at capacity".to_string(),
@@ -137,44 +158,54 @@ impl Shared {
                 session: Arc::downgrade(session),
                 request_id,
                 capability,
+                transport_stream_id,
                 expires_at: now.saturating_add(ATTACHMENT_RESULT_RETENTION_SECS),
             },
         );
         Ok(())
     }
 
-    fn peer_attachment_session(&self, stream_id: &str) -> Option<Weak<ActriumPeerSession>> {
+    fn peer_attachment_result_for_transport(
+        &self,
+        transport_stream_id: &str,
+    ) -> Option<(Weak<ActriumPeerSession>, String, String)> {
         let now = now_secs();
         let mut results = self.peer_attachment_results();
         results.retain(|_, entry| entry.expires_at > now && entry.session.strong_count() > 0);
-        results.get(stream_id).map(|entry| entry.session.clone())
-    }
-
-    pub(crate) fn finish_peer_attachment_result(&self, stream_id: &str) {
-        self.peer_attachment_results().remove(stream_id);
+        results
+            .iter()
+            .find(|(_, entry)| entry.transport_stream_id == transport_stream_id)
+            .map(|(stream_id, entry)| {
+                (
+                    entry.session.clone(),
+                    entry.request_id.clone(),
+                    stream_id.clone(),
+                )
+            })
     }
 
     pub(crate) fn finish_peer_attachment_result_for_request(
         &self,
         stream_id: &str,
         request_id: &str,
-    ) {
+    ) -> bool {
         let mut results = self.peer_attachment_results();
         if results
             .get(stream_id)
             .is_some_and(|entry| entry.request_id == request_id)
         {
             results.remove(stream_id);
+            true
+        } else {
+            false
         }
     }
 
     pub(crate) fn take_peer_attachment_result(
         &self,
         stream_id: &str,
-    ) -> Option<(Weak<ActriumPeerSession>, String, String)> {
-        self.peer_attachment_results()
-            .remove(stream_id)
-            .map(|entry| (entry.session, entry.request_id, entry.capability))
+    ) -> Option<PeerAttachmentResult> {
+        self.peer_attachment_results().remove(stream_id)
     }
 
     async fn finish_attachment_result_for_request(
@@ -329,6 +360,28 @@ pub(crate) fn attachment_result_stream(
         ));
     }
     Ok(Some(prepare.result_stream_id))
+}
+
+/// Give every Prepare a fresh wire-level result stream. A delayed result from
+/// an abandoned upload therefore cannot be authenticated as a later Prepare
+/// that happens to reuse the same caller-visible stream ID.
+pub(crate) fn fresh_attachment_result_stream(
+    route: &str,
+    payload: &[u8],
+) -> Result<Option<(String, String, Vec<u8>)>, IncomingGuardError> {
+    let Some(result_stream) = attachment_result_stream(route, payload)? else {
+        return Ok(None);
+    };
+    let mut prepare = PrepareAttachmentRequest::decode(payload).map_err(|error| {
+        invalid_metadata(format!("invalid attachment prepare payload: {error}"))
+    })?;
+    let transport_stream = format!("actrium-result-{}", uuid::Uuid::new_v4());
+    prepare.result_stream_id = transport_stream.clone();
+    Ok(Some((
+        result_stream,
+        transport_stream,
+        prepare.encode_to_vec(),
+    )))
 }
 
 struct Admitted {
@@ -821,6 +874,12 @@ impl IncomingGuard for ActriumServiceGuard {
         Ok(())
     }
 
+    fn stream_alias(&self, stream_id: &str) -> Option<String> {
+        self.shared
+            .peer_attachment_result_for_transport(stream_id)
+            .map(|(_, _, stream_id)| stream_id)
+    }
+
     async fn check_stream(
         &self,
         request: IncomingStreamChunk<'_>,
@@ -830,10 +889,11 @@ impl IncomingGuard for ActriumServiceGuard {
             .as_deref()
             .ok_or_else(missing_verified_channel)?;
         let channel = verified_channel(context)?;
+        let transport_stream_id = request.chunk.stream_id.clone();
         let business = chunk_request(request.chunk, request.metadata)?;
-        if let Some(session) = self
+        if let Some((session, prepare_request_id, stream_id)) = self
             .shared
-            .peer_attachment_session(&request.chunk.stream_id)
+            .peer_attachment_result_for_transport(&transport_stream_id)
         {
             let session = session.upgrade().ok_or_else(|| {
                 IncomingGuardError::new(
@@ -850,8 +910,19 @@ impl IncomingGuard for ActriumServiceGuard {
                         format!("outbound attachment result proof verification failed: {error}"),
                     )
                 })?;
-            self.shared
-                .finish_peer_attachment_result(&request.chunk.stream_id);
+            // Cancellation may have released this attempt while verification
+            // was suspended. Consume its exact reservation before restoring the
+            // caller-visible ID so a late result cannot reach a replacement.
+            if !self
+                .shared
+                .finish_peer_attachment_result_for_request(&stream_id, &prepare_request_id)
+            {
+                return Err(IncomingGuardError::new(
+                    IncomingGuardErrorCode::Revoked,
+                    "the attachment result attempt is no longer active".to_string(),
+                ));
+            }
+            request.into_chunk().stream_id = stream_id;
             return Ok(());
         }
         self.service
@@ -962,6 +1033,38 @@ mod attachment_reservation_tests {
         }
     }
 
+    #[test]
+    fn prepare_transport_streams_are_attempt_specific() {
+        let prepare = PrepareAttachmentRequest {
+            id: "attachment".to_string(),
+            filename: "notes.txt".to_string(),
+            r#type: 3,
+            stream_id: "chunks".to_string(),
+            checksum: "checksum".to_string(),
+            checksum_algorithm: "md5".to_string(),
+            size_bytes: 42,
+            result_stream_id: "result".to_string(),
+        };
+        let payload = prepare.encode_to_vec();
+        let (public, first, first_payload) =
+            fresh_attachment_result_stream(ATTACHMENT_PREPARE_ROUTE, &payload)
+                .unwrap()
+                .unwrap();
+        let (_, second, second_payload) =
+            fresh_attachment_result_stream(ATTACHMENT_PREPARE_ROUTE, &payload)
+                .unwrap()
+                .unwrap();
+
+        assert_eq!(public, "result");
+        assert_ne!(first, second);
+        for (transport, payload) in [(first, first_payload), (second, second_payload)] {
+            let decoded = PrepareAttachmentRequest::decode(payload.as_slice()).unwrap();
+            let mut expected = prepare.clone();
+            expected.result_stream_id = transport;
+            assert_eq!(decoded, expected);
+        }
+    }
+
     #[tokio::test]
     async fn cleanup_only_removes_the_prepare_that_owns_the_reservation() {
         let shared = Shared::default();
@@ -1010,6 +1113,7 @@ mod attachment_reservation_tests {
                 session: Weak::new(),
                 request_id: "new-prepare".to_string(),
                 capability: "documents.read".to_string(),
+                transport_stream_id: "new-transport".to_string(),
                 expires_at: u64::MAX,
             },
         );
