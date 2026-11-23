@@ -173,9 +173,9 @@ rusqlite = { version = "0.41.1", default-features = false, features = ["bundled"
 
 # === WASM Runtime ===
 # Pinned to 48.0.10 for Component Model host execution (Rust >= 1.95).
-# This includes the 2026-11-16 fixes for RUSTSEC-2026-0566 through
-# RUSTSEC-2026-0573, RUSTSEC-2026-0587, and the earlier 48.x sandbox and
-# host-panic fixes.
+# This includes the Windows WASI filesystem fix for RUSTSEC-2026-0587,
+# the fixes for RUSTSEC-2026-0566 through RUSTSEC-2026-0573, and the earlier
+# 48.x sandbox and host-panic fixes.
 #
 # The `async` feature powers the host-side wasmtime fibers we rely on
 # (`instantiate_async` / `call_async`); `component-model-async` stays enabled

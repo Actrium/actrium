@@ -38,13 +38,14 @@ const navItems: NavItem[] = [
   { to: "/admin", icon: LayoutDashboard, label: "Dashboard", end: true },
   { to: "/admin/general/architecture", icon: Network, label: "Architecture" },
   { to: "/admin/config", icon: FileText, label: "Config", end: false },
-  { to: "/admin/realms", icon: Globe, label: "Realms", end: false },
+  { to: "/admin/apps", icon: Globe, label: "Apps", end: false },
   { to: "/admin/general/recording", icon: Activity, label: "Recording" },
 ];
 
 const serviceItems: NavItem[] = [
   { to: "/admin/services/stun", icon: Shield, label: "STUN" },
   { to: "/admin/services/turn", icon: ArrowLeftRight, label: "TURN" },
+  { to: "/admin/services/relay", icon: Network, label: "WSS Relay" },
   { to: "/admin/services/signaling", icon: Radio, label: "Signaling" },
   { to: "/admin/publishers", icon: Building2, label: "Publisher Registry" },
   { to: "/admin/services/issuer", icon: Fingerprint, label: "Issuer" },

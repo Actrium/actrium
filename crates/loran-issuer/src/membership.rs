@@ -178,21 +178,22 @@ async fn join(
     if open {
         use_nonce(&request.nonce, expires_at).await?;
     }
+    let mut owner_device_only = false;
     let invited = async {
         let secret = request
             .invite
             .as_deref()
             .ok_or_else(|| invalid(&"join needs invite"))?;
         let secret_hash = invite_secret_hash(secret).map_err(|e| invalid(&e))?;
-        match membership::invite_realm(&secret_hash).await? {
-            None => return fail(Code::InviteUnknown, "no such invite"),
-            Some(realm) if realm != request.realm => {
-                return fail(
-                    Code::InviteRealmMismatch,
-                    "the invite belongs to another Realm",
-                );
-            }
-            Some(_) => {}
+        let Some((realm, strict)) = membership::locate_invite(&secret_hash).await? else {
+            return fail(Code::InviteUnknown, "no such invite");
+        };
+        owner_device_only = strict;
+        if realm != request.realm {
+            return fail(
+                Code::InviteRealmMismatch,
+                "the invite belongs to another Realm",
+            );
         }
         if !open {
             use_nonce(&request.nonce, expires_at).await?;
@@ -211,6 +212,7 @@ async fn join(
     match invited {
         Err(error)
             if open
+                && !owner_device_only
                 && matches!(
                     error.code,
                     Code::InvalidRequest
