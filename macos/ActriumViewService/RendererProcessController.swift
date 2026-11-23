@@ -40,10 +40,14 @@ struct IMECommandPayload: Codable {
 private var rnMarkedTextGateInstalled = false
 
 /// Components with an in-flight IME composition, fed by `applyMarkedText`
-/// and consumed by `applyInsertText`. Weak: a forgotten entry must not keep
-/// a dead component alive. Composition is per-component; a global table
-/// matches how the swizzled method itself is global.
-private let rnComposingComponents = NSHashTable<AnyObject>.weakObjects()
+/// and consumed by `applyInsertText`. Each entry records the editor the
+/// component was composing in: a stale entry (recycled Fabric input, ended
+/// field-editor session) never matches the component's current editor, so a
+/// recycled `RCTTextInputComponentView` cannot carry composition state into
+/// a new editor. Weak keys and values: a forgotten entry must not keep a
+/// dead component or editor alive. The table is global to match the
+/// swizzled method; window ownership is enforced by the prune paths.
+private let rnComposingComponents = NSMapTable<AnyObject, AnyObject>.weakToWeakObjects()
 
 private func installRNMarkedTextGate() {
     guard !rnMarkedTextGateInstalled,
@@ -59,7 +63,16 @@ private func installRNMarkedTextGate() {
     typealias ChangeIMP = @convention(c) (AnyObject, Selector) -> Void
     let oldIMP = method_getImplementation(method)
     let block: @convention(block) (AnyObject) -> Void = { obj in
-        guard !rnComposingComponents.contains(obj) else { return }
+        if let composingEditor = rnComposingComponents.object(forKey: obj) {
+            // Suppress only while the component still edits through the same
+            // editor the composition started in. A recycled Fabric input
+            // re-mounted with a new editor must not inherit the stale entry.
+            if let backing = (try? obj.value(forKey: "backedTextInputView")) as? NSView,
+               rnEditorTextView(under: backing) === composingEditor {
+                return
+            }
+            rnComposingComponents.removeObject(forKey: obj)
+        }
         unsafeBitCast(oldIMP, to: ChangeIMP.self)(obj, changeSel)
     }
     method_setImplementation(method, imp_implementationWithBlock(block))
@@ -116,14 +129,18 @@ private func rnEditorTextView(under view: NSView) -> NSTextView? {
 /// process serves several tabs, and a first-responder change in one tab
 /// must not evict a live composition in another.
 private func rnPruneComposingComponents(activeEditor: NSTextView?, inWindow window: NSWindow?) {
-    for component in rnComposingComponents.allObjects {
+    guard let keys = rnComposingComponents.keyEnumerator().allObjects as? [AnyObject] else { return }
+    for component in keys {
         guard let backing = (try? component.value(forKey: "backedTextInputView")) as? NSView else {
-            rnComposingComponents.remove(component)
+            rnComposingComponents.removeObject(forKey: component)
             continue
         }
         guard backing.window === window else { continue }
-        if activeEditor == nil || rnEditorTextView(under: backing) !== activeEditor {
-            rnComposingComponents.remove(component)
+        // Keep an entry only for a non-nil active editor that is still the
+        // editor the composition was recorded on: a single-line blur leaves
+        // currentEditor() nil, and `nil !== nil` would otherwise retain it.
+        if activeEditor == nil || rnComposingComponents.object(forKey: component) !== activeEditor {
+            rnComposingComponents.removeObject(forKey: component)
         }
     }
 }
@@ -972,7 +989,13 @@ final class RendererProcessController {
     private func destroyTab(_ tabId: String) {
         cancelFileImport(tabId)
         failPendingAttachmentCalls(tabId: tabId)
-        surfaces.removeValue(forKey: tabId)?.close()
+        if let surface = surfaces.removeValue(forKey: tabId) {
+            // Before the hierarchy is detached: afterwards backing.window is
+            // nil and no prune can reach the tab's composition entries, while
+            // a recycled Fabric input could carry them into a new editor.
+            surface.invalidateComposingState()
+            surface.close()
+        }
         reactNativeHost.destroyRendererEntry(tabId: tabId)
     }
 
@@ -1510,15 +1533,15 @@ private final class RendererTabSurface {
     /// Applies Host-mirrored IME marked text to the focused text input.
     func applyMarkedText(_ text: String, selectedRange: NSRange) {
         guard let client = resolvedTextView(window.firstResponder) as? NSTextInputClient else { return }
-        // Join the composing set BEFORE `setMarkedText:`: RN fires
+        // Join the composing table BEFORE `setMarkedText:`: RN fires
         // `textInputDidChange` synchronously inside it, and the gate must
         // already recognize this component as composing to keep that event
         // away from JS. An empty payload means composition ended (cancel).
         if let component = rnComponentView(for: resolvedTextView(window.firstResponder)) {
             if text.isEmpty {
-                rnComposingComponents.remove(component)
-            } else {
-                rnComposingComponents.add(component)
+                rnComposingComponents.removeObject(forKey: component)
+            } else if let editor = resolvedTextView(window.firstResponder) {
+                rnComposingComponents.setObject(editor, forKey: component)
             }
         }
         client.setMarkedText(
@@ -1555,7 +1578,7 @@ private final class RendererTabSurface {
         // callback.
         let component = rnComponentView(for: resolved)
         if preMarkedLength > 0, let component {
-            rnComposingComponents.remove(component)
+            rnComposingComponents.removeObject(forKey: component)
             component.setValue(false, forKey: "ignoreNextTextInputCall")
             _ = component.perform(NSSelectorFromString("textInputDidChange"))
         }
@@ -1669,6 +1692,15 @@ private final class RendererTabSurface {
         commit()
     }
 
+
+    /// Drop ALL composition state owned by this surface, regardless of the
+    /// current first responder. Called before the view hierarchy is torn
+    /// down: once detached, `backing.window` is nil and window-scoped
+    /// pruning can no longer reach the entries, while a recycled Fabric
+    /// input could otherwise carry the stale state into a new editor.
+    func invalidateComposingState() {
+        rnPruneComposingComponents(activeEditor: nil, inWindow: window)
+    }
 
     /// Drop composition state for components whose editor is no longer the
     /// focused text view of THIS surface. Called when the first responder
