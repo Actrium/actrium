@@ -392,20 +392,25 @@ actor RealmServiceEventPeerController {
     private var discoverySequence: UInt64 = 0
     private var committedDiscoverySequence: UInt64 = 0
 
+    struct Discovery: Sendable {
+        let target: ActrBindings.ActrId
+        fileprivate let generation: UInt64?
+        fileprivate let sequence: UInt64
+    }
+
     func select(
         generation: UInt64,
         reference: any RealmServiceEventReference,
-        serviceType: ActrBindings.ActrType
-    ) async throws {
+        target: ActrBindings.ActrId
+    ) throws {
         self.generation = max(self.generation, generation)
         guard self.generation == generation else { throw CancellationError() }
-        // The v1 domain model requires exactly one Service of the signed type;
-        // taking the first of multiple route candidates is not authentication.
-        let target = try await reference.discoverService(serviceType: serviceType)
-        guard self.generation == generation else { throw CancellationError() }
+        // The caller has already established this exact RuntimeConnection.
+        // Never rediscover and publish a different peer before its Attach succeeds.
         try reference.setServiceEventPeer(peer: target)
         self.reference = reference
         peer = target
+        committedDiscoverySequence = discoverySequence
     }
 
     /// A generation snapshot for `call` only when a subscription is active.
@@ -414,25 +419,31 @@ actor RealmServiceEventPeerController {
         reference == nil ? nil : generation
     }
 
-    /// Strictly rediscover the Service for an RPC and, when this generation's
-    /// subscription is still active, move its event peer to the same ActorId.
-    /// Discovery commits are sequenced within the generation: a slow response
-    /// for a retired Service cannot undo a newer RPC's committed selection.
+    /// Strictly rediscover the Service for an RPC. The returned discovery is only
+    /// a candidate: event routing changes after its replacement Attach succeeds.
     func resolve(
         ifGeneration generation: UInt64?,
         reference: any RealmServiceEventReference,
         serviceType: ActrBindings.ActrType
-    ) async throws -> ActrBindings.ActrId {
+    ) async throws -> Discovery {
         discoverySequence &+= 1
         let sequence = discoverySequence
         let target = try await reference.discoverService(serviceType: serviceType)
-        if let generation {
-            refresh(
-                ifGeneration: generation, reference: reference, target: target,
-                sequence: sequence
-            )
-        }
-        return target
+        return Discovery(target: target, generation: generation, sequence: sequence)
+    }
+
+    /// Publish a successfully attached RuntimeConnection without letting a slow,
+    /// older discovery overwrite a newer selection or revive a cleared peer.
+    func commit(
+        _ discovery: Discovery,
+        reference: any RealmServiceEventReference,
+        target: ActrBindings.ActrId
+    ) {
+        guard let generation = discovery.generation else { return }
+        refresh(
+            ifGeneration: generation, reference: reference, target: target,
+            sequence: discovery.sequence
+        )
     }
 
     /// Follow Service rediscovery without reviving a cleared subscription,
@@ -744,7 +755,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         try await eventPeers.select(
             generation: generation,
             reference: connection.reference,
-            serviceType: serviceType
+            target: connection.target
         )
         guard !stopped else {
             await eventPeers.suspend(ifGeneration: generation)
@@ -1132,16 +1143,21 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                 // Discover before touching the old session. If A is offline and
                 // B is now the unique Service, resuming A first would surface a
                 // transport error and hide the available replacement.
-                let target = try await self.eventPeers.resolve(
+                let discovery = try await self.eventPeers.resolve(
                     ifGeneration: eventGeneration,
                     reference: connection.reference,
                     serviceType: self.serviceType
                 )
                 return try await Self.recoverDiscoveredConnection(
                     currentTarget: connection.target,
-                    discoveredTarget: target,
-                    retarget: { try await self.retarget(connection, to: target) },
-                    resume: { try await self.resumeOrReattach(connection) }
+                    discoveredTarget: discovery.target,
+                    retarget: { try await self.retarget(connection, to: discovery.target) },
+                    resume: { try await self.resumeOrReattach(connection) },
+                    commit: { recovered in
+                        await self.eventPeers.commit(
+                            discovery, reference: recovered.reference, target: recovered.target
+                        )
+                    }
                 )
             }
             return try await self.resumeOrReattach(connection)
@@ -1184,16 +1200,21 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                 ownsRecoverySlot: ownsRecoverySlot,
                 connect: { try await self.connect() }
             )
-            let target = try await self.eventPeers.resolve(
+            let discovery = try await self.eventPeers.resolve(
                 ifGeneration: eventGeneration,
                 reference: connection.reference,
                 serviceType: self.serviceType
             )
             return try await Self.recoverDiscoveredConnection(
                 currentTarget: connection.target,
-                discoveredTarget: target,
-                retarget: { try await self.retarget(connection, to: target) },
-                resume: { connection }
+                discoveredTarget: discovery.target,
+                retarget: { try await self.retarget(connection, to: discovery.target) },
+                resume: { connection },
+                commit: { recovered in
+                    await self.eventPeers.commit(
+                        discovery, reference: recovered.reference, target: recovered.target
+                    )
+                }
             )
         }
         recovery = (id: id, task: task, discoversTarget: true)
@@ -1266,16 +1287,22 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
 
     /// Internal for recovery-ordering tests. A changed discovery target must
     /// attach the replacement without first resuming the unreachable old peer.
+    /// The event-routing commit runs only after that recovery has succeeded.
     static func recoverDiscoveredConnection<RecoveredConnection>(
         currentTarget: ActrBindings.ActrId,
         discoveredTarget: ActrBindings.ActrId,
         retarget: () async throws -> RecoveredConnection,
-        resume: () async throws -> RecoveredConnection
+        resume: () async throws -> RecoveredConnection,
+        commit: (RecoveredConnection) async -> Void = { _ in }
     ) async throws -> RecoveredConnection {
+        let recovered: RecoveredConnection
         if discoveredTarget != currentTarget {
-            return try await retarget()
+            recovered = try await retarget()
+        } else {
+            recovered = try await resume()
         }
-        return try await resume()
+        await commit(recovered)
+        return recovered
     }
 
     static func requiresReattach(_ error: Error) -> Bool {

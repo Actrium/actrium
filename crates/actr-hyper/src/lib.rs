@@ -1751,10 +1751,7 @@ impl Node<Registered> {
     /// authorizes inbound business requests/tells/streams and signs responses,
     /// and the same shared state enables outbound Attach and response-proof
     /// verification. Session traffic requires the verified Actor channel.
-    pub fn with_actrium_service(
-        self,
-        service: actrium_runtime::InMemorySessionService,
-    ) -> Self {
+    pub fn with_actrium_service(self, service: actrium_runtime::InMemorySessionService) -> Self {
         self.with_actrium_service_and_events(service, None)
     }
 

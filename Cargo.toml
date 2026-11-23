@@ -111,7 +111,8 @@ uuid = { version = "1.18", features = ["v4", "serde"] }
 thiserror = "2.0"
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-url = "2.5"
+# Enforce the nested blob URL origin stack-overflow fix in downstream locks.
+url = "2.5.9"
 if-addrs = "0.15"
 pwrzv = "0.6.2"
 yasm = "0.6.0"
@@ -172,9 +173,10 @@ rand = "0.8"
 rusqlite = { version = "0.41.1", default-features = false, features = ["bundled", "cache", "fallible_uint", "serde_json"] }
 
 # === WASM Runtime ===
-# Pinned to 48.0.9 for Component Model host execution (Rust >= 1.95).
+# Pinned to 48.0.10 for Component Model host execution (Rust >= 1.95).
 # This includes the 2026-11-16 fixes for RUSTSEC-2026-0566 through
-# RUSTSEC-2026-0573 and the earlier 48.x sandbox and host-panic fixes.
+# RUSTSEC-2026-0573, RUSTSEC-2026-0587, and the earlier 48.x sandbox and
+# host-panic fixes.
 #
 # The `async` feature powers the host-side wasmtime fibers we rely on
 # (`instantiate_async` / `call_async`); `component-model-async` stays enabled
@@ -191,14 +193,14 @@ rusqlite = { version = "0.41.1", default-features = false, features = ["bundled"
 # `default-features = false` keeps the feature set minimal: 48's default
 # additions (gc-*, wat, profiling, parallel-compilation, pooling-allocator,
 # wit-parser, ...) are not pulled in and are not needed.
-wasmtime = { version = "=48.0.9", default-features = false, features = [
+wasmtime = { version = "=48.0.10", default-features = false, features = [
     "runtime",
     "cranelift",
     "component-model",
     "component-model-async",
     "async",
 ] }
-wasmtime-wasi = "=48.0.9"
+wasmtime-wasi = "=48.0.10"
 
 # === Networking ===
 tokio-tungstenite = { version = "0.28.0", features = [
