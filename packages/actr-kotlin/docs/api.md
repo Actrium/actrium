@@ -2,6 +2,34 @@
 
 This document provides a comprehensive reference for both the low-level (UniFFI-generated) and high-level (DSL) APIs.
 
+## Realm member governance
+
+The `RealmMembership` returned by `RealmIdentityStore.membership(...)` exposes
+`inviteMember(role, expiresAt)`, `removeMember(memberId)`,
+`setRole(memberId, role)`, `transferOwner(memberId, previousOwnerRole)`, and
+`leave()` as suspending functions. Import these types from `io.actrium.actr`.
+`RealmMemberRole.EDITOR` and `RealmMemberRole.VIEWER` are the assignable roles;
+ownership changes use atomic transfer. Owner recovery consumes a one-time
+invitation supplied by the authorized domain key holder or Provider via `join`.
+
+```kotlin
+val invitation = membership.inviteMember(RealmMemberRole.EDITOR, expiresAt)
+membership.setRole(memberId, RealmMemberRole.VIEWER)
+membership.transferOwner(memberId, RealmMemberRole.EDITOR)
+```
+
+Results retain the existing protocol JSON. `RealmMembershipException.Rejected`
+preserves the HTTP status and stable `code`, including `forbidden`,
+`owner_last_client`, `owner_must_transfer`, and `client_revoked`.
+`Uncertain` means the operation may have committed: retain the signer and check
+membership before retrying. Inviting again creates another invitation; a
+completed transfer can remove the previous owner's permission, and a committed
+leave revokes its signer. Role changes apply to the next issued Actor credential.
+Provider-side revocation does not assert immediate closure of all peer sessions.
+
+See [real Issuer acceptance](../../../tests/e2e/actr/member-governance/README.md)
+for reproducible Rust and native-binding tests.
+
 ## Package Structure
 
 | Package | Purpose |

@@ -2,6 +2,34 @@
 
 This document provides a comprehensive overview of the Actr API, organized into Low Level and High Level APIs.
 
+## Realm member governance
+
+An existing `RealmMembership` from `RealmIdentityStore.membership(...)` exposes
+`inviteMember(role:expiresAt:)`, `removeMember(memberId:)`,
+`setRole(memberId:role:)`, `transferOwner(memberId:previousOwnerRole:)`, and
+`leave()`. `RealmMemberRole` has `.editor` and `.viewer`; ownership changes use
+the atomic transfer operation. Owner recovery uses `join(invite:label:)` with a
+one-time invitation supplied by the authorized domain key holder or Provider.
+
+```swift
+let invitation = try await membership.inviteMember(role: .editor, expiresAt: expiresAt)
+_ = try await membership.setRole(memberId: memberId, role: .viewer)
+_ = try await membership.transferOwner(memberId: memberId, previousOwnerRole: .editor)
+```
+
+Operations return the existing protocol JSON and preserve
+`RealmMembershipError.Rejected(status:code:)` outcomes such as `forbidden`,
+`owner_last_client`, `owner_must_transfer`, and `client_revoked`.
+`Uncertain` means the operation may have committed: retain the signer and check
+membership before retrying. Inviting again creates another invitation; a
+completed transfer can remove the previous owner's permission, and a committed
+leave revokes its signer. A role change applies to the next issued Actor
+credential. Successful Provider-side removal does not assert that all peer
+sessions have already terminated.
+
+See [real Issuer acceptance](../../../tests/e2e/actr/member-governance/README.md)
+for reproducible Rust and native-binding tests.
+
 ## Overview
 
 Actr provides two levels of API abstraction:
