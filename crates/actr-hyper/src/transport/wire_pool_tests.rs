@@ -1,6 +1,7 @@
 use super::*;
 use crate::transport::error::{NetworkError, NetworkResult};
 use crate::transport::lane::DataLane;
+use crate::transport::secure_channel::test_context;
 use crate::transport::secure_channel::{SecureCell, SecureChannelState, SecureDataLane};
 use actr_protocol::PayloadType;
 use std::sync::Arc;
@@ -40,6 +41,16 @@ struct BlockingLifecycleWire {
 
 #[async_trait::async_trait]
 impl WireHandle for BlockingLifecycleWire {
+    fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+        crate::transport::SecureChannelState::Verified
+    }
+    fn verified_peer_context(
+        &self,
+    ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+        Some(std::sync::Arc::new(
+            crate::transport::secure_channel::test_context(1),
+        ))
+    }
     fn connection_type(&self) -> ConnType {
         ConnType::WebRTC
     }
@@ -72,6 +83,16 @@ impl WireHandle for BlockingLifecycleWire {
 
 #[async_trait::async_trait]
 impl WireHandle for AdvancingLifecycleWire {
+    fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+        crate::transport::SecureChannelState::Verified
+    }
+    fn verified_peer_context(
+        &self,
+    ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+        Some(std::sync::Arc::new(
+            crate::transport::secure_channel::test_context(1),
+        ))
+    }
     fn connection_type(&self) -> ConnType {
         ConnType::WebRTC
     }
@@ -140,6 +161,16 @@ struct CommitRaceWire {
 
 #[async_trait::async_trait]
 impl WireHandle for BlockingWire {
+    fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+        crate::transport::SecureChannelState::Verified
+    }
+    fn verified_peer_context(
+        &self,
+    ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+        Some(std::sync::Arc::new(
+            crate::transport::secure_channel::test_context(1),
+        ))
+    }
     fn connection_type(&self) -> ConnType {
         ConnType::WebSocket
     }
@@ -169,6 +200,16 @@ impl WireHandle for BlockingWire {
 
 #[async_trait::async_trait]
 impl WireHandle for CommitRaceWire {
+    fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+        crate::transport::SecureChannelState::Verified
+    }
+    fn verified_peer_context(
+        &self,
+    ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+        Some(std::sync::Arc::new(
+            crate::transport::secure_channel::test_context(1),
+        ))
+    }
     fn connection_type(&self) -> ConnType {
         ConnType::WebSocket
     }
@@ -200,6 +241,16 @@ impl WireHandle for CommitRaceWire {
 
 #[async_trait::async_trait]
 impl WireHandle for MockWire {
+    fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+        crate::transport::SecureChannelState::Verified
+    }
+    fn verified_peer_context(
+        &self,
+    ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+        Some(std::sync::Arc::new(
+            crate::transport::secure_channel::test_context(1),
+        ))
+    }
     fn connection_type(&self) -> ConnType {
         self.conn_type
     }
@@ -582,7 +633,7 @@ async fn unverified_wire_does_not_surface_as_ready() {
 }
 
 // ── Secure-channel seam: state machine, transitions, data-plane gate ──────
-// RFC-0563 review (alinejun): the gate must be honest (LegacyBypass, not
+// RFC-0563 review (alinejun): the gate must be honest (New, not
 // Verified), transitions observable by the pool, and the data plane gated by
 // a generation-bound secure_epoch.
 
@@ -623,7 +674,11 @@ impl SecuredMockWire {
     fn new(conn_type: ConnType, initial: SecureChannelState) -> Self {
         Self {
             conn_type,
-            secure: SecureCell::new(initial),
+            secure: if initial.is_sendable() {
+                SecureCell::new_verified(test_context(1))
+            } else {
+                SecureCell::new(initial)
+            },
         }
     }
 }
@@ -637,6 +692,12 @@ impl WireHandle for SecuredMockWire {
         1
     }
     async fn connect(&self) -> NetworkResult<()> {
+        while !self.secure.is_io_sendable() {
+            let epoch = self.secure.epoch();
+            if !self.secure.is_io_sendable() {
+                self.secure.wait_after(epoch).await;
+            }
+        }
         Ok(())
     }
     fn is_connected(&self) -> bool {
@@ -651,6 +712,9 @@ impl WireHandle for SecuredMockWire {
             Arc::new(EchoLane::default()),
             self.secure.clone(),
         )))
+    }
+    fn verified_peer_context(&self) -> Option<Arc<crate::transport::VerifiedPeerContext>> {
+        self.secure.verified_peer()
     }
     fn secure_channel_state(&self) -> SecureChannelState {
         self.secure.state()
@@ -676,17 +740,13 @@ async fn handshaking_to_verified_wakes_watch_ready_once() {
     let cell = wire.secure.clone();
     pool.add_connection(wire).await;
 
-    // Slot is committed Ready, but secure state is Handshaking (not sendable),
-    // so the ready set stays empty — no broadcast yet.
+    // The ready set stays empty while the wire is handshaking.
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(!rx.borrow().contains(&ConnType::WebSocket));
 
     // Async transition: the pool's listener task must observe this and
     // re-broadcast, surfacing the wire as ready.
-    assert!(cell.set_state_validated(
-        SecureChannelState::Handshaking,
-        SecureChannelState::Verified,
-    ));
+    assert!(cell.publish_verified(SecureChannelState::Handshaking, test_context(1)));
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             if rx.borrow().contains(&ConnType::WebSocket) {
@@ -759,29 +819,14 @@ async fn verified_to_rekeying_removes_readiness_and_blocks_acquired_lane() {
     .expect("Rekeying wire must drop out of the ready set");
 }
 
-/// Review test 3: an unwrapped wire reports `LegacyBypass`, not `Verified`,
-/// and is sendable via `LegacyBypass` only.
+/// A wire with no authenticated context cannot claim application readiness.
 #[tokio::test]
-async fn unwrapped_wire_is_legacy_bypass_not_verified() {
-    let wire = MockWire {
+async fn unwrapped_wire_is_not_verified() {
+    let wire = UnverifiedWire {
         conn_type: ConnType::WebSocket,
-        succeed: true,
-        identity: None,
+        secure_state: SecureChannelState::Verified,
     };
-    assert_eq!(
-        wire.secure_channel_state(),
-        SecureChannelState::LegacyBypass,
-        "unwrapped wire must not claim Verified"
-    );
-    assert!(
-        wire.secure_channel_state().is_sendable(),
-        "LegacyBypass must be sendable in phase 2"
-    );
-    assert_ne!(
-        wire.secure_channel_state(),
-        SecureChannelState::Verified,
-        "LegacyBypass must be distinct from Verified"
-    );
+    assert!(!wire.is_verified());
 }
 
 /// Review test 4: repeated lookup of one physical connection preserves its
@@ -799,10 +844,7 @@ async fn repeated_lookup_preserves_secure_state_and_epoch() {
     assert_eq!(view_a.epoch(), view_b.epoch());
 
     // Advance via one view (simulating a handshake driven through one lookup).
-    assert!(view_a.set_state_validated(
-        SecureChannelState::Handshaking,
-        SecureChannelState::Verified,
-    ));
+    assert!(view_a.publish_verified(SecureChannelState::Handshaking, test_context(1)));
 
     // The other view — representing a second `existing_connections` lookup of
     // the same physical session — observes the new state and epoch.
@@ -1075,6 +1117,10 @@ impl WireHandle for TransitionBetweenBroadcastAndArmWire {
         1
     }
     async fn connect(&self) -> NetworkResult<()> {
+        assert!(
+            self.secure
+                .publish_verified(SecureChannelState::Handshaking, test_context(1))
+        );
         Ok(())
     }
     fn is_connected(&self) -> bool {
@@ -1086,15 +1132,25 @@ impl WireHandle for TransitionBetweenBroadcastAndArmWire {
     async fn get_lane(&self, _: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
         Err(NetworkError::NotImplemented("mock has no lane".into()))
     }
+    fn verified_peer_context(&self) -> Option<Arc<crate::transport::VerifiedPeerContext>> {
+        self.secure.verified_peer()
+    }
     fn secure_channel_state(&self) -> SecureChannelState {
         let n = self
             .state_checks
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
             + 1;
         if n == 2 {
-            let _ = self.secure.set_state_validated(
-                SecureChannelState::Handshaking,
-                SecureChannelState::Verified,
+            assert!(
+                self.secure.set_state_validated(
+                    SecureChannelState::Verified,
+                    SecureChannelState::Rekeying
+                )
+            );
+        } else if n == 3 {
+            assert!(
+                self.secure
+                    .publish_verified(SecureChannelState::Rekeying, test_context(2))
             );
         }
         self.secure.state()
@@ -1179,15 +1235,12 @@ async fn terminal_before_listener_arm_exits_without_parking() {
     let pool = WirePool::new(fast_retry());
     let rx = pool.watch_ready();
 
-    // `Closed` is a true terminal state (`is_terminal`); `LegacyBypass` is a
-    // live phase-2 sendable state and would legitimately park the listener.
     let wire = Arc::new(TerminalBeforeArmWire {
         secure: SecureCell::new(SecureChannelState::Closed),
     });
     pool.add_connection(wire.clone()).await;
 
-    // The wire committed Ready (connect returned Ok) but is terminal → it must
-    // never appear in the ready set.
+    // A wire that has already closed cannot be published as ready.
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(
         !rx.borrow().contains(&ConnType::WebSocket),
@@ -1213,7 +1266,7 @@ async fn terminal_before_listener_arm_exits_without_parking() {
 // ── Connect-retry vs terminal Failed (RFC-0563 re-review) ───────────────
 
 /// Wire that fails its first connect attempt and succeeds afterwards. Its
-/// secure cell stays at the pre-connect state (`LegacyBypass`) — mirroring the
+/// secure cell stays at the pre-connect state (`New`) — mirroring the
 /// fixed contract where a single failed attempt must NOT drive terminal
 /// `Failed` (the pool retries this same object).
 #[derive(Debug)]
@@ -1239,6 +1292,14 @@ impl WireHandle for FailOnceThenSucceedWire {
         if self.fail_forever || n == 1 {
             return Err(NetworkError::ConnectionError("first attempt fails".into()));
         }
+        assert!(
+            self.secure
+                .set_state_validated(SecureChannelState::New, SecureChannelState::Handshaking)
+        );
+        assert!(
+            self.secure
+                .publish_verified(SecureChannelState::Handshaking, test_context(1))
+        );
         Ok(())
     }
     fn is_connected(&self) -> bool {
@@ -1249,6 +1310,9 @@ impl WireHandle for FailOnceThenSucceedWire {
     }
     async fn get_lane(&self, _: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
         Err(NetworkError::NotImplemented("mock has no lane".into()))
+    }
+    fn verified_peer_context(&self) -> Option<Arc<crate::transport::VerifiedPeerContext>> {
+        self.secure.verified_peer()
     }
     fn secure_channel_state(&self) -> SecureChannelState {
         self.secure.state()
@@ -1279,7 +1343,7 @@ async fn first_connect_failure_then_retry_success_stays_sendable() {
 
     let wire = Arc::new(FailOnceThenSucceedWire {
         attempts: std::sync::atomic::AtomicUsize::new(0),
-        secure: SecureCell::new(SecureChannelState::LegacyBypass),
+        secure: SecureCell::new(SecureChannelState::New),
         fail_forever: false,
     });
     let secure = wire.secure.clone();
@@ -1293,7 +1357,7 @@ async fn first_connect_failure_then_retry_success_stays_sendable() {
     .await
     .expect("retry after a failed attempt must surface the wire as ready");
 
-    assert_eq!(secure.state(), SecureChannelState::LegacyBypass);
+    assert_eq!(secure.state(), SecureChannelState::Verified);
     assert!(
         secure.state().is_sendable(),
         "a single failed attempt must not leave the session terminal"
@@ -1313,7 +1377,7 @@ async fn retry_exhaustion_marks_secure_failed() {
 
     let wire = Arc::new(FailOnceThenSucceedWire {
         attempts: std::sync::atomic::AtomicUsize::new(0),
-        secure: SecureCell::new(SecureChannelState::LegacyBypass),
+        secure: SecureCell::new(SecureChannelState::New),
         fail_forever: true,
     });
     let secure = wire.secure.clone();
@@ -1367,7 +1431,7 @@ async fn pending_receive_crossing_rekey_errors_without_delivery() {
         rx: tokio::sync::Mutex::new(rx),
         recv_started: tokio::sync::Notify::new(),
     });
-    let cell = SecureCell::new(SecureChannelState::Verified);
+    let cell = SecureCell::new_verified(crate::transport::secure_channel::test_context(1));
     let lane = Arc::new(SecureDataLane::new(lane_inner.clone(), cell.clone()));
 
     let recv_task = tokio::spawn(async move { lane.recv().await });
@@ -1401,7 +1465,7 @@ async fn pending_receive_crossing_rekey_errors_without_delivery() {
 /// the caller on a readiness that can never arrive instead of evicting.
 #[tokio::test]
 async fn held_lane_over_terminal_wire_surfaces_connection_closed() {
-    let cell = SecureCell::new(SecureChannelState::Verified);
+    let cell = SecureCell::new_verified(crate::transport::secure_channel::test_context(1));
     let lane = SecureDataLane::new(Arc::new(EchoLane::default()), cell.clone());
 
     // Terminal transition bumps the epoch (drive_terminal → set_state_validated),
@@ -1422,7 +1486,7 @@ async fn terminal_websocket_is_not_a_live_candidate() {
     let pool = WirePool::new(fast_retry());
     let wire = Arc::new(SecuredMockWire::new(
         ConnType::WebSocket,
-        SecureChannelState::LegacyBypass,
+        SecureChannelState::Verified,
     ));
     let cell = wire.secure.clone();
     let mut ready = pool.watch_ready();

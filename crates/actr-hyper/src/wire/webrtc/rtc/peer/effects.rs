@@ -32,6 +32,9 @@ pub(crate) trait SessionOps: Send + Sync {
     async fn create_answer(&self) -> Result<RTCSessionDescription, RtcError>;
     async fn set_local_description(&self, desc: RTCSessionDescription) -> Result<(), RtcError>;
     async fn set_remote_description(&self, desc: RTCSessionDescription) -> Result<(), RtcError>;
+    async fn dtls_fingerprints(&self) -> Result<(String, String), RtcError> {
+        Err(RtcError::Other("no WebRTC DTLS binding".into()))
+    }
     async fn add_ice_candidate(&self, candidate: RTCIceCandidateInit) -> Result<(), RtcError>;
     async fn restart_ice(&self) -> Result<(), RtcError>;
     /// S5-6: refresh the ICE server / TURN credential configuration in-place
@@ -67,11 +70,20 @@ pub(crate) trait SessionOps: Send + Sync {
 /// Production `SessionOps`: forwards to the real RTC `PeerConnection`.
 pub(crate) struct RealSessionOps {
     pc: Arc<dyn PeerConnection>,
+    fingerprints: tokio::sync::Mutex<Option<(String, String)>>,
 }
 
 impl RealSessionOps {
     pub(crate) fn new(pc: Arc<dyn PeerConnection>) -> Self {
-        Self { pc }
+        Self {
+            pc,
+            fingerprints: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    fn fingerprint(desc: &RTCSessionDescription) -> Result<String, RtcError> {
+        actr_relay_security::dtls_fingerprint(&desc.sdp)
+            .map_err(|err| RtcError::Other(err.to_string()))
     }
 
     /// The underlying real connection (used for data-channel creation and stats
@@ -92,7 +104,14 @@ impl SessionOps for RealSessionOps {
     }
     async fn set_local_description(&self, desc: RTCSessionDescription) -> Result<(), RtcError> {
         let expected_type = desc.sdp_type;
+        let fingerprints = self.fingerprints.lock().await;
+        if let Some(bound) = fingerprints.as_ref()
+            && Self::fingerprint(&desc)? != bound.0
+        {
+            return Err(RtcError::Other("WebRTC DTLS fingerprint changed".into()));
+        }
         self.pc.set_local_description(desc).await?;
+        drop(fingerprints);
         // Reconcile through the RTC current/pending description accessors.
         // Which slot is populated depends on the signaling state, so accept
         // either, but never report a successful operation when the driver has
@@ -115,7 +134,14 @@ impl SessionOps for RealSessionOps {
     }
     async fn set_remote_description(&self, desc: RTCSessionDescription) -> Result<(), RtcError> {
         let expected_type = desc.sdp_type;
+        let fingerprints = self.fingerprints.lock().await;
+        if let Some(bound) = fingerprints.as_ref()
+            && Self::fingerprint(&desc)? != bound.1
+        {
+            return Err(RtcError::Other("WebRTC DTLS fingerprint changed".into()));
+        }
         self.pc.set_remote_description(desc).await?;
+        drop(fingerprints);
         let remote = self.pc.remote_description().await;
         let current = self.pc.current_remote_description().await;
         let pending = self.pc.pending_remote_description().await;
@@ -136,6 +162,20 @@ impl SessionOps for RealSessionOps {
         tracing::trace!(?can_trickle, "reconciled RTC remote description");
         Ok(())
     }
+    async fn dtls_fingerprints(&self) -> Result<(String, String), RtcError> {
+        let mut fingerprints = self.fingerprints.lock().await;
+        let local = self.pc.current_local_description().await;
+        let remote = self.pc.current_remote_description().await;
+        let (Some(local), Some(remote)) = (local, remote) else {
+            return Err(RtcError::Other(
+                "WebRTC DTLS descriptions are missing".into(),
+            ));
+        };
+        let pair = (Self::fingerprint(&local)?, Self::fingerprint(&remote)?);
+        *fingerprints = Some(pair.clone());
+        Ok(pair)
+    }
+
     async fn add_ice_candidate(&self, candidate: RTCIceCandidateInit) -> Result<(), RtcError> {
         self.pc.add_ice_candidate(candidate).await
     }

@@ -482,20 +482,24 @@ async fn send_envelope_to_caller(
     // Promote responses too: retaining the relay receive path must not pin
     // every reply to WSS after direct ICE becomes usable.
     let direct = if let Some(manager) = rtc_route {
-        manager.get_controller(caller).await.filter(|handle| {
+        manager.get_controller(caller).await.and_then(|handle| {
             let snapshot = handle.snapshot();
-            snapshot.sendable
+            let generation = snapshot.pc_generation;
+            (snapshot.sendable
                 && snapshot.network_path == crate::wire::webrtc::rtc::status::NetworkPath::Direct
+                && handle.secure_cell_for(generation).is_io_sendable())
+            .then_some((handle, generation))
         })
     } else {
         None
     };
-    let direct_send = direct.map(|handle| {
+    let direct_send = direct.map(|(handle, generation)| {
         let payload = Bytes::from(response_envelope.encode_to_vec());
         async move {
             handle
                 .send_with_progress(
                     crate::wire::webrtc::rtc::status::LaneKind::RpcReliable,
+                    generation,
                     payload,
                     false,
                 )
@@ -527,17 +531,30 @@ async fn send_envelope_to_caller(
                 CALLER_SENDABLE_WAIT,
                 async {
                     loop {
-                        if rx.borrow().sendable {
+                        let epoch = handle.secure_epoch();
+                        let snapshot = rx.borrow_and_update().clone();
+                        if snapshot.sendable
+                            && handle
+                                .secure_cell_for(snapshot.pc_generation)
+                                .is_io_sendable()
+                        {
                             return;
                         }
-                        if rx.changed().await.is_err() {
-                            return;
+                        tokio::select! {
+                            update = rx.changed() => {
+                                if update.is_err() { return; }
+                            }
+                            _ = handle.await_secure_state_change(epoch) => {}
                         }
                     }
                 },
             )
             .await;
-            let sendable = handle.snapshot().sendable;
+            let snapshot = handle.snapshot();
+            let sendable = snapshot.sendable
+                && handle
+                    .secure_cell_for(snapshot.pc_generation)
+                    .is_io_sendable();
             if waited.is_ok() && sendable {
                 let mut buf = Vec::new();
                 match response_envelope.encode(&mut buf) {
@@ -3635,6 +3652,24 @@ impl Inner {
 
             // Construct the RTC manager, controllers, and recovery stack as
             // one unit sharing the node's identity and inbound dispatch.
+            let relay_gate = Arc::new(crate::wire::websocket::WebSocketGate::new_relay(
+                pending_requests.clone(),
+                self.data_chunk_registry.clone(),
+                self.peer_types.clone(),
+            ));
+            let relay_client = crate::wire::relay::RelayClient::new(
+                self.config.signaling_url.to_string(),
+                self.config.issuer_endpoint.clone(),
+                client_key.clone(),
+                session_state.clone(),
+                relay_gate.clone(),
+                self.shutdown_token.clone(),
+                Some(actor_storage_root.clone()),
+                self.actor_key_namespace.clone(),
+                Some(credential_manager.clone()),
+            );
+            relay_gate.set_handover(handover.clone());
+
             let (rtc_manager, rtc_local_id, rtc_mailbox_slot): (
                 Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
                 crate::wire::webrtc::rtc::signaling::SharedLocalId,
@@ -3756,7 +3791,12 @@ impl Inner {
                         )),
                         buffer_config,
                     )
-                    .with_media_registry(media_frame_registry.clone()),
+                    .with_media_registry(media_frame_registry.clone())
+                    .with_actor_channel_identity(
+                        rtc::peer::authentication::ActorChannelCredentials::Enrollment(
+                            relay_client.clone(),
+                        ),
+                    ),
                 );
                 // Issuer rotates the HMAC TURN credential together with the actor
                 // credential. Apply the new value to live RTC sessions via
@@ -3884,23 +3924,6 @@ impl Inner {
             // Create DefaultWireBuilder with the configured wire transports
             use crate::transport::{DefaultWireBuilder, DefaultWireBuilderConfig};
 
-            let relay_gate = Arc::new(crate::wire::websocket::WebSocketGate::new_relay(
-                pending_requests.clone(),
-                self.data_chunk_registry.clone(),
-                self.peer_types.clone(),
-            ));
-            let relay_client = crate::wire::relay::RelayClient::new(
-                self.config.signaling_url.to_string(),
-                self.config.issuer_endpoint.clone(),
-                client_key.clone(),
-                session_state.clone(),
-                relay_gate.clone(),
-                self.shutdown_token.clone(),
-                Some(actor_storage_root.clone()),
-                self.actor_key_namespace.clone(),
-                Some(credential_manager.clone()),
-            );
-            relay_gate.set_handover(handover.clone());
             let wire_builder = Arc::new(
                 DefaultWireBuilder::new(DefaultWireBuilderConfig::default())
                     .with_rtc_manager(rtc_manager.clone())

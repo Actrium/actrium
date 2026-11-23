@@ -58,17 +58,6 @@ impl InboundDispatcher {
     /// RPC lanes decode the `RpcEnvelope` and route by direction; stream lanes
     /// decode the `DataChunk` and dispatch to the registry. Misclassified or
     /// undecodable payloads are logged and dropped.
-    pub(crate) async fn dispatch(
-        &self,
-        from_bytes: Vec<u8>,
-        data: Bytes,
-        payload_type: PayloadType,
-        mailbox: &Arc<dyn Mailbox>,
-    ) {
-        self.dispatch_with_context(from_bytes, data, None, payload_type, mailbox)
-            .await;
-    }
-
     pub(crate) async fn dispatch_with_context(
         &self,
         from_bytes: Vec<u8>,

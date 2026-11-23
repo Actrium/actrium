@@ -93,6 +93,29 @@ impl WirePool {
         });
     }
 
+    /// The worker has already authenticated the physical WebRTC port.
+    pub(crate) fn adopt_verified_rtc(
+        &self,
+        rtc: super::wire_handle::WebRtcConnection,
+    ) -> WebResult<()> {
+        if !rtc.is_connected() {
+            return Err(actr_web_common::WebError::Transport(
+                "WebRTC Actor channel is unverified".into(),
+            ));
+        }
+        let conn_type = ConnType::WebRTC;
+        let mut slots = self.connections.lock();
+        if let Some(WireStatus::Ready(WireHandle::WebRTC(previous))) = &slots[conn_type.as_index()]
+        {
+            previous.revoke_verified_port();
+        }
+        slots[conn_type.as_index()] = Some(WireStatus::Ready(WireHandle::WebRTC(rtc)));
+        self.ready_set.lock().insert(conn_type);
+        drop(slots);
+        Self::notify_all(&self.change_notifiers);
+        Ok(())
+    }
+
     /// Get the connection for a specific type.
     pub async fn get_connection(&self, conn_type: ConnType) -> Option<WireHandle> {
         let conns = self.connections.lock();
@@ -100,6 +123,22 @@ impl WirePool {
             Some(handle.clone())
         } else {
             None
+        }
+    }
+
+    pub(crate) fn set_rtc_reachable(&self, reachable: bool) {
+        let conns = self.connections.lock();
+        if let Some(WireStatus::Ready(WireHandle::WebRTC(rtc))) =
+            &conns[ConnType::WebRTC.as_index()]
+        {
+            rtc.set_reachable(reachable);
+            let mut ready = self.ready_set.lock();
+            if rtc.is_connected() {
+                ready.insert(ConnType::WebRTC);
+            } else {
+                ready.remove(&ConnType::WebRTC);
+            }
+            Self::notify_all(&self.change_notifiers);
         }
     }
 

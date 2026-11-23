@@ -73,7 +73,7 @@ struct FakeWire {
 impl FakeWire {
     fn new(conn_type: ConnType) -> Self {
         Self {
-            secure_state: std::sync::Mutex::new(crate::transport::SecureChannelState::LegacyBypass),
+            secure_state: std::sync::Mutex::new(crate::transport::SecureChannelState::Verified),
             recordings: Arc::default(),
             conn_type,
             connect_fails: false,
@@ -133,6 +133,13 @@ impl FakeWire {
 
 #[async_trait]
 impl WireHandle for FakeWire {
+    fn verified_peer_context(
+        &self,
+    ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+        Some(std::sync::Arc::new(
+            crate::transport::secure_channel::test_context(1),
+        ))
+    }
     fn connection_type(&self) -> ConnType {
         self.conn_type
     }
@@ -534,6 +541,16 @@ async fn generic_error_with_closed_text_does_not_trigger_stale_self_heal() {
 
     #[async_trait]
     impl WireHandle for GenericClosedTextWire {
+        fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+            crate::transport::SecureChannelState::Verified
+        }
+        fn verified_peer_context(
+            &self,
+        ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+            Some(std::sync::Arc::new(
+                crate::transport::secure_channel::test_context(1),
+            ))
+        }
         fn connection_type(&self) -> ConnType {
             ConnType::WebRTC
         }
@@ -647,6 +664,16 @@ struct RekeyRecoveryWire {
 
 #[async_trait]
 impl WireHandle for RekeyRecoveryWire {
+    fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+        crate::transport::SecureChannelState::Verified
+    }
+    fn verified_peer_context(
+        &self,
+    ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+        Some(std::sync::Arc::new(
+            crate::transport::secure_channel::test_context(1),
+        ))
+    }
     fn connection_type(&self) -> ConnType {
         self.conn_type
     }
@@ -726,6 +753,16 @@ struct StaticLaneWire {
 
 #[async_trait]
 impl WireHandle for StaticLaneWire {
+    fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+        crate::transport::SecureChannelState::Verified
+    }
+    fn verified_peer_context(
+        &self,
+    ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+        Some(std::sync::Arc::new(
+            crate::transport::secure_channel::test_context(1),
+        ))
+    }
     fn connection_type(&self) -> ConnType {
         self.conn_type
     }

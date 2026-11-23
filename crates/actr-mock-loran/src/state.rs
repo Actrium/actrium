@@ -83,9 +83,6 @@ pub struct MockState {
     pub disconnection_count: Arc<AtomicU32>,
     pub received_messages: Mutex<Vec<SignalingEnvelope>>,
     pub relay_enrollment_unavailable: AtomicBool,
-    /// When enabled, relay enrollment also mints an Actor channel certificate
-    /// so peers establish verified ActorChannelSessions instead of legacy.
-    pub actor_certificates_enabled: AtomicBool,
 }
 
 impl MockState {
@@ -122,7 +119,6 @@ impl MockState {
             disconnection_count: Arc::new(AtomicU32::new(0)),
             received_messages: Mutex::new(Vec::new()),
             relay_enrollment_unavailable: AtomicBool::new(false),
-            actor_certificates_enabled: AtomicBool::new(false),
         }
     }
 

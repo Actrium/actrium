@@ -32,11 +32,6 @@ pub(crate) enum ControllerGone {
     Gone,
 }
 
-struct SecureGenerationCell {
-    pc_generation: u64,
-    cell: crate::transport::SecureCell,
-}
-
 /// A cheap, cloneable handle to one peer's controller.
 #[derive(Clone)]
 pub(crate) struct RtcPeerControllerHandle {
@@ -65,15 +60,10 @@ pub(crate) struct RtcPeerControllerHandle {
     /// mailbox boundary, before the bounded `try_send` result is returned.
     #[cfg(test)]
     business_recovery_hint_attempts: Arc<AtomicUsize>,
-    /// S6-10: outbound media writers by track id (the media data plane —
-    /// writers bypass the controller after registration, like lane sends).
+    /// Outbound media writers are bound to the PC generation that owns them.
     media_writers:
-        Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<OutboundTrackWriter>>>>,
-    /// Session-generation secure state shared by every transport handle
-    /// materialized for this controller. When Hard Recovery publishes a new
-    /// PC generation, the prior cell is closed and a fresh explicit
-    /// LegacyBypass cell is installed for the replacement Session.
-    secure: Arc<std::sync::Mutex<SecureGenerationCell>>,
+        Arc<std::sync::Mutex<std::collections::HashMap<String, (u64, Arc<OutboundTrackWriter>)>>>,
+    security: Arc<super::session::InboundGenerationGate>,
     /// Outbound message-size cap shared with the receiver's reassembly
     /// limits (both derive from `RtcBufferConfig::max_inbound_message_bytes`).
     /// A payload above it would be fragmented, sent, and then rejected by the
@@ -94,9 +84,9 @@ impl RtcPeerControllerHandle {
         event_mailbox: crate::wire::webrtc::rtc::events::PeerEventMailbox,
         lanes: ActiveLaneRegistry,
         effect_port: Arc<dyn super::effect_port::RtcPeerEffectPort>,
+        security: Arc<super::session::InboundGenerationGate>,
         max_message_bytes: usize,
     ) -> Self {
-        let initial_pc_generation = snapshot_rx.borrow().pc_generation;
         Self {
             peer_id,
             controller_lifecycle_id,
@@ -111,34 +101,17 @@ impl RtcPeerControllerHandle {
             #[cfg(test)]
             business_recovery_hint_attempts: Arc::new(AtomicUsize::new(0)),
             media_writers: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            secure: Arc::new(std::sync::Mutex::new(SecureGenerationCell {
-                pc_generation: initial_pc_generation,
-                cell: crate::transport::SecureCell::new(
-                    crate::transport::SecureChannelState::LegacyBypass,
-                ),
-            })),
+            security,
             max_message_bytes,
         }
     }
 
     pub(crate) fn secure_cell(&self) -> crate::transport::SecureCell {
-        let pc_generation = self.snapshot().pc_generation;
-        let mut secure = self
-            .secure
-            .lock()
-            .expect("RTC secure-generation lock poisoned");
-        if secure.pc_generation != pc_generation {
-            secure
-                .cell
-                .drive_terminal(crate::transport::SecureChannelState::Closed);
-            *secure = SecureGenerationCell {
-                pc_generation,
-                cell: crate::transport::SecureCell::new(
-                    crate::transport::SecureChannelState::LegacyBypass,
-                ),
-            };
-        }
-        secure.cell.clone()
+        self.secure_cell_for(self.snapshot().pc_generation)
+    }
+
+    pub(crate) fn secure_cell_for(&self, generation: u64) -> crate::transport::SecureCell {
+        self.security.security(generation)
     }
 
     pub(crate) fn secure_state(&self) -> crate::transport::SecureChannelState {
@@ -146,22 +119,21 @@ impl RtcPeerControllerHandle {
     }
 
     pub(crate) fn secure_epoch(&self) -> u64 {
-        self.snapshot().revision
+        let snapshot = self.snapshot();
+        let epoch = self.security.security(snapshot.pc_generation).epoch();
+        // The snapshot revision orders physical sessions, even when each
+        // new session starts its secure epoch at zero.
+        (snapshot.revision << 32) | (epoch & u64::from(u32::MAX))
     }
 
     pub(crate) async fn await_secure_state_change(&self, observed_epoch: u64) {
         let mut snapshot_rx = self.subscribe();
-        // `subscribe()` clones the handle's long-lived receiver, whose seen
-        // watermark never advances (`snapshot()` uses plain `borrow()`), so
-        // `changed()` on a fresh clone is immediately ready after any publish
-        // and the caller would spin instead of parking. `borrow_and_update()`
-        // marks the current revision seen; `changed()` then waits for the
-        // next publish past it.
-        if snapshot_rx.borrow_and_update().revision > observed_epoch {
+        let snapshot = snapshot_rx.borrow_and_update().clone();
+        let cell = self.security.security(snapshot.pc_generation);
+        let cell_epoch = cell.epoch();
+        if ((snapshot.revision << 32) | (cell_epoch & u64::from(u32::MAX))) != observed_epoch {
             return;
         }
-        let cell = self.secure_cell();
-        let cell_epoch = cell.epoch();
         tokio::select! {
             _ = snapshot_rx.changed() => {}
             _ = cell.wait_after(cell_epoch) => {}
@@ -291,19 +263,20 @@ impl RtcPeerControllerHandle {
         lane: LaneKind,
         payload: bytes::Bytes,
     ) -> Result<(), RtcSendError> {
-        let permit = self.permit_for(lane).await?;
+        let permit = self.permit_for(lane, self.snapshot().pc_generation).await?;
         self.send_with_permit(&permit, payload, false).await
     }
 
     /// Latency-first non-blocking send (RFC: "the latency-first Lane MAY fail
     /// fast with `try_send()`"). Fails fast with `DataChannelBufferFull` when the
     /// send buffer is full rather than blocking.
+    #[cfg(test)]
     pub(crate) async fn try_send(
         &self,
         lane: LaneKind,
         payload: bytes::Bytes,
     ) -> Result<(), RtcSendError> {
-        let permit = self.permit_for(lane).await?;
+        let permit = self.permit_for(lane, self.snapshot().pc_generation).await?;
         self.send_with_permit(&permit, payload, true).await
     }
 
@@ -313,13 +286,13 @@ impl RtcPeerControllerHandle {
     pub(crate) async fn send_with_progress(
         &self,
         lane: LaneKind,
+        generation: u64,
         payload: bytes::Bytes,
         non_blocking: bool,
     ) -> RtcSendAttempt {
-        let result = if non_blocking {
-            self.try_send(lane, payload).await
-        } else {
-            self.send(lane, payload).await
+        let result = match self.permit_for(lane, generation).await {
+            Ok(permit) => self.send_with_permit(&permit, payload, non_blocking).await,
+            Err(error) => Err(error),
         };
         RtcSendAttempt::from_result(result)
     }
@@ -341,6 +314,11 @@ impl RtcPeerControllerHandle {
         non_blocking: bool,
     ) -> Result<(), RtcSendError> {
         use crate::transport::{DC_MAX_PAYLOAD_SIZE, FRAGMENT_HEADER_SIZE, encode_fragment_header};
+        let secure = self.security.security(permit.generation());
+        let epoch = secure.epoch();
+        if !secure.is_io_sendable() || !permit.is_valid(self.snapshot().pc_generation) {
+            return Err(RtcSendError::ConnectionNotReady);
+        }
 
         // Shared outbound cap: the receiver's reassembly rejects anything
         // above `max_inbound_message_bytes` after the sender already reported
@@ -349,6 +327,19 @@ impl RtcPeerControllerHandle {
             return Err(RtcSendError::MessageTooLarge);
         }
 
+        let send_frame = |frame| async {
+            tokio::select! {
+                biased;
+                _ = secure.wait_after(epoch) => Err(RtcSendError::DataChunkDeliveryUncertain),
+                result = async {
+                    if non_blocking {
+                        permit.channel().try_send(frame).await
+                    } else {
+                        permit.channel().send(frame).await
+                    }
+                } => Ok(result),
+            }
+        };
         let msg_id = self.msg_id_counter.fetch_add(1, Ordering::Relaxed);
         let data_len = payload.len();
 
@@ -358,11 +349,7 @@ impl RtcPeerControllerHandle {
             encode_fragment_header(&mut buf, msg_id, 0, 1);
             buf.extend_from_slice(&payload);
             let frame = bytes::BytesMut::from(&buf[..]);
-            let result = if non_blocking {
-                permit.channel().try_send(frame).await
-            } else {
-                permit.channel().send(frame).await
-            };
+            let result = send_frame(frame).await?;
             match result {
                 Ok(()) => Ok(()),
                 Err(e) => Err(self.map_send_outcome(permit, e, false).await),
@@ -385,8 +372,10 @@ impl RtcPeerControllerHandle {
                 "RTC fragmenting message"
             );
             for (frag_index, chunk) in payload.chunks(DC_MAX_PAYLOAD_SIZE).enumerate() {
-                let generation_current = permit.is_valid(self.snapshot().pc_generation);
                 let ready_state = permit.channel().ready_state().await;
+                let generation_current = permit.is_valid(self.snapshot().pc_generation)
+                    && secure.epoch() == epoch
+                    && secure.is_io_sendable();
                 let channel_open = matches!(
                     ready_state,
                     Ok(webrtc::data_channel::RTCDataChannelState::Open)
@@ -421,11 +410,7 @@ impl RtcPeerControllerHandle {
                 encode_fragment_header(&mut buf, msg_id, frag_index as u16, total_frags);
                 buf.extend_from_slice(chunk);
                 let frame = bytes::BytesMut::from(&buf[..]);
-                let result = if non_blocking {
-                    permit.channel().try_send(frame).await
-                } else {
-                    permit.channel().send(frame).await
-                };
+                let result = send_frame(frame).await?;
                 if let Err(e) = result {
                     return Err(self.map_send_outcome(permit, e, sent_any).await);
                 }
@@ -515,10 +500,20 @@ impl RtcPeerControllerHandle {
     /// Build + validate a `SendPermit` for a lane: `Snapshot.sendable` preflight,
     /// get-or-lazily-create the lane handle, and re-validate generation +
     /// cancellation (RFC §"Send path and SendPermit" steps 2/3/4/5).
-    async fn permit_for(&self, lane: LaneKind) -> Result<super::send::SendPermit, RtcSendError> {
+    async fn permit_for(
+        &self,
+        lane: LaneKind,
+        generation: u64,
+    ) -> Result<super::send::SendPermit, RtcSendError> {
         // Preflight: the peer must be sendable per the authoritative snapshot.
         let snapshot = self.snapshot();
-        if !snapshot.sendable {
+        if !snapshot.sendable
+            || snapshot.pc_generation != generation
+            || !self
+                .security
+                .security(snapshot.pc_generation)
+                .is_io_sendable()
+        {
             tracing::trace!(
                 peer = %self.peer_id().to_string_repr(),
                 ?lane,
@@ -757,28 +752,36 @@ impl RtcPeerControllerHandle {
         codec: &str,
         media_type: &str,
     ) -> Result<(), String> {
+        let generation = self.snapshot().pc_generation;
+        if !self.security.security(generation).is_io_sendable() {
+            return Err("WebRTC Actor channel is unverified".into());
+        }
         if self
             .media_writers
             .lock()
             .expect("media writers lock")
-            .contains_key(track_id)
+            .get(track_id)
+            .is_some_and(|(current, _)| *current == generation)
         {
             return Ok(());
         }
         let writer = Arc::new(OutboundTrackWriter::new(track_id, codec, media_type)?);
         let sender = self.add_track(writer.track()).await?;
+        if self.snapshot().pc_generation != generation {
+            return Err("WebRTC media session changed during track setup".into());
+        }
         writer.set_sender(sender);
         self.media_writers
             .lock()
             .expect("media writers lock")
-            .insert(track_id.to_string(), writer);
+            .insert(track_id.to_string(), (generation, writer));
         Ok(())
     }
 
     /// Remove a media track: unregister the writer and remove the track from
     /// the active session (triggers renegotiation).
     pub(crate) async fn remove_media_track(&self, track_id: &str) -> Result<(), String> {
-        let writer = self
+        let (_, writer) = self
             .media_writers
             .lock()
             .expect("media writers lock")
@@ -797,14 +800,23 @@ impl RtcPeerControllerHandle {
         track_id: &str,
         sample: &actr_framework::MediaSample,
     ) -> Result<(), String> {
-        let writer = self
+        let (generation, writer) = self
             .media_writers
             .lock()
             .expect("media writers lock")
             .get(track_id)
             .cloned()
             .ok_or_else(|| format!("track not found: {track_id}"))?;
-        writer.write_sample(sample).await.map_err(|e| e.to_string())
+        let secure = self.security.security(generation);
+        let epoch = secure.epoch();
+        if self.snapshot().pc_generation != generation || !secure.is_io_sendable() {
+            return Err("WebRTC media track has no verified Actor channel".into());
+        }
+        tokio::select! {
+            biased;
+            _ = secure.wait_after(epoch) => Err("WebRTC media channel was retired during send".into()),
+            result = writer.write_sample(sample) => result.map_err(|error| error.to_string()),
+        }
     }
 
     /// Deliver a remote SDP offer/answer (from the signaling router).

@@ -407,9 +407,8 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
         .with_test_writer()
         .try_init();
     let mut server = TestSignalingServer::start_with_relay().await.unwrap();
-    server.enable_actor_certificates();
     // Block SDP offer/answer/ICE forwarding so data can only flow over the
-    // verified Actor channel on the relay (no legacy WebRTC bypass).
+    // verified Actor channel using the relay transport.
     server.pause_forwarding();
 
     let service_dir = TempDir::new().unwrap();

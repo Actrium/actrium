@@ -8,6 +8,7 @@ import { ServiceWorkerBridge } from './sw-bridge';
 
 export interface FastPathData {
   streamId: string;
+  connectionId: string;
   data: ArrayBuffer;
   timestamp: number;
 }
@@ -31,9 +32,10 @@ export class FastPathForwarder {
    *
    * Uses Transferable ArrayBuffer for zero-copy transfer.
    */
-  forward(streamId: string, data: ArrayBuffer): void {
+  forward(streamId: string, data: ArrayBuffer, connectionId: string): void {
     const fastPathData: FastPathData = {
       streamId,
+      connectionId,
       data,
       timestamp: Date.now(),
     };
@@ -47,9 +49,10 @@ export class FastPathForwarder {
    *
    * Buffers messages and flushes via PostMessage when batch is full or timer fires.
    */
-  forwardBatch(streamId: string, data: ArrayBuffer): void {
+  forwardBatch(streamId: string, data: ArrayBuffer, connectionId: string): void {
     this.batchQueue.push({
       streamId,
+      connectionId,
       data,
       timestamp: Date.now(),
     });
@@ -75,6 +78,7 @@ export class FastPathForwarder {
         type: 'fast_path_data',
         payload: {
           streamId: fastPathData.streamId,
+          connectionId: fastPathData.connectionId,
           data: view,
           timestamp: fastPathData.timestamp,
         },
@@ -100,6 +104,7 @@ export class FastPathForwarder {
     //  transferables
     const batchPayload = this.batchQueue.map((item) => ({
       streamId: item.streamId,
+      connectionId: item.connectionId,
       data: new Uint8Array(item.data),
       timestamp: item.timestamp,
     }));

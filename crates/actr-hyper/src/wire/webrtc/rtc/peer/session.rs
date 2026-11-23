@@ -30,7 +30,9 @@ use webrtc::media_stream::track_remote::TrackRemote;
 
 use actr_protocol::ActrId;
 
+use super::authentication::{ActorChannelCredentials, RtcAuthentication};
 use crate::inbound::MediaFrameRegistry;
+use crate::transport::{SecureCell, SecureChannelState};
 use crate::wire::webrtc::rtc::inbound::InboundRouter;
 use crate::wire::webrtc::rtc::media::TrackMeta;
 use crate::wire::webrtc::rtc::status::LaneKind;
@@ -318,19 +320,65 @@ pub(crate) struct LanePlumbing {
 #[derive(Clone)]
 pub(crate) struct InboundGenerationGate {
     admitted: watch::Sender<Option<u64>>,
+    security: Arc<std::sync::Mutex<HashMap<u64, SecureCell>>>,
 }
 
 impl InboundGenerationGate {
     pub(crate) fn new() -> Self {
         let (admitted, _) = watch::channel(None);
-        Self { admitted }
+        Self {
+            admitted,
+            security: Arc::new(std::sync::Mutex::new(HashMap::new())),
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn with_generation(generation: u64) -> Self {
         let gate = Self::new();
         gate.set(Some(generation));
+        gate.verify_for_test(generation);
         gate
+    }
+
+    pub(crate) fn register_security(&self, generation: u64) {
+        self.security
+            .lock()
+            .expect("RTC generation security lock")
+            .entry(generation)
+            .or_insert_with(|| SecureCell::new(SecureChannelState::New));
+    }
+
+    pub(crate) fn retire_security(&self, generation: u64) {
+        if let Some(cell) = self
+            .security
+            .lock()
+            .expect("RTC generation security lock")
+            .remove(&generation)
+        {
+            cell.drive_terminal(SecureChannelState::Closed);
+        }
+    }
+
+    pub(crate) fn security(&self, generation: u64) -> SecureCell {
+        self.security
+            .lock()
+            .expect("RTC generation security lock")
+            .get(&generation)
+            .cloned()
+            .unwrap_or_else(|| SecureCell::new(SecureChannelState::New))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn verify_for_test(&self, generation: u64) {
+        self.security
+            .lock()
+            .expect("RTC generation security lock")
+            .insert(
+                generation,
+                SecureCell::new_verified(crate::transport::secure_channel::test_context(
+                    generation,
+                )),
+            );
     }
 
     pub(crate) fn set(&self, generation: Option<u64>) {
@@ -502,12 +550,13 @@ const INBOUND_ADMISSION_WAIT: std::time::Duration = std::time::Duration::from_se
 /// controller as `LaneEvent`s and payloads to the inbound router. This is a
 /// plain async fn (not a spawn wrapper) so the owning session registers it in
 /// its `JoinSet` and cancels it on close.
-pub(crate) async fn lane_pump(
+pub(super) async fn lane_pump(
     generation: u64,
     lane: LaneKind,
     channel: Arc<dyn LaneDataChannel>,
     plumbing: LanePlumbing,
     cancellation: CancellationToken,
+    authentication: Option<RtcAuthentication>,
 ) {
     let LanePlumbing {
         peer_id,
@@ -534,9 +583,43 @@ pub(crate) async fn lane_pump(
     let mut admission_deadline = None;
     let mut message_admissions = InboundAdmissionCache::new(reassembly_limits.max_messages);
 
-    while let Some(event) = channel.poll().await {
+    let secure = inbound_generation.security(generation);
+    let mut authentication = authentication;
+    let mut security_deadline = authentication
+        .as_ref()
+        .map(|_| Instant::now() + std::time::Duration::from_secs(10));
+    loop {
+        let event = if let Some(deadline) = security_deadline {
+            match crate::timer::timeout_at(
+                crate::timer::ids::WEBRTC_ACTOR_AUTHENTICATION,
+                deadline,
+                channel.poll(),
+            )
+            .await
+            {
+                Ok(event) => event,
+                Err(_) => break,
+            }
+        } else {
+            channel.poll().await
+        };
+        let Some(event) = event else {
+            break;
+        };
         match event {
             E::OnOpen => {
+                if let (Some(auth), Some(deadline)) = (authentication.as_mut(), security_deadline) {
+                    let start = crate::timer::timeout_at(
+                        crate::timer::ids::WEBRTC_ACTOR_AUTHENTICATION,
+                        deadline,
+                        auth.start(&channel, &secure),
+                    )
+                    .await;
+                    if !matches!(start, Ok(Ok(()))) {
+                        tracing::warn!(?start, "WebRTC Actor authentication failed to start");
+                        break;
+                    }
+                }
                 tracing::debug!(
                     peer = %peer_id.to_string_repr(),
                     generation,
@@ -555,6 +638,33 @@ pub(crate) async fn lane_pump(
                 // Strip the 8-byte fragment header (wire-compatible with 0.14)
                 // and reassemble multi-fragment messages before dispatch.
                 let raw = message.data.freeze();
+                if let Some(record) = raw.strip_prefix(actr_relay_security::RTC_AUTH_FRAME_PREFIX) {
+                    if let (Some(auth), Some(deadline)) =
+                        (authentication.as_mut(), security_deadline)
+                    {
+                        let receive = crate::timer::timeout_at(
+                            crate::timer::ids::WEBRTC_ACTOR_AUTHENTICATION,
+                            deadline,
+                            auth.receive(record, &channel, &secure),
+                        )
+                        .await;
+                        if !matches!(receive, Ok(Ok(()))) {
+                            tracing::warn!(?receive, "WebRTC Actor authentication failed");
+                            break;
+                        }
+                        if let Some(context) = secure.verified_peer() {
+                            let seconds = context
+                                .peer_credential_expires_at_epoch_secs
+                                .saturating_sub(crate::wire::relay::now_secs());
+                            security_deadline =
+                                Some(Instant::now() + std::time::Duration::from_secs(seconds));
+                        }
+                    }
+                    continue;
+                }
+                let Some(peer_context) = secure.verified_peer() else {
+                    continue;
+                };
                 let (msg_id, frag_index, total_frags, payload) = match decode_fragment_header(raw) {
                     Ok(fragment) => fragment,
                     Err(e) => {
@@ -601,12 +711,16 @@ pub(crate) async fn lane_pump(
 
                 match admitted {
                     InboundAdmission::Admitted => {
+                        if !secure.is_io_sendable() {
+                            continue;
+                        }
                         if total_frags == 1 {
                             if !inbound.route(InboundMessage {
                                 peer: peer_id.clone(),
                                 generation,
                                 lane,
                                 payload,
+                                peer_context: Some(peer_context),
                             }) {
                                 tracing::warn!(
                                     peer = %peer_id.to_string_repr(),
@@ -632,6 +746,7 @@ pub(crate) async fn lane_pump(
                                         generation,
                                         lane,
                                         payload: complete,
+                                        peer_context: Some(peer_context),
                                     }) {
                                         tracing::warn!(
                                             peer = %peer_id.to_string_repr(),
@@ -696,12 +811,16 @@ pub(crate) async fn lane_pump(
                     ?lane,
                     "RTC data-channel lane closed"
                 );
-                let _ = lane_tx.send(LaneEvent::Closed { generation, lane }).await;
-                return;
+                break;
             }
             _ => {}
         }
     }
+    if authentication.is_some() {
+        secure.drive_terminal(SecureChannelState::Closed);
+        let _ = channel.close().await;
+    }
+    let _ = lane_tx.send(LaneEvent::Closed { generation, lane }).await;
 }
 
 /// Owns the physical resources of one PC generation.
@@ -788,15 +907,27 @@ impl PeerConnectionSession {
         lane: LaneKind,
         channel: Arc<dyn LaneDataChannel>,
         plumbing: LanePlumbing,
+        identity: Option<ActorChannelCredentials>,
     ) -> LaneHandle {
         let handle = LaneHandle::new(self.generation, lane, channel.clone(), self.cancellation());
         // Spawn the pump as a session-owned task (cancelled on close).
+        let authentication = identity
+            .filter(|_| lane == LaneKind::RpcReliable)
+            .map(|identity| {
+                RtcAuthentication::new(
+                    identity,
+                    self.ops.clone(),
+                    plumbing.peer_id.clone(),
+                    self.generation,
+                )
+            });
         self.tasks.spawn(lane_pump(
             self.generation,
             lane,
             channel.clone(),
             plumbing,
             self.cancellation(),
+            authentication,
         ));
         self.channels.insert(lane, channel);
         handle
@@ -808,9 +939,10 @@ impl PeerConnectionSession {
         resource_id: SessionResourceId,
         lane: LaneKind,
         plumbing: LanePlumbing,
+        identity: Option<ActorChannelCredentials>,
     ) -> Option<LaneHandle> {
         let channel = self.resources.take_data_channel(resource_id)?;
-        Some(self.register_channel(lane, channel, plumbing))
+        Some(self.register_channel(lane, channel, plumbing, identity))
     }
 
     pub(crate) fn has_data_channel_resource(&self, resource_id: SessionResourceId) -> bool {
@@ -828,7 +960,7 @@ impl PeerConnectionSession {
             .ops
             .create_data_channel(lane.wire_label(), super::lane::lane_config(lane))
             .await?;
-        Ok(self.register_channel(lane, channel, plumbing))
+        Ok(self.register_channel(lane, channel, plumbing, None))
     }
 
     /// Register a pump task owned by this session. Registered tasks are aborted
@@ -852,6 +984,7 @@ impl PeerConnectionSession {
         meta: TrackMeta,
         peer_id: &ActrId,
         media_registry: Option<Arc<MediaFrameRegistry>>,
+        secure: SecureCell,
     ) -> String {
         let track_id = meta.track_id.clone();
         self.tasks
@@ -861,6 +994,7 @@ impl PeerConnectionSession {
                 track.clone(),
                 meta,
                 media_registry,
+                secure,
             ));
         self.tracks.insert(track_id.clone(), track);
         track_id
@@ -873,6 +1007,7 @@ impl PeerConnectionSession {
         meta: TrackMeta,
         peer_id: &ActrId,
         media_registry: Option<Arc<MediaFrameRegistry>>,
+        secure: SecureCell,
     ) -> Option<String> {
         if self.tracks.contains_key(&meta.track_id)
             || !self.resources.contains_remote_track(resource_id)
@@ -880,7 +1015,7 @@ impl PeerConnectionSession {
             return None;
         }
         let track = self.resources.take_remote_track(resource_id)?;
-        Some(self.register_track_with_meta(track, meta, peer_id, media_registry))
+        Some(self.register_track_with_meta(track, meta, peer_id, media_registry, secure))
     }
 
     /// Register a remote track, resolving its metadata inline (tests).
@@ -892,7 +1027,15 @@ impl PeerConnectionSession {
         media_registry: Option<Arc<MediaFrameRegistry>>,
     ) -> String {
         let meta = TrackMeta::resolve(&track).await;
-        self.register_track_with_meta(track, meta, peer_id, media_registry)
+        self.register_track_with_meta(
+            track,
+            meta,
+            peer_id,
+            media_registry,
+            SecureCell::new_verified(crate::transport::secure_channel::test_context(
+                self.generation,
+            )),
+        )
     }
 
     /// Register a local (outbound) track after a successful `add_track`

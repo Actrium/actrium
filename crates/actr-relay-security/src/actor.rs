@@ -277,7 +277,7 @@ impl VerifiedActorChannel {
 }
 
 /// A real encrypted Actor channel. Front is always the Noise initiator and
-/// Service is always the responder; lexical ActorId ordering is not used.
+/// Relay participants establish Front/Service roles. RTC participants order Actor IDs.
 pub struct ActorChannelSession {
     session: SecureSession,
 }
@@ -314,6 +314,29 @@ impl ActorChannelSession {
             false,
             now,
         )
+    }
+
+    /// Authenticate an RTC session over its reliable lane. Both endpoints
+    /// commit to the fingerprints of the DTLS association carrying this lane.
+    pub fn new_rtc(
+        local: &ActorChannelIdentity,
+        peer: &str,
+        local_fingerprint: &str,
+        peer_fingerprint: &str,
+        now: u64,
+    ) -> Result<Self> {
+        let initiator = local.claims.actor_id.as_str() < peer;
+        let (first, second) = if initiator {
+            (local_fingerprint, peer_fingerprint)
+        } else {
+            (peer_fingerprint, local_fingerprint)
+        };
+        let channel = format!("rtc-dtls-sha256:{first}:{second}");
+        if initiator {
+            Self::new_front(local, peer, &channel, now)
+        } else {
+            Self::new_service(local, peer, &channel, now)
+        }
     }
 
     fn new(

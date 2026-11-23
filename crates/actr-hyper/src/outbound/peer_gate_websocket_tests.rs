@@ -153,6 +153,16 @@ struct TestWire {
 
 #[async_trait]
 impl WireHandle for TestWire {
+    fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+        crate::transport::SecureChannelState::Verified
+    }
+    fn verified_peer_context(
+        &self,
+    ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+        Some(std::sync::Arc::new(
+            crate::transport::secure_channel::test_context(1),
+        ))
+    }
     fn connection_type(&self) -> ConnType {
         self.kind
     }

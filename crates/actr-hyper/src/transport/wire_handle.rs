@@ -60,14 +60,10 @@ pub trait WireHandle: Send + Sync + std::fmt::Debug {
 
     /// Establish connection.
     ///
-    /// Contract (RFC-0563): returns only when the wire's
-    /// `secure_channel_state()` is sendable. In phase 2 that means
-    /// `LegacyBypass` (transport ready, no crypto); phase 3 will drive
-    /// `New → Handshaking → Verified` here once the real handshake lands.
+    /// Returns only when the wire is ready and the peer is authenticated.
     async fn connect(&self) -> NetworkResult<()>;
 
-    /// The verified Actrium peer context once Actor mutual authentication
-    /// has completed on this wire. Legacy wires always return `None`.
+    /// The authenticated peer context of the current channel generation.
     fn verified_peer_context(&self) -> Option<Arc<VerifiedPeerContext>> {
         None
     }
@@ -99,15 +95,13 @@ pub trait WireHandle: Send + Sync + std::fmt::Debug {
         None
     }
 
-    /// Secure-channel state. Default `LegacyBypass` — an honest "transport
-    /// ready, no crypto" label — so unwrapped wires (tests, web bindings,
-    /// future transports) are sendable **without** claiming cryptographic
-    /// verification. Physical `WireHandle` impls that own a [`SecureCell`]
-    /// override this with their real state. See RFC-0563.
-    ///
-    /// [`SecureCell`]: super::secure_channel::SecureCell
+    /// Unauthenticated by default. Physical wires report their session state.
     fn secure_channel_state(&self) -> SecureChannelState {
-        SecureChannelState::LegacyBypass
+        SecureChannelState::New
+    }
+
+    fn is_verified(&self) -> bool {
+        self.secure_channel_state().is_sendable() && self.verified_peer_context().is_some()
     }
 
     /// Current secure epoch (monotonic, bumps on every validated transition).

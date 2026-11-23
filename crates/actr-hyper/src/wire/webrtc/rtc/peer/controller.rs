@@ -271,6 +271,8 @@ pub(crate) struct SharedNodeDeps {
     pub(crate) inbound: std::sync::Arc<crate::wire::webrtc::rtc::inbound::InboundRouter>,
     /// The node media-frame registry (Stage 6); `None` drops media dispatch.
     pub(crate) media_registry: Option<Arc<crate::inbound::MediaFrameRegistry>>,
+    pub(crate) actor_channel_identity:
+        Option<crate::wire::webrtc::rtc::peer::authentication::ActorChannelCredentials>,
     /// Validated receive/reassembly/resource limits shared with every Session.
     pub(crate) buffer_config: crate::wire::webrtc::rtc::config::RtcBufferConfig,
     /// Test-only observation of raw Handler facts before Controller reduction.
@@ -472,7 +474,7 @@ impl RtcPeerController {
 
         let controller = Self {
             state,
-            inbound_generation,
+            inbound_generation: inbound_generation.clone(),
             effect_port: effect_port.clone(),
             lanes: lanes.clone(),
             inbound: deps.inbound.clone(),
@@ -518,6 +520,7 @@ impl RtcPeerController {
             event_mailbox.clone(),
             lanes,
             effect_port,
+            inbound_generation,
             deps.buffer_config.max_inbound_message_bytes,
         );
         (handle, lane_tx, event_mailbox, task)

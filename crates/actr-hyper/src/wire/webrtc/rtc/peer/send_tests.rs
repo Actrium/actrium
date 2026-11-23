@@ -177,6 +177,7 @@ fn spawn_send_harness_with_gate(
         crate::wire::webrtc::rtc::peer::controller::SharedNodeDeps {
             inbound,
             media_registry: None,
+            actor_channel_identity: None,
             buffer_config: crate::wire::webrtc::rtc::config::RtcBufferConfig::default(),
             #[cfg(feature = "test-utils")]
             driver_event_observer: None,
@@ -255,7 +256,7 @@ async fn drive_to_sendable(h: &mut SendHarness) {
     });
 
     // Wait for sendable (RpcReliable recording channel opens via its pump).
-    timeout(WAIT, async {
+    let snapshot = timeout(WAIT, async {
         loop {
             let snap = h.handle.snapshot();
             if snap.sendable {
@@ -266,6 +267,13 @@ async fn drive_to_sendable(h: &mut SendHarness) {
     })
     .await
     .expect("peer did not become sendable");
+    let cell = h.handle.secure_cell_for(snapshot.pc_generation);
+    use crate::transport::SecureChannelState::{Handshaking, New};
+    assert!(cell.set_state_validated(New, Handshaking));
+    assert!(cell.publish_verified(
+        Handshaking,
+        crate::transport::secure_channel::test_context(snapshot.pc_generation)
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -487,7 +495,12 @@ async fn buffer_full_after_a_fragment_is_delivery_uncertain() {
         let payload = bytes::Bytes::from(vec![0; crate::transport::DC_MAX_PAYLOAD_SIZE + 1]);
         let attempt = h
             .handle
-            .send_with_progress(LaneKind::RpcReliable, payload, non_blocking)
+            .send_with_progress(
+                LaneKind::RpcReliable,
+                h.handle.snapshot().pc_generation,
+                payload,
+                non_blocking,
+            )
             .await;
         assert_eq!(
             attempt.result,
@@ -519,6 +532,7 @@ async fn unavailable_outstanding_count_is_delivery_uncertain() {
         .handle
         .send_with_progress(
             LaneKind::RpcReliable,
+            h.handle.snapshot().pc_generation,
             bytes::Bytes::from_static(b"reply"),
             false,
         )

@@ -111,6 +111,7 @@ impl ControllerTestHarness {
         let deps = SharedNodeDeps {
             inbound: Arc::new(crate::wire::webrtc::rtc::inbound::InboundRouter::discard()),
             media_registry: None,
+            actor_channel_identity: None,
             buffer_config: crate::wire::webrtc::rtc::config::RtcBufferConfig::default(),
             #[cfg(feature = "test-utils")]
             driver_event_observer: None,
