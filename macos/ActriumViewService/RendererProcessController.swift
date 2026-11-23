@@ -104,18 +104,25 @@ private func rnEditorTextView(under view: NSView) -> NSTextView? {
     return nil
 }
 
-/// Drop composition state for every component whose editor is not
-/// `activeEditor`. Editing ends or focus moves while a composition is in
-/// flight (blur, click into another input) never reaches the commit path,
-/// so without this the abandoned component would stay in the gate's
-/// composing set and have ALL of its later change events suppressed.
-private func rnPruneComposingComponents(activeEditor: NSTextView?) {
+/// Drop composition state owned by `window` for every component whose
+/// editor is not `activeEditor`. Editing ends or focus moves while a
+/// composition is in flight (blur, click into another input) never reaches
+/// the commit path, so without this the abandoned component would stay in
+/// the gate's composing set and have ALL of its later change events
+/// suppressed. A nil `activeEditor` drops every entry owned by the window
+/// (e.g. a single-line blur with no replacement editor — `currentEditor()`
+/// is nil for the old field, and `nil !== nil` would otherwise retain it).
+/// Entries owned by OTHER windows are left untouched: a shared renderer
+/// process serves several tabs, and a first-responder change in one tab
+/// must not evict a live composition in another.
+private func rnPruneComposingComponents(activeEditor: NSTextView?, inWindow window: NSWindow?) {
     for component in rnComposingComponents.allObjects {
         guard let backing = (try? component.value(forKey: "backedTextInputView")) as? NSView else {
             rnComposingComponents.remove(component)
             continue
         }
-        if rnEditorTextView(under: backing) !== activeEditor {
+        guard backing.window === window else { continue }
+        if activeEditor == nil || rnEditorTextView(under: backing) !== activeEditor {
             rnComposingComponents.remove(component)
         }
     }
@@ -1664,11 +1671,16 @@ private final class RendererTabSurface {
 
 
     /// Drop composition state for components whose editor is no longer the
-    /// focused text view. Called when the first responder changes; an
-    /// interrupted composition must not keep its component in the gate's
-    /// composing set (which would suppress its ordinary change events).
+    /// focused text view of THIS surface. Called when the first responder
+    /// changes; an interrupted composition must not keep its component in
+    /// the gate's composing set (which would suppress its ordinary change
+    /// events). Entries owned by other windows (tabs sharing this renderer)
+    /// are left untouched.
     func pruneComposingState() {
-        rnPruneComposingComponents(activeEditor: resolvedTextView(window.firstResponder))
+        rnPruneComposingComponents(
+            activeEditor: resolvedTextView(window.firstResponder),
+            inWindow: window
+        )
     }
 
     /// The Host asked this text input to give up focus (its own IME client
@@ -1679,8 +1691,8 @@ private final class RendererTabSurface {
             window.makeFirstResponder(container)
         }
         // Editing ended: drop any composition state still attached to inputs
-        // in this surface.
-        rnPruneComposingComponents(activeEditor: nil)
+        // owned by this surface.
+        rnPruneComposingComponents(activeEditor: nil, inWindow: window)
         focusedEditor = nil
         lastCaretRect = nil
         RendererProcessLifetime.shared.controller?.publishCaret(tabId: tabId, rect: nil)
