@@ -146,6 +146,12 @@ pub(crate) enum Provenance {
 
 type IssuedActorRow = (String, Option<i32>, bool, Option<Vec<u8>>);
 
+/// Verified Realm member and independent Actor public key bound to a new ActrId.
+struct ActorRegistrationIdentity<'a> {
+    signer: &'a Signer,
+    actor_public_key: &'a [u8; 32],
+}
+
 /// What Issuer recorded when it issued an Actor identity.
 pub(crate) struct IssuedActor {
     pub(crate) actor_type: ActrType,
@@ -612,8 +618,10 @@ impl AIdIssuer {
                     actr_protocol::RegisterAuthMode::Package
                 },
                 development,
-                signer,
-                &actor_public_key,
+                ActorRegistrationIdentity {
+                    signer,
+                    actor_public_key: &actor_public_key,
+                },
             )
             .await?;
 
@@ -941,8 +949,7 @@ impl AIdIssuer {
         target: Option<&str>,
         auth_mode: actr_protocol::RegisterAuthMode,
         development: bool,
-        signer: &Signer,
-        actor_public_key: &[u8; 32],
+        identity: ActorRegistrationIdentity<'_>,
     ) -> Result<ActrId, AidError> {
         let pool = platform::storage::db::get_database().get_pool();
         let issued_at = SystemTime::now()
@@ -969,9 +976,9 @@ impl AIdIssuer {
             .bind(issued_at)
             .bind(auth_mode as i32)
             .bind(development)
-            .bind(&signer.member_id)
-            .bind(&signer.key_id)
-            .bind(actor_public_key.as_slice())
+            .bind(&identity.signer.member_id)
+            .bind(&identity.signer.key_id)
+            .bind(identity.actor_public_key.as_slice())
             .execute(pool)
             .await
             .map_err(|error| {

@@ -111,8 +111,7 @@ uuid = { version = "1.18", features = ["v4", "serde"] }
 thiserror = "2.0"
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-# Enforce the nested blob URL origin stack-overflow fix in downstream locks.
-url = "2.5.9"
+url = "2.5"
 if-addrs = "0.15"
 pwrzv = "0.6.2"
 yasm = "0.6.0"
