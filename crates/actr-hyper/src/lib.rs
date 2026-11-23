@@ -1591,7 +1591,7 @@ impl Node<Attached> {
         use crate::lifecycle::credential_manager::RegistrationContext;
         let mut context = self.registration_context(service_spec.clone())?;
         if open_service {
-            let RegistrationContext::Package { request } = &mut context else {
+            let RegistrationContext::Package { request, .. } = &mut context else {
                 return Err(HyperError::InvalidManifest(
                     "Open Service requires a signed package".into(),
                 ));
