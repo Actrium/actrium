@@ -15,9 +15,9 @@ use super::*;
 use crate::config::WasiDataGrant;
 use crate::wasm::WasmHost;
 
-// language-allow: The fixture checks the Notebook's localized weather label.
+// cjk-allow: The fixture checks the Notebook's localized weather label.
 const TOKYO_WEATHER_PREFIX: &str = "东京天气：";
-// language-allow: The fixture checks the Notebook's localized forecast.
+// cjk-allow: The fixture checks the Notebook's localized forecast.
 const TOKYO_RAIN_FORECAST: &str = "东京天气：雨天";
 const PREFIX: &str = "actrium.notes_search.v1";
 const INDEX: u64 = 2;

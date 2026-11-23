@@ -61,6 +61,12 @@ target 'ActriumRenderer' do
   if ENV['ACTRIUM_SUPRAMARK_DIR']
     supramark_root = File.realpath(ENV.fetch('ACTRIUM_SUPRAMARK_DIR'))
     ENV['REACT_NATIVE_NODE_MODULES_DIR'] ||= File.join(supramark_root, 'node_modules')
+    selection_root = File.join(supramark_root, 'packages/renderers/rn-selection/native/macos')
+    if File.exist?(File.join(selection_root, 'SupramarkSelectionMetrics.podspec'))
+      pod 'SupramarkSelectionMetrics', :path => selection_root
+    else
+      Pod::UI.warn('SupramarkSelectionMetrics.podspec is missing from ACTRIUM_SUPRAMARK_DIR. Markdown selection will use React Native text metrics.')
+    end
     pod 'SupramarkMarkdownNative', :path => File.join(supramark_root, 'crates/supramark-markdown/packages/react-native')
     pod 'RNSVG', :path => File.dirname(
       Pod::Executable.execute_command('node', [

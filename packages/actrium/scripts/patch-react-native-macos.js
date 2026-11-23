@@ -68,13 +68,26 @@ patchFile('React/Fabric/Mounting/ComponentViews/ScrollView/RCTScrollViewComponen
     '    _containerView.autoresizingMask = NSViewNotSizable;',
   ].join('\n');
 
-  if (source.includes(fixed)) {
-    return source;
+  // macOS delivers NSClipView bounds changes through RCTUIScrollViewDelegate.
+  // Fabric needs the same callback as iOS to update the shadow tree's contentOffset.
+  const register = '    [self.scrollViewDelegateSplitter addDelegate:self];';
+  const edits = [
+    [flexible, fixed],
+    ['#if !TARGET_OS_OSX // [macOS]\n    UIScrollViewDelegate,\n#endif // [macOS]', '    RCTUIScrollViewDelegate,'],
+    [`#if !TARGET_OS_OSX // [macOS]\n${register}\n#endif // [macOS]\n#if TARGET_OS_IOS`, `${register}\n#if TARGET_OS_IOS`],
+  ];
+  for (const [before, after] of edits) {
+    const segments = source.split(before);
+    const unpatched = segments.length - 1;
+    // The replacement can be contained inside its guarded original.
+    const patched = segments.reduce((count, segment) => count + segment.split(after).length - 1, 0);
+    if (unpatched === 1 && patched === 0) {
+      source = source.replace(before, after);
+    } else if (unpatched !== 0 || patched !== 1) {
+      throw new Error(`Unrecognized macOS Fabric ScrollView source while applying:\n${after}`);
+    }
   }
-  if (!source.includes(flexible)) {
-    throw new Error('Unable to patch the macOS Fabric ScrollView document autoresizing mask');
-  }
-  return source.replace(flexible, fixed);
+  return source;
 });
 
 const aliasPath = path.join(

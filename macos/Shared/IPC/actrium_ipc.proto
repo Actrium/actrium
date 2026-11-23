@@ -85,6 +85,8 @@ message InputEvent {
     uint32 modifiers = 7;     // shift=1, control=2, option=4, command=8
     uint32 key_code = 8;
     string characters = 9;
+    optional uint32 click_count = 10;
+    optional int64 event_number = 11;
     string tab_id = 20;
 
     enum EventType {
@@ -96,6 +98,7 @@ message InputEvent {
         SCROLL = 5;
         KEY_DOWN = 6;
         KEY_UP = 7;
+        MOUSE_DRAGGED = 8;
     }
 }
 
