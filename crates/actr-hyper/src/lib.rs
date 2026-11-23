@@ -1199,6 +1199,14 @@ impl FrontEventRouter {
             .expect("Front Service event lock poisoned") = service;
     }
 
+    pub(crate) fn admits(
+        &self,
+        envelope: &actr_protocol::RpcEnvelope,
+        caller: Option<&actr_protocol::ActrId>,
+    ) -> bool {
+        self.accept(envelope, caller).is_some()
+    }
+
     fn accept(
         &self,
         envelope: &actr_protocol::RpcEnvelope,
@@ -1744,12 +1752,35 @@ impl Node<Registered> {
     /// and the same shared state enables outbound Attach and response-proof
     /// verification. Session traffic requires the verified Actor channel.
     pub fn with_actrium_service(
+        self,
+        service: actrium_runtime::InMemorySessionService,
+    ) -> Self {
+        self.with_actrium_service_and_events(service, None)
+    }
+
+    /// Install Actrium on a host-rendered Front and admit only the event routes
+    /// accepted by its authenticated Service event router.
+    #[doc(hidden)]
+    pub fn with_actrium_front(
+        self,
+        service: actrium_runtime::InMemorySessionService,
+        events: FrontEventRouter,
+    ) -> Self {
+        self.with_actrium_service_and_events(service, Some(events))
+    }
+
+    fn with_actrium_service_and_events(
         mut self,
         service: actrium_runtime::InMemorySessionService,
+        events: Option<FrontEventRouter>,
     ) -> Self {
         let shared = Arc::new(crate::actrium::service::Shared::default());
         let (registry, guard) =
             crate::actrium::ActriumServiceRegistry::new(service, shared.clone());
+        let guard = match events {
+            Some(events) => guard.with_front_events(events),
+            None => guard,
+        };
         let node = &mut self
             .attachment
             .as_mut()

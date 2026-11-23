@@ -318,7 +318,10 @@ impl ActrNode {
         let node = node_guard.take().ok_or_else(|| ActrError::Internal {
             msg: "runtime node is no longer available".to_string(),
         })?;
-        *node_guard = Some(node.with_actrium_service(service));
+        *node_guard = Some(match self.front_event_router.clone() {
+            Some(events) => node.with_actrium_front(service, events),
+            None => node.with_actrium_service(service),
+        });
         Ok(self)
     }
 }

@@ -605,6 +605,91 @@ async fn session_methods_require_a_verified_channel() {
 }
 
 #[tokio::test]
+async fn declared_front_event_reaches_listener_without_opening_rpcs() {
+    #[derive(Default)]
+    struct RecordingListener(std::sync::Mutex<Vec<crate::FrontServiceEvent>>);
+
+    impl crate::FrontEventListener for RecordingListener {
+        fn on_event(&self, event: crate::FrontServiceEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    let listener = Arc::new(RecordingListener::default());
+    let router = crate::FrontEventRouter::new(["documents.changed".into()], listener.clone());
+    let service_actor = service_id();
+    router.set_service(Some(service_actor.clone()));
+    let (_registry, guard) =
+        ActriumServiceRegistry::new(service(), Arc::new(PeerShared::default()));
+    let guard = guard.with_front_events(router.clone());
+    let event = RpcEnvelope {
+        request_id: "event-1".into(),
+        route_key: "documents.changed".into(),
+        direction: Some(Direction::Tell as i32),
+        payload: Some(Bytes::from_static(b"event payload")),
+        ..Default::default()
+    };
+
+    guard
+        .check(IncomingDispatchRequest::new(
+            &event,
+            Some((&service_actor, None)),
+        ))
+        .await
+        .expect_err("events still require a verified Actor channel");
+    guard
+        .check(
+            IncomingDispatchRequest::new(&event, Some((&service_actor, None)))
+                .with_peer_context(Some(front_context())),
+        )
+        .await
+        .expect("a declared event from the selected Service is admitted");
+
+    let workload = crate::FrontWorkload {
+        events: Some(router),
+    };
+    let context = actr_framework::test_support::DummyContext::new(front_id())
+        .with_caller_id(service_actor.clone());
+    <crate::FrontWorkload as actr_framework::MessageDispatcher>::dispatch(
+        &workload,
+        event.clone(),
+        &context,
+    )
+    .await
+    .expect("the admitted Tell reaches the Front workload");
+    assert_eq!(
+        listener.0.lock().unwrap().as_slice(),
+        &[crate::FrontServiceEvent {
+            event: "documents.changed".into(),
+            payload: Bytes::from_static(b"event payload"),
+        }]
+    );
+
+    let rpc = RpcEnvelope {
+        direction: Some(Direction::Request as i32),
+        ..event.clone()
+    };
+    guard
+        .check(
+            IncomingDispatchRequest::new(&rpc, Some((&service_actor, None)))
+                .with_peer_context(Some(front_context())),
+        )
+        .await
+        .expect_err("the event exemption does not admit RPCs");
+    let undeclared = RpcEnvelope {
+        route_key: "documents.undeclared".into(),
+        ..event
+    };
+    guard
+        .check(
+            IncomingDispatchRequest::new(&undeclared, Some((&service_actor, None)))
+                .with_peer_context(Some(front_context())),
+        )
+        .await
+        .expect_err("the event exemption does not admit undeclared routes");
+}
+
+#[tokio::test]
 async fn tampered_requests_and_responses_are_rejected() {
     let shared = Arc::new(PeerShared::default());
     let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());

@@ -457,7 +457,11 @@ impl ActriumServiceRegistry {
                 service: service.clone(),
                 shared: shared.clone(),
             },
-            ActriumServiceGuard { service, shared },
+            ActriumServiceGuard {
+                service,
+                shared,
+                front_events: None,
+            },
         )
     }
 
@@ -623,6 +627,14 @@ impl SessionRegistry for ActriumServiceRegistry {
 pub struct ActriumServiceGuard {
     service: InMemorySessionService,
     shared: Arc<Shared>,
+    front_events: Option<crate::FrontEventRouter>,
+}
+
+impl ActriumServiceGuard {
+    pub(crate) fn with_front_events(mut self, events: crate::FrontEventRouter) -> Self {
+        self.front_events = Some(events);
+        self
+    }
 }
 
 struct ProofFields {
@@ -808,6 +820,16 @@ impl IncomingGuard for ActriumServiceGuard {
             .as_deref()
             .ok_or_else(missing_verified_channel)?;
         let channel = verified_channel(context)?;
+        let caller = request.caller.map(|(actor_id, _)| actor_id);
+        if let Some(events) = &self.front_events
+            && caller == Some(&context.peer_actor_id)
+            && events.admits(envelope, caller)
+        {
+            // Front events are reliable Tells, not session-proved business RPCs.
+            // The verified channel and the discovered Service identity authorize
+            // only this declared route; FrontWorkload rechecks it before delivery.
+            return Ok(());
+        }
         let business = envelope_request(request.envelope, request.metadata)?;
         if business.request_id.is_empty() {
             return Err(invalid_metadata("business requests require a request id"));
