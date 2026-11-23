@@ -87,6 +87,40 @@ private func rnComponentView(for resolved: NSView?) -> NSObject? {
     return component
 }
 
+/// The text view a component edits through: the field's active field editor
+/// for a single-line input, otherwise the NSTextView inside the backing
+/// view hierarchy.
+private func rnEditorTextView(under view: NSView) -> NSTextView? {
+    if let field = view as? NSTextField {
+        return field.currentEditor() as? NSTextView
+    }
+    if let textView = view as? NSTextView { return textView }
+    var queue = view.subviews
+    while !queue.isEmpty {
+        let sub = queue.removeFirst()
+        if let textView = sub as? NSTextView { return textView }
+        queue.append(contentsOf: sub.subviews)
+    }
+    return nil
+}
+
+/// Drop composition state for every component whose editor is not
+/// `activeEditor`. Editing ends or focus moves while a composition is in
+/// flight (blur, click into another input) never reaches the commit path,
+/// so without this the abandoned component would stay in the gate's
+/// composing set and have ALL of its later change events suppressed.
+private func rnPruneComposingComponents(activeEditor: NSTextView?) {
+    for component in rnComposingComponents.allObjects {
+        guard let backing = (try? component.value(forKey: "backedTextInputView")) as? NSView else {
+            rnComposingComponents.remove(component)
+            continue
+        }
+        if rnEditorTextView(under: backing) !== activeEditor {
+            rnComposingComponents.remove(component)
+        }
+    }
+}
+
 /// Notification posted on the renderer's main queue after any
 /// `NSWindow.makeFirstResponder(_:)` call, carrying the window.
 let ActriumFirstResponderDidChangeNotification = Notification.Name(
@@ -566,6 +600,9 @@ final class RendererProcessController {
         ) { [weak self] note in
             guard let self, let window = note.object as? NSWindow else { return }
             for (tabId, surface) in self.surfaces where surface.window === window {
+                // Focus moved: an interrupted composition must not leave its
+                // component in the composing gate forever.
+                surface.pruneComposingState()
                 self.reportTextInputFocus(tabId: tabId, surface: surface)
             }
         }
@@ -1626,6 +1663,14 @@ private final class RendererTabSurface {
     }
 
 
+    /// Drop composition state for components whose editor is no longer the
+    /// focused text view. Called when the first responder changes; an
+    /// interrupted composition must not keep its component in the gate's
+    /// composing set (which would suppress its ordinary change events).
+    func pruneComposingState() {
+        rnPruneComposingComponents(activeEditor: resolvedTextView(window.firstResponder))
+    }
+
     /// The Host asked this text input to give up focus (its own IME client
     /// resigned first responder, e.g. the user focused the address bar).
     func resignTextInputFocus() {
@@ -1633,6 +1678,9 @@ private final class RendererTabSurface {
             || window.firstResponder is NSTextField {
             window.makeFirstResponder(container)
         }
+        // Editing ended: drop any composition state still attached to inputs
+        // in this surface.
+        rnPruneComposingComponents(activeEditor: nil)
         focusedEditor = nil
         lastCaretRect = nil
         RendererProcessLifetime.shared.controller?.publishCaret(tabId: tabId, rect: nil)
