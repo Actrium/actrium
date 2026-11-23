@@ -21,6 +21,8 @@
   "include": ["index.ts", "index-system.tsx", "src"],
   "exclude": [
     "node_modules",
+    "src/runtime-host/guest-markdown-renderer.supramark.js",
+    "src/runtime-host/guest-markdown-renderer.supramark.test.jsx",
     "../keel/src/guest",
     "../keel/src/cli",
     "../keel/src/devtools"

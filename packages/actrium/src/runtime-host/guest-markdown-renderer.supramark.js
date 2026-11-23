@@ -1,8 +1,8 @@
 import React, { useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Text } from 'react-native';
-import '@supramark/markdown-native-rn';
-import { parse } from '@supramark/core';
-import { Supramark as SupramarkRenderer } from '@supramark/rn';
+import '@goaskaway/supramark-markdown-native-rn';
+import { parse } from '@goaskaway/supramark-core/rn';
+import { Supramark as SupramarkRenderer } from '@goaskaway/supramark-rn';
 import { DocumentSelectionContext } from './DocumentSelectionSurface';
 
 const config = { features: [{ id: '@supramark/feature-math', enabled: false }] };
