@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import WebKit
 
@@ -672,6 +673,17 @@ struct WorkspaceMainView: View {
             }
             // Note: isOverviewMode By ViewBridgeCoordinatorManager Subscriptions actriumMode AutoSync
         }
+        // A native Start Page card renders its cached snapshot, which would
+        // otherwise keep showing favorites or recently visited sites the user
+        // just removed. Drop those snapshots when the library data changes so
+        // the card falls back to the live Start Page; the next focus pass
+        // re-captures it.
+        .onReceive(historyVM.$recentItems.dropFirst()) { _ in
+            invalidateNativeTabSnapshots()
+        }
+        .onReceive(bookmarkVM.$bookmarks.dropFirst()) { _ in
+            invalidateNativeTabSnapshots()
+        }
         // shouldAutoFocusAddressBar Move processing to AddressBarContainer It's... onAppear Medium
         // This will only be triggered when the address bar is actually rendered, without delay.
         .onAppear {
@@ -1320,6 +1332,21 @@ struct WorkspaceMainView: View {
     private var floatingTitleBarHeight: CGFloat { CardStyle.titleBarHeight }
 
     /// Calculate spacing (between cards) and vertical margins
+    /// Native (Start Page) cards prefer the cached viewport snapshot, which
+    /// is what the mode transition zooms. That image goes stale as soon as
+    /// the library data behind the Start Page changes, so drop it and let the
+    /// card render the live page until the next focus pass re-captures.
+    private func invalidateNativeTabSnapshots() {
+        for tab in viewModel.tabs {
+            switch tab.contentType {
+            case .native, .empty:
+                TabSnapshotCacheManager.shared.invalidate(tabId: tab.id)
+            case .web, .reactNative:
+                break
+            }
+        }
+    }
+
     // MARK: - VirtualGrid Helper
 
     /// Build VirtualGrid Card Info Numerator
