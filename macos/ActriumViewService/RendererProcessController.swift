@@ -17,6 +17,64 @@ struct IMECommandPayload: Codable {
     var command: String
 }
 
+// MARK: - RN TextInput marked-text event gate
+
+/// Restores iOS-style IME composition semantics to RN macOS's Fabric
+/// `RCTTextInputComponentView`:
+///
+/// 1. `textInputDidChange` (the native origin of JS `onChangeText`) is
+///    suppressed while the backing view holds marked (composition) text.
+///    RN macOS emits the event for the FIRST marked-text update, polluting
+///    the JS controlled state with the first composition letter (pinyin
+///    "nihao" → state stuck at "n"). iOS emits no change events during
+///    composition; without the gate the commit's event is then swallowed by
+///    RN's `_ignoreNextTextInputCall` early-return (see `applyInsertText`),
+///    so JS never receives the final text.
+/// 2. The commit path clears that latch and re-drives the event explicitly.
+private var rnMarkedTextGateInstalled = false
+
+private func installRNMarkedTextGate() {
+    guard !rnMarkedTextGateInstalled,
+          let cls = NSClassFromString("RCTTextInputComponentView")
+    else { return }
+    rnMarkedTextGateInstalled = true
+
+    // method_setImplementation + direct old-IMP calls: an exchange-based
+    // swizzle recursed here because Swift statically dispatched the
+    // "original" call back into the probe, overflowing the stack.
+    let changeSel = NSSelectorFromString("textInputDidChange")
+    guard let method = class_getInstanceMethod(cls, changeSel) else { return }
+    typealias ChangeIMP = @convention(c) (AnyObject, Selector) -> Void
+    let oldIMP = method_getImplementation(method)
+    let block: @convention(block) (AnyObject) -> Void = { obj in
+        guard !rnBackingHasMarkedText(of: obj) else { return }
+        unsafeBitCast(oldIMP, to: ChangeIMP.self)(obj, changeSel)
+    }
+    method_setImplementation(method, imp_implementationWithBlock(block))
+}
+
+/// True when the component's backing text view currently holds marked text.
+/// `backedTextInputView` may be the RCTUITextView itself or an
+/// RCTWrappedTextView container whose subview hierarchy contains it.
+private func rnBackingHasMarkedText(of object: AnyObject) -> Bool {
+    // Zero-length ranges ({2, 0}) linger after a commit in RCTUITextView —
+    // only a NON-ZERO length means an active composition.
+    func hasMarked(_ view: NSView) -> Bool? {
+        (view as? NSTextView).map { $0.markedRange().length > 0 }
+    }
+    guard let backing = (try? object.value(forKey: "backedTextInputView")) as? NSView else {
+        return false
+    }
+    if let result = hasMarked(backing) { return result }
+    var queue = backing.subviews
+    while !queue.isEmpty {
+        let view = queue.removeFirst()
+        if let result = hasMarked(view) { return result }
+        queue.append(contentsOf: view.subviews)
+    }
+    return false
+}
+
 /// Notification posted on the renderer's main queue after any
 /// `NSWindow.makeFirstResponder(_:)` call, carrying the window.
 let ActriumFirstResponderDidChangeNotification = Notification.Name(
@@ -442,6 +500,7 @@ final class RendererProcessController {
 
     private init(arguments: Arguments) {
         self.arguments = arguments
+        installRNMarkedTextGate()
         connection = IPCHelperConnection(
             tabId: arguments.rendererId,
             connectedSocket: STDIN_FILENO
@@ -1406,10 +1465,22 @@ private final class RendererTabSurface {
 
     /// Applies Host-mirrored committed IME text to the focused text input.
     func applyInsertText(_ text: String) {
-        guard let client = resolvedTextView(window.firstResponder) as? NSTextInputClient else { return }
+        let resolved = resolvedTextView(window.firstResponder)
+        guard let client = resolved as? NSTextInputClient else { return }
         beginUndoableEdit()
         client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         endUndoableEdit()
+        // The commit insert fires NSTextView delegate callbacks while RN's
+        // `_ignoreNextTextInputCall` latch is set (composition selection
+        // updates set it even though our gate suppressed the change events),
+        // so RN's own textInputDidChange swallows the commit's onChange and
+        // JS never receives the final text. Clear the latch and drive the
+        // event explicitly — identical bookkeeping to a real keystroke.
+        if let textView = resolved,
+           let component = (try? textView.value(forKey: "textInputDelegate")) as? NSObject {
+            component.setValue(false, forKey: "ignoreNextTextInputCall")
+            _ = component.perform(NSSelectorFromString("textInputDidChange"))
+        }
         publishCaret()
         commit()
     }
