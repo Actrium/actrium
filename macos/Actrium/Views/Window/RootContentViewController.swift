@@ -102,7 +102,10 @@ enum CompactToolbarLayout {
     static let toolbarHeight: CGFloat = 45
     static let tabStripContentPadding: CGFloat = 3
     static let tabStripHeight: CGFloat = 38
-    static let tabSeparationWidth: CGFloat = 1.5
+    /// Inset applied to each side of a Tab's surface. Two neighboring Tabs
+    /// contribute one side each, so the visible gap between them is twice
+    /// this value.
+    static let tabSeparationWidth: CGFloat = 3
     static let layeredBoundaryCapWidth: CGFloat = 18
     static let edgeTabCornerRadius: CGFloat = 8
     static let tabCornerRadius: CGFloat = 6
@@ -113,18 +116,20 @@ enum CompactToolbarLayout {
     static let fullScreenLeadingReserve: CGFloat = 4
     static let inactiveTabMinWidth: CGFloat = 88
     static let inactiveTabCompressedMinWidth: CGFloat = 68
-    static let inactiveTabMaxWidth: CGFloat = 240
-    static let activeTabMinWidth: CGFloat = 300
+    /// No Tab grows past this, however much horizontal room the strip has.
+    static let tabMaxWidth: CGFloat = 230
+    static let inactiveTabMaxWidth: CGFloat = tabMaxWidth
+    static let activeTabMinWidth: CGFloat = 230
     static let activeTabCompressedMinWidth: CGFloat = 220
-    static let activeTabMaxWidth: CGFloat = 520
-    static let activeTabPreferredWidth: CGFloat = 420
+    static let activeTabMaxWidth: CGFloat = tabMaxWidth
+    static let activeTabPreferredWidth: CGFloat = tabMaxWidth
 
     static func leadingReserve(isFullScreen: Bool) -> CGFloat {
         isFullScreen ? fullScreenLeadingReserve : compactTrafficLightReserve
     }
 
     static func maximumTabStripWidth(in toolbarWidth: CGFloat, isFullScreen: Bool) -> CGFloat {
-        let actionCount = CGFloat(CompactToolbarAction.allCases.count)
+        let actionCount = CGFloat(CompactToolbarAction.visibleActions.count)
         return max(
             0,
             toolbarWidth
@@ -156,7 +161,7 @@ enum CompactToolbarLayout {
 
     static func actionButtonFrames(in bounds: NSRect) -> [CompactToolbarAction: NSRect] {
         let step = buttonSize + itemSpacing
-        return Dictionary(uniqueKeysWithValues: CompactToolbarAction.allCases.reversed().enumerated().map { index, action in
+        return Dictionary(uniqueKeysWithValues: CompactToolbarAction.visibleActions.reversed().enumerated().map { index, action in
             let maxX = bounds.maxX - horizontalPadding - CGFloat(index) * step
             return (action, centeredRect(minX: maxX - buttonSize, maxX: maxX, height: buttonSize, in: bounds))
         })
@@ -717,7 +722,7 @@ struct MainWindowTabsView: View {
                 Spacer(minLength: itemSpacing)
 
                 HStack(spacing: itemSpacing) {
-                    ForEach(CompactToolbarAction.allCases, id: \.self) { action in
+                    ForEach(CompactToolbarAction.visibleActions, id: \.self) { action in
                         headerButton(for: action)
                     }
                 }
@@ -978,17 +983,58 @@ struct MainWindowTabsView: View {
         )
     }
 
-    private func groupHeaderShape(for group: TabGroup) -> UnevenRoundedRectangle {
-        let sections = tabSections
-        return toolbarSurfaceShape(
-            isLeadingEdge: sections.first?.group?.id == group.id,
-            isTrailingEdge: group.isCollapsed && sections.last?.group?.id == group.id
-        )
+    /// Every Tab surface insets itself by the Tab separation on both sides, so
+    /// a group's painted area has to inset by the same amount to keep the gap
+    /// to a neighboring Tab identical to every other Tab seam.
+    private func groupBorderInset(for group: TabGroup) -> CGFloat {
+        group.isCollapsed ? 0 : CompactToolbarLayout.tabSeparationWidth
+    }
+
+    /// The group outline, stroked just *outside* the group area: the header
+    /// and every member Tab keep their full height, and the line never
+    /// composites over the group wash. Both edges end immediately outside
+    /// the group's painted area, matching the inset Tab surfaces.
+    private func groupBorderOutline(for group: TabGroup) -> some View {
+        // A dragged Tab hovering the group marks it as the drop target by
+        // deepening the outline.
+        let isDropTarget = interaction.isDragging && interaction.hoveredGroupID == group.id
+        return groupShape(for: group)
+            .inset(by: -groupBorderWidth / 2)
+            .stroke(
+                group.color.swiftUIColor.opacity(
+                    isDropTarget ? groupDropTargetBorderOpacity : groupTintOpacity
+                ),
+                lineWidth: groupBorderWidth
+            )
+            .padding(.horizontal, groupBorderInset(for: group))
+            .animation(.easeOut(duration: 0.15), value: isDropTarget)
+    }
+
+    /// The custom name shown in the header: at most 10 characters, elided.
+    private func groupDisplayName(_ group: TabGroup) -> String {
+        group.name.count > 10 ? String(group.name.prefix(10)) + "…" : group.name
     }
 
     private func groupLabelWidth(_ group: TabGroup) -> CGFloat {
-        let title = group.name.isEmpty ? "Tab Group" : group.name
-        return min(158, max(82, CGFloat(title.count) * 7 + 48))
+        // The frame below subtracts the reserved trailing separation, so the
+        // width has to add it back or the last character gets clipped.
+        let separation = group.isCollapsed
+            ? 0 : CompactToolbarLayout.tabSeparationWidth
+        let memberCount = viewModel.tabs.filter { $0.groupId == group.id }.count
+        let countWidth = CGFloat(max(1, String(max(memberCount, 0)).count)) * 6
+
+        // Unnamed header: chevron (16) + spacing (3) + count + padding (10).
+        guard !group.name.isEmpty else {
+            return 29 + countWidth + separation
+        }
+
+        // Named header: chevron (16) + spacing (3) + name + spacing (5) +
+        // count + padding (10). Measure the name with the font it renders in
+        // so wide glyphs (CJK, for example) are not clipped.
+        let nameWidth = (groupDisplayName(group) as NSString).size(withAttributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold)
+        ]).width
+        return min(176, max(82, 34 + ceil(nameWidth) + countWidth + separation + 2))
     }
 
     private func tabStripWidth(in toolbarWidth: CGFloat) -> CGFloat {
@@ -1263,10 +1309,22 @@ struct MainWindowTabsView: View {
         if let tabID = interaction.movingTabID,
            let tab = viewModel.tabs.first(where: { $0.id == tabID }),
            let frame = interaction.movingTabFrame(for: tabID) {
-            tabLabel(tab)
-                .frame(width: frame.width, height: frame.height)
-                .overlay { layeredTabBoundary(for: tab, edge: nil, isVisible: true) }
-                .position(x: frame.midX, y: frame.midY)
+            // The lifted Tab keeps the current-page appearance (without the
+            // resting-state glass rim) and adds a shadow. Its plate is drawn
+            // edge to edge on an opaque fill: at rest the plate leaves side
+            // insets and a vertical gap, which would otherwise let the
+            // translucent toolbar show through once the Tab floats.
+            ZStack {
+                tabShape(for: tab)
+                    .fill(AppColors.windowChromeActiveTabPlateColor)
+
+                tabLabel(tab, showsGlassReflection: false)
+                    .frame(width: frame.width, height: frame.height)
+            }
+            .frame(width: frame.width, height: frame.height)
+            .overlay { layeredTabBoundary(for: tab, edge: nil, isVisible: true) }
+            .shadow(color: movingTabShadowColor, radius: 2, x: 0, y: 1)
+            .position(x: frame.midX, y: frame.midY)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
                 .zIndex(1_000)
@@ -1297,7 +1355,7 @@ struct MainWindowTabsView: View {
                     HStack(spacing: 0) {
                         ForEach(tabs) { tab in
                             let width = tabWidths[tab.id] ?? preferredTabWidth(for: tab)
-                            tabLabel(tab)
+                            tabLabel(tab, showsGlassReflection: false)
                                 .frame(width: width, height: 32)
                                 .overlay {
                                     layeredTabBoundary(for: tab, edge: nil, isVisible: true)
@@ -1311,12 +1369,13 @@ struct MainWindowTabsView: View {
                 groupSurface(for: group, isMoving: true)
             }
             .overlay {
-                groupShape(for: group)
-                    .strokeBorder(
-                        group.color.swiftUIColor.opacity(groupBorderOpacity),
-                        lineWidth: 1.5
-                    )
+                // A collapsed group is header-only; the header chip carries
+                // the identity, so it draws no border.
+                if !group.isCollapsed {
+                    groupBorderOutline(for: group)
+                }
             }
+            .shadow(color: movingTabShadowColor, radius: 2, x: 0, y: 1)
             .position(x: frame.midX, y: frame.midY)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
@@ -1333,9 +1392,28 @@ struct MainWindowTabsView: View {
         interaction.phase(for: tab.id, activeTabID: viewModel.currentTabId)
     }
 
-    private var groupBorderOpacity: Double {
-        interaction.isAddressEditing && addressPresentationPhase.showsFocusAffordances
-            ? 0.24 : 0.85
+    /// A dragged Tab (or group) lifts off the strip, so its foreground casts
+    /// a soft shadow onto the surface underneath.
+    private var movingTabShadowColor: Color {
+        Color.black.opacity(AppColors.usesDarkAppearance ? 0.28 : 0.10)
+    }
+
+    /// One tint for every group surface — the header chip, the group
+    /// background wash and the border — so a group reads as a single color
+    /// at a single opacity.
+    private var groupTintOpacity: Double {
+        0.2
+    }
+
+    /// Outline opacity while a dragged Tab hovers this group.
+    private var groupDropTargetBorderOpacity: Double {
+        0.5
+    }
+
+    /// Width of the group border stroke, also used to keep the group wash
+    /// clear of the hairline so the two never composite over each other.
+    private var groupBorderWidth: CGFloat {
+        2
     }
 
     private var tabReorderGesture: some Gesture {
@@ -1408,11 +1486,11 @@ struct MainWindowTabsView: View {
             }
         }
         .overlay {
-            groupShape(for: group)
-                .strokeBorder(
-                    group.color.swiftUIColor.opacity(groupBorderOpacity),
-                    lineWidth: 1.5
-                )
+            // A collapsed group is header-only; the header chip carries the
+            // identity, so it draws no border.
+            if !group.isCollapsed {
+                groupBorderOutline(for: group)
+            }
         }
         .opacity(isMoving ? 0 : 1)
         .transition(.identity)
@@ -1433,20 +1511,31 @@ struct MainWindowTabsView: View {
         return ZStack {
             // Keep both layers in one non-animated surface. This matches the
             // moving Tab plate and prevents a transient opacity interpolation
-            // when the group first leaves its layout slot.
-            shape.fill(isMoving ? AppColors.windowChromeDragPlateColor : Color.clear)
-            shape.fill(group.color.swiftUIColor.opacity(0.08))
+            // when the group first leaves its layout slot. The drag plate
+            // stays edge to edge so nothing underneath can bleed through.
+            if isMoving {
+                shape.fill(AppColors.windowChromeDragPlateColor)
+            }
+            // The wash spans the group area edge to edge — the border is
+            // stroked outside it, so header, background and border each show
+            // the same single layer of tint.
+            shape.fill(group.color.swiftUIColor.opacity(groupTintOpacity))
         }
+        // At rest the wash stops where the border starts on both sides, so the
+        // gap to the neighboring Tab matches every other Tab seam. While the
+        // group is moving the plate keeps its full width so nothing underneath
+        // can show through the seam.
+        .padding(.horizontal, isMoving ? 0 : groupBorderInset(for: group))
         .transaction { transaction in
             transaction.animation = nil
         }
     }
 
     private func groupHeader(_ group: TabGroup, tabCount: Int) -> some View {
-        let title = group.name.isEmpty ? "Tab Group" : group.name
-        let containsCurrentTab = viewModel.currentTab?.groupId == group.id
         let trailingSeparation = group.isCollapsed
             ? 0 : CompactToolbarLayout.tabSeparationWidth
+        // Custom names show at most 10 characters; the rest is elided.
+        let displayName = groupDisplayName(group)
 
         return HStack(spacing: 3) {
             Button {
@@ -1462,37 +1551,49 @@ struct MainWindowTabsView: View {
             .buttonStyle(.plain)
             .help(group.isCollapsed ? "Expand Group" : "Collapse Group")
 
-            Button {
-                exitEditingMode()
-                groupNameDraft = group.name
-                editingGroupID = group.id
-            } label: {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(group.color.swiftUIColor)
-                        .frame(width: 9, height: 9)
+            // Unnamed groups show no label at all — the chevron (and the
+            // member count) identify the header. Renaming stays available
+            // through the header context menu.
+            if !group.name.isEmpty {
+                Button {
+                    exitEditingMode()
+                    groupNameDraft = group.name
+                    editingGroupID = group.id
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(displayName)
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
 
-                    Text(title)
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
-
-                    Text("\(tabCount)")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        Text("\(tabCount)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            .help("Edit Tab Group")
-            .popover(isPresented: groupEditorBinding(for: group), arrowEdge: .bottom) {
-                groupEditor(group)
+                .buttonStyle(.plain)
+                .help("Edit Tab Group")
+            } else {
+                Text("\(tabCount)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.horizontal, 5)
-        .frame(width: groupLabelWidth(group) - trailingSeparation, height: 30)
-        .background {
-            groupHeaderShape(for: group)
-                .fill(group.color.swiftUIColor.opacity(containsCurrentTab ? 0.32 : 0.2))
+        // Leading alignment pins the chevron in place whether the group is
+        // expanded or collapsed.
+        .frame(
+            width: groupLabelWidth(group) - trailingSeparation,
+            height: 30,
+            alignment: .leading
+        )
+        // No chip fill of its own: the group wash already covers the header
+        // area, and a second fill would composite into a darker patch.
+        // The editor popover anchors to the whole header so it presents even
+        // for unnamed groups, whose label button is not rendered.
+        .popover(isPresented: groupEditorBinding(for: group), arrowEdge: .bottom) {
+            groupEditor(group)
         }
         // The next Tab already contributes its leading half of the seam.
         // Reserve the same trailing half that every Tab surface contributes.
@@ -1512,7 +1613,9 @@ struct MainWindowTabsView: View {
                 viewModel.closeGroup(groupId: group.id, historyVM: historyVM)
             }
         }
-        .accessibilityLabel("\(title), \(tabCount) tabs")
+        .accessibilityLabel(
+            group.name.isEmpty ? "\(tabCount) tabs" : "\(group.name), \(tabCount) tabs"
+        )
     }
 
     private func groupEditorBinding(for group: TabGroup) -> Binding<Bool> {
@@ -1603,7 +1706,8 @@ struct MainWindowTabsView: View {
     @ViewBuilder
     private func tabLabel(
         _ tab: Tab,
-        accordionPresentation: ToolbarAccordionTabPresentation = .identity
+        accordionPresentation: ToolbarAccordionTabPresentation = .identity,
+        showsGlassReflection: Bool = true
     ) -> some View {
         if accordionPresentation.isObscured, tab.id != viewModel.currentTabId {
             // Only the lower, actually obscured Tab loses its editing
@@ -1619,7 +1723,7 @@ struct MainWindowTabsView: View {
                 inactiveTab(tab, accordionPresentation: accordionPresentation)
                     .transition(.identity)
             case .active:
-                activeTab(tab)
+                activeTab(tab, showsGlassReflection: showsGlassReflection)
                     .transition(.identity)
             case .addressEditing:
                 addressEditingTab(tab)
@@ -1628,7 +1732,7 @@ struct MainWindowTabsView: View {
                 inactiveTab(tab, accordionPresentation: accordionPresentation)
                     .transition(.identity)
             case .draggingActive:
-                activeTab(tab)
+                activeTab(tab, showsGlassReflection: showsGlassReflection)
                     .transition(.identity)
             }
         }
@@ -1662,7 +1766,7 @@ struct MainWindowTabsView: View {
         .accessibilityLabel(tab.title.isEmpty ? "New Tab" : tab.title)
     }
 
-    private func activeTab(_ tab: Tab) -> some View {
+    private func activeTab(_ tab: Tab, showsGlassReflection: Bool = true) -> some View {
         HStack(spacing: 3) {
             tabToolbarButton("chevron.left", help: "Back", disabled: !viewModel.canGoBack) {
                 viewModel.goBack()
@@ -1686,7 +1790,11 @@ struct MainWindowTabsView: View {
         .padding(.horizontal, 6)
         .frame(height: 32)
         .background {
-            tabSurface(for: tab, isActive: true)
+            tabSurface(
+                for: tab,
+                isActive: true,
+                showsGlassReflection: showsGlassReflection
+            )
         }
         .contentShape(tabShape(for: tab))
         .onHover { isInside in
@@ -1703,7 +1811,8 @@ struct MainWindowTabsView: View {
     private func tabSurface(
         for tab: Tab,
         isActive: Bool,
-        isEditing: Bool = false
+        isEditing: Bool = false,
+        showsGlassReflection: Bool = true
     ) -> some View {
         let shape = tabShape(for: tab)
 
@@ -1713,7 +1822,7 @@ struct MainWindowTabsView: View {
                     ? AppColors.windowChromeActiveTabPlateColor
                     : AppColors.windowChromeTabPlateColor
             )
-            if isActive {
+            if isActive && showsGlassReflection {
                 // Glass edge reflection: a specular gradient tracing the plate
                 // border — bright along the top edge, fading toward the bottom,
                 // the way light catches the rim of a glass surface.

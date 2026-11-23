@@ -125,8 +125,9 @@ struct WebViewMultiProcessTabView: View {
 
     var body: some View {
         ZStack {
-            // Overview Mode: Show screenshots or placeholders
-            Color(nsColor: .windowBackgroundColor)
+            // Overview Mode: Show screenshots or placeholders. A blank page
+            // reads as white rather than as the dark workspace behind it.
+            Color.white
 
             if !isFocused {
                 // Try to show cached snapshot first
@@ -249,6 +250,18 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         // Use custom DownloadableWebView for context menu download support
         self.webView = DownloadableWebView(frame: .zero, configuration: config)
         super.init()
+
+        // A page that has not painted yet — still loading, or failed to load —
+        // shows this backdrop. Without it the system's dark under-page color
+        // makes the empty content area read as black.
+        webView.underPageBackgroundColor = .white
+        // The web view also paints its own blank surface, which follows the
+        // system appearance and is black in dark mode. Turn drawing off so
+        // the white container behind the web view shows through instead;
+        // pages paint their own background on top as usual.
+        if webView.responds(to: Selector(("setDrawsBackground:"))) {
+            webView.setValue(false, forKey: "drawsBackground")
+        }
 
         if let webView = webView as? DownloadableWebView {
             webView.onPrimaryMouseDown = { [weak self] in
@@ -1047,6 +1060,10 @@ struct PersistentWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         // Use container view to ensure the correct layout
         let container = NSView(frame: NSRect(origin: .zero, size: size))
+        // White backing so an unpainted page (loading or failed) never shows
+        // the dark workspace behind the web content.
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.white.cgColor
         let webView = holder.webView
 
         // navigationDelegate Already WebViewHolder Medium Settings
@@ -1783,6 +1800,7 @@ struct FocusedWebOverlay: View {
         PersistentWebView(holder: holder, size: viewportSize)
             .id(tab.id)
             .frame(width: viewportSize.width, height: viewportSize.height)
+            .background(Color.white)
             .onAppear {
                 holder.loadIfNeeded(url)
             }

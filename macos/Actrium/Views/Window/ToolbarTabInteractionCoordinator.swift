@@ -2,6 +2,21 @@ import Combine
 import Foundation
 import SwiftUI
 
+/// Temporary drag diagnostics. Writes one line per decision to a fixed file so
+/// a manual drag can be inspected without attaching a debugger.
+private func dragDebugLog(_ message: @autoclosure () -> String) {
+    let path = "/tmp/actrium_tab_drag.log"
+    let line = "\(Date().timeIntervalSince1970) \(message())\n"
+    let data = Data(line.utf8)
+    if let handle = FileHandle(forWritingAtPath: path) {
+        defer { try? handle.close() }
+        handle.seekToEndOfFile()
+        handle.write(data)
+    } else {
+        try? data.write(to: URL(fileURLWithPath: path))
+    }
+}
+
 private enum ToolbarInPlaceDragSubject: Equatable {
     case tab(UUID)
     case group(UUID)
@@ -123,7 +138,7 @@ func toolbarEdgeUngroupInsertionIndex(
 func toolbarDragCanReorder(
     pointerX: CGFloat,
     lastReorderPointerX: CGFloat?,
-    minimumTravel: CGFloat = 12
+    minimumTravel: CGFloat = 6
 ) -> Bool {
     // A stationary pointer must not reverse a move while SwiftUI catches up
     // with the changed group header and tab slots.
@@ -142,6 +157,10 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
     @Published private var groupFrames: [UUID: CGRect] = [:]
     @Published private var groupHeaderFrames: [UUID: CGRect] = [:]
     @Published private var tabStripWidth: CGFloat = 0
+
+    /// The expanded group the pointer is currently over during a Tab drag.
+    /// Drives both the drop-target highlight and the membership decision.
+    @Published private(set) var hoveredGroupID: UUID?
 
     private weak var reorderViewModel: BrowserViewModel?
     private var pendingVisualTabOrder: [UUID]?
@@ -304,6 +323,7 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         inPlaceDragState = nil
         pendingVisualTabOrder = nil
         pendingGroupFrameChange = nil
+        hoveredGroupID = nil
 
         guard isDragging else { return }
         let input: ToolbarTabInteractionInput = interactionTabID == activeTabID
@@ -359,6 +379,12 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         if inPlaceDragState == nil {
             guard beginDrag(tabID: interactionTabID, activeTabID: activeTabID) else { return }
             reorderViewModel = viewModel
+            // Dragging a Tab is treated as a click plus a drag: it becomes the
+            // current Tab as soon as the gesture starts, so the lifted surface
+            // is always the selected one.
+            if case let .tab(tabID) = subject, tabID != activeTabID {
+                viewModel.switchToTab(id: tabID)
+            }
             inPlaceDragState = ToolbarInPlaceDragState(
                 subject: subject,
                 grabOffsetX: startLocationX - frame.minX,
@@ -377,6 +403,26 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         if nextOriginX != drag.originX {
             drag.originX = nextOriginX
             inPlaceDragState = drag
+        }
+
+        // Track the expanded group under the pointer so the strip can
+        // highlight it as a drop target and the membership decision does not
+        // depend on where the Tab's own origin happens to sit.
+        let hoveredGroup: UUID?
+        if case .tab = subject {
+            hoveredGroup = groupFrames
+                .filter { $0.value.minX <= locationX && locationX <= $0.value.maxX }
+                .min(by: { $0.value.width < $1.value.width })
+                .flatMap { candidate in
+                    viewModel.tabGroups.contains { $0.id == candidate.key && !$0.isCollapsed }
+                        ? candidate.key
+                        : nil
+                }
+        } else {
+            hoveredGroup = nil
+        }
+        if hoveredGroupID != hoveredGroup {
+            hoveredGroupID = hoveredGroup
         }
 
         let draggedFrame = CGRect(
@@ -422,6 +468,7 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         inPlaceDragState = nil
         pendingVisualTabOrder = nil
         pendingGroupFrameChange = nil
+        hoveredGroupID = nil
 
         guard interactionTabID != nil else { return }
         _ = apply(input: .cancel)
@@ -440,7 +487,13 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
               toolbarDragCanReorder(
                   pointerX: pointerX,
                   lastReorderPointerX: inPlaceDragState?.lastReorderPointerX
-              ) else { return }
+              ) else {
+            dragDebugLog(
+                "reorderBlocked pendingOrder=\(pendingVisualTabOrder != nil)"
+                    + " pendingGroup=\(pendingGroupFrameChange != nil) pointer=\(Int(pointerX))"
+            )
+            return
+        }
         guard let sourceIndex = viewModel.tabs.firstIndex(where: { $0.id == tabID }) else {
             return
         }
@@ -614,11 +667,18 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         pointerX: CGFloat,
         viewModel: BrowserViewModel
     ) -> UUID? {
-        if let hoveredGroup = groupFrames
-            .filter({ $0.value.minX <= pointerX && pointerX <= $0.value.maxX })
-            .min(by: { abs($0.value.midX - pointerX) < abs($1.value.midX - pointerX) }),
-           viewModel.tabGroups.first(where: { $0.id == hoveredGroup.key })?.isCollapsed == false {
-            return hoveredGroup.key
+        dragDebugLog(
+            "targetGroup pointer=\(Int(pointerX)) target=\(targetIndex) groups="
+                + groupFrames.map { "\($0.key.uuidString.prefix(4))@\(Int($0.value.minX))-\(Int($0.value.maxX))" }
+                    .joined(separator: ",")
+                + " collapsed=" + viewModel.tabGroups.map { "\($0.id.uuidString.prefix(4)):\($0.isCollapsed)" }
+                    .joined(separator: ",")
+        )
+        // Authoritative: the expanded group the pointer is over, tracked on
+        // every drag update. This is what the strip highlights.
+        if let hoveredGroupID {
+            dragDebugLog("targetGroup -> hovered \(hoveredGroupID.uuidString.prefix(4))")
+            return hoveredGroupID
         }
 
         var remainingTabs = viewModel.tabs
@@ -631,8 +691,10 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         if let leftGroupID,
            leftGroupID == rightGroupID,
            viewModel.tabGroups.first(where: { $0.id == leftGroupID })?.isCollapsed == false {
+            dragDebugLog("targetGroup -> slot \(leftGroupID.uuidString.prefix(4))")
             return leftGroupID
         }
+        dragDebugLog("targetGroup -> nil")
         return nil
     }
 
@@ -647,6 +709,11 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         let boundedTargetIndex = min(max(0, targetIndex), max(0, viewModel.tabs.count - 1))
 
         let currentGroupID = viewModel.tabs[fromIndex].groupId
+        dragDebugLog(
+            "move from=\(fromIndex) to=\(boundedTargetIndex) group="
+                + "\(groupID?.uuidString.prefix(4).description ?? "nil") currentGroup="
+                + "\(currentGroupID?.uuidString.prefix(4).description ?? "nil")"
+        )
         guard boundedTargetIndex != fromIndex || currentGroupID != groupID else { return }
 
         let previousVisualOrder = visibleModelTabOrder(viewModel)

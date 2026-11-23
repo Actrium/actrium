@@ -289,9 +289,32 @@ struct WorkspaceMainView: View {
                         // Safari-style loading progress bar
                         if viewModel.isCurrentTabLoading {
                             GeometryReader { geo in
+                                let barWidth = geo.size.width * viewModel.loadingProgress
+                                // The leading tip of the filled bar fades out
+                                // over roughly 20pt, so the head reads as a
+                                // moving highlight instead of a hard edge.
+                                let fadeFraction = barWidth > 0
+                                    ? min(0.5, 20 / barWidth)
+                                    : 0
                                 Rectangle()
-                                    .fill(Color.accentColor)
-                                    .frame(width: geo.size.width * viewModel.loadingProgress, height: 2)
+                                    .fill(
+                                        LinearGradient(
+                                            stops: [
+                                                .init(color: Color.accentColor, location: 0),
+                                                .init(
+                                                    color: Color.accentColor,
+                                                    location: 1 - fadeFraction
+                                                ),
+                                                .init(
+                                                    color: Color.accentColor.opacity(0),
+                                                    location: 1
+                                                ),
+                                            ],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: barWidth, height: 2)
                                     .animation(.linear(duration: 0.2), value: viewModel.loadingProgress)
                             }
                             .frame(height: 2)

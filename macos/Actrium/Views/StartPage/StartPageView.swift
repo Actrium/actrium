@@ -97,7 +97,12 @@ private struct FullStartPageView: View {
                             .frame(maxWidth: .infinity)
                     }
                 }
+                // Sections stay leading-aligned as one column, but the
+                // column itself is capped and centered so a wide window does
+                // not push the whole Start Page against the left edge.
+                .frame(maxWidth: 900, alignment: .leading)
                 .padding(40)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
         }
     }

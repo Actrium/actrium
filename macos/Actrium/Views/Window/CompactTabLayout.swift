@@ -6,6 +6,10 @@ enum CompactToolbarAction: CaseIterable, Hashable {
     case history
     case bookmarks
     case overview
+
+    /// Actions the toolbar actually renders. History and Bookmarks are
+    /// library pages; their header entry buttons stay hidden.
+    static let visibleActions: [CompactToolbarAction] = [.newTab, .overview]
 }
 
 struct CompactToolbarInteractionFrames {
