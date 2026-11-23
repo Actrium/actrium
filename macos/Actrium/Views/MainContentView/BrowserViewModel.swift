@@ -2181,24 +2181,31 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             frontArchive: archive, trustedPublicKey: trustedKey,
             frontType: profile.packageType, serviceType: profile.serviceType
         )
-        let sessionMetadata = try ActrBindings.actriumSessionMetadataForFront(
-            frontArchive: archive,
-            trustedFrontKey: trustedKey,
-            serviceType: serviceType,
-            servicePackageDigestHex: service.sha256
-        )
-        let binding = try RealmServiceBinding(
-            profile: profile, verifiedProfileBody: profileData, front: archive,
-            metadata: sessionMetadata, trustedFrontKey: trustedKey, capabilitiesJSON: capabilities,
-            permissions: manifest.permissions
-        )
+        let binding = try Self.serviceBindingForDeclaredCapabilities(capabilities) { capabilities in
+            let sessionMetadata = try ActrBindings.actriumSessionMetadataForFront(
+                frontArchive: archive,
+                trustedFrontKey: trustedKey,
+                serviceType: serviceType,
+                servicePackageDigestHex: service.sha256
+            )
+            return try RealmServiceBinding(
+                profile: profile, verifiedProfileBody: profileData, front: archive,
+                metadata: sessionMetadata, trustedFrontKey: trustedKey, capabilitiesJSON: capabilities,
+                permissions: manifest.permissions
+            )
+        }
         var installed = false
-        defer { if !installed { Task { await binding.stop() } } }
+        defer {
+            if !installed, let binding {
+                Task { await binding.stop() }
+            }
+        }
         let publisherKeys: [RealmProfileStore.KeyRequirement] = [
             .init(publicKey: trustedKey, domain: publisher.domain, localFront: policy)
         ]
         let previousBinding = RealmServiceBindings.shared.localFrontBinding(for: tabId)
         func rollbackLocalFrontHandoff() async {
+            guard let binding else { return }
             // An unstructured task does not inherit cancellation from the switch.
             // Stop the new session first; otherwise restoring the old exclusive
             // lease would race a still-attached replacement. A newer switch may
@@ -2226,8 +2233,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         do {
             // Verification is complete before the old lease is released. The
             // old renderer remains usable again if the replacement cannot Attach.
-            try await previousBinding?.suspendForLocalFrontReplacement()
-            try await binding.prepareLocalFront()
+            if let binding {
+                try await previousBinding?.suspendForLocalFrontReplacement()
+                try await binding.prepareLocalFront()
+            }
         } catch {
             await rollbackLocalFrontHandoff()
             throw error
@@ -2262,7 +2271,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 let position = tabSlotPositions.removeValue(forKey: tabId) ?? index
                 releaseTabRuntime(tabId, preserveRealmLoad: true)
                 leftPanelVisibility[tabId] = nil
-                RealmServiceBindings.shared.attach(binding, to: tab.id)
+                if let binding {
+                    RealmServiceBindings.shared.attach(binding, to: tab.id)
+                }
                 localFrontApprovals[tab.id] = LocalFrontApproval(scope: scope, file: file)
                 tabSlotPositions[tab.id] = position
                 leftPanelVisibility[tab.id] = manifest.leftPanelDefaultVisible
@@ -2294,8 +2305,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let hostModules: [String: Module]
     }
 
-    /// Internal for downloaded-Front regression tests. Attach metadata and the
-    /// Service binding are constructed for declared Service RPCs or events.
+    /// Internal for downloaded and local Front regression tests. Attach metadata
+    /// and the Service binding are constructed only for declared Service RPCs or events.
     nonisolated static func serviceBindingForDeclaredCapabilities<ServiceBinding>(
         _ capabilitiesJSON: String?,
         make: (String) throws -> ServiceBinding

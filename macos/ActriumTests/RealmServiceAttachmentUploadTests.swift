@@ -642,15 +642,6 @@ struct RealmServiceAttachmentUploadTests {
         }
         #expect(binding == nil)
 
-        let localStorageOnly = #"{"hostModules":{"local-storage":{"rpc":["getItem","setItem"]}}}"#
-        let rendererOnly: String? = try BrowserViewModel.serviceBindingForDeclaredCapabilities(
-            localStorageOnly
-        ) { _ in
-            Issue.record("Non-Service capabilities must not derive Attach metadata.")
-            throw SessionError(description: "Unexpected Service binding")
-        }
-        #expect(rendererOnly == nil)
-
         let serviceCapabilities = #"{"hostModules":{"service":{"rpc":["documents/read"]}}}"#
         let declared = try BrowserViewModel.serviceBindingForDeclaredCapabilities(serviceCapabilities) { $0 }
         #expect(declared == serviceCapabilities)
@@ -658,6 +649,17 @@ struct RealmServiceAttachmentUploadTests {
         let eventCapabilities = #"{"hostModules":{"service":{"events":["documents/changed"]}}}"#
         let eventBinding = try BrowserViewModel.serviceBindingForDeclaredCapabilities(eventCapabilities) { $0 }
         #expect(eventBinding == eventCapabilities)
+    }
+
+    @Test func localFrontSkipsServiceBindingForNonServiceCapabilities() throws {
+        let localStorageOnly = #"{"hostModules":{"local-storage":{"rpc":["getItem","setItem"]}}}"#
+        let rendererOnly: String? = try BrowserViewModel.serviceBindingForDeclaredCapabilities(
+            localStorageOnly
+        ) { _ in
+            Issue.record("A local Front's non-Service capabilities must not derive Attach metadata.")
+            throw SessionError(description: "Unexpected local Front Service binding")
+        }
+        #expect(rendererOnly == nil)
     }
 
     @Test func rpcRecoversAfterJoiningAResumeOnlyCaller() async throws {
