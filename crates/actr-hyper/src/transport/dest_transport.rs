@@ -824,6 +824,34 @@ impl DestTransport {
         self.conn_mgr.watch_ready()
     }
 
+    /// The verified Actrium context of this destination's wire, if Actor
+    /// mutual authentication has completed on it.
+    ///
+    /// The reliable route is only pinned by the first committed send, so a
+    /// pre-traffic Attach must also consider ready wires the pool already
+    /// holds; otherwise a fresh session could never bootstrap.
+    pub(crate) async fn verified_peer_context(
+        &self,
+    ) -> Option<Arc<crate::transport::VerifiedPeerContext>> {
+        let route = self.reliable.lock().await;
+        if let Some(context) = route
+            .current
+            .as_ref()
+            .and_then(|wire| wire.verified_peer_context())
+        {
+            return Some(context);
+        }
+        drop(route);
+        for conn_type in [ConnType::WebSocket, ConnType::WebRTC] {
+            if let Some(wire) = self.conn_mgr.get_connection(conn_type).await
+                && let Some(context) = wire.verified_peer_context()
+            {
+                return Some(context);
+            }
+        }
+        None
+    }
+
     pub(crate) async fn adopt_ready(&self, connection: Arc<dyn WireHandle>) {
         self.conn_mgr.adopt_ready(connection).await;
     }

@@ -383,11 +383,20 @@ final class RealmAdmissionTests: XCTestCase {
         source.tabs[0].guestScript = "installed Front"
         let document = try profile(membership: "invite-only")
         let accepted = try accept(document, preferences: preferences)
+        let metadata = ActriumSessionMetadata(
+            program: ProgramRelease(publisher: "publisher.example", name: "echo", version: "1.0.0"),
+            packageDigest: Data(repeating: 1, count: 32),
+            guestDigest: Data(repeating: 2, count: 32),
+            protocolFingerprint: Data(repeating: 3, count: 32),
+            runtime: ActriumRuntime(actriumVersion: "1.0.0", frontHostApi: "1.0", keelApi: "1.0"),
+            programCapabilities: ["service"],
+            routes: [ActriumRoute(route: "uploadAttachment", capabilities: ["service"])]
+        )
         let binding = try RealmServiceBinding(
             profile: accepted.info,
             verifiedProfileBody: document.0,
             front: Data(),
-            serviceType: ActrBindings.ActrType(publisher: "publisher.example", name: "echo", version: "1.0.0"),
+            metadata: metadata,
             trustedFrontKey: Data(),
             capabilitiesJSON: #"{"hostModules":{"service":{"rpc":["uploadAttachment"]}}}"#,
             permissions: ["service.attachmentUpload"]

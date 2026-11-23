@@ -39,6 +39,9 @@ actr = { path = "../actr", version = "0.10.7", features = ["config"] }
 # Hyper layer - binary hash computation and manifest embed for dev tooling
 actr-hyper = { path = "../actr-hyper", version = "0.10.7" }
 
+# Actrium v1 session service (packaged Service host accepts Attach)
+actrium-runtime = { path = "../actrium-runtime" }
+
 # Package format (.actr ZIP STORE)
 actr-pack = { workspace = true, features = ["profile-validation"] }
 

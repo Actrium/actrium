@@ -20,6 +20,7 @@ pub mod persistence;
 mod publisher_storage;
 pub mod realm_link;
 pub mod runtime_persistence;
+pub mod session;
 pub mod speech;
 
 pub use ffi::*;

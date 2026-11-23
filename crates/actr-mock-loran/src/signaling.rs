@@ -13,6 +13,9 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
+use actr_protocol::actor_key_proof::{
+    ActorKeyProofOperation, sign_actor_key_proof, verify_actor_key_proof,
+};
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
     AIdCredential, ActrId, ActrRelay, RegisterRequest, RegisterResponse, RelayDeliveryResult,
@@ -26,7 +29,7 @@ use axum::http::{HeaderMap, header::SEC_WEBSOCKET_PROTOCOL};
 use axum::response::IntoResponse;
 use base64::Engine as _;
 use bytes::Bytes;
-use ed25519_dalek::Signer;
+use ed25519_dalek::{Signer, SigningKey};
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::sync::mpsc;
@@ -134,12 +137,19 @@ async fn handle_connection(
                 }
             }
             if !found {
+                let actr_type = claimed_type.unwrap_or_default();
+                let registration = ensure_actor_key_proof(RegisterRequest {
+                    actr_type: actr_type.clone(),
+                    realm: actr_id.realm.clone(),
+                    ..Default::default()
+                });
                 registry.push(crate::state::RegisteredActor {
                     actr_id: actr_id.clone(),
-                    actr_type: claimed_type.unwrap_or_default(),
+                    actr_type,
                     client_id: client_id.clone(),
                     ws_address: None,
                     service_spec: None,
+                    registration,
                 });
             }
             drop(registry);
@@ -264,6 +274,7 @@ async fn handle_peer_to_server(
 
     match payload {
         peer_to_signaling::Payload::RegisterRequest(req) => {
+            let req = &ensure_actor_key_proof(req.clone());
             let register_ok = build_register_ok(req, state).await;
 
             // Store registration
@@ -274,6 +285,7 @@ async fn handle_peer_to_server(
                     client_id: sender_id.to_string(),
                     ws_address: req.ws_address.clone(),
                     service_spec: req.service_spec.clone(),
+                    registration: req.clone(),
                 };
                 state.registry.write().await.push(entry);
                 bind_client_to_actor(state, sender_id, register_ok.actr_id.clone()).await;
@@ -307,6 +319,26 @@ async fn handle_peer_to_server(
     }
 }
 
+/// Ensure mock registrations carry a real, independent Actor key and proof.
+///
+/// Tests that do not supply their own key get a deterministic key derived only
+/// from the Realm and Actor type, never from the Publisher or Realm client key.
+pub(crate) fn ensure_actor_key_proof(mut req: RegisterRequest) -> RegisterRequest {
+    if verify_actor_key_proof(&req, ActorKeyProofOperation::Register).is_ok() {
+        return req;
+    }
+
+    use sha2::{Digest as _, Sha256};
+    let seed = Sha256::digest(format!(
+        "actr-mock-loran-actor-key-v1\0{}\0{}",
+        req.realm,
+        req.actr_type.to_program_identity()
+    ));
+    let signing_key = SigningKey::from_bytes(&seed.into());
+    sign_actor_key_proof(&mut req, ActorKeyProofOperation::Register, &signing_key);
+    req
+}
+
 /// Build a `RegisterOk` for the given `RegisterRequest`.
 ///
 /// This is the shared code path used by both the WS signaling handler and the
@@ -316,6 +348,7 @@ pub async fn build_register_ok(
     req: &RegisterRequest,
     state: &Arc<MockState>,
 ) -> register_response::RegisterOk {
+    let req = &ensure_actor_key_proof(req.clone());
     let serial = state.next_serial.fetch_add(1, Ordering::SeqCst);
 
     let actr_id = ActrId {
@@ -338,6 +371,7 @@ pub async fn build_register_ok(
         client_key: "0000000000000000".to_string(),
         role: actr_protocol::MemberRole::Owner as i32,
         development: None,
+        actor_public_key: req.actor_public_key.clone(),
     };
     let claims_bytes = claims.encode_to_vec();
     let signature = state.issuer_signing_key().sign(&claims_bytes);
@@ -1034,7 +1068,8 @@ fn parse_actor_id(s: &str) -> Option<ActrId> {
 mod tests {
     use super::{
         MockRelayEgress, build_register_ok, collect_reachable_route_candidates,
-        forward_relay_to_target, resolve_role_negotiation_targets, send_relay_delivery_result,
+        ensure_actor_key_proof, forward_relay_to_target, resolve_role_negotiation_targets,
+        send_relay_delivery_result,
     };
     use crate::state::{MockState, RegisteredActor};
     use actr_protocol::prost::Message as ProstMessage;
@@ -1059,16 +1094,24 @@ mod tests {
     }
 
     fn registered_actor(serial: u64, name: &str, client_id: &str) -> RegisteredActor {
+        let actr_id = actor(serial);
+        let actr_type = ActrType {
+            publisher: "acme".to_string(),
+            name: name.to_string(),
+            version: "0.1.0".to_string(),
+        };
+        let registration = ensure_actor_key_proof(RegisterRequest {
+            actr_type: actr_type.clone(),
+            realm: actr_id.realm.clone(),
+            ..Default::default()
+        });
         RegisteredActor {
-            actr_id: actor(serial),
-            actr_type: ActrType {
-                publisher: "acme".to_string(),
-                name: name.to_string(),
-                version: "0.1.0".to_string(),
-            },
+            actr_id,
+            actr_type,
             client_id: client_id.to_string(),
             ws_address: Some(format!("ws://example.invalid/{serial}")),
             service_spec: None,
+            registration,
         }
     }
 
@@ -1084,23 +1127,15 @@ mod tests {
     #[tokio::test]
     async fn register_ok_uses_32_byte_renewal_token() {
         let state = test_state();
-        let req = RegisterRequest {
+        let req = ensure_actor_key_proof(RegisterRequest {
             actr_type: ActrType {
                 publisher: "acme".to_string(),
                 name: "EchoService".to_string(),
                 version: "0.1.0".to_string(),
             },
             realm: "mock@example.com".to_string(),
-            service_spec: None,
-            acl: None,
-            service: None,
-            ws_address: None,
-            manifest_raw: None,
-            publisher_signature: None,
-            target: None,
-            auth_mode: None,
-            signing_public_key: None,
-        };
+            ..Default::default()
+        });
 
         let ok = build_register_ok(&req, &state).await;
         let token = ok
@@ -1108,6 +1143,13 @@ mod tests {
             .expect("mock registration should include renewal token");
 
         assert_eq!(token.len(), 32);
+        actr_protocol::actor_key_proof::verify_actor_key_proof(
+            &req,
+            actr_protocol::actor_key_proof::ActorKeyProofOperation::Register,
+        )
+        .unwrap();
+        let claims = actr_protocol::IdentityClaims::decode(&ok.credential.claims[..]).unwrap();
+        assert_eq!(claims.actor_public_key, req.actor_public_key);
     }
 
     #[test]

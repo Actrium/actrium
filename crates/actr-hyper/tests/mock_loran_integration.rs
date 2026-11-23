@@ -27,6 +27,8 @@ fn test_register_request() -> RegisterRequest {
         target: Some("wasm32-wasip2".into()),
         auth_mode: Some(RegisterAuthMode::Package as i32),
         signing_public_key: None,
+        actor_public_key: None,
+        actor_key_proof: None,
     }
 }
 

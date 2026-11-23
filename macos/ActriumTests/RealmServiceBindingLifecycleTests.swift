@@ -489,31 +489,17 @@ struct RealmServiceBindingLifecycleTests {
         #expect(suspendCount == 1)
     }
 
-    @Test func olderDiscoveryCannotReplaceANewerEventPeer() async throws {
+    @Test func olderSelectionCannotReplaceANewerEventPeer() async throws {
         let controller = RealmServiceEventPeerController()
         let oldTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 1)
         let newTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 2)
         let oldReference = ControlledEventReference(target: oldTarget)
         let newReference = ControlledEventReference(target: newTarget)
-        let serviceType = ActrBindings.ActrType(publisher: "pub", name: "svc", version: "1.0.0")
 
-        let oldSelection = Task {
-            try await controller.select(generation: 1, reference: oldReference, serviceType: serviceType)
-        }
-        await oldReference.waitForDiscovery()
-        let newSelection = Task {
-            try await controller.select(generation: 2, reference: newReference, serviceType: serviceType)
-        }
-        await newReference.waitForDiscovery()
-
-        // Complete the discoveries in reverse order. The late generation 1
-        // result must fail instead of replacing generation 2's peer.
-        newReference.completeDiscovery()
-        try await newSelection.value
-        oldReference.completeDiscovery()
+        try await controller.select(generation: 2, reference: newReference, target: newTarget)
         do {
-            try await oldSelection.value
-            Issue.record("An older discovery must not commit its event peer.")
+            try await controller.select(generation: 1, reference: oldReference, target: oldTarget)
+            Issue.record("An older selection must not commit its event peer.")
         } catch is CancellationError {
             // Expected.
         }
@@ -523,18 +509,13 @@ struct RealmServiceBindingLifecycleTests {
         #expect(selectedPeer == newTarget)
     }
 
-    @Test func callRediscoveryRefreshesAnActiveEventPeer() async throws {
+    @Test func failedReplacementAttachKeepsTheActiveEventPeerUntilCommit() async throws {
         let controller = RealmServiceEventPeerController()
         let originalTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 1)
         let restartedTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 2)
         let reference = ControlledEventReference(target: originalTarget)
         let serviceType = ActrBindings.ActrType(publisher: "pub", name: "svc", version: "1.0.0")
-        let selection = Task {
-            try await controller.select(generation: 1, reference: reference, serviceType: serviceType)
-        }
-        await reference.waitForDiscovery()
-        reference.completeDiscovery()
-        try await selection.value
+        try await controller.select(generation: 1, reference: reference, target: originalTarget)
         #expect(reference.peer == originalTarget)
 
         // This is the call(_:) path: strict rediscovery returns a restarted
@@ -547,12 +528,46 @@ struct RealmServiceBindingLifecycleTests {
                 ifGeneration: generation, reference: reference, serviceType: serviceType
             )
         }
-        await reference.waitForDiscovery(expected: 2)
+        await reference.waitForDiscovery()
         reference.completeDiscovery()
-        let resolvedTarget = try await rediscovery.value
-        #expect(resolvedTarget == restartedTarget)
+        let discovery = try await rediscovery.value
+        #expect(discovery.target == restartedTarget)
+
+        // Exercise the replacement-Attach branch itself. A failed Attach must
+        // skip commit and preserve both the controller and Rust event router.
+        do {
+            _ = try await RealmServiceBinding.recoverDiscoveredConnection(
+                currentTarget: originalTarget,
+                discoveredTarget: discovery.target,
+                retarget: { () async throws -> ActrBindings.ActrId in
+                    throw RealmServiceError(message: "replacement Attach failed")
+                },
+                resume: { originalTarget },
+                commit: { recovered in
+                    await controller.commit(discovery, reference: reference, target: recovered)
+                }
+            )
+            Issue.record("The controlled replacement Attach must fail.")
+        } catch {
+            // Expected.
+        }
+        #expect(reference.peer == originalTarget)
+        var selectedPeer = await controller.peer
+        #expect(selectedPeer == originalTarget)
+
+        // Only a successfully established RuntimeConnection publishes B.
+        let recovered = try await RealmServiceBinding.recoverDiscoveredConnection(
+            currentTarget: originalTarget,
+            discoveredTarget: discovery.target,
+            retarget: { restartedTarget },
+            resume: { originalTarget },
+            commit: { recovered in
+                await controller.commit(discovery, reference: reference, target: recovered)
+            }
+        )
+        #expect(recovered == restartedTarget)
         #expect(reference.peer == restartedTarget)
-        let selectedPeer = await controller.peer
+        selectedPeer = await controller.peer
         #expect(selectedPeer == restartedTarget)
 
         // A delayed rediscovery from before the last unsubscribe must not
@@ -563,9 +578,10 @@ struct RealmServiceBindingLifecycleTests {
                 ifGeneration: generation, reference: reference, serviceType: serviceType
             )
         }
-        await reference.waitForDiscovery(expected: 3)
+        await reference.waitForDiscovery(expected: 2)
         reference.completeDiscovery()
-        _ = try await staleRefresh.value
+        let staleDiscovery = try await staleRefresh.value
+        await controller.commit(staleDiscovery, reference: reference, target: staleDiscovery.target)
         #expect(reference.peer == nil)
     }
 
@@ -576,12 +592,7 @@ struct RealmServiceBindingLifecycleTests {
         let oldReference = ControlledEventReference(target: oldTarget)
         let newReference = ControlledEventReference(target: newTarget)
         let serviceType = ActrBindings.ActrType(publisher: "pub", name: "svc", version: "1.0.0")
-        let selection = Task {
-            try await controller.select(generation: 1, reference: oldReference, serviceType: serviceType)
-        }
-        await oldReference.waitForDiscovery()
-        oldReference.completeDiscovery()
-        try await selection.value
+        try await controller.select(generation: 1, reference: oldReference, target: oldTarget)
         let activeGeneration = await controller.activeGeneration()
         let generation = try #require(activeGeneration)
 
@@ -590,7 +601,7 @@ struct RealmServiceBindingLifecycleTests {
                 ifGeneration: generation, reference: oldReference, serviceType: serviceType
             )
         }
-        await oldReference.waitForDiscovery(expected: 2)
+        await oldReference.waitForDiscovery()
         let newResolution = Task {
             try await controller.resolve(
                 ifGeneration: generation, reference: newReference, serviceType: serviceType
@@ -601,49 +612,29 @@ struct RealmServiceBindingLifecycleTests {
         // The replacement Service is discovered first. When the older RPC
         // later returns the retired ID, it must not undo that committed peer.
         newReference.completeDiscovery()
-        let resolvedNewTarget = try await newResolution.value
-        #expect(resolvedNewTarget == newTarget)
+        let resolvedNew = try await newResolution.value
+        #expect(resolvedNew.target == newTarget)
+        await controller.commit(resolvedNew, reference: newReference, target: newTarget)
         oldReference.completeDiscovery()
-        let resolvedOldTarget = try await oldResolution.value
-        #expect(resolvedOldTarget == oldTarget)
+        let resolvedOld = try await oldResolution.value
+        #expect(resolvedOld.target == oldTarget)
+        await controller.commit(resolvedOld, reference: oldReference, target: oldTarget)
         #expect(oldReference.peer == oldTarget)
         #expect(newReference.peer == newTarget)
         let selectedPeer = await controller.peer
         #expect(selectedPeer == newTarget)
     }
 
-    @Test func ambiguousServiceDiscoveryDoesNotSelectOrReplaceAnEventPeer() async throws {
+    @Test func ambiguousServiceDiscoveryDoesNotReplaceAnEventPeer() async throws {
         let controller = RealmServiceEventPeerController()
         let originalTarget = ActrBindings.ActrId(realm: "realm@example.test", serialNumber: 1)
         let reference = ControlledEventReference(target: originalTarget)
         let serviceType = ActrBindings.ActrType(publisher: "pub", name: "svc", version: "1.0.0")
         let ambiguous = RealmServiceError(message: "Multiple Realm Services match the signed type.")
 
-        let selection = Task {
-            try await controller.select(generation: 1, reference: reference, serviceType: serviceType)
-        }
-        await reference.waitForDiscovery()
-        reference.failDiscovery(with: ambiguous)
-        reference.completeDiscovery()
-        do {
-            try await selection.value
-            Issue.record("Ambiguous Service discovery must fail.")
-        } catch {
-            // Expected.
-        }
-        #expect(reference.peer == nil)
-        var selectedPeer = await controller.peer
-        #expect(selectedPeer == nil)
-
         // Establish a valid subscription, then make the next call's discovery
         // ambiguous. The previously trusted peer must remain unchanged.
-        reference.setTarget(originalTarget)
-        let validSelection = Task {
-            try await controller.select(generation: 2, reference: reference, serviceType: serviceType)
-        }
-        await reference.waitForDiscovery(expected: 2)
-        reference.completeDiscovery()
-        try await validSelection.value
+        try await controller.select(generation: 1, reference: reference, target: originalTarget)
         #expect(reference.peer == originalTarget)
 
         let activeGeneration = await controller.activeGeneration()
@@ -653,7 +644,7 @@ struct RealmServiceBindingLifecycleTests {
                 ifGeneration: generation, reference: reference, serviceType: serviceType
             )
         }
-        await reference.waitForDiscovery(expected: 3)
+        await reference.waitForDiscovery()
         reference.failDiscovery(with: ambiguous)
         reference.completeDiscovery()
         do {
@@ -663,7 +654,7 @@ struct RealmServiceBindingLifecycleTests {
             // Expected.
         }
         #expect(reference.peer == originalTarget)
-        selectedPeer = await controller.peer
+        let selectedPeer = await controller.peer
         #expect(selectedPeer == originalTarget)
     }
 }

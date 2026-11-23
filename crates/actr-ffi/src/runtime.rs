@@ -1,6 +1,10 @@
 //! Runtime wrappers for UniFFI export
 
 use crate::error::{ActrError, ActrResult, run_on_tokio_runtime};
+use crate::session::{
+    ActrPeerSessionWrapper, ActriumAttachParams, ActriumServiceConfig, ActriumServicePolicies,
+    actr_ref_attach_actrium, actrium_service_for_node,
+};
 use crate::types::{
     ActrId, ActrType, AppLifecycleState, CleanupReason, NetworkEventResult, NetworkSnapshot,
     PayloadType, ReconnectReason,
@@ -11,40 +15,6 @@ use actr_hyper::{ActrRef, NetworkEventHandle, Node, Registered, WorkloadPackage}
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
-
-/// Verify the Front before rendering and return the Service type from the accepted Realm Profile.
-#[uniffi::export]
-pub fn verify_realm_front(
-    front_archive: Vec<u8>,
-    trusted_public_key: Vec<u8>,
-    front_type: String,
-    service_type: String,
-) -> ActrResult<ActrType> {
-    let invalid = |msg| ActrError::Config { msg };
-    let key_bytes = trusted_public_key
-        .as_slice()
-        .try_into()
-        .map_err(|_| invalid("Invalid Front Publisher public key length".into()))?;
-    let key = ed25519_dalek::VerifyingKey::from_bytes(key_bytes)
-        .map_err(|error| invalid(error.to_string()))?;
-    let verified = actr_pack::verify_actor_package(&front_archive, &key)
-        .map_err(|error| invalid(error.to_string()))?;
-    if verified.manifest.actor_type() != front_type {
-        return Err(invalid(
-            "The Front does not match the Actor type in the Realm profile.".into(),
-        ));
-    }
-    let service_type = actr_protocol::ActrType::from_string_repr(&service_type)
-        .map_err(|error| invalid(error.to_string()))?;
-    actr_hyper::validate_realm_front_dependency(
-        &front_archive,
-        &verified.manifest,
-        &service_type,
-        actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
-    )
-    .map_err(|error| invalid(error.to_string()))?;
-    Ok(service_type.into())
-}
 
 /// Resolve a dependency's ActrType from a manifest.toml file.
 ///
@@ -144,8 +114,10 @@ impl ActrNode {
     pub async fn new_from_package_file(
         config_path: String,
         package_path: String,
+        actor_key_namespace: Option<String>,
     ) -> ActrResult<Arc<Self>> {
-        new_from_package_file_inner(config_path, package_path, None, None).await
+        new_from_package_file_inner(config_path, package_path, None, None, actor_key_namespace)
+            .await
     }
 
     /// Create a package-backed runtime and install host-side observers.
@@ -154,8 +126,16 @@ impl ActrNode {
         config_path: String,
         package_path: String,
         observers: Arc<RuntimeObservers>,
+        actor_key_namespace: Option<String>,
     ) -> ActrResult<Arc<Self>> {
-        new_from_package_file_inner(config_path, package_path, Some(observers), None).await
+        new_from_package_file_inner(
+            config_path,
+            package_path,
+            Some(observers),
+            None,
+            actor_key_namespace,
+        )
+        .await
     }
 
     /// Create a linked/static runtime from a foreign-language workload.
@@ -164,6 +144,7 @@ impl ActrNode {
         config_path: String,
         actor_type: ActrType,
         workload: Arc<DynamicWorkload>,
+        actor_key_namespace: Option<String>,
     ) -> ActrResult<Arc<Self>> {
         let actor_type: actr_protocol::ActrType = actor_type.into();
         let init = load_linked_init(&config_path, &actor_type).await?;
@@ -174,7 +155,7 @@ impl ActrNode {
             .map_err(|e| ActrError::Internal {
                 msg: format!("Failed to link foreign workload: {e}"),
             })?;
-        register_node(attached).await
+        register_linked_node(attached, actor_key_namespace).await
     }
 
     /// Create a package-backed runtime using an OS-managed Realm identity.
@@ -184,23 +165,43 @@ impl ActrNode {
         package_path: String,
         membership: Arc<crate::RealmMembership>,
         observers: Option<Arc<RuntimeObservers>>,
+        actor_key_namespace: Option<String>,
     ) -> ActrResult<Arc<Self>> {
         run_on_tokio_runtime("package membership bootstrap", async move {
-            new_from_package_file_inner(config_path, package_path, observers, Some(membership))
-                .await
+            new_from_package_file_inner(
+                config_path,
+                package_path,
+                observers,
+                Some(membership),
+                actor_key_namespace,
+            )
+            .await
         })
         .await
     }
 
-    /// Start the network side of a signed Realm Front whose guest runs in the host.
+    /// Create a Realm Front runtime from a verified Front archive and an
+    /// OS-managed Realm identity.
+    ///
+    /// The Guest is rendered by the platform Host; this node owns only the
+    /// Front Actor identity, the network side, and the Actrium session client.
     #[uniffi::constructor(async_runtime = "tokio")]
     pub async fn new_from_front_with_membership(
         config_path: String,
         front_archive: Vec<u8>,
         service_type: ActrType,
         membership: Arc<crate::RealmMembership>,
+        actor_key_namespace: Option<String>,
     ) -> ActrResult<Arc<Self>> {
-        new_from_front_inner(config_path, front_archive, service_type, membership, None).await
+        new_from_front_inner(
+            config_path,
+            front_archive,
+            service_type,
+            membership,
+            actor_key_namespace,
+            None,
+        )
+        .await
     }
 
     /// Start a Realm Front and deliver declared Service business events to the
@@ -223,6 +224,7 @@ impl ActrNode {
             front_archive,
             service_type,
             membership,
+            None,
             Some(router),
         )
         .await
@@ -235,6 +237,7 @@ impl ActrNode {
         actor_type: ActrType,
         workload: Arc<DynamicWorkload>,
         membership: Arc<crate::RealmMembership>,
+        actor_key_namespace: Option<String>,
     ) -> ActrResult<Arc<Self>> {
         // UniFFI's Tokio compatibility enters the runtime but still polls on
         // the foreign executor. Keep native bootstrap and signing callbacks
@@ -249,7 +252,7 @@ impl ActrNode {
                 .map_err(|_| ActrError::Internal {
                     msg: "failed to link foreign workload".into(),
                 })?;
-            register_node(membership.bind(attached)?).await
+            register_linked_node(membership.bind(attached)?, actor_key_namespace).await
         })
         .await
     }
@@ -292,6 +295,35 @@ impl ActrNode {
 
         Ok(Arc::new(NetworkEventHandleWrapper { inner: handle }))
     }
+
+    /// Install an Actrium Service registry on this node. In the P2P model every
+    /// participating node is a Service; the same configuration also enables
+    /// outbound `attachActrium` calls to other peers.
+    pub fn with_actrium_service(
+        self: Arc<Self>,
+        config: ActriumServiceConfig,
+        policies: Arc<ActriumServicePolicies>,
+    ) -> ActrResult<Arc<Self>> {
+        let this = self.clone();
+        let mut node_guard = this.inner.lock();
+        let service = {
+            let node = node_guard.as_ref().ok_or_else(|| ActrError::Internal {
+                msg: "runtime node is no longer available".to_string(),
+            })?;
+            actrium_service_for_node(node, config, policies)?
+        };
+        // Every fallible step above runs while the node is still owned by the
+        // guard. Installing the prepared service is infallible, so a config
+        // error cannot consume the node or prevent a corrected retry.
+        let node = node_guard.take().ok_or_else(|| ActrError::Internal {
+            msg: "runtime node is no longer available".to_string(),
+        })?;
+        *node_guard = Some(match self.front_event_router.clone() {
+            Some(events) => node.with_actrium_front(service, events),
+            None => node.with_actrium_service(service),
+        });
+        Ok(self)
+    }
 }
 
 async fn new_from_package_file_inner(
@@ -299,6 +331,7 @@ async fn new_from_package_file_inner(
     package_path: String,
     observers: Option<Arc<RuntimeObservers>>,
     membership: Option<Arc<crate::RealmMembership>>,
+    actor_key_namespace: Option<String>,
 ) -> ActrResult<Arc<ActrNode>> {
     let package_bytes = std::fs::read(&package_path).map_err(|e| {
         error!("Failed to read package at {}: {}", package_path, e);
@@ -332,6 +365,14 @@ async fn new_from_package_file_inner(
             msg: format!("Failed to attach package-backed node: {e}"),
         }
     })?;
+    if let Some(namespace) = actor_key_namespace {
+        attached =
+            attached
+                .with_actor_key_namespace(namespace)
+                .map_err(|e| ActrError::Internal {
+                    msg: format!("Failed to set Actor key namespace: {e}"),
+                })?;
+    }
     if let Some(observers) = observers {
         attached = attached.with_hook_observer(observers.as_ref().clone());
     }
@@ -621,6 +662,15 @@ impl ActrRefWrapper {
         }
     }
 
+    /// Attach to a peer Service over the verified Actor channel.
+    pub async fn attach_actrium(
+        &self,
+        service: ActrId,
+        params: ActriumAttachParams,
+    ) -> ActrResult<Arc<ActrPeerSessionWrapper>> {
+        actr_ref_attach_actrium(&self.inner, service, params).await
+    }
+
     /// Discover the unique Service of the specified type in this Realm.
     /// Unlike `discover`, this rejects both zero and ambiguous candidates.
     pub async fn discover_service(&self, service_type: ActrType) -> ActrResult<ActrId> {
@@ -798,11 +848,7 @@ impl ActrRefWrapper {
 
     /// Unregister a DataChunk callback for a stream ID.
     pub async fn unregister_stream(&self, stream_id: String) -> ActrResult<()> {
-        self.inner
-            .app_context()
-            .await
-            .unregister_stream(&stream_id)
-            .await?;
+        self.inner.unregister_stream(&stream_id).await?;
         Ok(())
     }
 
@@ -881,6 +927,7 @@ async fn new_from_front_inner(
     front_archive: Vec<u8>,
     service_type: ActrType,
     membership: Arc<crate::RealmMembership>,
+    actor_key_namespace: Option<String>,
     event_router: Option<actr_hyper::FrontEventRouter>,
 ) -> ActrResult<Arc<ActrNode>> {
     run_on_tokio_runtime("Front membership bootstrap", async move {
@@ -896,24 +943,36 @@ async fn new_from_front_inner(
             )
             .await
             .map_err(|e| ActrError::Config { msg: e.to_string() })?;
-        let issuer_endpoint = attached.issuer_endpoint().to_string();
-        let registered = membership
-            .bind(attached)?
-            .register(&issuer_endpoint)
-            .await
-            .map_err(|e| ActrError::Internal {
-                msg: format!("Issuer registration failed: {e}"),
-            })?;
-        Ok::<Arc<ActrNode>, ActrError>(Arc::new(ActrNode {
-            inner: Mutex::new(Some(registered)),
-            network_event_handle: Mutex::new(None),
-            front_event_router: event_router,
-        }))
+        register_linked_node_with_router(
+            membership.bind(attached)?,
+            actor_key_namespace,
+            event_router,
+        )
+        .await
     })
     .await
 }
 
-async fn register_node(attached: Node<actr_hyper::Attached>) -> ActrResult<Arc<ActrNode>> {
+async fn register_linked_node(
+    attached: Node<actr_hyper::Attached>,
+    actor_key_namespace: Option<String>,
+) -> ActrResult<Arc<ActrNode>> {
+    register_linked_node_with_router(attached, actor_key_namespace, None).await
+}
+
+async fn register_linked_node_with_router(
+    mut attached: Node<actr_hyper::Attached>,
+    actor_key_namespace: Option<String>,
+    front_event_router: Option<actr_hyper::FrontEventRouter>,
+) -> ActrResult<Arc<ActrNode>> {
+    if let Some(namespace) = actor_key_namespace {
+        attached =
+            attached
+                .with_actor_key_namespace(namespace)
+                .map_err(|e| ActrError::Internal {
+                    msg: format!("Failed to set Actor key namespace: {e}"),
+                })?;
+    }
     let issuer_endpoint = attached.issuer_endpoint().to_string();
     let registered = attached.register(&issuer_endpoint).await.map_err(|e| {
         error!("Issuer registration failed: {}", e);
@@ -925,7 +984,7 @@ async fn register_node(attached: Node<actr_hyper::Attached>) -> ActrResult<Arc<A
     Ok(Arc::new(ActrNode {
         inner: Mutex::new(Some(registered)),
         network_event_handle: Mutex::new(None),
-        front_event_router: None,
+        front_event_router,
     }))
 }
 
@@ -1070,7 +1129,7 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
             .link(workload.as_ref().clone())
             .await
             .expect("link manifest-backed workload");
-        let node = register_node(attached)
+        let node = register_linked_node(attached, None)
             .await
             .expect("register manifest-backed linked node");
         let actr_ref = node
@@ -1121,8 +1180,77 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
                 version: "0.1.0".to_string(),
             },
             workload,
+            None,
         )
         .await
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn event_only_actrium_peer_starts_with_empty_routes() {
+        let mut server = MockLoranServer::start()
+            .await
+            .expect("mock loran server should start");
+        let temp = tempdir().expect("temp dir");
+        let config_path = write_test_config(temp.path(), &server);
+        let node = linked_node_for_test(&config_path)
+            .await
+            .expect("linked workload node should be created");
+        let mut config = crate::session::tests::service_config_for_test();
+        config.service_actor_id.clear();
+        config.program_capabilities = vec!["service".into()];
+        config.routes.clear();
+
+        node.clone()
+            .with_actrium_service(config, ActriumServicePolicies::allow_all())
+            .expect("an event-only peer accepts an empty deny-all RPC table");
+        let actr_ref = node
+            .start()
+            .await
+            .expect("the event-only peer starts with subscriptions and no business RPCs");
+        actr_ref.shutdown();
+        actr_ref.wait_for_shutdown().await;
+        server.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn invalid_actrium_service_config_allows_a_corrected_retry() {
+        let mut server = MockLoranServer::start()
+            .await
+            .expect("mock loran server should start");
+        let temp = tempdir().expect("temp dir");
+        let config_path = write_test_config(temp.path(), &server);
+        let node = linked_node_for_test(&config_path)
+            .await
+            .expect("linked workload node should be created");
+        let mut config = crate::session::tests::service_config_for_test();
+        // Hosts cannot read the pre-start Node identity through FFI. An empty
+        // Service ActorId therefore selects the registered Node's own identity.
+        config.service_actor_id.clear();
+        config.package_digest.clear();
+
+        let error = match node
+            .clone()
+            .with_actrium_service(config.clone(), ActriumServicePolicies::allow_all())
+        {
+            Ok(_) => panic!("an invalid package digest must be rejected"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("invalid service config"),
+            "unexpected validation error: {error}"
+        );
+
+        config.package_digest = crate::session::tests::service_config_for_test().package_digest;
+        node.clone()
+            .with_actrium_service(config, ActriumServicePolicies::allow_all())
+            .expect("the same node accepts a corrected config");
+        let actr_ref = node
+            .start()
+            .await
+            .expect("a failed first attempt must not consume the node");
+        actr_ref.shutdown();
+        actr_ref.wait_for_shutdown().await;
+        server.shutdown().await;
     }
 
     #[tokio::test]

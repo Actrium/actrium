@@ -8,7 +8,8 @@ use actr_protocol::realm_membership::{
     CLIENT_PROOF_HEADER, ClientProof, ProofOp, RealmClientKeyFile,
 };
 use actr_protocol::{
-    RegisterRequest, RegisterResponse, RenewCredentialRequest, RenewCredentialResponse,
+    RegisterRequest, RegisterResponse, ReissueCredentialRequest, RenewCredentialRequest,
+    RenewCredentialResponse,
 };
 use js_sys::{ArrayBuffer, Promise, Uint8Array};
 use wasm_bindgen::JsCast;
@@ -148,6 +149,40 @@ impl WebIssuerClient {
             self.endpoint
         );
         self.do_register(req).await
+    }
+
+    /// Re-authenticate a workload and re-issue credentials for its existing,
+    /// stable ActrId. `/reissue` also establishes the Actor-key binding
+    /// Issuer-side when the identity has none (credentials registered before
+    /// Actor keys existed), which is the heal for a relay Actor-channel
+    /// enrollment rejected with 403.
+    pub async fn reissue_credential(
+        &self,
+        req: ReissueCredentialRequest,
+    ) -> WebResult<RegisterResponse> {
+        let url = format!("{}/reissue", self.endpoint.trim_end_matches('/'));
+        let realm = req.registration.realm.clone();
+        let body = req.encode_to_vec();
+        let (status, status_text, _retry_after_secs, buf) = self
+            .post_protobuf_raw(&url, ProofOp::Reissue, &realm, body)
+            .await?;
+        if !(200..300).contains(&status) {
+            return Err(WebError::Network(format!(
+                "Issuer reissue request failed: {status} {status_text}"
+            )));
+        }
+        let decoded = RegisterResponse::decode(buf.as_slice()).map_err(|e| {
+            log::error!("failed to decode Issuer RegisterResponse: {e}");
+            WebError::Protocol(format!("reissue response protobuf decode failed: {e}"))
+        })?;
+        if let Some(actr_protocol::register_response::Result::Error(err)) = decoded.result.as_ref()
+        {
+            return Err(WebError::Protocol(format!(
+                "Issuer reissue failed ({}): {}",
+                err.code, err.message
+            )));
+        }
+        Ok(decoded)
     }
 
     /// Renew credentials for the same ActrId using a renewal token.

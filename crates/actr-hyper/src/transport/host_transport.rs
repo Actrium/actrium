@@ -310,6 +310,13 @@ impl HostTransport {
         &self.scope_registry
     }
 
+    pub(crate) fn set_incoming_guard(
+        &self,
+        guard: Option<Arc<dyn crate::lifecycle::IncomingGuard>>,
+    ) {
+        self.correlation.set_incoming_guard(guard);
+    }
+
     /// Send request (with response waiting)
     #[cfg_attr(
         feature = "opentelemetry",
@@ -485,6 +492,21 @@ impl HostTransport {
         self.reliable_rx.lock().await.recv().await
     }
 
+    /// Authorize and complete one in-proc response through the shared correlation path.
+    pub(crate) async fn complete_envelope(&self, envelope: RpcEnvelope) -> NetworkResult<()> {
+        let request_id = envelope.request_id.clone();
+        match self
+            .correlation
+            .complete_from_envelope(envelope, None, || "in-proc workload".to_string())
+            .await
+        {
+            CompleteOutcome::Completed => Ok(()),
+            CompleteOutcome::Orphan => Err(NetworkError::InvalidArgument(format!(
+                "No pending request found for id: {request_id}"
+            ))),
+        }
+    }
+
     /// Complete a pending request with response payload
     ///
     /// # Arguments
@@ -494,6 +516,7 @@ impl HostTransport {
     /// # Returns
     /// - `Ok(())`: Successfully sent response to waiting sender
     /// - `Err(NetworkError)`: No pending request found with this ID
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn complete_response(
         &self,
         request_id: &str,
@@ -515,6 +538,7 @@ impl HostTransport {
     /// # Returns
     /// - `Ok(())`: Successfully sent error to waiting sender
     /// - `Err(NetworkError)`: No pending request found with this ID
+    #[cfg(any(test, feature = "test-utils"))]
     pub async fn complete_error(&self, request_id: &str, error: ActrError) -> NetworkResult<()> {
         match self.correlation.complete(request_id, Err(error)) {
             CompleteOutcome::Completed => {
@@ -530,14 +554,13 @@ impl HostTransport {
     /// Handle response matching (returns true if it was a response)
     #[cfg(feature = "test-utils")]
     async fn try_complete_response(&self, envelope: &RpcEnvelope) -> bool {
-        // Reconstructs the precise ActrError variant from the wire code so
-        // test-utils tests observe the same classification production call
-        // sites do — not a flat Unavailable.
-        let result = super::correlation::envelope_response_to_result(
-            envelope.payload.clone(),
-            envelope.error.clone(),
-        );
-        match self.correlation.complete(&envelope.request_id, result) {
+        match self
+            .correlation
+            .complete_from_envelope(envelope.clone(), None, || {
+                "in-proc test transport".to_string()
+            })
+            .await
+        {
             CompleteOutcome::Completed => {
                 tracing::debug!("Completed pending request: {}", envelope.request_id);
                 true

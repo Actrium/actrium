@@ -48,6 +48,7 @@ fn credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) -> AIdC
         client_key: "0000000000000000".to_string(),
         role: actr_protocol::MemberRole::Owner as i32,
         development: None,
+        actor_public_key: None,
     };
     AIdCredential {
         key_id,
@@ -156,7 +157,7 @@ async fn expired_renewal_token_re_registers_fresh_identity() {
         session.clone(),
         server.url(),
         None,
-        RegistrationContext::Linked { request },
+        RegistrationContext::linked_for_test(request),
         None,
         None,
         pending_control_attempts(),
@@ -264,13 +265,11 @@ async fn soft_renewal_fires_credential_renewed_hook() {
         session,
         server.url(),
         None,
-        RegistrationContext::Linked {
-            request: RegisterRequest {
-                actr_type: test_actr_type(),
-                realm: actor_id.realm.clone(),
-                ..Default::default()
-            },
-        },
+        RegistrationContext::linked_for_test(RegisterRequest {
+            actr_type: test_actr_type(),
+            realm: actor_id.realm.clone(),
+            ..Default::default()
+        }),
         None,
         Some(hook_callback),
         pending_control_attempts(),
@@ -344,13 +343,11 @@ async fn credential_only_hard_reissue_fires_credential_renewed_hook() {
         session,
         server.url(),
         None,
-        RegistrationContext::Linked {
-            request: RegisterRequest {
-                actr_type: test_actr_type(),
-                realm: "test7@example.com".to_string(),
-                ..Default::default()
-            },
-        },
+        RegistrationContext::linked_for_test(RegisterRequest {
+            actr_type: test_actr_type(),
+            realm: "test7@example.com".to_string(),
+            ..Default::default()
+        }),
         None,
         Some(hook_callback),
         pending_control_attempts(),
@@ -424,13 +421,11 @@ async fn reissue_possession_failure_defers_instead_of_denying() {
         session,
         server.url(),
         None,
-        RegistrationContext::Linked {
-            request: RegisterRequest {
-                actr_type: test_actr_type(),
-                realm: "test7@example.com".to_string(),
-                ..Default::default()
-            },
-        },
+        RegistrationContext::linked_for_test(RegisterRequest {
+            actr_type: test_actr_type(),
+            realm: "test7@example.com".to_string(),
+            ..Default::default()
+        }),
         None,
         None,
         pending_control_attempts(),
@@ -500,13 +495,11 @@ async fn reissue_realm_denied_is_terminal() {
         session,
         server.url(),
         None,
-        RegistrationContext::Linked {
-            request: RegisterRequest {
-                actr_type: test_actr_type(),
-                realm: "test7@example.com".to_string(),
-                ..Default::default()
-            },
-        },
+        RegistrationContext::linked_for_test(RegisterRequest {
+            actr_type: test_actr_type(),
+            realm: "test7@example.com".to_string(),
+            ..Default::default()
+        }),
         None,
         None,
         pending_control_attempts(),
@@ -588,13 +581,11 @@ async fn legacy_hard_rebind_fires_credential_renewed_hook() {
         session,
         server.url(),
         None,
-        RegistrationContext::Linked {
-            request: RegisterRequest {
-                actr_type: test_actr_type(),
-                realm: "test7@example.com".to_string(),
-                ..Default::default()
-            },
-        },
+        RegistrationContext::linked_for_test(RegisterRequest {
+            actr_type: test_actr_type(),
+            realm: "test7@example.com".to_string(),
+            ..Default::default()
+        }),
         None,
         Some(hook_callback),
         pending_control_attempts(),
@@ -649,9 +640,15 @@ async fn package_hard_rebind_resends_package_registration() {
         result: Some(register_response::Result::Success(register_ok(1, 9))),
     };
     // Flag-OFF legacy hard rebind re-registers via fresh `/register`.
+    let expected_registration = crate::issuer_client::sign_actor_request(
+        request.clone(),
+        &ed25519_dalek::SigningKey::from_bytes(&[41; 32]),
+        actr_protocol::actor_key_proof::ActorKeyProofOperation::Register,
+    )
+    .unwrap();
     let mock = server
         .mock("POST", "/register")
-        .match_body(request.encode_to_vec())
+        .match_body(expected_registration.encode_to_vec())
         .with_status(200)
         .with_header("content-type", "application/x-protobuf")
         .with_body(response.encode_to_vec())
@@ -688,9 +685,7 @@ async fn package_hard_rebind_resends_package_registration() {
         session,
         server.url(),
         None,
-        RegistrationContext::Package {
-            request: request.clone(),
-        },
+        RegistrationContext::package_for_test(request.clone()),
         None,
         None,
         pending_control_attempts(),
@@ -884,13 +879,11 @@ async fn legacy_hard_rebind_commits_when_issuer_omits_renewal_token() {
         session.clone(),
         server.url(),
         None,
-        RegistrationContext::Linked {
-            request: RegisterRequest {
-                actr_type: test_actr_type(),
-                realm: "test7@example.com".to_string(),
-                ..Default::default()
-            },
-        },
+        RegistrationContext::linked_for_test(RegisterRequest {
+            actr_type: test_actr_type(),
+            realm: "test7@example.com".to_string(),
+            ..Default::default()
+        }),
         None,
         None,
         pending_control_attempts(),
@@ -966,13 +959,11 @@ async fn credential_only_hard_reissue_commits_when_issuer_omits_renewal_token() 
         session,
         server.url(),
         None,
-        RegistrationContext::Linked {
-            request: RegisterRequest {
-                actr_type: test_actr_type(),
-                realm: "test7@example.com".to_string(),
-                ..Default::default()
-            },
-        },
+        RegistrationContext::linked_for_test(RegisterRequest {
+            actr_type: test_actr_type(),
+            realm: "test7@example.com".to_string(),
+            ..Default::default()
+        }),
         None,
         None,
         pending_control_attempts(),

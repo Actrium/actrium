@@ -135,6 +135,41 @@ pub struct RuntimeRawConfig {
     /// ```
     #[serde(default)]
     pub hyper: Option<RawHyperConfig>,
+
+    /// Actrium v1 Service-host settings (`[actrium]` section).
+    ///
+    /// Presence makes `actr run` install the Attach server. Example:
+    ///
+    /// ```toml
+    /// [actrium]
+    /// front_package = "dist/front.actr"
+    /// lease_duration_secs = 300
+    /// heartbeat_interval_secs = 30
+    /// grace_period_secs = 60
+    /// ```
+    #[serde(default)]
+    pub actrium: Option<RawActriumConfig>,
+}
+
+/// Actrium v1 Service-host settings.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RawActriumConfig {
+    /// Front package whose Guest attaches to this Service. Resolved relative
+    /// to the runtime config file.
+    #[serde(default)]
+    pub front_package: Option<std::path::PathBuf>,
+
+    /// Exclusive lease duration granted by Attach.
+    #[serde(default)]
+    pub lease_duration_secs: Option<u64>,
+
+    /// Caller heartbeat interval.
+    #[serde(default)]
+    pub heartbeat_interval_secs: Option<u64>,
+
+    /// Grace period before an expired lease is reaped.
+    #[serde(default)]
+    pub grace_period_secs: Option<u64>,
 }
 
 /// Workload package path configuration

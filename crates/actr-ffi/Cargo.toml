@@ -18,7 +18,13 @@ actr-framework.workspace = true
 actr-runtime.workspace = true
 actr-hyper = { workspace = true, features = ["opentelemetry"] }
 actr-config = { workspace = true, features = ["opentelemetry"] }
-actr-pack.workspace = true
+actr-pack = { workspace = true, features = ["profile-validation"] }
+actr-service-compat.workspace = true
+actrium-core = { path = "../actrium-core" }
+actrium-runtime = { path = "../actrium-runtime" }
+hex = "0.4"
+semver = "1"
+sha2.workspace = true
 
 # UniFFI
 uniffi = { version = "0.31.1", features = ["tokio"] }
@@ -34,6 +40,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-android = "0.2"
 tracing-oslog = { version = "0.2", optional = true }
 url = "2.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 async-trait = "0.1"
 parking_lot = "0.12"
 futures-util = "0.3.31"
@@ -49,6 +57,7 @@ log = "0.4"
 
 [dev-dependencies]
 actr-mock-loran = { workspace = true }
+base64.workspace = true
 tempfile.workspace = true
 
 [features]

@@ -1007,6 +1007,7 @@ mod tests {
                 version: "0.1.0".to_string(),
             },
             workload.clone(),
+            None,
         )
         .await
         .expect("linked workload node should be created");
@@ -1202,6 +1203,7 @@ mod tests {
                 version: "0.1.0".to_string(),
             },
             workload,
+            None,
         )
         .await
     }

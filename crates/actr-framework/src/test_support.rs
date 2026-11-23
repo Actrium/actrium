@@ -32,6 +32,12 @@ impl DummyContext {
         self
     }
 
+    /// Set the authenticated caller observed by a workload dispatcher.
+    pub fn with_caller_id(mut self, caller_id: ActrId) -> Self {
+        self.caller_id = Some(caller_id);
+        self
+    }
+
     fn not_implemented(feature: &str) -> ActrError {
         ActrError::NotImplemented(feature.to_string())
     }

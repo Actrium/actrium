@@ -45,6 +45,7 @@ pub async fn register_handler(
 ) -> Result<Response, ApiError> {
     let req = RegisterRequest::decode(body.as_ref())
         .map_err(|e| ApiError::bad_request(format!("protobuf decode failed: {e}")))?;
+    let req = signaling::ensure_actor_key_proof(req);
 
     // Lazily register the realm so callers don't have to pre-seed.
     state.add_realm(req.realm.clone()).await;
@@ -61,6 +62,7 @@ pub async fn register_handler(
         client_id: String::new(),
         ws_address: req.ws_address.clone(),
         service_spec: req.service_spec.clone(),
+        registration: req.clone(),
     });
 
     let response = RegisterResponse {
@@ -126,29 +128,22 @@ pub async fn renew_handler(
             .into_response());
     }
 
-    // Build fresh credentials for the same ActrId. The Actor type is not part
-    // of the ActrId; take the one recorded at registration.
-    let actr_type = state
+    // Reuse the normalized registration so renewal retains the original Actor
+    // key and its valid proof. Unknown actors get the same real-key fallback as
+    // a fresh mock registration.
+    let fake_req = state
         .registry
         .read()
         .await
         .iter()
         .find(|entry| entry.actr_id == *actor_id)
-        .map(|entry| entry.actr_type.clone())
-        .unwrap_or_default();
-    let fake_req = RegisterRequest {
-        actr_type,
-        realm: actor_id.realm.clone(),
-        service: None,
-        service_spec: None,
-        acl: None,
-        ws_address: None,
-        manifest_raw: None,
-        publisher_signature: None,
-        target: None,
-        auth_mode: Some(actr_protocol::RegisterAuthMode::Package as i32),
-        signing_public_key: None,
-    };
+        .map(|entry| entry.registration.clone())
+        .unwrap_or_else(|| {
+            signaling::ensure_actor_key_proof(RegisterRequest {
+                realm: actor_id.realm.clone(),
+                ..Default::default()
+            })
+        });
 
     let mut register_ok = signaling::build_register_ok(&fake_req, &state).await;
     // Preserve the original ActrId (mock assigns a new serial, so override).
@@ -286,6 +281,7 @@ pub async fn admin_state_handler(State(state): State<Arc<MockState>>) -> Json<Ad
 // Error type
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
     message: String,
@@ -347,6 +343,7 @@ pub async fn relay_identity_handler(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
+    let actor_certificate = issue_actor_certificate(&state, &request, &actor, &actor_type, now);
     let claims = serde_json::to_vec(&IdentityClaims {
         domain: CERTIFICATE_DOMAIN.into(),
         endpoint: request.endpoint,
@@ -373,7 +370,67 @@ pub async fn relay_identity_handler(
             public_key: *state.issuer_signing_key().verifying_key().as_bytes(),
             expires_at: now + CERTIFICATE_TTL,
         },
+        actor_certificate,
     }))
+}
+
+/// Mint an Actor channel certificate when the test enabled them and the
+/// enrollment carries a decodable Actor credential. Missing or malformed
+/// material degrades to the legacy response instead of failing enrollment.
+fn issue_actor_certificate(
+    state: &MockState,
+    request: &actr_relay_security::IdentityRequest,
+    actor: &actr_protocol::ActrId,
+    actor_type: &str,
+    now: u64,
+) -> Option<actr_relay_security::ActorChannelCertificate> {
+    use actr_protocol::prost::Message as _;
+    use actr_relay_security::*;
+    if !state
+        .actor_certificates_enabled
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return None;
+    }
+    let enrollment = request.actor.as_ref()?;
+    let credential =
+        actr_protocol::AIdCredential::decode(enrollment.actor_credential.as_slice()).ok()?;
+    let credential_claims =
+        actr_protocol::IdentityClaims::decode(credential.claims.as_ref()).ok()?;
+    let actor_public_key: [u8; 32] = credential_claims
+        .actor_public_key
+        .as_deref()?
+        .try_into()
+        .ok()?;
+    let role = actr_protocol::MemberRole::try_from(credential_claims.role).ok()?;
+    let claims = ActorChannelClaims {
+        realm: actor.realm.clone(),
+        actor_id: request.endpoint.clone(),
+        actor_type: actor_type.to_string(),
+        member: credential_claims.member,
+        client_key: credential_claims.client_key,
+        role: format!("{role:?}").to_lowercase(),
+        actor_public_key,
+        noise_public_key: request.public_key,
+        actor_credential_digest: enrollment.actor_credential_digest,
+        policy_digest: enrollment.policy_digest,
+        actor_state_digest: enrollment.actor_state_digest,
+        issuer: actor.realm.clone(),
+        provider: "mock-provider".into(),
+        audience: ACTOR_CHANNEL_AUDIENCE.into(),
+        expires_at: now + CERTIFICATE_TTL,
+        runtime_instance_id: enrollment.runtime_instance_id.clone(),
+    };
+    let certificate = ActorChannelCertificate::issue(
+        &claims,
+        state.issuer_signing_key_id(),
+        state.issuer_signing_key(),
+    )
+    .ok();
+    if certificate.is_none() {
+        tracing::warn!("mock-loran: Actor channel certificate issuance failed");
+    }
+    certificate
 }
 
 pub async fn relay_key_handler(
@@ -392,4 +449,82 @@ pub async fn relay_key_handler(
         public_key: *state.issuer_signing_key().verifying_key().as_bytes(),
         expires_at: now + actr_relay_security::CERTIFICATE_TTL,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actr_protocol::actor_key_proof::{ActorKeyProofOperation, verify_actor_key_proof};
+    use actr_protocol::{ActrType, IdentityClaims};
+    use ed25519_dalek::SigningKey;
+    use tokio_util::sync::CancellationToken;
+
+    #[tokio::test]
+    async fn renewal_preserves_the_registered_actor_key() {
+        let state = Arc::new(MockState::new(
+            SigningKey::from_bytes(&[42; 32]),
+            7,
+            SigningKey::from_bytes(&[43; 32]),
+            CancellationToken::new(),
+        ));
+        let request = RegisterRequest {
+            actr_type: ActrType {
+                publisher: "mock".into(),
+                name: "echo".into(),
+                version: "1.0.0".into(),
+            },
+            realm: "mock@example.com".into(),
+            ..Default::default()
+        };
+        let response = register_handler(State(state.clone()), Bytes::from(request.encode_to_vec()))
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let initial = match RegisterResponse::decode(body).unwrap().result.unwrap() {
+            register_response::Result::Success(ok) => ok,
+            register_response::Result::Error(error) => panic!("register failed: {error:?}"),
+        };
+        let initial_claims = IdentityClaims::decode(&initial.credential.claims[..]).unwrap();
+
+        let response = renew_handler(
+            State(state.clone()),
+            Bytes::from(
+                RenewCredentialRequest {
+                    actr_id: initial.actr_id.clone(),
+                    renewal_token: initial.renewal_token.clone().unwrap(),
+                    attempt_id: Default::default(),
+                }
+                .encode_to_vec(),
+            ),
+        )
+        .await
+        .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let renewed = match RenewCredentialResponse::decode(body)
+            .unwrap()
+            .result
+            .unwrap()
+        {
+            renew_credential_response::Result::Success(ok) => ok,
+            renew_credential_response::Result::Error(error) => panic!("renew failed: {error:?}"),
+        };
+        let renewed_claims = IdentityClaims::decode(&renewed.credential.claims[..]).unwrap();
+
+        assert_eq!(renewed.actr_id, initial.actr_id);
+        assert_eq!(
+            renewed_claims.actor_public_key,
+            initial_claims.actor_public_key
+        );
+        let registry = state.registry.read().await;
+        let registration = &registry[0].registration;
+        verify_actor_key_proof(registration, ActorKeyProofOperation::Register).unwrap();
+        assert_eq!(
+            registration.actor_public_key,
+            initial_claims.actor_public_key
+        );
+    }
 }

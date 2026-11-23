@@ -1657,8 +1657,17 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             }
             let installedProfileName = "\(realmName)/\(replacingTabId.uuidString)"
             var candidateBinding: RealmServiceBinding?
+            var bindingHandoff: RealmServiceBinding?
             defer {
-                if let candidateBinding { Task { await candidateBinding.stop() } }
+                let candidate = candidateBinding
+                let handoff = bindingHandoff
+                Task {
+                    // Always stop the replacement before restoring the old
+                    // exclusive lease; successful replacement stops the old
+                    // binding and makes this restoration a no-op.
+                    if let candidate { await candidate.stop() }
+                    if let handoff { try? await handoff.restoreAfterFailedLocalFrontReplacement() }
+                }
             }
             do {
                 let data = try await fetchRealmDocument(
@@ -1839,6 +1848,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                             profile: profile, verifiedProfileBody: profileData
                         )
                         if connection != activeBinding.connection {
+                            bindingHandoff = activeBinding
+                            try await activeBinding.suspendForLocalFrontReplacement()
                             let replacement = try await activeBinding.replacingConnection(connection)
                             candidateBinding = replacement
                             try await replacement.prepareForSwitch()
@@ -1948,18 +1959,33 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 let manifest = try readPackageManifest(
                     fromRoot: frontDirectory, requireSignature: true, additionalTrustedKeys: publisherKeys
                 )
-                candidateBinding = try manifest.capabilityManifestJSON.map { capabilities in
-                    try RealmServiceBinding(
+                candidateBinding = try Self.serviceBindingForDeclaredCapabilities(
+                    manifest.capabilityManifestJSON
+                ) { capabilities in
+                    // Only Fronts that declare Service capabilities need Attach
+                    // compatibility metadata. A verified renderer-only Front
+                    // must remain loadable without a Service binding.
+                    let sessionMetadata = try ActrBindings.actriumSessionMetadataForFront(
+                        frontArchive: verified.bytes,
+                        trustedFrontKey: verified.trustedKey,
+                        serviceType: verified.serviceType,
+                        servicePackageDigestHex: profile.serviceSha256
+                    )
+                    return try RealmServiceBinding(
                         profile: profile,
                         verifiedProfileBody: profileData,
                         front: verified.bytes,
-                        serviceType: verified.serviceType,
+                        metadata: sessionMetadata,
                         trustedFrontKey: verified.trustedKey,
                         capabilitiesJSON: capabilities,
                         permissions: manifest.permissions
                     )
                 }
                 if prepareService, let candidateBinding {
+                    if let activeBinding = RealmServiceBindings.shared.binding(for: replacingTabId) {
+                        bindingHandoff = activeBinding
+                        try await activeBinding.suspendForLocalFrontReplacement()
+                    }
                     try await candidateBinding.prepareForSwitch()
                 }
                 guard try profileIsCurrent(), let storageIndex = tabIndex() else { return }
@@ -2155,16 +2181,47 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             frontArchive: archive, trustedPublicKey: trustedKey,
             frontType: profile.packageType, serviceType: profile.serviceType
         )
-        let binding = try RealmServiceBinding(
-            profile: profile, verifiedProfileBody: profileData, front: archive,
-            serviceType: serviceType, trustedFrontKey: trustedKey, capabilitiesJSON: capabilities,
-            permissions: manifest.permissions
-        )
+        let binding = try Self.serviceBindingForDeclaredCapabilities(capabilities) { capabilities in
+            let sessionMetadata = try ActrBindings.actriumSessionMetadataForFront(
+                frontArchive: archive,
+                trustedFrontKey: trustedKey,
+                serviceType: serviceType,
+                servicePackageDigestHex: service.sha256
+            )
+            return try RealmServiceBinding(
+                profile: profile, verifiedProfileBody: profileData, front: archive,
+                metadata: sessionMetadata, trustedFrontKey: trustedKey, capabilitiesJSON: capabilities,
+                permissions: manifest.permissions
+            )
+        }
         var installed = false
-        defer { if !installed { Task { await binding.stop() } } }
+        defer {
+            if !installed, let binding {
+                Task { await binding.stop() }
+            }
+        }
         let publisherKeys: [RealmProfileStore.KeyRequirement] = [
             .init(publicKey: trustedKey, domain: publisher.domain, localFront: policy)
         ]
+        let previousBinding = RealmServiceBindings.shared.localFrontBinding(for: tabId)
+        func rollbackLocalFrontHandoff() async {
+            guard let binding else { return }
+            // An unstructured task does not inherit cancellation from the switch.
+            // Stop the new session first; otherwise restoring the old exclusive
+            // lease would race a still-attached replacement. A newer switch may
+            // have replaced the registry entry while this rollback was suspended.
+            await Task {
+                await binding.stop()
+                guard let previousBinding,
+                      RealmServiceBindings.shared.localFrontBinding(for: tabId) === previousBinding
+                else { return }
+                do {
+                    try await previousBinding.restoreAfterFailedLocalFrontReplacement()
+                } catch {
+                    logger.error("⚠️ [LocalFront] Failed to restore the previous Service session: \(error)")
+                }
+            }.value
+        }
         guard let storageIndex = tabs.firstIndex(where: { $0.id == tabId }) else { return nil }
         let preparedStorage = try await RendererProcessPool.shared.prepareLocalStorage(
             tabId: tabId, reloadKey: tabs[storageIndex].reloadNonce,
@@ -2173,42 +2230,97 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         )
         try await RealmProfileStore.requirePublisherKeys(publisherKeys, database: .shared)
         guard isCurrent() else { return nil }
-        try await binding.prepareLocalFront()
-        return try await RealmProfileStore.withPublisherKeys(publisherKeys, database: .shared) {
-            guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else { return nil }
-
-            // New renderer identity prevents late messages from the old Guest
-            // from using the new binding or inheriting its approvals.
-            var tab = Tab(
-                title: manifest.name ?? front.href, url: sourceURL,
-                appId: "actrium.local-front/\(profile.realmName)/\(digest)",
-                groupId: tabs[index].groupId, unifiedScript: script, guestExtractedPath: root.path,
-                guestEntry: entry, capabilityManifestJSON: capabilities,
-                localStorageOrigin: manifest.storageOrigin(devDirectory: nil),
-                localStoragePublisherIdentity: publisher.storageIdentity, preparedLocalStorage: preparedStorage,
-                contractName: manifest.contractName,
-                contractVersion: manifest.contractVersion, permissions: manifest.permissions,
-                leftPanelDefaultVisible: manifest.leftPanelDefaultVisible,
-                rightPanelDefaultVisible: manifest.rightPanelDefaultVisible, backgroundColor: manifest.themeColor
-            )
-            tab.realmProfileSigner = (profile.realmName, accepted.signingKeyId)
-            let position = tabSlotPositions.removeValue(forKey: tabId) ?? index
-            releaseTabRuntime(tabId, preserveRealmLoad: true)
-            leftPanelVisibility[tabId] = nil
-            RealmServiceBindings.shared.attach(binding, to: tab.id)
-            localFrontApprovals[tab.id] = LocalFrontApproval(scope: scope, file: file)
-            tabSlotPositions[tab.id] = position
-            leftPanelVisibility[tab.id] = manifest.leftPanelDefaultVisible
-            tabs[index] = tab
-            if currentTabId == tabId {
-                currentTabId = tab.id
-                if actriumMode.isInFocusMode { actriumMode = .focus(tabId: tab.id) }
+        do {
+            // Verification is complete before the old lease is released. The
+            // old renderer remains usable again if the replacement cannot Attach.
+            if let binding {
+                try await previousBinding?.suspendForLocalFrontReplacement()
+                try await binding.prepareLocalFront()
             }
-            installed = true
-            persistBrowserPageSession()
-            schedulePackageCacheEviction()
-            return tab.id
+        } catch {
+            await rollbackLocalFrontHandoff()
+            throw error
         }
+        guard isCurrent() else {
+            await rollbackLocalFrontHandoff()
+            return nil
+        }
+        do {
+            let activated: UUID? = try await RealmProfileStore.withPublisherKeys(
+                publisherKeys, database: .shared
+            ) {
+                guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else {
+                    return nil
+                }
+
+                // New renderer identity prevents late messages from the old Guest
+                // from using the new binding or inheriting its approvals.
+                var tab = Tab(
+                    title: manifest.name ?? front.href, url: sourceURL,
+                    appId: "actrium.local-front/\(profile.realmName)/\(digest)",
+                    groupId: tabs[index].groupId, unifiedScript: script, guestExtractedPath: root.path,
+                    guestEntry: entry, capabilityManifestJSON: capabilities,
+                    localStorageOrigin: manifest.storageOrigin(devDirectory: nil),
+                    localStoragePublisherIdentity: publisher.storageIdentity, preparedLocalStorage: preparedStorage,
+                    contractName: manifest.contractName,
+                    contractVersion: manifest.contractVersion, permissions: manifest.permissions,
+                    leftPanelDefaultVisible: manifest.leftPanelDefaultVisible,
+                    rightPanelDefaultVisible: manifest.rightPanelDefaultVisible, backgroundColor: manifest.themeColor
+                )
+                tab.realmProfileSigner = (profile.realmName, accepted.signingKeyId)
+                let position = tabSlotPositions.removeValue(forKey: tabId) ?? index
+                releaseTabRuntime(tabId, preserveRealmLoad: true)
+                leftPanelVisibility[tabId] = nil
+                if let binding {
+                    RealmServiceBindings.shared.attach(binding, to: tab.id)
+                }
+                localFrontApprovals[tab.id] = LocalFrontApproval(scope: scope, file: file)
+                tabSlotPositions[tab.id] = position
+                leftPanelVisibility[tab.id] = manifest.leftPanelDefaultVisible
+                tabs[index] = tab
+                if currentTabId == tabId {
+                    currentTabId = tab.id
+                    if actriumMode.isInFocusMode { actriumMode = .focus(tabId: tab.id) }
+                }
+                installed = true
+                persistBrowserPageSession()
+                schedulePackageCacheEviction()
+                return tab.id
+            }
+            if activated == nil {
+                await rollbackLocalFrontHandoff()
+            }
+            return activated
+        } catch {
+            await rollbackLocalFrontHandoff()
+            throw error
+        }
+    }
+
+    private struct ServiceCapabilityManifest: Decodable {
+        struct Module: Decodable {
+            let rpc: [String]?
+            let events: [String]?
+        }
+        let hostModules: [String: Module]
+    }
+
+    /// Internal for downloaded and local Front regression tests. Attach metadata
+    /// and the Service binding are constructed only for declared Service RPCs or events.
+    nonisolated static func serviceBindingForDeclaredCapabilities<ServiceBinding>(
+        _ capabilitiesJSON: String?,
+        make: (String) throws -> ServiceBinding
+    ) throws -> ServiceBinding? {
+        guard let capabilitiesJSON else { return nil }
+        let capabilities = try JSONDecoder().decode(
+            ServiceCapabilityManifest.self,
+            from: Data(capabilitiesJSON.utf8)
+        )
+        let service = capabilities.hostModules["service"] ?? capabilities.hostModules["host:service"]
+        let hasRoutes = service?.rpc?.isEmpty == false
+        let hasEvents = service?.events?.isEmpty == false
+        guard hasRoutes || hasEvents else { return nil }
+        return try make(capabilitiesJSON)
     }
 
     nonisolated private static func realmArchiveDigest(_ bytes: Data) -> String {

@@ -41,6 +41,7 @@ fn credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) -> AIdC
             client_key: "0000000000000000".to_string(),
             role: actr_protocol::MemberRole::Owner as i32,
             development: None,
+            actor_public_key: None,
         }
         .encode_to_vec()
         .into(),
@@ -107,13 +108,11 @@ fn session(actor_id: &ActrId, revision: u64, token_usable: bool) -> SessionState
 }
 
 fn linked_ctx(actor_id: &ActrId) -> RegistrationContext {
-    RegistrationContext::Linked {
-        request: RegisterRequest {
-            actr_type: test_actr_type(),
-            realm: actor_id.realm.clone(),
-            ..Default::default()
-        },
-    }
+    RegistrationContext::linked_for_test(RegisterRequest {
+        actr_type: test_actr_type(),
+        realm: actor_id.realm.clone(),
+        ..Default::default()
+    })
 }
 
 fn seed(actor_id: &ActrId, revision: u64) -> PublishedCredential {
