@@ -528,10 +528,10 @@ pub async fn issue_owner_invite(
     Ok(invite)
 }
 
-/// The Realm of the invite whose secret hashes to `secret_hash`.
-pub async fn invite_realm(secret_hash: &str) -> Result<Option<String>, MembershipError> {
+/// The Realm and admission policy of the invite identified by this secret.
+pub async fn locate_invite(secret_hash: &str) -> Result<Option<(String, bool)>, MembershipError> {
     Ok(
-        sqlx::query_scalar("SELECT realm FROM realm_invite WHERE secret_hash = ?")
+        sqlx::query_as("SELECT realm,owner_device_only FROM realm_invite WHERE secret_hash = ?")
             .bind(secret_hash)
             .fetch_optional(get_database().get_pool())
             .await?,
@@ -546,6 +546,7 @@ type InviteRow = (
     Option<i64>,
     Option<String>,
     Option<i64>,
+    bool,
 );
 
 /// Admission settings and aggregate occupancy for an authenticated Realm domain.
@@ -612,23 +613,80 @@ pub async fn join_with_mode(
     limits: Limits,
     mode: DevJoinMode,
 ) -> Result<Value, MembershipError> {
+    redeem_invite(realm, secret_hash, public_key, label, limits, mode, None).await
+}
+
+pub enum OwnerDevice<'a> {
+    First,
+    Existing(&'a str),
+}
+
+/// Attach a device without using the Owner recovery path.
+pub async fn join_owner_device(
+    realm: &str,
+    secret_hash: &str,
+    public_key: &[u8; 32],
+    label: &str,
+    limits: Limits,
+    owner: OwnerDevice<'_>,
+) -> Result<Value, MembershipError> {
+    redeem_invite(
+        realm,
+        secret_hash,
+        public_key,
+        label,
+        limits,
+        DevJoinMode::Off,
+        Some(owner),
+    )
+    .await
+}
+
+async fn redeem_invite(
+    realm: &str,
+    secret_hash: &str,
+    public_key: &[u8; 32],
+    label: &str,
+    limits: Limits,
+    mode: DevJoinMode,
+    admission: Option<OwnerDevice<'_>>,
+) -> Result<Value, MembershipError> {
     let key_id = actr_protocol::realm_membership::client_key_id(public_key);
     let now = now_secs();
     let mut tx = begin().await?;
     let invite: Option<InviteRow> = sqlx::query_as(
-        "SELECT invite_id, role, member_id, expires_at, used_at, used_by_key, revoked_at
+        "SELECT invite_id, role, member_id, expires_at, used_at, used_by_key, revoked_at, owner_device_only
          FROM realm_invite WHERE realm = ? AND secret_hash = ?",
     )
     .bind(realm)
     .bind(secret_hash)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some((invite_id, role, target, expires_at, used_at, used_by_key, revoked_at)) = invite
+    let Some((
+        invite_id,
+        role,
+        target,
+        expires_at,
+        used_at,
+        used_by_key,
+        revoked_at,
+        owner_device_only,
+    )) = invite
     else {
         return fail(Code::InviteUnknown, "no such invite");
     };
     if revoked_at.is_some() {
         return fail(Code::InviteRevoked, "the invite was revoked");
+    }
+    if !match &admission {
+        Some(OwnerDevice::First) => role.as_deref() == Some("owner") && target.is_none(),
+        Some(OwnerDevice::Existing(id)) => role.is_none() && target.as_deref() == Some(*id),
+        None => true,
+    } {
+        return fail(
+            Code::Conflict,
+            "the invitation does not match the requested Owner admission",
+        );
     }
     if used_at.is_some() {
         // A retry of the same redemption returns its result.
@@ -636,6 +694,9 @@ pub async fn join_with_mode(
             && let Some(key) = client_key_on(&mut tx, realm, &key_id).await?
             && !key.revoked
             && key.member_active
+            && &key.public_key == public_key
+            && (!(owner_device_only || admission.is_some()) || key.role == Role::Owner)
+            && target.as_ref().is_none_or(|id| id == &key.member_id)
         {
             check_realm_active(&mut tx, realm).await?;
             return Ok(json!({
@@ -650,7 +711,9 @@ pub async fn join_with_mode(
     }
     let policy = check_realm_active(&mut tx, realm).await?;
     let member_limit = policy.member_limit(limits.max_members);
-    let reusable = mode == DevJoinMode::ReusableInvite && role.as_deref() != Some("owner");
+    let reusable = mode == DevJoinMode::ReusableInvite
+        && !owner_device_only
+        && role.as_deref() != Some("owner");
     if reusable && let Some(key) = client_key_on(&mut tx, realm, &key_id).await? {
         let signer = signer_of(key)?;
         if target.as_ref().is_some_and(|id| id != &signer.member_id) {
@@ -676,6 +739,9 @@ pub async fn join_with_mode(
             .fetch_optional(&mut *tx)
             .await?;
             match owner {
+                Some(_) if matches!(admission, Some(OwnerDevice::First)) => {
+                    return fail(Code::Conflict, "the Realm already has an Owner");
+                }
                 // Owner recovery: the new key replaces all the owner's keys.
                 Some(owner) => {
                     let keys = member_keys(&mut tx, realm, &owner).await?;
@@ -693,6 +759,11 @@ pub async fn join_with_mode(
             role,
         ),
         (None, Some(member_id)) => match member_on(&mut tx, realm, &member_id).await? {
+            Some((role, true))
+                if (owner_device_only || admission.is_some()) && role != Role::Owner =>
+            {
+                return fail(Code::Conflict, "the invited member is no longer the Owner");
+            }
             Some((role, true)) => (member_id, role),
             _ => return fail(Code::MemberRemoved, "the invited member was removed"),
         },

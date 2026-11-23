@@ -1,4 +1,4 @@
-use super::admin_api::{AdminApiState, build_admin_api_router};
+use super::admin_api::{AdminApiState, AppManagement, build_admin_api_router};
 use anyhow::Result;
 use axum::{Json, Router, routing::get};
 use issuer::realm_profile::RealmProfiles;
@@ -116,6 +116,14 @@ async fn build_admin_ui_router(
         .with_toml_content(toml_content)
         .with_config_path(config_path);
 
+    let app_management =
+        AppManagement::configured(config, aid_issuer.clone(), realm_profiles.clone())
+            .await?
+            .map(Arc::new);
+    let domain_management = realm_profiles
+        .as_ref()
+        .map(|profiles| super::realm_management::router(profiles.clone(), config.realm.clone()));
+    let provider = realm_profiles.as_ref().map(|p| p.provider_id().to_owned());
     if let Some(issuer) = aid_issuer {
         service = service.with_aid_issuer(issuer);
     }
@@ -154,6 +162,19 @@ async fn build_admin_ui_router(
         .as_ref()
         .map(|h| h.advertised_ip.clone())
         .unwrap_or_else(|| "127.0.0.1".to_string());
+    let relay_endpoint = config.relay.public_url.clone().or_else(|| {
+        let http = config
+            .bind
+            .http
+            .as_ref()
+            .filter(|_| config.is_relay_enabled())?;
+        Some(format!(
+            "{}://{}:{}/relay/ws",
+            http.ws_scheme(),
+            http.domain_name,
+            http.effective_advertised_port()
+        ))
+    });
     let state = Arc::new(AdminApiState {
         service,
         config: config.control.admin_ui.clone(),
@@ -161,6 +182,15 @@ async fn build_admin_ui_router(
         advertised_ip,
         metrics_store,
         realm_writes_enabled: !config.superv_managed(),
+        app_management,
+        domain_management,
+        provider,
+        package_verifier: Default::default(),
+        access: super::admin_api::service_access(config, relay_endpoint.as_deref()),
+        relay: json!({"enabled":config.is_relay_enabled(),"config":{
+            "public_url":relay_endpoint, "path":"/relay/ws", "auth":config.relay.auth,
+            "limits":config.relay.limits, "http_port":config.bind.http.as_ref().map(|http| http.port)
+        }}),
     });
 
     // Build Publisher Registry management router.

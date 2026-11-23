@@ -7,6 +7,59 @@ const REALM: &str = "k7m2q9xh@acme.com";
 
 #[tokio::test]
 #[serial]
+async fn console_registration_never_replaces_owner_and_console_invites_are_single_use() {
+    let owner = realm_with_owner().await;
+    let recovery = issue_owner_invite(REALM, BY_OPERATOR).await.unwrap();
+    let recovery = invite_secret_hash(&secret_of(&recovery)).unwrap();
+    assert_eq!(
+        code(join_owner_device(REALM, &recovery, &key(2), "", LIMITS, OwnerDevice::First).await),
+        Code::Conflict
+    );
+    assert_eq!(signer(1).await, owner);
+
+    let invite = create_invite(
+        &owner,
+        None,
+        Some(&owner.member_id),
+        now_secs() + 600,
+        LIMITS,
+    )
+    .await
+    .unwrap();
+    let hash = invite_secret_hash(&secret_of(&invite)).unwrap();
+    sqlx::query("UPDATE realm_invite SET owner_device_only=1,expires_at=? WHERE secret_hash=?")
+        .bind(now_secs() - 1)
+        .bind(&hash)
+        .execute(get_database().get_pool())
+        .await
+        .unwrap();
+    let redeem = async |public_key| {
+        join_with_mode(
+            REALM,
+            &hash,
+            &public_key,
+            "",
+            LIMITS,
+            DevJoinMode::ReusableInvite,
+        )
+        .await
+    };
+    assert_eq!(code(redeem(key(2)).await), Code::InviteExpired);
+    sqlx::query("UPDATE realm_invite SET expires_at=? WHERE secret_hash=?")
+        .bind(now_secs() + 600)
+        .bind(&hash)
+        .execute(get_database().get_pool())
+        .await
+        .unwrap();
+    let reply = redeem(key(2)).await.unwrap();
+    assert_eq!(reply["member_id"], owner.member_id);
+    assert_eq!(reply["role"], "owner");
+    assert_eq!(redeem(key(2)).await.unwrap(), reply);
+    assert_eq!(code(redeem(key(3)).await), Code::InviteUsed);
+}
+
+#[tokio::test]
+#[serial]
 async fn open_admission_is_idempotent_and_enforces_revocation_and_quotas() {
     let owner = realm_with_owner().await;
     Realm::set_unsigned_policy(

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "test:e2e": "node scripts/e2e-apps.mjs",
     "audit:dependencies": "node scripts/check-production-audit.mjs"
   },
   "dependencies": {

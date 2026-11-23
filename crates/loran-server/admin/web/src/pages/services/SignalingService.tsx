@@ -1,23 +1,24 @@
+import { ServiceAccessCard } from "./ServiceAccessCard";
 import { useEffect, useState, useCallback } from "react";
 import { api, type ServiceDetail } from "../../lib/api";
-import { ServicePageLayout, ConfigSection, StatusSection } from "../../components/layout/ServicePageLayout";
+import { ServicePageLayout, StatusSection } from "../../components/layout/ServicePageLayout";
 import { HowItWorks } from "../../components/ui/HowItWorks";
 import { ServiceMetrics } from "./shared";
 
-function SignalingDiagram({ config }: { config: Record<string, unknown> }) {
-  const wsPath = String(config.ws_path ?? "/signaling");
-
+function SignalingDiagram() {
   /* ── layout ── */
   const aX = 80;   // Peer A
   const sX = 310;  // Signaling Server
   const bX = 540;  // Peer B
-  const headY = 8;
-  const lifeTop = 56;
-  const lifeBot = 310;
+  const headY = 28;
+  const lifeTop = 76;
+  const lifeBot = 266;
 
   return (
     <svg
-      viewBox="0 0 620 324"
+      viewBox="0 0 620 310"
+      role="img"
+      aria-label="Signaling sequence after both peers register with Issuer"
       className="max-w-2xl mx-auto"
       xmlns="http://www.w3.org/2000/svg"
     >
@@ -36,6 +37,10 @@ function SignalingDiagram({ config }: { config: Record<string, unknown> }) {
         </marker>
       </defs>
 
+      <text x={sX} y={15} textAnchor="middle" fontSize="10" fontWeight="600" fill="#475569">
+        Both peers have registered with Issuer before connecting
+      </text>
+
       {/* ══ Column heads ══════════════════════════════ */}
       <rect x={aX - 50} y={headY} width="100" height="40" rx="8" fill="#dbeafe" stroke="#3b82f6" strokeWidth="1.5" />
       <text x={aX} y={headY + 18} textAnchor="middle" fontSize="11" fontWeight="600" fill="#1e40af">Peer A</text>
@@ -43,7 +48,7 @@ function SignalingDiagram({ config }: { config: Record<string, unknown> }) {
 
       <rect x={sX - 60} y={headY} width="120" height="40" rx="8" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.5" />
       <text x={sX} y={headY + 18} textAnchor="middle" fontSize="11" fontWeight="600" fill="#3730a3">Signaling</text>
-      <text x={sX} y={headY + 31} textAnchor="middle" fontSize="8" fill="#6366f1">ws://*{wsPath}</text>
+      <text x={sX} y={headY + 31} textAnchor="middle" fontSize="8" fill="#6366f1">/signaling/ws</text>
 
       <rect x={bX - 50} y={headY} width="100" height="40" rx="8" fill="#d1fae5" stroke="#10b981" strokeWidth="1.5" />
       <text x={bX} y={headY + 18} textAnchor="middle" fontSize="11" fontWeight="600" fill="#065f46">Peer B</text>
@@ -54,19 +59,19 @@ function SignalingDiagram({ config }: { config: Record<string, unknown> }) {
       <line x1={sX} y1={lifeTop} x2={sX} y2={lifeBot} stroke="#cbd5e1" strokeWidth="1" strokeDasharray="4 3" />
       <line x1={bX} y1={lifeTop} x2={bX} y2={lifeBot} stroke="#cbd5e1" strokeWidth="1" strokeDasharray="4 3" />
 
-      {/* ── 1. Register ───────────────────────────── */}
-      <line x1={aX + 4} y1={74} x2={sX - 4} y2={74} stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#sig-ar)" />
-      <text x={(aX + sX) / 2} y={68} textAnchor="middle" fontSize="9" fontWeight="600" fill="#3b82f6">Register</text>
+      {/* ── 1. Authenticate on upgrade ──────────────── */}
+      <line x1={aX + 4} y1={96} x2={sX - 4} y2={96} stroke="#3b82f6" strokeWidth="1.5" markerEnd="url(#sig-ar)" />
+      <text x={(aX + sX) / 2} y={90} textAnchor="middle" fontSize="9" fontWeight="600" fill="#3b82f6">WS upgrade with credential</text>
 
-      <line x1={bX - 4} y1={92} x2={sX + 4} y2={92} stroke="#10b981" strokeWidth="1.5" markerEnd="url(#sig-ag)" />
-      <text x={(sX + bX) / 2} y={86} textAnchor="middle" fontSize="9" fontWeight="600" fill="#10b981">Register</text>
+      <line x1={bX - 4} y1={96} x2={sX + 4} y2={96} stroke="#10b981" strokeWidth="1.5" markerEnd="url(#sig-ag)" />
+      <text x={(sX + bX) / 2} y={90} textAnchor="middle" fontSize="9" fontWeight="600" fill="#047857">WS upgrade with credential</text>
 
-      {/* ── 2. Discovery ──────────────────────────── */}
-      <line x1={aX + 4} y1={118} x2={sX - 4} y2={118} stroke="#d97706" strokeWidth="1.5" markerEnd="url(#sig-ao)" />
-      <text x={(aX + sX) / 2} y={112} textAnchor="middle" fontSize="9" fontWeight="600" fill="#d97706">Discovery</text>
+      {/* ── 2. Find an eligible Actor for a known type ─ */}
+      <line x1={aX + 4} y1={120} x2={sX - 4} y2={120} stroke="#d97706" strokeWidth="1.5" markerEnd="url(#sig-ao)" />
+      <text x={(aX + sX) / 2} y={114} textAnchor="middle" fontSize="9" fontWeight="600" fill="#92400e">RouteCandidates (service type)</text>
 
-      <line x1={sX - 4} y1={136} x2={aX + 4} y2={136} stroke="#d97706" strokeWidth="1.5" markerEnd="url(#sig-ao)" />
-      <text x={(aX + sX) / 2} y={130} textAnchor="middle" fontSize="8" fill="#d97706">found Peer B</text>
+      <line x1={sX - 4} y1={140} x2={aX + 4} y2={140} stroke="#d97706" strokeWidth="1.5" markerEnd="url(#sig-ao)" />
+      <text x={(aX + sX) / 2} y={134} textAnchor="middle" fontSize="8" fill="#92400e">Eligible Actor IDs</text>
 
       {/* ── 3. SDP Offer/Answer ────────────────────── */}
       <line x1={aX + 4} y1={162} x2={sX - 4} y2={162} stroke="#8b5cf6" strokeWidth="1.5" markerEnd="url(#sig-ap)" />
@@ -86,10 +91,10 @@ function SignalingDiagram({ config }: { config: Record<string, unknown> }) {
       <line x1={sX - 4} y1={230} x2={aX + 4} y2={230} stroke="#8b5cf6" strokeWidth="1.2" strokeDasharray="5 3" markerEnd="url(#sig-ap)" />
       <text x={sX} y={224} textAnchor="middle" fontSize="8" fill="#8b5cf6">ICE candidates</text>
 
-      {/* ── 5. P2P established ────────────────────── */}
-      <line x1={aX + 4} y1={268} x2={bX - 4} y2={268} stroke="#10b981" strokeWidth="2" />
-      <rect x={sX - 55} y={258} width="110" height="18" rx="4" fill="#ecfdf5" />
-      <text x={sX} y={270} textAnchor="middle" fontSize="9" fontWeight="700" fill="#065f46">P2P established</text>
+      <rect x={sX - 146} y={275} width="292" height="24" rx="5" fill="#ecfdf5" />
+      <text x={sX} y={290} textAnchor="middle" fontSize="10" fontWeight="600" fill="#065f46">
+        Peers run ICE checks for a direct or TURN path
+      </text>
     </svg>
   );
 }
@@ -137,22 +142,30 @@ export function SignalingService() {
         disabledHint={<>This service is not enabled. Set the Signaling bit (bit 0) in the <code>enable</code> bitmask to activate it.</>}
       />
 
+      <ServiceAccessCard service="signaling" data={data} onRefresh={fetchData} />
+
       {data.enabled && <ServiceMetrics status={data.status} storageKey="signaling" />}
 
       {data.config && (
         <HowItWorks storageKey="signaling">
           <p className="text-xs text-gray-500 mb-4">
-            Peers connect via WebSocket, register their identity, discover each other,
-            then exchange SDP offers/answers and ICE candidates through the server.
-            Once negotiation completes, a direct P2P connection is established and
-            the signaling channel becomes idle.
+            Each peer first registers over HTTP(S) at <code>/issuer/register</code>. Signaling verifies the Actor
+            credential and the active identity binding before upgrading <code>/signaling/ws</code> to a WebSocket.
+            It then registers the live connection for discovery and routing.
           </p>
-          <SignalingDiagram config={data.config} />
+          <SignalingDiagram />
+          <div className="mt-4 space-y-2 border-t border-gray-100 pt-4 text-xs text-gray-500">
+            <p>
+              <strong className="text-gray-600">Discovery</strong> lists service types the caller may access in
+              its Realm. <strong className="text-gray-600">RouteCandidates</strong> finds and ranks eligible online Actors
+              of a requested type. Signaling forwards authorized role negotiation, SDP and ICE messages between the peers.
+            </p>
+            <p>
+              WebRTC traffic uses the direct or TURN relay path selected by ICE. WSS Relay is a separate transport
+              for application data over WebSocket.
+            </p>
+          </div>
         </HowItWorks>
-      )}
-
-      {data.config_fields && (
-        <ConfigSection storageKey="signaling" fields={data.config_fields} onRefresh={fetchData} />
       )}
     </ServicePageLayout>
   );
