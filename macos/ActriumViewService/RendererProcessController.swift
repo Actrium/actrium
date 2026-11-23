@@ -23,15 +23,27 @@ struct IMECommandPayload: Codable {
 /// `RCTTextInputComponentView`:
 ///
 /// 1. `textInputDidChange` (the native origin of JS `onChangeText`) is
-///    suppressed while the backing view holds marked (composition) text.
-///    RN macOS emits the event for the FIRST marked-text update, polluting
-///    the JS controlled state with the first composition letter (pinyin
-///    "nihao" → state stuck at "n"). iOS emits no change events during
-///    composition; without the gate the commit's event is then swallowed by
-///    RN's `_ignoreNextTextInputCall` early-return (see `applyInsertText`),
-///    so JS never receives the final text.
-/// 2. The commit path clears that latch and re-drives the event explicitly.
+///    suppressed while the component is composing. RN macOS emits the event
+///    for the FIRST marked-text update, polluting the JS controlled state
+///    with the first composition letter (pinyin "nihao" → state stuck at
+///    "n"). iOS emits no change events during composition. The mirror feeds
+///    marked text via `applyMarkedText`, so composition membership is tracked
+///    explicitly in `rnComposingComponents` rather than read back from
+///    `markedRange` — the delegate callback fires while `setMarkedText:` is
+///    still in flight, before the marked range (or even the backing view
+///    resolution) is reliable.
+/// 2. The commit path (`applyInsertText`, detected by marked text being
+///    present on the editor right before the insert) clears RN's
+///    `_ignoreNextTextInputCall` latch and re-drives the event explicitly.
+///    Plain-text inserts never see pre-insert marked text, so ordinary
+///    characters emit exactly one `onChange` from RN's own callback.
 private var rnMarkedTextGateInstalled = false
+
+/// Components with an in-flight IME composition, fed by `applyMarkedText`
+/// and consumed by `applyInsertText`. Weak: a forgotten entry must not keep
+/// a dead component alive. Composition is per-component; a global table
+/// matches how the swizzled method itself is global.
+private let rnComposingComponents = NSHashTable<AnyObject>.weakObjects()
 
 private func installRNMarkedTextGate() {
     guard !rnMarkedTextGateInstalled,
@@ -47,32 +59,32 @@ private func installRNMarkedTextGate() {
     typealias ChangeIMP = @convention(c) (AnyObject, Selector) -> Void
     let oldIMP = method_getImplementation(method)
     let block: @convention(block) (AnyObject) -> Void = { obj in
-        guard !rnBackingHasMarkedText(of: obj) else { return }
+        guard !rnComposingComponents.contains(obj) else { return }
         unsafeBitCast(oldIMP, to: ChangeIMP.self)(obj, changeSel)
     }
     method_setImplementation(method, imp_implementationWithBlock(block))
 }
 
-/// True when the component's backing text view currently holds marked text.
-/// `backedTextInputView` may be the RCTUITextView itself or an
-/// RCTWrappedTextView container whose subview hierarchy contains it.
-private func rnBackingHasMarkedText(of object: AnyObject) -> Bool {
-    // Zero-length ranges ({2, 0}) linger after a commit in RCTUITextView —
-    // only a NON-ZERO length means an active composition.
-    func hasMarked(_ view: NSView) -> Bool? {
-        (view as? NSTextView).map { $0.markedRange().length > 0 }
+/// The Fabric `RCTTextInputComponentView` owning `resolved` — the text view
+/// the renderer resolved as first responder. For a single-line input that
+/// view is AppKit's shared field editor; its `delegate` is the owning
+/// `RCTUITextField`, which exposes `textInputDelegate`. Returns nil unless
+/// the delegate really is the expected Fabric component, so RN internals are
+/// only touched through the documented key paths.
+private func rnComponentView(for resolved: NSView?) -> NSObject? {
+    guard let resolved else { return nil }
+    let backing: NSView
+    if let editor = resolved as? NSTextView,
+       let field = editor.delegate as? NSTextField {
+        backing = field
+    } else {
+        backing = resolved
     }
-    guard let backing = (try? object.value(forKey: "backedTextInputView")) as? NSView else {
-        return false
-    }
-    if let result = hasMarked(backing) { return result }
-    var queue = backing.subviews
-    while !queue.isEmpty {
-        let view = queue.removeFirst()
-        if let result = hasMarked(view) { return result }
-        queue.append(contentsOf: view.subviews)
-    }
-    return false
+    guard let component = (try? backing.value(forKey: "textInputDelegate")) as? NSObject,
+          let cls = NSClassFromString("RCTTextInputComponentView"),
+          component.isKind(of: cls)
+    else { return nil }
+    return component
 }
 
 /// Notification posted on the renderer's main queue after any
@@ -1454,6 +1466,17 @@ private final class RendererTabSurface {
     /// Applies Host-mirrored IME marked text to the focused text input.
     func applyMarkedText(_ text: String, selectedRange: NSRange) {
         guard let client = resolvedTextView(window.firstResponder) as? NSTextInputClient else { return }
+        // Join the composing set BEFORE `setMarkedText:`: RN fires
+        // `textInputDidChange` synchronously inside it, and the gate must
+        // already recognize this component as composing to keep that event
+        // away from JS. An empty payload means composition ended (cancel).
+        if let component = rnComponentView(for: resolvedTextView(window.firstResponder)) {
+            if text.isEmpty {
+                rnComposingComponents.remove(component)
+            } else {
+                rnComposingComponents.add(component)
+            }
+        }
         client.setMarkedText(
             text,
             selectedRange: selectedRange,
@@ -1467,17 +1490,28 @@ private final class RendererTabSurface {
     func applyInsertText(_ text: String) {
         let resolved = resolvedTextView(window.firstResponder)
         guard let client = resolved as? NSTextInputClient else { return }
+        // Composition commit is detected by marked text present on the
+        // editor BEFORE the insert: `insertText` replaces the marked text,
+        // so reading the marked range after it would always see a cleared
+        // range. (Zero-length ranges like {2, 0} linger after a commit —
+        // only a NON-ZERO length means an active composition, which also
+        // keeps plain-text inserts from entering the recovery path.)
+        let preMarkedLength = resolved?.markedRange().length ?? 0
         beginUndoableEdit()
         client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         endUndoableEdit()
-        // The commit insert fires NSTextView delegate callbacks while RN's
+        // The insert fires NSTextView delegate callbacks while RN's
         // `_ignoreNextTextInputCall` latch is set (composition selection
-        // updates set it even though our gate suppressed the change events),
-        // so RN's own textInputDidChange swallows the commit's onChange and
-        // JS never receives the final text. Clear the latch and drive the
-        // event explicitly — identical bookkeeping to a real keystroke.
-        if let textView = resolved,
-           let component = (try? textView.value(forKey: "textInputDelegate")) as? NSObject {
+        // updates set it even though our gate kept the composition change
+        // events away from JS), so RN's own textInputDidChange swallows the
+        // commit's onChange and JS never receives the final text. Clear the
+        // latch and drive the event explicitly — identical bookkeeping to a
+        // real keystroke. Plain-text inserts see no pre-insert marked text,
+        // so ordinary characters keep exactly one onChange from RN's own
+        // callback.
+        let component = rnComponentView(for: resolved)
+        if preMarkedLength > 0, let component {
+            rnComposingComponents.remove(component)
             component.setValue(false, forKey: "ignoreNextTextInputCall")
             _ = component.perform(NSSelectorFromString("textInputDidChange"))
         }
