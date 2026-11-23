@@ -8,17 +8,18 @@
 use actr_protocol::realm_membership::{
     MembershipOp, MembershipRequest, RealmClientKeyFile, RealmInvite, Role,
 };
-use actr_protocol::realm_profile::{RealmProfile, RealmStatus, realm_profile_urls};
+use actr_protocol::realm_profile::{MembershipMode, RealmProfile, RealmStatus, realm_profile_urls};
 use actr_protocol::uri::{ActrUri, parse_realm_name};
-use actr_protocol::{AuthorityDescriptor, RealmSigningKeys};
-use anyhow::{Context, Result, bail};
+use actr_protocol::{ActrType, AuthorityDescriptor, RealmSigningKeys};
+use anyhow::{Context, Result, bail, ensure};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use clap::Args;
 use ed25519_dalek::SigningKey;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::realm::write_private;
@@ -467,6 +468,66 @@ pub async fn join(args: &JoinArgs) -> Result<Value> {
         &http_client()?,
     )
     .await
+}
+
+pub(super) async fn join_open_service(
+    realm: &str,
+    actor_type: &ActrType,
+    archive: &[u8],
+    hyper_dir: &Path,
+) -> Result<(RealmProfile, PathBuf)> {
+    let discovery = discovery_client()?;
+    let profile = realm_profile(realm, None, move |url| {
+        let discovery = discovery.clone();
+        async move { fetch_public(&discovery, url).await }
+    })
+    .await?;
+    ensure!(
+        profile.realm.status == RealmStatus::Active
+            && profile.policy.membership == MembershipMode::Open,
+        "the verified Profile does not allow Open Join"
+    );
+    let selection = profile
+        .selection
+        .as_ref()
+        .context("the Realm has no package selection")?;
+    let (_, front) = selection.selected().map_err(anyhow::Error::msg)?;
+    let actor_type = actor_type.to_string_repr();
+    let digest = hex::encode(Sha256::digest(archive));
+    ensure!(
+        front.r#type != actor_type
+            && selection.packages.values().any(|entry| {
+                entry.r#type == actor_type && entry.fixed_digest() == Some(digest.as_str())
+            }),
+        "the package does not match a Service selected by the verified Realm Profile"
+    );
+
+    let directory = hyper_dir.join("open-service-clients");
+    tokio::fs::create_dir_all(&directory).await?;
+    let name = hex::encode(Sha256::digest(format!("{realm}\0{actor_type}")));
+    let path = directory.join(format!("{name}.json"));
+    let lock_path = directory.join(format!("{name}.lock"));
+    let _lock = tokio::task::spawn_blocking(move || {
+        let lock = std::fs::File::options()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(lock_path)?;
+        lock.lock()?;
+        Ok::<_, std::io::Error>(lock)
+    })
+    .await??;
+    join(&JoinArgs {
+        invite: None,
+        realm: Some(realm.to_owned()),
+        output: path.clone(),
+        issuer: Some(profile.issuer.url.clone()),
+        provider: Some(profile.provider.id.clone()),
+        label: Some(actor_type),
+        force: false,
+    })
+    .await?;
+    Ok((profile, path))
 }
 
 /// [`join`], fetching public documents with `fetch` and sending membership

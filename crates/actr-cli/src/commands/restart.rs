@@ -61,6 +61,7 @@ impl Command for RestartCommand {
             config: Some(config_path),
             hyper_dir: self.hyper_dir.clone(),
             detach: true,
+            open_join: entry.record.open_join,
             internal_detached_child: false,
             internal_wid: Some(full_wid),
             web: false,

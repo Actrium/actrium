@@ -183,6 +183,8 @@ enum RegisterAuthMode {
   REGISTER_AUTH_MODE_PACKAGE = 1;
   // Source-linked workload registration authenticated by realm authorization.
   REGISTER_AUTH_MODE_LINKED = 2;
+  // Publisher-signed Service with an exact type declared by an open Realm.
+  REGISTER_AUTH_MODE_OPEN_SERVICE = 3;
 }
 
 // Allocate a new ActrId and register node metadata and API info.

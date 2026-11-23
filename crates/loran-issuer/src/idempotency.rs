@@ -554,17 +554,24 @@ impl ControlAttemptStore {
                 "client_unknown: the Actor belongs to another member".to_string(),
             )));
         }
-        crate::issuer::AIdIssuer::recheck_actor_on(&mut tx, actor_id, &prepared.signer)
-            .await
-            .map_err(AttemptError::Refused)?;
+        let issued =
+            crate::issuer::AIdIssuer::recheck_actor_on(&mut tx, actor_id, &prepared.signer)
+                .await
+                .map_err(AttemptError::Refused)?;
 
         if prepared.package {
+            let package_mode =
+                if issued.auth_mode == Some(actr_protocol::RegisterAuthMode::OpenService as i32) {
+                    actr_protocol::RegisterAuthMode::OpenService
+                } else {
+                    actr_protocol::RegisterAuthMode::Package
+                };
             sqlx::query(
                 "UPDATE issued_actor_identity SET target = ?1, auth_mode = ?2
                  WHERE realm = ?3 AND serial_number = ?4",
             )
             .bind(prepared.target.as_deref())
-            .bind(actr_protocol::RegisterAuthMode::Package as i32)
+            .bind(package_mode as i32)
             .bind(&actor_id.realm)
             .bind(actor_id.serial_number as i64)
             .execute(&mut *tx)

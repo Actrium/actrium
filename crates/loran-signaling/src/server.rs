@@ -2062,10 +2062,10 @@ async fn handle_actr_relay(
         return Ok(());
     };
 
-    let can_relay = ActorAcl::can_discover(
+    let can_relay = ActorAcl::can_discover_actor(
         &source.realm,
-        &target.realm,
         &type_key(&source_type),
+        &target,
         &type_key(&target_type),
     )
     .await
@@ -2676,7 +2676,14 @@ async fn handle_discovery_request(
         let target_realm = &service.actor_id.realm;
         let target_type = type_key(&service.actor_type);
 
-        match ActorAcl::can_discover(source_realm, target_realm, &source_type, &target_type).await {
+        match ActorAcl::can_discover_actor(
+            source_realm,
+            &source_type,
+            &service.actor_id,
+            &target_type,
+        )
+        .await
+        {
             Ok(true) => acl_filtered_services.push(service),
             Ok(false) => {
                 platform::recording::debug!(
@@ -2842,7 +2849,14 @@ async fn handle_route_candidates_request(
         let target_realm = &candidate.actor_id.realm;
         let target_type = type_key(&candidate.actor_type);
 
-        match ActorAcl::can_discover(source_realm, target_realm, &source_type, &target_type).await {
+        match ActorAcl::can_discover_actor(
+            source_realm,
+            &source_type,
+            &candidate.actor_id,
+            &target_type,
+        )
+        .await
+        {
             Ok(true) => acl_filtered_candidates.push(candidate),
             Ok(false) => {
                 platform::recording::debug!(

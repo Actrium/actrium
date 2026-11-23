@@ -1441,7 +1441,17 @@ impl Node<Attached> {
     /// identity. No Publisher private key is involved.
     pub async fn register(self, issuer_endpoint: &str) -> HyperResult<Node<Registered>> {
         let service_spec = self.derived_service_spec()?;
-        self.register_with_inner(issuer_endpoint, service_spec)
+        self.register_with_inner(issuer_endpoint, service_spec, false)
+            .await
+    }
+
+    /// Register a package-backed Service declared by the Open Realm's Profile.
+    pub async fn register_open_service(
+        self,
+        issuer_endpoint: &str,
+    ) -> HyperResult<Node<Registered>> {
+        let service_spec = self.derived_service_spec()?;
+        self.register_with_inner(issuer_endpoint, service_spec, true)
             .await
     }
 
@@ -1568,7 +1578,7 @@ impl Node<Attached> {
                 "v2 ServiceSpec must come from the signed package contract".into(),
             ));
         }
-        self.register_with_inner(issuer_endpoint, service_spec)
+        self.register_with_inner(issuer_endpoint, service_spec, false)
             .await
     }
 
@@ -1576,8 +1586,18 @@ impl Node<Attached> {
         self,
         issuer_endpoint: &str,
         service_spec: Option<ServiceSpec>,
+        open_service: bool,
     ) -> HyperResult<Node<Registered>> {
-        let context = self.registration_context(service_spec.clone())?;
+        use crate::lifecycle::credential_manager::RegistrationContext;
+        let mut context = self.registration_context(service_spec.clone())?;
+        if open_service {
+            let RegistrationContext::Package { request } = &mut context else {
+                return Err(HyperError::InvalidManifest(
+                    "Open Service requires a signed package".into(),
+                ));
+            };
+            request.auth_mode = Some(RegisterAuthMode::OpenService as i32);
+        }
         let attachment = self
             .attachment
             .as_ref()
@@ -1594,6 +1614,7 @@ impl Node<Attached> {
                     acl: config.acl.clone(),
                     client_key: attachment.node.resolved_realm_client_key()?,
                     actor_key_namespace: attachment.node.actor_key_namespace.clone(),
+                    open_service,
                 },
             )
             .await?
@@ -1829,6 +1850,7 @@ impl Hyper {
                 acl,
                 client_key,
                 actor_key_namespace: None,
+                open_service: false,
             },
         )
         .await
@@ -2208,6 +2230,7 @@ struct CredentialBootstrapRequest<'a> {
     acl: Option<Acl>,
     client_key: Option<RealmClientKey>,
     actor_key_namespace: Option<String>,
+    open_service: bool,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2223,6 +2246,7 @@ async fn bootstrap_credential_inner(
         acl,
         client_key,
         actor_key_namespace,
+        open_service,
     } = request;
     let manifest = &verified.manifest;
     let actr_type = manifest.actor_type().to_program_identity();
@@ -2259,7 +2283,11 @@ async fn bootstrap_credential_inner(
         &actor_type,
         actor_key_namespace.as_deref(),
     )?;
-    let req = build_package_register_request(verified, realm, service_spec, acl, signer.as_ref())?;
+    let mut req =
+        build_package_register_request(verified, realm, service_spec, acl, signer.as_ref())?;
+    if open_service {
+        req.auth_mode = Some(RegisterAuthMode::OpenService as i32);
+    }
     let response = issuer.register_with_manifest(req).await?;
 
     // 3. Process Issuer response

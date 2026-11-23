@@ -8,7 +8,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-const LORAN_SCHEMA_VERSION: i64 = 17;
+const LORAN_SCHEMA_VERSION: i64 = 19;
 const LORAN_SCHEMA_VERSION_WITH_REALM_CLIENT_KEYS: i64 = 10;
 
 /// Database manager
@@ -60,6 +60,8 @@ impl Database {
                 | 14
                 | 15
                 | 16
+                | 17
+                | 18
                 | LORAN_SCHEMA_VERSION
         ) {
             return Ok(version);
@@ -509,6 +511,20 @@ impl Database {
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_issued_actor_identity_client_key
              ON issued_actor_identity(realm, client_key_id)",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Open Services can configure connections to their own Actor instance.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS actor_instance_acl (
+                realm TEXT NOT NULL,
+                serial_number INTEGER NOT NULL,
+                acl BLOB NOT NULL,
+                PRIMARY KEY(realm, serial_number),
+                FOREIGN KEY(realm, serial_number) REFERENCES issued_actor_identity(realm, serial_number)
+                    ON DELETE CASCADE
+            )",
         )
         .execute(&mut *tx)
         .await?;

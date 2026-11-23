@@ -3,12 +3,14 @@
 //! Defines data structures for actor permission control
 use anyhow::Result;
 
+use prost::Message;
 use serde::{Deserialize, Serialize};
 
 use super::super::RealmError;
 use super::membership::Signer;
 use crate::storage::db::get_database;
 use actr_protocol::realm_membership::Role;
+use actr_protocol::{Acl, ActrId, acl_rule};
 
 const ANONYMOUS_ACTOR_TYPE: &str = "ANONCLNT";
 const VOICE_ACTOR_TYPE: &str = "VOICE";
@@ -401,6 +403,65 @@ impl ActorAcl {
                 Ok(false)
             }
         }
+    }
+
+    /// Store Open Service rules under the issued instance's identity.
+    pub async fn save_instance_policy(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        actor: &ActrId,
+        acl: &Acl,
+    ) -> Result<(), RealmError> {
+        sqlx::query("INSERT INTO actor_instance_acl (realm, serial_number, acl) VALUES (?, ?, ?)")
+            .bind(&actor.realm)
+            .bind(actor.serial_number as i64)
+            .bind(acl.encode_to_vec())
+            .execute(&mut **tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Check the actual target instance, falling back to the type policy for
+    /// instances without their own rules. A type-wide denial still applies.
+    pub async fn can_discover_actor(
+        source_realm: &str,
+        from_type: &str,
+        target: &ActrId,
+        to_type: &str,
+    ) -> Result<bool, RealmError> {
+        if source_realm != target.realm {
+            return Ok(false);
+        }
+        let instance_acl: Option<Vec<u8>> = sqlx::query_scalar(
+            "SELECT acl FROM actor_instance_acl WHERE realm = ? AND serial_number = ?",
+        )
+        .bind(&target.realm)
+        .bind(target.serial_number as i64)
+        .fetch_optional(get_database().get_pool())
+        .await?;
+        let Some(instance_acl) = instance_acl else {
+            return Self::can_discover(source_realm, &target.realm, from_type, to_type).await;
+        };
+        let acl = Acl::decode(instance_acl.as_slice())
+            .map_err(|error| RealmError::ParseError(format!("invalid instance ACL: {error}")))?;
+        let permitted = acl
+            .rules
+            .iter()
+            .filter(|rule| rule.from_type.to_program_identity() == from_type)
+            .filter_map(|rule| match &rule.source_realm {
+                Some(acl_rule::SourceRealm::Realm(realm)) if realm != source_realm => None,
+                Some(acl_rule::SourceRealm::AnyRealm(_)) => Some((rule, false)),
+                _ => Some((rule, true)),
+            })
+            .max_by_key(|(_, exact_realm)| *exact_realm)
+            .is_some_and(|(rule, _)| rule.permission == acl_rule::Permission::Allow as i32);
+        if !permitted {
+            return Ok(false);
+        }
+        Ok(
+            Self::get_by_types(&target.realm, source_realm, from_type, to_type)
+                .await?
+                .is_none_or(|acl| acl.access()),
+        )
     }
 }
 

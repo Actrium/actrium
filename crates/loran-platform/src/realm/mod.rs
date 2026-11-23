@@ -12,6 +12,7 @@ pub mod issuer_key;
 pub mod management;
 pub mod membership;
 pub mod model;
+pub mod open_service;
 pub mod profile;
 pub mod turn_secret;
 pub mod validation;
