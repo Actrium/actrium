@@ -17,6 +17,134 @@ struct IMECommandPayload: Codable {
     var command: String
 }
 
+// MARK: - RN TextInput marked-text event gate
+
+/// Restores iOS-style IME composition semantics to RN macOS's Fabric
+/// `RCTTextInputComponentView`:
+///
+/// 1. `textInputDidChange` (the native origin of JS `onChangeText`) is
+///    suppressed while the component is composing. RN macOS emits the event
+///    for the FIRST marked-text update, polluting the JS controlled state
+///    with the first composition letter (pinyin "nihao" → state stuck at
+///    "n"). iOS emits no change events during composition. The mirror feeds
+///    marked text via `applyMarkedText`, so composition membership is tracked
+///    explicitly in `rnComposingComponents` rather than read back from
+///    `markedRange` — the delegate callback fires while `setMarkedText:` is
+///    still in flight, before the marked range (or even the backing view
+///    resolution) is reliable.
+/// 2. The commit path (`applyInsertText`, detected by marked text being
+///    present on the editor right before the insert) clears RN's
+///    `_ignoreNextTextInputCall` latch and re-drives the event explicitly.
+///    Plain-text inserts never see pre-insert marked text, so ordinary
+///    characters emit exactly one `onChange` from RN's own callback.
+private var rnMarkedTextGateInstalled = false
+
+/// Components with an in-flight IME composition, fed by `applyMarkedText`
+/// and consumed by `applyInsertText`. Each entry records the editor the
+/// component was composing in: a stale entry (recycled Fabric input, ended
+/// field-editor session) never matches the component's current editor, so a
+/// recycled `RCTTextInputComponentView` cannot carry composition state into
+/// a new editor. Weak keys and values: a forgotten entry must not keep a
+/// dead component or editor alive. The table is global to match the
+/// swizzled method; window ownership is enforced by the prune paths.
+private let rnComposingComponents = NSMapTable<AnyObject, AnyObject>.weakToWeakObjects()
+
+private func installRNMarkedTextGate() {
+    guard !rnMarkedTextGateInstalled,
+          let cls = NSClassFromString("RCTTextInputComponentView")
+    else { return }
+    rnMarkedTextGateInstalled = true
+
+    // method_setImplementation + direct old-IMP calls: an exchange-based
+    // swizzle recursed here because Swift statically dispatched the
+    // "original" call back into the probe, overflowing the stack.
+    let changeSel = NSSelectorFromString("textInputDidChange")
+    guard let method = class_getInstanceMethod(cls, changeSel) else { return }
+    typealias ChangeIMP = @convention(c) (AnyObject, Selector) -> Void
+    let oldIMP = method_getImplementation(method)
+    let block: @convention(block) (AnyObject) -> Void = { obj in
+        if let composingEditor = rnComposingComponents.object(forKey: obj) {
+            // Suppress only while the component still edits through the same
+            // editor the composition started in. A recycled Fabric input
+            // re-mounted with a new editor must not inherit the stale entry.
+            if let backing = (try? obj.value(forKey: "backedTextInputView")) as? NSView,
+               rnEditorTextView(under: backing) === composingEditor {
+                return
+            }
+            rnComposingComponents.removeObject(forKey: obj)
+        }
+        unsafeBitCast(oldIMP, to: ChangeIMP.self)(obj, changeSel)
+    }
+    method_setImplementation(method, imp_implementationWithBlock(block))
+}
+
+/// The Fabric `RCTTextInputComponentView` owning `resolved` — the text view
+/// the renderer resolved as first responder. For a single-line input that
+/// view is AppKit's shared field editor; its `delegate` is the owning
+/// `RCTUITextField`, which exposes `textInputDelegate`. Returns nil unless
+/// the delegate really is the expected Fabric component, so RN internals are
+/// only touched through the documented key paths.
+private func rnComponentView(for resolved: NSView?) -> NSObject? {
+    guard let resolved else { return nil }
+    let backing: NSView
+    if let editor = resolved as? NSTextView,
+       let field = editor.delegate as? NSTextField {
+        backing = field
+    } else {
+        backing = resolved
+    }
+    guard let component = (try? backing.value(forKey: "textInputDelegate")) as? NSObject,
+          let cls = NSClassFromString("RCTTextInputComponentView"),
+          component.isKind(of: cls)
+    else { return nil }
+    return component
+}
+
+/// The text view a component edits through: the field's active field editor
+/// for a single-line input, otherwise the NSTextView inside the backing
+/// view hierarchy.
+private func rnEditorTextView(under view: NSView) -> NSTextView? {
+    if let field = view as? NSTextField {
+        return field.currentEditor() as? NSTextView
+    }
+    if let textView = view as? NSTextView { return textView }
+    var queue = view.subviews
+    while !queue.isEmpty {
+        let sub = queue.removeFirst()
+        if let textView = sub as? NSTextView { return textView }
+        queue.append(contentsOf: sub.subviews)
+    }
+    return nil
+}
+
+/// Drop composition state owned by `window` for every component whose
+/// editor is not `activeEditor`. Editing ends or focus moves while a
+/// composition is in flight (blur, click into another input) never reaches
+/// the commit path, so without this the abandoned component would stay in
+/// the gate's composing set and have ALL of its later change events
+/// suppressed. A nil `activeEditor` drops every entry owned by the window
+/// (e.g. a single-line blur with no replacement editor — `currentEditor()`
+/// is nil for the old field, and `nil !== nil` would otherwise retain it).
+/// Entries owned by OTHER windows are left untouched: a shared renderer
+/// process serves several tabs, and a first-responder change in one tab
+/// must not evict a live composition in another.
+private func rnPruneComposingComponents(activeEditor: NSTextView?, inWindow window: NSWindow?) {
+    guard let keys = rnComposingComponents.keyEnumerator().allObjects as? [AnyObject] else { return }
+    for component in keys {
+        guard let backing = (try? component.value(forKey: "backedTextInputView")) as? NSView else {
+            rnComposingComponents.removeObject(forKey: component)
+            continue
+        }
+        guard backing.window === window else { continue }
+        // Keep an entry only for a non-nil active editor that is still the
+        // editor the composition was recorded on: a single-line blur leaves
+        // currentEditor() nil, and `nil !== nil` would otherwise retain it.
+        if activeEditor == nil || rnComposingComponents.object(forKey: component) !== activeEditor {
+            rnComposingComponents.removeObject(forKey: component)
+        }
+    }
+}
+
 /// Notification posted on the renderer's main queue after any
 /// `NSWindow.makeFirstResponder(_:)` call, carrying the window.
 let ActriumFirstResponderDidChangeNotification = Notification.Name(
@@ -442,6 +570,7 @@ final class RendererProcessController {
 
     private init(arguments: Arguments) {
         self.arguments = arguments
+        installRNMarkedTextGate()
         connection = IPCHelperConnection(
             tabId: arguments.rendererId,
             connectedSocket: STDIN_FILENO
@@ -495,6 +624,9 @@ final class RendererProcessController {
         ) { [weak self] note in
             guard let self, let window = note.object as? NSWindow else { return }
             for (tabId, surface) in self.surfaces where surface.window === window {
+                // Focus moved: an interrupted composition must not leave its
+                // component in the composing gate forever.
+                surface.pruneComposingState()
                 self.reportTextInputFocus(tabId: tabId, surface: surface)
             }
         }
@@ -857,7 +989,13 @@ final class RendererProcessController {
     private func destroyTab(_ tabId: String) {
         cancelFileImport(tabId)
         failPendingAttachmentCalls(tabId: tabId)
-        surfaces.removeValue(forKey: tabId)?.close()
+        if let surface = surfaces.removeValue(forKey: tabId) {
+            // Before the hierarchy is detached: afterwards backing.window is
+            // nil and no prune can reach the tab's composition entries, while
+            // a recycled Fabric input could carry them into a new editor.
+            surface.invalidateComposingState()
+            surface.close()
+        }
         reactNativeHost.destroyRendererEntry(tabId: tabId)
     }
 
@@ -1395,6 +1533,17 @@ private final class RendererTabSurface {
     /// Applies Host-mirrored IME marked text to the focused text input.
     func applyMarkedText(_ text: String, selectedRange: NSRange) {
         guard let client = resolvedTextView(window.firstResponder) as? NSTextInputClient else { return }
+        // Join the composing table BEFORE `setMarkedText:`: RN fires
+        // `textInputDidChange` synchronously inside it, and the gate must
+        // already recognize this component as composing to keep that event
+        // away from JS. An empty payload means composition ended (cancel).
+        if let component = rnComponentView(for: resolvedTextView(window.firstResponder)) {
+            if text.isEmpty {
+                rnComposingComponents.removeObject(forKey: component)
+            } else if let editor = resolvedTextView(window.firstResponder) {
+                rnComposingComponents.setObject(editor, forKey: component)
+            }
+        }
         client.setMarkedText(
             text,
             selectedRange: selectedRange,
@@ -1406,10 +1555,33 @@ private final class RendererTabSurface {
 
     /// Applies Host-mirrored committed IME text to the focused text input.
     func applyInsertText(_ text: String) {
-        guard let client = resolvedTextView(window.firstResponder) as? NSTextInputClient else { return }
+        let resolved = resolvedTextView(window.firstResponder)
+        guard let client = resolved as? NSTextInputClient else { return }
+        // Composition commit is detected by marked text present on the
+        // editor BEFORE the insert: `insertText` replaces the marked text,
+        // so reading the marked range after it would always see a cleared
+        // range. (Zero-length ranges like {2, 0} linger after a commit —
+        // only a NON-ZERO length means an active composition, which also
+        // keeps plain-text inserts from entering the recovery path.)
+        let preMarkedLength = resolved?.markedRange().length ?? 0
         beginUndoableEdit()
         client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
         endUndoableEdit()
+        // The insert fires NSTextView delegate callbacks while RN's
+        // `_ignoreNextTextInputCall` latch is set (composition selection
+        // updates set it even though our gate kept the composition change
+        // events away from JS), so RN's own textInputDidChange swallows the
+        // commit's onChange and JS never receives the final text. Clear the
+        // latch and drive the event explicitly — identical bookkeeping to a
+        // real keystroke. Plain-text inserts see no pre-insert marked text,
+        // so ordinary characters keep exactly one onChange from RN's own
+        // callback.
+        let component = rnComponentView(for: resolved)
+        if preMarkedLength > 0, let component {
+            rnComposingComponents.removeObject(forKey: component)
+            component.setValue(false, forKey: "ignoreNextTextInputCall")
+            _ = component.perform(NSSelectorFromString("textInputDidChange"))
+        }
         publishCaret()
         commit()
     }
@@ -1454,8 +1626,26 @@ private final class RendererTabSurface {
         editor.setSelectedRange(full)
         editor.insertText(snapshot, replacementRange: full)
         editor.setSelectedRange(NSRange(location: caret, length: 0))
+        // Undo/redo bypasses applyInsertText, so a change made while an IME
+        // composition is active would have its event discarded by the gate.
+        rnPublishEditingMutation(on: editor)
         publishCaret()
         commit()
+    }
+
+    /// Mutating editing commands (undo/redo/cut/paste) apply changes directly
+    /// to the editor instead of going through `applyInsertText`, so the
+    /// composing gate never sees the edit resolved. Drop the composition
+    /// entry and re-drive RN's change event explicitly — identical
+    /// bookkeeping to the commit recovery — otherwise JS keeps its pre-edit
+    /// value while the native field shows the restored text.
+    private func rnPublishEditingMutation(on editor: NSTextView?) {
+        guard let editor, let component = rnComponentView(for: editor),
+              rnComposingComponents.object(forKey: component) != nil
+        else { return }
+        rnComposingComponents.removeObject(forKey: component)
+        component.setValue(false, forKey: "ignoreNextTextInputCall")
+        _ = component.perform(NSSelectorFromString("textInputDidChange"))
     }
 
     private func undoTextEdit() {
@@ -1515,11 +1705,38 @@ private final class RendererTabSurface {
         let mutates = command == "cut" || command == "paste"
         if mutates { beginUndoableEdit() }
         ActriumSendEditingAction(selector, target ?? NSApp)
-        if mutates { endUndoableEdit() }
+        if mutates {
+            endUndoableEdit()
+            // Same gate gap as undo/redo: the mutation bypasses
+            // applyInsertText, so publish explicitly after it.
+            rnPublishEditingMutation(on: resolvedTextView(window.firstResponder))
+        }
         publishCaret()
         commit()
     }
 
+
+    /// Drop ALL composition state owned by this surface, regardless of the
+    /// current first responder. Called before the view hierarchy is torn
+    /// down: once detached, `backing.window` is nil and window-scoped
+    /// pruning can no longer reach the entries, while a recycled Fabric
+    /// input could otherwise carry the stale state into a new editor.
+    func invalidateComposingState() {
+        rnPruneComposingComponents(activeEditor: nil, inWindow: window)
+    }
+
+    /// Drop composition state for components whose editor is no longer the
+    /// focused text view of THIS surface. Called when the first responder
+    /// changes; an interrupted composition must not keep its component in
+    /// the gate's composing set (which would suppress its ordinary change
+    /// events). Entries owned by other windows (tabs sharing this renderer)
+    /// are left untouched.
+    func pruneComposingState() {
+        rnPruneComposingComponents(
+            activeEditor: resolvedTextView(window.firstResponder),
+            inWindow: window
+        )
+    }
 
     /// The Host asked this text input to give up focus (its own IME client
     /// resigned first responder, e.g. the user focused the address bar).
@@ -1528,6 +1745,9 @@ private final class RendererTabSurface {
             || window.firstResponder is NSTextField {
             window.makeFirstResponder(container)
         }
+        // Editing ended: drop any composition state still attached to inputs
+        // owned by this surface.
+        rnPruneComposingComponents(activeEditor: nil, inWindow: window)
         focusedEditor = nil
         lastCaretRect = nil
         RendererProcessLifetime.shared.controller?.publishCaret(tabId: tabId, rect: nil)

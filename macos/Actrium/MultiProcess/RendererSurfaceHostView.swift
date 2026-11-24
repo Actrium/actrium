@@ -896,8 +896,29 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
     /// this view, so these actions arrive as selector dispatches on this
     /// (empty) text view instead of as key events; executing them against
     /// the local storage would do nothing.
+    ///
+    /// While an IME composition is active, mutating commands follow the
+    /// system text field's semantics instead of forwarding:
+    /// - undo cancels the composition first (the marked text is not an
+    ///   edit, and undoing "through" it would strand the native field and JS
+    ///   on different values). The keystroke is consumed by the cancel; the
+    ///   same command pressed again applies to the settled text — TextEdit's
+    ///   two-stage behavior.
+    /// - redo/cut/paste/select-all are swallowed with no effect, exactly as
+    ///   a system text field ignores them while the candidate window is up.
     func sendTextCommand(_ command: String) {
-        sendIMEPayload(name: "com.actrium.textCommand", payload: ["command": command])
+        guard imeCompositionView?.forwardingMarkedTextActive == true else {
+            sendIMEPayload(name: "com.actrium.textCommand", payload: ["command": command])
+            return
+        }
+        switch command {
+        case "undo":
+            imeCompositionView?.cancelCompositionForEditingCommand()
+        case "redo", "cut", "paste", "selectAll":
+            break
+        default:
+            sendIMEPayload(name: "com.actrium.textCommand", payload: ["command": command])
+        }
     }
 
     /// The IME client lost first responder (user focused another Host
@@ -945,6 +966,11 @@ final class IMECompositionView: NSTextView {
     weak var surfaceView: RendererSurfaceHostView?
 
     private var forwardingMarkedText: String = ""
+
+    /// Set while `cancelCompositionForEditingCommand` bounces the input
+    /// context: TSM ends the abandoned session by committing its marked text
+    /// into the client, which the cancel swallows instead of forwarding.
+    private var swallowingCompositionCommit = false
     private var forwardingMarkedSelection: NSRange = NSRange(location: 0, length: 0)
     private var interpretingModifiers: NSEvent.ModifierFlags = []
 
@@ -1164,6 +1190,14 @@ final class IMECompositionView: NSTextView {
 
     override func insertText(_ string: Any, replacementRange: NSRange) {
         let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        if swallowingCompositionCommit {
+            // TSM commits the abandoned composition into the client while
+            // the input context bounces; the cancel path drops it instead
+            // of forwarding it as an insertion.
+            forwardingMarkedText = ""
+            forwardingMarkedSelection = NSRange(location: 0, length: 0)
+            return
+        }
         forwardingMarkedText = ""
         surfaceView?.sendInsertText(text)
     }
@@ -1185,6 +1219,27 @@ final class IMECompositionView: NSTextView {
         surfaceView?.sendMarkedText("", selectedRange: NSRange(location: 0, length: 0))
         forwardingMarkedText = ""
         forwardingMarkedSelection = NSRange(location: 0, length: 0)
+    }
+
+    /// Whether a system IME composition is currently in flight.
+    var forwardingMarkedTextActive: Bool { !forwardingMarkedText.isEmpty }
+
+    /// Aborts the in-flight TSM composition. Discarding the local marked
+    /// state does not dismiss TSM's own session (synthetic Escape events go
+    /// through `doCommand` instead of the input context, and would forward a
+    /// spurious cancel to the Renderer), so tear the session down for real by
+    /// bouncing the input context. Deactivation COMMITS the session into the
+    /// client, which the cancel path swallows — the command's semantics are
+    /// "discard the composition", not "commit it".
+    func cancelCompositionForEditingCommand() {
+        guard !forwardingMarkedText.isEmpty else { return }
+        if let context = NSTextInputContext.current {
+            swallowingCompositionCommit = true
+            context.deactivate()
+            context.activate()
+            swallowingCompositionCommit = false
+        }
+        unmarkText()
     }
 
     override func selectedRange() -> NSRange {
