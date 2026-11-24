@@ -73,6 +73,34 @@ Do not create the archive with a generic ZIP command: the packer canonicalizes
 file metadata, updates payload digests and key identity, enforces ZIP `STORE`,
 and signs the exact manifest bytes.
 
+## Text-to-speech on macOS
+
+Add `host:tts.speak` and `host:tts.stop` to `[host].required-capabilities`
+when the Guest imports both methods. Actrium prompts the user for playback permission.
+Build the v1 Guest with `--contract packages/actrium/src/runtime-host/contract.ts`
+and `--v1-capability-manifest workload/capabilities.json`.
+
+```ts
+import { speak, stop } from 'host:tts';
+
+export function readMessage(voice: 'female' | 'male') {
+  return speak({ text: 'Welcome to Actrium.', locale: 'en-US', voice });
+}
+
+export function stopReading() {
+  return stop();
+}
+```
+
+`speak` accepts non-blank text and an optional language tag.
+The optional `voice` defaults to `'system'`. Available voices
+depend on the Mac. If the requested language and voice cannot be selected,
+`speak` rejects with `voice_unavailable`.
+
+`speak` resolves with `{ status: 'finished' }` after playback or
+`{ status: 'cancelled' }` if stopped or replaced. Call it again with the new
+voice to restart playback. `stop` affects only the calling Guest.
+
 ## Sandbox boundary
 
 Guest code may use React, Keel Guest APIs, and Host capabilities explicitly

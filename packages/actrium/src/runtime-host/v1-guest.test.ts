@@ -7,6 +7,7 @@ import { createHostModuleDispatch } from 'keel/contract';
 import { Engine } from 'keel/host';
 import { type V1Linkage, createV1CapabilityManifest, v1ServiceDispatchId, writeV1Bundle } from 'keel/v1';
 import { contract } from './contract';
+import { GuestTTS } from './guest-tts';
 import { createHostModules } from './host-modules';
 import { createTestServiceEventSource } from './service-events.test-utils';
 import type { AttachmentUploadManager } from './attachment-upload';
@@ -228,6 +229,7 @@ test('rejects a fixed tell link while tell is unimplemented even on a linked cal
 });
 
 test.each([false, true])('runs the built Guest through a scoped Engine (minify=%s)', async (minify) => {
+  const mandarinText = '\u4f60\u597d';
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'actrium-v1-guest-'));
   let engine: Engine | undefined;
   try {
@@ -235,7 +237,10 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
       import { Menu, Select, Supramark, Svg, View } from 'keel/guest';
       import { writeText } from 'host:clipboard';
       import { call as echo } from 'host:service/${route}';
-      void echo({ payloadBase64: '' }).then(() => writeText({ text: 'Echo received' }));
+      import { speak } from 'host:tts';
+      void echo({ payloadBase64: '' })
+        .then(() => speak({ text: ${JSON.stringify(mandarinText)}, locale: 'zh-CN', voice: 'male' }))
+        .then(({ status }) => writeText({ text: 'Echo received, speech ' + status }));
       export default function App() {
         return <>
           <View onMouseEnter={() => writeText({ text: 'hover-in' })} onMouseLeave={() => writeText({ text: 'hover-out' })}>
@@ -260,19 +265,21 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
     if (result.exitCode !== 0) throw new Error(result.stderr.toString() || result.stdout.toString());
     const bundle = await Bun.file(path.join(root, 'workload/guest.js')).text();
     const signedProfile = await Bun.file(path.join(root, 'workload/capabilities.json')).text();
-    const verified = verifyV1RuntimeGuest(bundle, signedProfile, declarations);
+    const guestDeclarations = [...declarations, 'host:tts.speak'];
+    const verified = verifyV1RuntimeGuest(bundle, signedProfile, guestDeclarations);
     if (!verified.ok) throw new Error(verified.details.join(' '));
     expect(verified.manifest.components).toEqual(['Menu', 'Select', 'Supramark', 'Svg', 'View']);
     const profileWithoutMenus = JSON.stringify({ ...verified.manifest, components: ['Supramark', 'View'] });
-    expect(verifyV1RuntimeGuest(bundle, profileWithoutMenus, declarations)).toMatchObject({
+    expect(verifyV1RuntimeGuest(bundle, profileWithoutMenus, guestDeclarations)).toMatchObject({
       ok: false, code: 'capability_mismatch',
     });
     const profileWithoutSvg = JSON.stringify({ ...verified.manifest, components: ['Menu', 'Select', 'Supramark', 'View'] });
-    expect(verifyV1RuntimeGuest(bundle, profileWithoutSvg, declarations)).toMatchObject({
+    expect(verifyV1RuntimeGuest(bundle, profileWithoutSvg, guestDeclarations)).toMatchObject({
       ok: false, code: 'capability_mismatch',
     });
 
     const calls: string[] = [];
+    const spoken: unknown[] = [];
     const clipboard = Promise.withResolvers<string>();
     const selections: string[] = [];
     const authorize = async () => {};
@@ -288,6 +295,18 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
         selections.push(text);
         clipboard.resolve(text);
       },
+      tts: new GuestTTS({
+        authorize,
+        onRevoked: () => () => {},
+        onCleanupError: (error) => { throw error; },
+        bridge: {
+          speak: async (_sessionId, text, locale, voice) => {
+            spoken.push({ text, locale, voice });
+            return { status: 'finished' };
+          },
+          stop: async () => {},
+        },
+      }),
     });
     // Stand in for the Host's native renderer without registering a Text component.
     const ProtocolText = () => null;
@@ -305,7 +324,8 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
     engine.register({ Supramark: HostSupramark, Select: HostSelect, Menu: HostMenu, Svg: HostSvg, View: () => null });
     const receiver = engine.createReceiver();
     await engine.loadBundle(bundle);
-    expect(await clipboard.promise).toBe('Echo received');
+    expect(await clipboard.promise).toBe('Echo received, speech finished');
+    expect(spoken).toEqual([{ text: mandarinText, locale: 'zh-CN', voice: 'male' }]);
     expect(calls).toEqual([route]);
     // Check rendered children, since protocol text nodes can exist without a renderer.
     type GuestCallbacks = {
@@ -347,7 +367,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
     expect(hover?.onMouseLeave).toBeFunction();
     await hover?.onMouseEnter?.();
     await hover?.onMouseLeave?.();
-    expect(selections).toEqual(['Echo received', 'zh', 'rename', 'hover-in', 'hover-out']);
+    expect(selections).toEqual(['Echo received, speech finished', 'zh', 'rename', 'hover-in', 'hover-out']);
   } finally {
     engine?.destroy();
     fs.rmSync(root, { recursive: true, force: true });

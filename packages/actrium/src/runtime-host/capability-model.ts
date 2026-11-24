@@ -180,6 +180,22 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     requiresSandbox: true,
     implemented: true,
   },
+  'host:tts.speak': {
+    name: 'host:tts.speak',
+    audience: 'third_party',
+    requiresGrant: 'user',
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: true,
+  },
+  'host:tts.stop': {
+    name: 'host:tts.stop',
+    audience: 'third_party',
+    requiresGrant: 'none',
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: true,
+  },
   'host:location.getCurrentPosition': {
     name: 'host:location.getCurrentPosition',
     audience: 'third_party',

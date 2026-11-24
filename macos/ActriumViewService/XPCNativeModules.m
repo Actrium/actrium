@@ -122,6 +122,21 @@ RCT_EXTERN_METHOD(cachedAttachment:(NSString *)tabId
 
 @end
 
+@interface RCT_EXTERN_MODULE(GuestTTS, NSObject)
+
+RCT_EXTERN_METHOD(speak:(NSString *)sessionId
+                  text:(NSString *)text
+                  locale:(NSString *)locale
+                  voice:(NSString *)voice
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(stop:(NSString *)sessionId
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+@end
+
 // MARK: - StartPageModule
 
 @interface RCT_EXTERN_MODULE(StartPageModule, NSObject)
