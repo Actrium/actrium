@@ -16,6 +16,40 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
+/// Verify the Front before rendering and return the Service type from the accepted Realm Profile.
+#[uniffi::export]
+pub fn verify_realm_front(
+    front_archive: Vec<u8>,
+    trusted_public_key: Vec<u8>,
+    front_type: String,
+    service_type: String,
+) -> ActrResult<ActrType> {
+    let invalid = |msg| ActrError::Config { msg };
+    let key_bytes = trusted_public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| invalid("Invalid Front Publisher public key length".into()))?;
+    let key = ed25519_dalek::VerifyingKey::from_bytes(key_bytes)
+        .map_err(|error| invalid(error.to_string()))?;
+    let verified = actr_pack::verify_actor_package(&front_archive, &key)
+        .map_err(|error| invalid(error.to_string()))?;
+    if verified.manifest.actor_type() != front_type {
+        return Err(invalid(
+            "The Front does not match the Actor type in the Realm profile.".into(),
+        ));
+    }
+    let service_type = actr_protocol::ActrType::from_string_repr(&service_type)
+        .map_err(|error| invalid(error.to_string()))?;
+    actr_hyper::validate_realm_front_dependency(
+        &front_archive,
+        &verified.manifest,
+        &service_type,
+        actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
+    )
+    .map_err(|error| invalid(error.to_string()))?;
+    Ok(service_type.into())
+}
+
 /// Resolve a dependency's ActrType from a manifest.toml file.
 ///
 /// Parses the manifest, looks up the dependency by alias, and returns its
