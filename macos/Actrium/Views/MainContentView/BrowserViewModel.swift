@@ -2248,7 +2248,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         do {
             let activated: UUID? = try await RealmProfileStore.withPublisherKeys(
                 publisherKeys, database: .shared
-            ) {
+            ) { () -> UUID? in
                 guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else {
                     return nil
                 }
