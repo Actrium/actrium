@@ -6,6 +6,46 @@ private let logger = AppLogger.ui
 import AppKit
 import UniformTypeIdentifiers
 
+// MARK: - Hosting Window
+
+/// Reports the `NSWindow` that hosts a workspace, so snapshot captures can
+/// bind to that window instead of the app-wide key window.
+private struct WorkspaceWindowReader: NSViewRepresentable {
+    let onWindowChange: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> WindowReportingView {
+        let view = WindowReportingView()
+        view.onWindowChange = onWindowChange
+        return view
+    }
+
+    func updateNSView(_ nsView: WindowReportingView, context: Context) {
+        nsView.onWindowChange = onWindowChange
+        nsView.reportWindowIfNeeded()
+    }
+
+    final class WindowReportingView: NSView {
+        var onWindowChange: ((NSWindow?) -> Void)?
+        private weak var reportedWindow: NSWindow?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            reportWindowIfNeeded()
+        }
+
+        func reportWindowIfNeeded() {
+            guard window !== reportedWindow else { return }
+            reportedWindow = window
+            // The view can move between windows during a SwiftUI update pass;
+            // hand the change back on the next runloop turn.
+            let window = self.window
+            DispatchQueue.main.async { [onWindowChange] in
+                onWindowChange?(window)
+            }
+        }
+    }
+}
+
 // MARK: - Notification Names
 
 extension Notification.Name {
@@ -62,6 +102,10 @@ struct WorkspaceMainView: View {
 
     // Mode Switch Transition controller
     @StateObject private var modeTransitionController = ModeTransitionController()
+
+    /// The window hosting this workspace. Snapshot captures bind to it so a
+    /// delayed capture cannot read whichever window happens to be key.
+    @State private var hostingWindow: NSWindow?
 
     // 🔑 Drag State (from) TabGridView Raise, Jean. UnifiedReactNativeLayer I can also visit)
     @State private var draggingTabId: UUID?
@@ -657,7 +701,7 @@ struct WorkspaceMainView: View {
                     Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 400_000_000) // 0.4s render settle
                         guard viewModel.actriumMode == .focus(tabId: focusedTabId) else { return }
-                        guard let snapshot = captureViewportSnapshot(viewportSize: size) else { return }
+                        guard let snapshot = captureViewportSnapshot(viewportSize: size, in: hostingWindow) else { return }
                         TabSnapshotCacheManager.shared.setSnapshot(snapshot, for: focusedTabId)
                     }
                 }
@@ -672,6 +716,11 @@ struct WorkspaceMainView: View {
                 isSearchTabsFocused = false
             }
             // Note: isOverviewMode By ViewBridgeCoordinatorManager Subscriptions actriumMode AutoSync
+        }
+        // Bind snapshot captures to the window that hosts this workspace.
+        .background {
+            WorkspaceWindowReader { hostingWindow = $0 }
+                .allowsHitTesting(false)
         }
         // A native Start Page card renders its cached snapshot, which would
         // otherwise keep showing favorites or recently visited sites the user
@@ -1034,7 +1083,7 @@ struct WorkspaceMainView: View {
             case .native, .empty:
                 focusSnapshot = nil
             case .web, .reactNative:
-                focusSnapshot = captureViewportSnapshot(viewportSize: viewportSize)
+                focusSnapshot = captureViewportSnapshot(viewportSize: viewportSize, in: hostingWindow)
             }
         } else {
             focusSnapshot = nil
@@ -1119,11 +1168,13 @@ struct WorkspaceMainView: View {
     /// Only the view area, excluding the sidebar and the toolbar
     /// Optimization: Direct access to view areas to avoid cutting through the entire window
     /// - Parameter viewportSize: Portage Dimensions
-    private func captureViewportSnapshot(viewportSize: CGSize) -> NSImage? {
+    private func captureViewportSnapshot(
+        viewportSize: CGSize,
+        in window: NSWindow?
+    ) -> NSImage? {
         let startTime = CACurrentMediaTime()
 
-        guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
-              let contentView = window.contentView else {
+        guard let window, let contentView = window.contentView else {
             return nil
         }
 

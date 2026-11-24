@@ -992,17 +992,28 @@ final class WebViewHolderManager {
     /// mode-transition animations.
     private func installResizeEndObserver() {
         guard resizeEndObserver == nil else { return }
+        // AppKit's own resize-end notification: the app has no producer for a
+        // custom resize notification, so observing one meant the recapture
+        // never ran after a normal window resize.
         resizeEndObserver = NotificationCenter.default.addObserver(
-            forName: .windowLiveResizeEnded,
+            forName: NSWindow.didEndLiveResizeNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
             guard let self = self else { return }
+            let resizedWindow = notification.object as? NSWindow
             self.resizeCaptureTask?.cancel()
             self.resizeCaptureTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 350_000_000) // 0.35s debounce
                 guard let self = self, !Task.isCancelled else { return }
                 for (tabId, holder) in self.holders {
+                    // Scope the recapture to the window that actually
+                    // resized; Tabs in other windows keep their images.
+                    if let resizedWindow,
+                       let hostWindow = holder.webView.window,
+                       hostWindow !== resizedWindow {
+                        continue
+                    }
                     guard holder.webView.window != nil || holder.snapshot != nil else { continue }
                     await self.takeSnapshot(for: tabId)
                 }
