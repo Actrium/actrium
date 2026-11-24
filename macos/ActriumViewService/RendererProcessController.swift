@@ -1626,8 +1626,26 @@ private final class RendererTabSurface {
         editor.setSelectedRange(full)
         editor.insertText(snapshot, replacementRange: full)
         editor.setSelectedRange(NSRange(location: caret, length: 0))
+        // Undo/redo bypasses applyInsertText, so a change made while an IME
+        // composition is active would have its event discarded by the gate.
+        rnPublishEditingMutation(on: editor)
         publishCaret()
         commit()
+    }
+
+    /// Mutating editing commands (undo/redo/cut/paste) apply changes directly
+    /// to the editor instead of going through `applyInsertText`, so the
+    /// composing gate never sees the edit resolved. Drop the composition
+    /// entry and re-drive RN's change event explicitly — identical
+    /// bookkeeping to the commit recovery — otherwise JS keeps its pre-edit
+    /// value while the native field shows the restored text.
+    private func rnPublishEditingMutation(on editor: NSTextView?) {
+        guard let editor, let component = rnComponentView(for: editor),
+              rnComposingComponents.object(forKey: component) != nil
+        else { return }
+        rnComposingComponents.removeObject(forKey: component)
+        component.setValue(false, forKey: "ignoreNextTextInputCall")
+        _ = component.perform(NSSelectorFromString("textInputDidChange"))
     }
 
     private func undoTextEdit() {
@@ -1687,7 +1705,12 @@ private final class RendererTabSurface {
         let mutates = command == "cut" || command == "paste"
         if mutates { beginUndoableEdit() }
         ActriumSendEditingAction(selector, target ?? NSApp)
-        if mutates { endUndoableEdit() }
+        if mutates {
+            endUndoableEdit()
+            // Same gate gap as undo/redo: the mutation bypasses
+            // applyInsertText, so publish explicitly after it.
+            rnPublishEditingMutation(on: resolvedTextView(window.firstResponder))
+        }
         publishCaret()
         commit()
     }
