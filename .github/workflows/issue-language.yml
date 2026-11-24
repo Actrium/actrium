@@ -1,0 +1,64 @@
+name: Issue language
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions: {}
+
+jobs:
+  label:
+    if: github.repository == 'Actrium/actrium'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    concurrency:
+      group: issue-language-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Apply or clear the language label
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const repo = context.repo;
+            const issueParams = { ...repo, issue_number: context.payload.issue.number };
+            const label = 'needs-english';
+
+            // Fetch current content rather than relying on potentially stale event text.
+            const { data: issue } = await github.rest.issues.get(issueParams);
+            const han = /\p{Script=Han}/u;
+            const needsEnglish = [issue.title, issue.body ?? ''].some((text) => han.test(text));
+            const hasLabel = issue.labels.some((entry) =>
+              (typeof entry === 'string' ? entry : entry.name)?.toLowerCase() === label
+            );
+            if (needsEnglish === hasLabel) return;
+
+            if (!needsEnglish) {
+              try {
+                await github.rest.issues.removeLabel({ ...issueParams, name: label });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+              return;
+            }
+
+            // Create the label in this repository only, and only when first needed.
+            try {
+              await github.rest.issues.getLabel({ ...repo, name: label });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              try {
+                await github.rest.issues.createLabel({
+                  ...repo,
+                  name: label,
+                  color: 'FBCA04',
+                  description: 'Please write the issue title and description in English.',
+                });
+              } catch (createError) {
+                // Another issue may have created the repository label concurrently.
+                if (createError.status !== 422) throw createError;
+                await github.rest.issues.getLabel({ ...repo, name: label });
+              }
+            }
+            await github.rest.issues.addLabels({ ...issueParams, labels: [label] });
