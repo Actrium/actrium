@@ -71,11 +71,13 @@ function MarkdownDocument({ markdown, theme, paddingHorizontal, variant }) {
 
   if (!literal && result?.markdown !== markdown) return null;
   if (!literal && result.error) return <Text style={styles?.root}>Could not parse Markdown.</Text>;
-  return <SupramarkRenderer markdown={markdown} ast={literal ?? result.ast} config={config} theme={theme} selection={selection} styles={styles} />;
+  // The renderer registers its selection handle on mount, so each literal revision needs a new mount.
+  return <SupramarkRenderer key={error ? markdown : undefined} markdown={markdown} ast={literal ?? result.ast}
+    config={config} theme={theme} selection={selection} styles={styles} />;
 }
 
 export function Supramark({ markdown, theme, paddingHorizontal, variant }) {
-  if (typeof markdown !== 'string' || markdown.length > 64 * 1024) {
+  if (typeof markdown !== 'string' || (variant !== 'error' && markdown.length > 64 * 1024)) {
     return <Text>Invalid Markdown source.</Text>;
   }
   if (paddingHorizontal !== undefined && (!Number.isFinite(paddingHorizontal) || paddingHorizontal < 0)) {

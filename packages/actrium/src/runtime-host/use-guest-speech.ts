@@ -32,12 +32,14 @@ function getRecognizer() {
 export function useGuestSpeech(allowed: boolean) {
   const currentRequest = React.useRef<SpeechRequest | null>(null);
   const canRecognize = React.useRef(false);
+  const [active, setActive] = React.useState(false);
 
   const cancel = React.useCallback(() => {
     const request = currentRequest.current;
     if (!request) return;
     request.controller.abort();
     currentRequest.current = null;
+    setActive(false);
   }, []);
 
   React.useLayoutEffect(() => {
@@ -61,6 +63,7 @@ export function useGuestSpeech(allowed: boolean) {
     if (currentRequest.current) throw new Error('Speech recognition is already in progress.');
     const session: SpeechRequest = { controller: new AbortController() };
     currentRequest.current = session;
+    setActive(true);
     try {
       return await getRecognizer()(input, session.controller.signal, onInterim, {
         onStarted: (finish) => { session.finish = finish; onState?.({ state: 'recording' }); },
@@ -69,9 +72,10 @@ export function useGuestSpeech(allowed: boolean) {
     } finally {
       if (currentRequest.current === session) {
         currentRequest.current = null;
+        setActive(false);
       }
     }
   }, []);
 
-  return { request, stop, cancel };
+  return { active, request, stop, cancel };
 }
