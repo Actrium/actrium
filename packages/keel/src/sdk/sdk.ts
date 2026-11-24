@@ -499,6 +499,9 @@ export const RefreshControl = asComponent<RefreshControlProps>(_components.Refre
 export const TextInput = asComponent<TextInputProps>(_components.TextInput);
 export const Button = asComponent<ButtonProps>(_components.Button);
 export const Switch = asComponent<SwitchProps>(_components.Switch);
+export const Select = declareHostComponent<SelectProps>('Select');
+export const Menu = declareHostComponent<MenuProps>('Menu');
+export const Svg = declareHostComponent<SvgProps>('Svg');
 export const Pressable = asComponent<PressableProps>(_components.Pressable);
 // Touchables
 export const TouchableOpacity = asComponent<TouchableOpacityProps>(_components.TouchableOpacity);
@@ -578,6 +581,8 @@ export interface BaseProps {
 export interface ViewProps extends BaseProps {
   children?: ReactNode;
   onLayout?: (event: LayoutEvent) => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
   pointerEvents?: 'auto' | 'none' | 'box-none' | 'box-only';
   accessible?: boolean;
   accessibilityLabel?: string;
@@ -703,13 +708,13 @@ export interface TextInputProps extends BaseProps {
 /**
  * Button Component Props
  */
-export interface ButtonProps {
+export interface ButtonProps extends BaseProps {
   title: string;
   onPress: () => void;
   color?: string;
   disabled?: boolean;
-  testID?: string;
   accessibilityLabel?: string;
+  children?: ReactNode;
 }
 
 /**
@@ -722,6 +727,46 @@ export interface SwitchProps extends BaseProps {
   trackColor?: { false?: string; true?: string };
   thumbColor?: string;
   ios_backgroundColor?: string;
+}
+
+export type MenuOption = { value: string; label: string; disabled?: boolean };
+
+export interface SelectProps extends BaseProps {
+  options: readonly MenuOption[];
+  value?: string;
+  placeholder?: string;
+  disabled?: boolean;
+  accessibilityLabel?: string;
+  onValueChange: (value: string) => void;
+}
+
+export interface MenuProps extends BaseProps {
+  items: readonly MenuOption[];
+  title: string;
+  disabled?: boolean;
+  accessibilityLabel?: string;
+  onSelect: (value: string) => void;
+  children?: ReactNode;
+}
+
+export type SvgPath = {
+  d: string;
+  fill?: string;
+  fillRule?: 'nonzero' | 'evenodd';
+  stroke?: string;
+  strokeWidth?: number;
+  strokeLinecap?: 'butt' | 'round' | 'square';
+  strokeLinejoin?: 'miter' | 'round' | 'bevel';
+  opacity?: number;
+};
+
+export interface SvgProps extends BaseProps {
+  width: number;
+  height: number;
+  viewBox: string;
+  paths: readonly SvgPath[];
+  color?: string;
+  accessibilityLabel?: string;
 }
 
 /**

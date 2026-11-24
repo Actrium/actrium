@@ -697,7 +697,7 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
     }
 
     override func cursorUpdate(with event: NSEvent) {
-        (allowsInput && documentInteraction.usesTextCursor ? NSCursor.iBeam : NSCursor.arrow).set()
+        (allowsInput ? documentInteraction.cursor.appKitCursor : NSCursor.arrow).set()
     }
 
     private var canCopyDocumentSelection: Bool {

@@ -34,7 +34,7 @@ extension Notification.Name {
     static let rendererAccessibilityUpdated = Notification.Name("rendererAccessibilityUpdated")
     static let rendererCaretUpdated = Notification.Name("rendererCaretUpdated")
     static let rendererDocumentSelection = Notification.Name("rendererDocumentSelection")
-    static let rendererTextCursor = Notification.Name("rendererTextCursor")
+    static let rendererCursor = Notification.Name("rendererCursor")
     static let rendererTextInputFocusChanged = Notification.Name("rendererTextInputFocusChanged")
 }
 
@@ -74,6 +74,7 @@ struct RendererProcessPoolSnapshot: Sendable, Equatable {
 @MainActor
 final class RendererProcessPool: ObservableObject {
     static let shared = RendererProcessPool(localStorage: RendererLocalStorage(access: .shared))
+    private let guestMenu = RendererGuestMenu()
 
     nonisolated static let systemFingerprintPrefix = "system."
 
@@ -640,12 +641,19 @@ final class RendererProcessPool: ObservableObject {
         }
 
         worker.connection.onHostEvent = { [weak self, weak worker] name, userInfoJSON, tab in
-            if name == "com.actrium.documentSelection" || name == "com.actrium.textCursor" {
+            if name == "com.actrium.rendererCursor" {
+                guard let self, let worker, let id = UUID(uuidString: tab), self.worker(for: id) === worker,
+                      let payload = try? JSONDecoder().decode([String: RendererCursor].self, from: Data(userInfoJSON.utf8)),
+                      let cursor = payload["cursor"] else { return }
+                NotificationCenter.default.post(name: .rendererCursor, object: nil, userInfo: ["tabId": id, "cursor": cursor])
+                return
+            }
+            if name == "com.actrium.documentSelection" {
                 guard let self, let worker, let id = UUID(uuidString: tab), self.worker(for: id) === worker,
                       let flag = try? JSONDecoder().decode([String: Bool].self, from: Data(userInfoJSON.utf8)),
                       let active = flag["active"] else { return }
                 NotificationCenter.default.post(
-                    name: name == "com.actrium.textCursor" ? .rendererTextCursor : .rendererDocumentSelection,
+                    name: .rendererDocumentSelection,
                     object: nil, userInfo: ["tabId": id, "active": active]
                 )
                 return
@@ -673,6 +681,12 @@ final class RendererProcessPool: ObservableObject {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker else { return }
                 Task { await self.handleFileImport(userInfoJSON, tabId: tabId, worker: worker) }
+                return
+            }
+            if name == GuestMenuCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker else { return }
+                Task { self.handleGuestMenu(userInfoJSON, tabId: tabId, worker: worker) }
                 return
             }
             if name == "com.actrium.textInputFocus" {
@@ -958,6 +972,23 @@ final class RendererProcessPool: ObservableObject {
                     tabId: tabId.uuidString
                 )
             }
+        }
+    }
+
+    private func handleGuestMenu(_ json: String, tabId: UUID, worker: Worker) {
+        guard self.worker(for: tabId) === worker,
+              json.utf8.count <= GuestMenuCall.maxRequestBytes + 256,
+              let call = try? JSONDecoder().decode(GuestMenuCall.self, from: Data(json.utf8)) else { return }
+        let reply = guestMenu.show(call, tabId: tabId)
+        guard self.worker(for: tabId) === worker else { return }
+        do {
+            let data = try JSONEncoder().encode(reply)
+            try worker.connection.sendHostEvent(
+                name: GuestMenuCall.responseEvent, userInfoJSON: String(decoding: data, as: UTF8.self),
+                tabId: tabId.uuidString
+            )
+        } catch {
+            AppLogger.reactNative.error("Could not send guest menu result: \(error.localizedDescription)")
         }
     }
 

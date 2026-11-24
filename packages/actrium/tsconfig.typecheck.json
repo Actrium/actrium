@@ -11,6 +11,7 @@
       "askit/core": ["../actrium-app-sdk/src/core/index.ts"],
       "askit/contracts": ["../actrium-app-sdk/src/contracts/index.ts"],
       "keel": ["../keel/src/index.ts"],
+      "keel/guest": ["../keel/src/sdk/index.ts"],
       "keel/contract": ["../keel/src/contract/index.ts"],
       "keel/v1": ["../keel/src/v1.ts"],
       "keel/host": ["../keel/src/host/index.ts"],

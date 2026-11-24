@@ -308,10 +308,30 @@ final class RendererProcessController {
     private var serviceEventTabs: [UUID: String] = [:]
     private var cancelledServiceEventSubscriptions: Set<UUID> = []
     private var fileImports: [String: (id: UUID, reloadKey: Int, reply: (GuestFileImportReply) -> Void)] = [:]
+    private var guestMenus: [String: (call: GuestMenuCall, reply: (GuestMenuReply) -> Void)] = [:]
     private var attachmentPrepareReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentPrepareReply) -> Void)] = [:]
     private var attachmentChunkReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentChunkReply) -> Void)] = [:]
     private var attachmentUnregisterReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentUnregisterReply) -> Void)] = [:]
     private var attachmentAvailabilityReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentAvailabilityReply) -> Void)] = [:]
+
+    static func showGuestMenu(
+        _ call: GuestMenuCall, tabId: String, reply: @escaping (GuestMenuReply) -> Void
+    ) {
+        guard let controller = RendererProcessLifetime.shared.controller,
+              controller.surfaces[tabId] != nil, controller.guestMenus[tabId] == nil else {
+            reply(GuestMenuReply(id: call.id, error: "The tab cannot open a menu."))
+            return
+        }
+        do {
+            let data = try JSONEncoder().encode(call)
+            try controller.connection.sendHostEvent(
+                name: GuestMenuCall.requestEvent, userInfoJSON: String(decoding: data, as: UTF8.self), tabId: tabId
+            )
+            controller.guestMenus[tabId] = (call, reply)
+        } catch {
+            reply(GuestMenuReply(id: call.id, error: "Could not contact the menu host."))
+        }
+    }
 
     static func pickFiles(
         _ call: GuestFileImportCall, tabId: String, reply: @escaping (GuestFileImportReply) -> Void
@@ -640,6 +660,10 @@ final class RendererProcessController {
                 receiveFileImport(json, tabId: tabId)
                 return
             }
+            if name == GuestMenuCall.responseEvent {
+                receiveGuestMenu(json, tabId: tabId)
+                return
+            }
             if name == "com.actrium.rendererKeyboardFocus" {
                 guard let focused = Bool(json) else { return }
                 // Apply focus on the same queue as input so the next key
@@ -853,6 +877,9 @@ final class RendererProcessController {
         if let pending = fileImports[tabId], pending.reloadKey != Int(request.reloadKey) {
             cancelFileImport(tabId)
         }
+        if let pending = guestMenus[tabId], pending.call.reloadKey != Int(request.reloadKey) {
+            cancelGuestMenu(tabId)
+        }
         config["tabId"] = tabId
         if config["title"] == nil {
             config["title"] = request.title
@@ -988,6 +1015,7 @@ final class RendererProcessController {
 
     private func destroyTab(_ tabId: String) {
         cancelFileImport(tabId)
+        cancelGuestMenu(tabId)
         failPendingAttachmentCalls(tabId: tabId)
         if let surface = surfaces.removeValue(forKey: tabId) {
             // Before the hierarchy is detached: afterwards backing.window is
@@ -1019,6 +1047,17 @@ final class RendererProcessController {
             attachmentAvailabilityReplies.removeValue(forKey: id)?
                 .reply(RealmServiceAttachmentAvailabilityReply(id: id, available: false))
         }
+    }
+
+    private func cancelGuestMenu(_ tabId: String) {
+        guard let pending = guestMenus.removeValue(forKey: tabId) else { return }
+        pending.reply(GuestMenuReply(id: pending.call.id))
+    }
+
+    private func receiveGuestMenu(_ json: String, tabId: String) {
+        guard let response = try? JSONDecoder().decode(GuestMenuReply.self, from: Data(json.utf8)),
+              guestMenus[tabId]?.call.id == response.id else { return }
+        guestMenus.removeValue(forKey: tabId)?.reply(response)
     }
 
     private func cancelFileImport(_ tabId: String, message: String = "The picker document changed or closed.") {
@@ -1094,6 +1133,7 @@ private final class RendererTabSurface {
     private var accessibilityObservers: [NSObjectProtocol] = []
     private var accessibilityPublishWork: DispatchWorkItem?
     private let mouseTracking = RendererMouseTracking()
+    private let hoverTracking = RendererHoverTracking()
     private var textInputPresses: Set<UInt32> = []
     /// Character index where the current text drag started. AppKit's
     /// mouse-tracking selection cannot run here (mouse events arrive
@@ -1116,7 +1156,7 @@ private final class RendererTabSurface {
     /// Last text-input focus state reported to the Host. The Host mirrors
     /// IME composition for whichever surface owns the focused text input.
     private var lastReportedTextFocus = false
-    private var lastTextCursor = false
+    private var lastCursor: String?
     private weak var focusedEditor: NSTextView?
     private var lastCaretRect: CGRect?
     /// Snapshot-based undo/redo for Host-mirrored text commits. AppKit's
@@ -1343,8 +1383,10 @@ private final class RendererTabSurface {
             }
 
             let hitView = hitTest(at: location)
+            window.hostMouseLocation = location
+            hoverTracking.update(hitView: hitView, windowNumber: window.windowNumber, location: location)
             if input.type == .mouseMove {
-                updateTextCursor(for: hitView)
+                updateCursor(for: hitView)
             }
             // Editable RN controls keep AppKit's native focus path; routing
             // their clicks through the JS responder revokes first responder.
@@ -1438,10 +1480,13 @@ private final class RendererTabSurface {
 
         case .scroll:
             guard let hitView = hitTest(at: location) else { return }
+            window.hostMouseLocation = location
             let delta = NSPoint(x: input.scrollDeltaX, y: input.scrollDeltaY)
             if ActriumScrollRendererContent(hitView, delta) {
                 commit()
-                updateTextCursor(for: hitTest(at: location))
+                let target = hitTest(at: location)
+                hoverTracking.update(hitView: target, windowNumber: window.windowNumber, location: location)
+                updateCursor(for: target)
             }
 
         case .keyDown, .keyUp:
@@ -1484,9 +1529,14 @@ private final class RendererTabSurface {
             }
 
         case .mouseEntered:
-            updateTextCursor(for: hitTest(at: location), force: true)
+            let target = hitTest(at: location)
+            window.hostMouseLocation = location
+            hoverTracking.update(hitView: target, windowNumber: window.windowNumber, location: location)
+            updateCursor(for: target, force: true)
         case .mouseExited:
-            lastTextCursor = false
+            window.hostMouseLocation = nil
+            hoverTracking.update(hitView: nil, windowNumber: window.windowNumber, location: location)
+            lastCursor = nil
         case .UNRECOGNIZED(_):
             break
         }
@@ -1497,12 +1547,12 @@ private final class RendererTabSurface {
         return container.hitTest(point)
     }
 
-    private func updateTextCursor(for hitView: NSView?, force: Bool = false) {
-        let active = ActriumRendererUsesTextCursor(hitView)
-        guard force || active != lastTextCursor else { return }
-        lastTextCursor = active
-        RendererProcessController.sendHostEvent(name: "com.actrium.textCursor",
-                                               userInfo: ["active": active], tabId: tabId)
+    private func updateCursor(for hitView: NSView?, force: Bool = false) {
+        let cursor = ActriumRendererCursorForHitView(hitView)
+        guard force || cursor != lastCursor else { return }
+        lastCursor = cursor
+        RendererProcessController.sendHostEvent(name: "com.actrium.rendererCursor",
+                                               userInfo: ["cursor": cursor], tabId: tabId)
     }
 
 

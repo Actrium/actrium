@@ -16,6 +16,8 @@ export interface ViewProps {
   accessible?: boolean;
   accessibilityLabel?: string;
   collapsable?: boolean;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
   onLayout?: (event: {
     nativeEvent: {
       layout: { x: number; y: number; width: number; height: number };
@@ -33,6 +35,8 @@ export const View = React.forwardRef<React.ComponentRef<typeof RNView>, ViewProp
       accessible,
       accessibilityLabel,
       collapsable,
+      onMouseEnter,
+      onMouseLeave,
       onLayout,
     },
     ref
@@ -63,7 +67,11 @@ export const View = React.forwardRef<React.ComponentRef<typeof RNView>, ViewProp
         pointerEvents={pointerEvents}
         accessible={accessible}
         accessibilityLabel={accessibilityLabel}
-        collapsable={collapsable}
+        collapsable={onMouseEnter || onMouseLeave ? false : collapsable}
+        {...{
+          onMouseEnter: onMouseEnter ? () => onMouseEnter() : undefined,
+          onMouseLeave: onMouseLeave ? () => onMouseLeave() : undefined,
+        }}
         onLayout={handleLayout}
       >
         {children}

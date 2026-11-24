@@ -15,6 +15,7 @@ const supramarkRoot = process.env.ACTRIUM_SUPRAMARK_DIR
 const supramarkCore = supramarkRoot && path.join(supramarkRoot, 'packages/core/src');
 const supramarkSources = supramarkCore ? {
   './guest-markdown-renderer': path.join(projectRoot, 'src/runtime-host/guest-markdown-renderer.supramark.js'),
+  './guest-svg-renderer': path.join(projectRoot, 'src/runtime-host/guest-svg-renderer.rnsvg.js'),
   '@supramark/core': path.join(supramarkCore, 'index.rn.ts'),
   '@supramark/core/rn': path.join(supramarkCore, 'index.rn.ts'),
   '@supramark/markdown-native-rn': path.join(supramarkRoot, 'crates/supramark-markdown/packages/react-native/src/index.ts'),
