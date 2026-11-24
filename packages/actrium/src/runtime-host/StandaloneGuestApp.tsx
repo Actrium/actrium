@@ -193,7 +193,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     [tab.capabilitySnapshotJSON]
   );
   const capabilitySnapshotAvailable = capabilitySnapshot !== null;
-  const { active: speechActive, request: recognizeSpeech, stop: stopSpeech, cancel: cancelSpeech } = useGuestSpeech(
+  const { request: recognizeSpeech, stop: stopSpeech, cancel: cancelSpeech } = useGuestSpeech(
     isOverviewMode === false && capabilitySnapshot !== null &&
       evaluateCapabilityAccess('host:speech.recognize', capabilitySnapshot).allowed
   );
@@ -554,12 +554,6 @@ export const StandaloneGuestApp: React.FC<Props> = ({
 
   const body = (
     <>
-      {speechActive && (
-        <NativeView style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 8 }}>
-          <NativeText accessibilityLiveRegion='polite'>Speech recognition in progress</NativeText>
-          <GuestButton title='Cancel' onPress={cancelSpeech} />
-        </NativeView>
-      )}
       {content ?? (
         <NativeView
           style={{

@@ -22,12 +22,21 @@ function displayNodes(node) {
   }
 }
 
-function MarkdownDocument({ markdown, theme, paddingHorizontal }) {
+function errorDocument(text) {
+  return {
+    type: 'root', ast_version: 2, diagnostics: [],
+    children: [{ type: 'paragraph', children: [{ type: 'text', value: text }] }],
+  };
+}
+
+function MarkdownDocument({ markdown, theme, paddingHorizontal, variant }) {
   const [result, setResult] = useState(null);
   const surface = useContext(DocumentSelectionContext);
+  const error = variant === 'error';
   const styles = useMemo(() => (
     paddingHorizontal === undefined ? undefined : { root: { paddingHorizontal } }
   ), [paddingHorizontal]);
+  const literal = useMemo(() => error ? errorDocument(markdown) : null, [error, markdown]);
   // Give each Markdown revision its own handle so late cleanup cannot clear its replacement.
   const selection = useMemo(() => {
     let handle = null;
@@ -47,6 +56,7 @@ function MarkdownDocument({ markdown, theme, paddingHorizontal }) {
   }, [surface, markdown]);
   useLayoutEffect(() => () => selection.onHandleReady(null), [selection]);
   useEffect(() => {
+    if (error) return;
     let active = true;
     parse(markdown, { config }).then((root) => displayNodes(root)[0]).then(
       (ast) => {
@@ -57,19 +67,23 @@ function MarkdownDocument({ markdown, theme, paddingHorizontal }) {
       }
     );
     return () => { active = false; };
-  }, [markdown]);
+  }, [error, markdown]);
 
-  if (result?.markdown !== markdown) return null;
-  if (result.error) return <Text style={styles?.root}>Could not parse Markdown.</Text>;
-  return <SupramarkRenderer markdown={markdown} ast={result.ast} config={config} theme={theme} selection={selection} styles={styles} />;
+  if (!literal && result?.markdown !== markdown) return null;
+  if (!literal && result.error) return <Text style={styles?.root}>Could not parse Markdown.</Text>;
+  return <SupramarkRenderer markdown={markdown} ast={literal ?? result.ast} config={config} theme={theme} selection={selection} styles={styles} />;
 }
 
-export function Supramark({ markdown, theme, paddingHorizontal }) {
+export function Supramark({ markdown, theme, paddingHorizontal, variant }) {
   if (typeof markdown !== 'string' || markdown.length > 64 * 1024) {
     return <Text>Invalid Markdown source.</Text>;
   }
   if (paddingHorizontal !== undefined && (!Number.isFinite(paddingHorizontal) || paddingHorizontal < 0)) {
     return <Text>Invalid Markdown padding.</Text>;
   }
-  return <MarkdownDocument markdown={markdown} theme={theme === 'dark' ? 'dark' : 'light'} paddingHorizontal={paddingHorizontal} />;
+  if (variant !== undefined && variant !== 'error') {
+    return <Text>Invalid Markdown variant.</Text>;
+  }
+  return <MarkdownDocument key={variant} markdown={markdown} theme={theme === 'dark' ? 'dark' : 'light'}
+    paddingHorizontal={paddingHorizontal} variant={variant} />;
 }

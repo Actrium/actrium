@@ -485,6 +485,7 @@ export const Supramark = declareHostComponent<{
   markdown: string;
   theme?: 'light' | 'dark';
   paddingHorizontal?: number;
+  variant?: 'error';
 }>('Supramark');
 export const ImageBackground = asComponent<ImageBackgroundProps>(_components.ImageBackground);
 // Scrolling
