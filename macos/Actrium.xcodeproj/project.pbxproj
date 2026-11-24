@@ -9,10 +9,10 @@
 /* Begin PBXBuildFile section */
 		1A2B3C4D5E6F7890ABCD0001 /* ActriumIPC in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7890ABCD0002 /* ActriumIPC */; };
 		1A2B3C4D5E6F7890ABCD0003 /* ActriumIPC in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7890ABCD0002 /* ActriumIPC */; };
-		5C0B1A2D3E4F506172830001 /* Actr in Frameworks */ = {isa = PBXBuildFile; productRef = 5C0B1A2D3E4F506172830002 /* Actr */; };
 		36ED6B68B2DE67F2DB1523A7 /* libPods-ActriumRenderer.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1394BEA9FE9BE0BE89646222 /* libPods-ActriumRenderer.a */; };
 		457EEA1F5D65241F37B32E2D /* libPods-Actrium.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 68501CEF0142AD9A599B85C8 /* libPods-Actrium.a */; };
 		4CD4205E8A324EA5B01E8E1D /* RendererScrolling.mm in Sources */ = {isa = PBXBuildFile; fileRef = 4CD4205E8A324EA5B01E8E1C /* RendererScrolling.mm */; };
+		5C0B1A2D3E4F506172830001 /* Actr in Frameworks */ = {isa = PBXBuildFile; productRef = 5C0B1A2D3E4F506172830002 /* Actr */; };
 		A90D97D7984E951158B896D0 /* libPods-ActriumTests.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DACA28DED8E4818311DAAB4D /* libPods-ActriumTests.a */; };
 		AA00110022003300AA00BB02 /* ActriumVault in Frameworks */ = {isa = PBXBuildFile; productRef = AA00110022003300AA00BB03 /* ActriumVault */; };
 		AB00110022003300AA00BB02 /* ActriumCore in Frameworks */ = {isa = PBXBuildFile; productRef = AB00110022003300AA00BB03 /* ActriumCore */; };
@@ -96,7 +96,6 @@
 				DevTools/DevToolsBridge.m,
 				DevTools/DevToolsBridge.swift,
 				Info.plist,
-				Resources/assets,
 				Resources/system.jsbundle,
 			);
 			target = B3E4589F2EC731A30014D74C /* Actrium */;
@@ -555,7 +554,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ \"$CONFIGURATION\" = \"Debug\" ]; then\n  DEV_FLAG=\"--dev\"\nelse\n  DEV_FLAG=\"\"\nfi\n\"${SRCROOT}/scripts/bundle-actrium-runtime.sh\" --target system $DEV_FLAG\nRENDERER_RESOURCES=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nmkdir -p \"$RENDERER_RESOURCES\"\ncp \"${SRCROOT}/Actrium/Resources/system.jsbundle\" \"$RENDERER_RESOURCES/system.jsbundle\"\n";
+			shellScript = "set -e\nif [ \"$CONFIGURATION\" = \"Debug\" ]; then\n  DEV_FLAG=\"--dev\"\nelse\n  DEV_FLAG=\"\"\nfi\n\"${SRCROOT}/scripts/bundle-actrium-runtime.sh\" --target system $DEV_FLAG\nRENDERER_RESOURCES=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nmkdir -p \"$RENDERER_RESOURCES\"\ncp \"${SRCROOT}/Actrium/Resources/system.jsbundle\" \"$RENDERER_RESOURCES/system.jsbundle\"\n";
 			showEnvVarsInLog = 0;
 		};
 		CBA3BCE34D80E77B0AABEFD0 /* [CP] Check Pods Manifest.lock */ = {
