@@ -318,6 +318,14 @@ impl WireHandle for RtcWireHandle {
             .map_or(SecureChannelState::New, |handle| handle.secure_state())
     }
 
+    fn is_transport_terminal(&self) -> bool {
+        self.controller
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_none_or(RtcPeerControllerHandle::is_transport_terminal)
+    }
+
     fn secure_epoch(&self) -> u64 {
         self.controller
             .lock()

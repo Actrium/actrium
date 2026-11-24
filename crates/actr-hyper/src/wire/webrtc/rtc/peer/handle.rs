@@ -120,6 +120,13 @@ impl RtcPeerControllerHandle {
         self.secure_cell().state()
     }
 
+    pub(crate) fn is_transport_terminal(&self) -> bool {
+        let snapshot = self.snapshot();
+        self.snapshot_rx.has_changed().is_err()
+            || (snapshot.status == actr_framework::WebRtcPeerStatus::Idle
+                && snapshot.unavailable_reason.is_some())
+    }
+
     pub(crate) fn secure_epoch(&self) -> u64 {
         let snapshot = self.snapshot();
         let epoch = self.security.security(snapshot.pc_generation).epoch();

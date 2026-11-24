@@ -331,15 +331,9 @@ impl WirePool {
                             tokio::spawn(async move {
                                 let mut epoch = initial_epoch;
                                 loop {
-                                    // Check terminal BEFORE waiting: a wire
-                                    // that reached `Closed`/`Failed` before
-                                    // this task armed (or in a previous
-                                    // iteration) admits no further
-                                    // transitions, so parking on
-                                    // `await_secure_state_change` would never
-                                    // return. Re-broadcast so the ready set
-                                    // reflects the removal, then exit.
-                                    if conn.secure_channel_state().is_terminal() {
+                                    // A retired WebRTC channel can be followed
+                                    // by a fresh channel on the same wire.
+                                    if conn.is_transport_terminal() {
                                         Self::broadcast_ready_connections(&connections, &ready_tx)
                                             .await;
                                         return;
@@ -569,7 +563,7 @@ impl WirePool {
         let shutdown = self.shutdown.clone();
         tokio::spawn(async move {
             loop {
-                if connection.secure_channel_state().is_terminal() {
+                if connection.is_transport_terminal() {
                     Self::broadcast_ready_connections(&connections, &ready_tx).await;
                     return;
                 }
@@ -590,7 +584,7 @@ impl WirePool {
         conn_types
             .iter()
             .any(|conn_type| match &conns[conn_type.as_index()] {
-                Some(WireStatus::Ready(conn)) => !conn.secure_channel_state().is_terminal(),
+                Some(WireStatus::Ready(conn)) => !conn.is_transport_terminal(),
                 Some(WireStatus::Connecting(_)) => true,
                 _ => false,
             })

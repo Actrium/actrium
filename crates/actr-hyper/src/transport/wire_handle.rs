@@ -100,6 +100,13 @@ pub trait WireHandle: Send + Sync + std::fmt::Debug {
         SecureChannelState::New
     }
 
+    /// Whether this wire has reached the end of its logical transport lifetime.
+    /// A wire that can replace its physical session may outlive a closed
+    /// secure channel.
+    fn is_transport_terminal(&self) -> bool {
+        self.secure_channel_state().is_terminal()
+    }
+
     fn is_verified(&self) -> bool {
         self.secure_channel_state().is_sendable() && self.verified_peer_context().is_some()
     }
