@@ -323,7 +323,13 @@ final class RendererProcessController {
             return
         }
         do {
-            let data = try JSONEncoder().encode(call)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .withoutEscapingSlashes
+            let data = try encoder.encode(call)
+            guard data.count <= GuestMenuCall.maxEncodedRequestBytes else {
+                reply(GuestMenuReply(id: call.id, error: "The menu request is too large."))
+                return
+            }
             try controller.connection.sendHostEvent(
                 name: GuestMenuCall.requestEvent, userInfoJSON: String(decoding: data, as: UTF8.self), tabId: tabId
             )

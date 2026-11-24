@@ -26,6 +26,7 @@
     "keel": "file:../keel",
     "react": "19.0.0",
     "react-native": "0.79.6",
+    "react-native-svg": "15.15.3",
     "react-reconciler": "0.31.0",
     "spark-md5": "^3.0.2"
   },

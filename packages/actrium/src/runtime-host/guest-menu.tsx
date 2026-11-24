@@ -2,6 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import { NativeModules, Pressable, Text, View, useColorScheme, type ViewStyle } from 'react-native';
 import type { MenuOption, MenuProps, SelectProps } from 'keel/guest';
 import { Svg } from './guest-svg-renderer';
+import { guestMenuEntries, isGuestMenuOption } from './guest-menu-options';
+import { completeGuestMenu } from './guest-menu-selection';
 
 export const guestMenuNames = ['Select', 'Menu'] as const;
 type Component = typeof guestMenuNames[number];
@@ -20,7 +22,7 @@ type TriggerProps = {
   testID?: string;
   style?: SelectProps['style'];
   children?: React.ReactNode;
-  onSelect: (value: string) => void;
+  onSelect: (value: string) => void | PromiseLike<void>;
   show: ShowMenu;
   onError: (error: unknown) => void;
 };
@@ -37,25 +39,28 @@ function useMenuTrigger(props: TriggerProps) {
   }, []);
 
   const { component, items, selectedValue, show, onError, disabled } = props;
-  const unavailable = disabled || !Array.isArray(items) || !items.some((item) => item && !item.disabled);
+  const unavailable = disabled || !Array.isArray(items) || !items.some((item) => isGuestMenuOption(item) && !item.disabled);
   function open() {
     if (pending.current || unavailable || !trigger.current) return;
     pending.current = true;
-    trigger.current.measureInWindow((x, y, width, height) => {
-      if (!mounted.current || width <= 0 || height <= 0) {
+    // Fabric's page coordinates are relative to the renderer's React Native root.
+    trigger.current.measure((_x, _y, width, height, x, y) => {
+      if (!mounted.current || ![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
         pending.current = false;
         return;
       }
-      void show({ component, items, selectedValue, anchor: { x, y, width, height } })
-        .then((value) => {
+      void completeGuestMenu(
+        show({ component, items, selectedValue, anchor: { x, y, width, height } }),
+        () => { pending.current = false; },
+        (value) => {
           const latest = current.current;
-          if (typeof value === 'string' && mounted.current && !latest.disabled && Array.isArray(latest.items) &&
-              latest.items.some((item) => item?.value === value && !item.disabled)) {
-            latest.onSelect(value);
+          if (mounted.current && !latest.disabled && Array.isArray(latest.items) &&
+              latest.items.some((item) => isGuestMenuOption(item) && item.value === value && !item.disabled)) {
+            return latest.onSelect(value);
           }
-        })
-        .catch(onError)
-        .finally(() => { pending.current = false; });
+        },
+        onError,
+      );
     });
   }
   return { trigger, unavailable, open };
@@ -103,13 +108,15 @@ export function createGuestMenuComponents(tabId: string, reloadKey: number, onEr
   const bridge = NativeModules.GuestMenu as NativeGuestMenu | undefined;
   if (typeof bridge?.show !== 'function') return undefined;
   const show: ShowMenu = async ({ component, anchor, items, selectedValue }) => {
-    const entries = items.map(({ value, label, disabled }) => ({ value, label, disabled }));
+    const entries = guestMenuEntries(items);
     return bridge.show(tabId, reloadKey, JSON.stringify({ component, anchor, items: entries, selectedValue }));
   };
 
   return {
     Select({ options, value, placeholder, onValueChange, ...props }: SelectProps) {
-      const selected = Array.isArray(options) ? options.find((option) => option?.value === value) : undefined;
+      const selected = Array.isArray(options)
+        ? options.find((option) => isGuestMenuOption(option) && option.value === value)
+        : undefined;
       return <MenuTrigger {...props} component="Select" items={options} selectedValue={selected?.value}
         title={selected?.label ?? placeholder ?? ''} onSelect={onValueChange} show={show} onError={onError} />;
     },

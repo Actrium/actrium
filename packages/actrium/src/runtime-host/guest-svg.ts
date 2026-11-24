@@ -1,4 +1,5 @@
 import type { SvgPath, SvgProps } from 'keel/guest';
+import { normalizeGuestSvgPath } from './guest-svg-path';
 
 function size(value: unknown, max: number): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= max;
@@ -9,21 +10,24 @@ function paint(value: unknown): string | undefined {
   return /^(?:#[\da-f]{3,4}|#[\da-f]{6}|#[\da-f]{8}|[a-z]{1,24})$/i.test(value) ? value : undefined;
 }
 
-function normalizePath(value: unknown): SvgPath | undefined {
+function normalizePath(value: unknown, limit: number): { path: SvgPath; length: number } | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const path = value as Partial<SvgPath>;
-  if (typeof path.d !== 'string' || path.d.length > 16_384 || !/^\s*[Mm][\dEeMmZzLlHhVvCcSsQqTtAa+.,\s-]+$/.test(path.d)) {
-    return undefined;
-  }
+  if (typeof path.d !== 'string' || path.d.length > limit) return undefined;
+  const d = normalizeGuestSvgPath(path.d);
+  if (!d || d.length > limit) return undefined;
   return {
-    d: path.d,
-    fill: paint(path.fill),
-    stroke: paint(path.stroke),
-    fillRule: path.fillRule === 'evenodd' ? 'evenodd' : undefined,
-    strokeWidth: size(path.strokeWidth, 4096) ? path.strokeWidth : undefined,
-    strokeLinecap: path.strokeLinecap === 'round' || path.strokeLinecap === 'square' ? path.strokeLinecap : undefined,
-    strokeLinejoin: path.strokeLinejoin === 'round' || path.strokeLinejoin === 'bevel' ? path.strokeLinejoin : undefined,
-    opacity: size(path.opacity, 1) ? path.opacity : undefined,
+    length: Math.max(path.d.length, d.length),
+    path: {
+      d,
+      fill: paint(path.fill),
+      stroke: paint(path.stroke),
+      fillRule: path.fillRule === 'evenodd' ? 'evenodd' : undefined,
+      strokeWidth: size(path.strokeWidth, 4096) ? path.strokeWidth : undefined,
+      strokeLinecap: path.strokeLinecap === 'round' || path.strokeLinecap === 'square' ? path.strokeLinecap : undefined,
+      strokeLinejoin: path.strokeLinejoin === 'round' || path.strokeLinejoin === 'bevel' ? path.strokeLinejoin : undefined,
+      opacity: size(path.opacity, 1) ? path.opacity : undefined,
+    },
   };
 }
 
@@ -37,11 +41,12 @@ export function normalizeGuestSvg(props: SvgProps): SvgProps | undefined {
       box[2]! <= 0 || box[3]! <= 0) return undefined;
 
   const safePaths: SvgPath[] = [];
-  let length = 0;
+  let remaining = 128 * 1024;
   for (const value of paths) {
-    const path = normalizePath(value);
-    if (!path || (length += path.d.length) > 128 * 1024) return undefined;
-    safePaths.push(path);
+    const result = normalizePath(value, Math.min(16_384, remaining));
+    if (!result) return undefined;
+    remaining -= result.length;
+    safePaths.push(result.path);
   }
   return {
     width, height, viewBox: box.join(' '), paths: safePaths, color: paint(props.color),

@@ -4,7 +4,9 @@ public struct GuestMenuCall: Codable, Sendable {
     public static let requestEvent = "com.actrium.guestMenu.request"
     public static let responseEvent = "com.actrium.guestMenu.response"
     public static let maxRequestBytes = 96 * 1024
+    public static let maxEncodedRequestBytes = maxRequestBytes + 256
 
+    /// Points relative to the top-left of the renderer tab, where the Guest is laid out.
     public struct Anchor: Codable, Sendable {
         public let x: Double
         public let y: Double
