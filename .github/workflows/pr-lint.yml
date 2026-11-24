@@ -32,3 +32,17 @@ jobs:
           echo "  chore(deps): bump tokio to 1.45"
           echo "Valid types: feat, fix, chore, docs, style, refactor, test, ci, perf, build, revert"
           exit 1
+
+      - name: Check PR title and description for Han characters
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const { pull_request: pr } = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+          const han = /\p{Script=Han}/u;
+          for (const [field, value] of [['title', pr.title], ['description', pr.body ?? '']]) {
+            if (han.test(value)) {
+              console.error(`::error::Please use English in the PR ${field}. Han characters were detected.`);
+              process.exitCode = 1;
+            }
+          }
+          NODE
