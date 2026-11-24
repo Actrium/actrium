@@ -1229,6 +1229,7 @@ async fn lane_pump_rejects_message_from_non_sendable_generation() {
     let (lane_tx, mut lane_rx) = mpsc::channel(4);
     let inbound_generation =
         std::sync::Arc::new(super::session::InboundGenerationGate::with_generation(2));
+    inbound_generation.verify_for_test(1);
     let mut framed = Vec::new();
     crate::transport::encode_fragment_header(&mut framed, 7, 0, 1);
     framed.extend_from_slice(b"stale");
@@ -1296,6 +1297,7 @@ async fn lane_pump_releases_message_when_same_generation_becomes_sendable() {
         },
     )));
     let gate = std::sync::Arc::new(super::session::InboundGenerationGate::new());
+    gate.verify_for_test(1);
     let (lane_tx, mut lane_rx) = mpsc::channel(4);
     let mut framed = Vec::new();
     crate::transport::encode_fragment_header(&mut framed, 8, 0, 1);
@@ -1360,6 +1362,7 @@ async fn lane_pump_admission_deadline_is_shared_across_stale_messages() {
     let peer = test_actor_id(1);
     let inbound = std::sync::Arc::new(InboundRouter::discard());
     let gate = std::sync::Arc::new(super::session::InboundGenerationGate::new());
+    gate.verify_for_test(1);
     let (lane_tx, mut lane_rx) = mpsc::channel(4);
 
     fn stale_frame(msg_id: u32) -> RTCDataChannelMessage {

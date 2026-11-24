@@ -941,6 +941,7 @@ async fn stale_handshake_retry_keeps_the_original_pending_dial() {
     let mut fixture = Fixture::new().await;
     let (request, dial) = fixture.start_dial(fixture.remote.clone()).await;
     fixture.connected(Some(request)).await.unwrap();
+    let _initial_handshake = fixture.next_binary().await;
     let connection = fixture.client.channels.read().await[&42].conn.clone();
     let sink = connection.sink();
     let sink_guard = sink.lock().await;

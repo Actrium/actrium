@@ -613,11 +613,17 @@ async fn unverified_wire_does_not_surface_as_ready() {
     }))
     .await;
 
-    // Give the background connect task time to commit the slot as Ready.
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Slot is transport-Ready (live candidate), but secure state gates it out
-    // of the broadcast ready set and out of get_connection.
+    // Returning from connect without a verified context exhausts this
+    // one-attempt candidate.
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while pool.connection_status_for_test(ConnType::WebSocket).await
+            != Some(super::WireStatusKind::Failed)
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("unverified connection attempt must fail");
     assert!(
         !rx.borrow().contains(&ConnType::WebSocket),
         "unverified wire must not appear in the ready set"
@@ -627,8 +633,8 @@ async fn unverified_wire_does_not_surface_as_ready() {
         "get_connection must refuse an unverified wire"
     );
     assert!(
-        pool.has_live_candidate(&[ConnType::WebSocket]).await,
-        "transport-Ready wire is still a live candidate"
+        !pool.has_live_candidate(&[ConnType::WebSocket]).await,
+        "an exhausted unverified wire cannot become sendable"
     );
 }
 

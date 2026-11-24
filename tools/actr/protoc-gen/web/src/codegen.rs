@@ -1308,10 +1308,11 @@ self.addEventListener('message', (event) => {
         break;
       case 'register_datachannel_port':
         try {
-          const dcPort = message.payload.port;
-          const dcPeerId = message.payload.peerId;
-          if (dcPort && dcPeerId) {
-            await wasm_bindgen.register_datachannel_port(clientId, dcPeerId, dcPort);
+          const { peerId, connectionId, port, localSdp, remoteSdp } = message.payload;
+          if (peerId && connectionId && port && localSdp && remoteSdp) {
+            await wasm_bindgen.register_datachannel_port(
+              clientId, peerId, connectionId, port, localSdp, remoteSdp,
+            );
           }
         } catch (e) {
           console.error('[SW] register_datachannel_port failed:', e);

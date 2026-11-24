@@ -439,7 +439,7 @@ impl DataLane for SecureDataLane {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub(crate) fn test_context(channel_generation: u64) -> VerifiedPeerContext {
     VerifiedPeerContext {
         local_actor_id: ActrId {

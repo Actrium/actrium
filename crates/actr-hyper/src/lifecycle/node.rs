@@ -1027,6 +1027,9 @@ pub(crate) struct Inner {
     #[cfg(feature = "test-utils")]
     pub(crate) test_faults: Option<crate::wire::webrtc::test_runtime::TestFaultRegistries>,
 
+    #[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+    use_test_actor_channel_issuer: bool,
+
     /// RTC connection manager (created after startup; RTC backend only).
     /// Backs the node-level RTC status query/list/subscribe APIs (S6-4).
     pub(crate) rtc_manager: Option<Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>>,
@@ -3078,6 +3081,8 @@ impl Inner {
             session_state: None,
             #[cfg(feature = "test-utils")]
             test_faults: None,
+            #[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+            use_test_actor_channel_issuer: false,
             rtc_manager: None,
             rtc_inbound_mailbox_slot: None,
             peer_transport: None,
@@ -3271,6 +3276,12 @@ impl Inner {
             "Pre-registered credential attached; start() will skip Issuer registration"
         );
         self.preregistered_credential = Some(register_ok);
+    }
+
+    /// Use fixture certificates for a test that supplies its own registration.
+    #[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+    pub(crate) fn use_fixture_actor_channel_issuer(&mut self) {
+        self.use_test_actor_channel_issuer = true;
     }
 
     pub(crate) fn set_preregistered_registration_context(&mut self, ctx: RegistrationContext) {
@@ -3781,6 +3792,15 @@ impl Inner {
                         self.shutdown_token.child_token(),
                     );
                 task_handles.push(inbound_dispatch_tasks);
+                use rtc::peer::authentication::ActorChannelCredentials;
+                let actor_channel_credentials =
+                    ActorChannelCredentials::Enrollment(relay_client.clone());
+                #[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+                let actor_channel_credentials = if self.use_test_actor_channel_issuer {
+                    ActorChannelCredentials::fixture(&actor_id)
+                } else {
+                    actor_channel_credentials
+                };
                 let rtc_manager = Arc::new(
                     rtc::manager::RtcConnectionManager::with_inbound_config(
                         factory.clone(),
@@ -3792,11 +3812,7 @@ impl Inner {
                         buffer_config,
                     )
                     .with_media_registry(media_frame_registry.clone())
-                    .with_actor_channel_identity(
-                        rtc::peer::authentication::ActorChannelCredentials::Enrollment(
-                            relay_client.clone(),
-                        ),
-                    ),
+                    .with_actor_channel_identity(actor_channel_credentials),
                 );
                 // Issuer rotates the HMAC TURN credential together with the actor
                 // credential. Apply the new value to live RTC sessions via

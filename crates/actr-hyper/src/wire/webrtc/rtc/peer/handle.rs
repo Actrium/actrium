@@ -7,10 +7,11 @@
 //! plane (business payloads bypass the controller entirely; Stage 4 adds
 //! `LaneHandle`/`SendPermit`).
 
-use std::sync::Arc;
+use std::collections::HashMap;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use actr_protocol::ActrId;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -31,6 +32,8 @@ pub(crate) enum ControllerGone {
     #[error("peer controller is no longer running")]
     Gone,
 }
+
+type OutboundMediaWriters = HashMap<String, (u64, Arc<OutboundTrackWriter>)>;
 
 /// A cheap, cloneable handle to one peer's controller.
 #[derive(Clone)]
@@ -61,8 +64,7 @@ pub(crate) struct RtcPeerControllerHandle {
     #[cfg(test)]
     business_recovery_hint_attempts: Arc<AtomicUsize>,
     /// Outbound media writers are bound to the PC generation that owns them.
-    media_writers:
-        Arc<std::sync::Mutex<std::collections::HashMap<String, (u64, Arc<OutboundTrackWriter>)>>>,
+    media_writers: Arc<Mutex<OutboundMediaWriters>>,
     security: Arc<super::session::InboundGenerationGate>,
     /// Outbound message-size cap shared with the receiver's reassembly
     /// limits (both derive from `RtcBufferConfig::max_inbound_message_bytes`).
@@ -100,7 +102,7 @@ impl RtcPeerControllerHandle {
             msg_id_counter: Arc::new(AtomicU32::new(0)),
             #[cfg(test)]
             business_recovery_hint_attempts: Arc::new(AtomicUsize::new(0)),
-            media_writers: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            media_writers: Arc::new(Mutex::new(HashMap::new())),
             security,
             max_message_bytes,
         }

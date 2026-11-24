@@ -533,6 +533,63 @@ async fn await_inbound_admission(
 /// is discarded once the replacement generation wins the gate.
 const INBOUND_ADMISSION_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
+async fn await_verified_ingress(
+    secure: &SecureCell,
+    lane: LaneKind,
+    cancellation: &CancellationToken,
+) -> Option<Arc<crate::transport::VerifiedPeerContext>> {
+    if let Some(peer) = secure.verified_peer() {
+        return Some(peer);
+    }
+    if lane == LaneKind::RpcReliable || secure.state() != SecureChannelState::Handshaking {
+        return None;
+    }
+
+    // SCTP orders the final proof and payloads within a lane. A payload on
+    // another lane can reach its pump before the proof reaches the RPC pump.
+    // Retain only that pump's current frame until the same channel verifies.
+    crate::timer::timeout(
+        crate::timer::ids::WEBRTC_ACTOR_AUTHENTICATION,
+        INBOUND_ADMISSION_WAIT,
+        async {
+            loop {
+                let epoch = secure.epoch();
+                if let Some(peer) = secure.verified_peer() {
+                    return Some(peer);
+                }
+                if secure.state() != SecureChannelState::Handshaking {
+                    return None;
+                }
+                tokio::select! {
+                    _ = cancellation.cancelled() => return None,
+                    _ = secure.wait_after(epoch) => {}
+                }
+            }
+        },
+    )
+    .await
+    .ok()
+    .flatten()
+}
+
+#[tokio::test]
+async fn stream_ingress_waits_for_verification_on_the_rpc_lane() {
+    let secure = SecureCell::new(SecureChannelState::Handshaking);
+    let cancellation = CancellationToken::new();
+    assert!(
+        await_verified_ingress(&secure, LaneKind::RpcReliable, &cancellation)
+            .await
+            .is_none()
+    );
+    let ingress = await_verified_ingress(&secure, LaneKind::StreamReliable, &cancellation);
+    tokio::pin!(ingress);
+    assert!(futures_util::poll!(ingress.as_mut()).is_pending());
+
+    let verified = crate::transport::secure_channel::test_context(1);
+    assert!(secure.publish_verified(SecureChannelState::Handshaking, verified.clone()));
+    assert_eq!(ingress.await.as_deref(), Some(&verified));
+}
+
 /// Poll a data channel as its single `poll()` consumer (RFC §"DataChannel
 /// model": "There MUST be only one `DataChannel::poll()` consumer per
 /// DataChannel"), covering every `DataChannelEvent`:
@@ -662,7 +719,8 @@ pub(super) async fn lane_pump(
                     }
                     continue;
                 }
-                let Some(peer_context) = secure.verified_peer() else {
+                let Some(peer_context) = await_verified_ingress(&secure, lane, &cancellation).await
+                else {
                     continue;
                 };
                 let (msg_id, frag_index, total_frags, payload) = match decode_fragment_header(raw) {

@@ -391,7 +391,15 @@ impl DestTransport {
                     }
                     let conn = if let Some(route) = reliable.as_deref_mut() {
                         match self.reliable_wire(conn, route).await {
-                            Ok(conn) => conn,
+                            Ok(conn) if matches_channel(conn.as_ref()) => conn,
+                            Ok(_) => {
+                                return DestSendAttempt::failed_pre_send(
+                                    NetworkError::SecureChannelNotReady(
+                                        "reliable route handover has not reached the bound Actor channel"
+                                            .into(),
+                                    ),
+                                );
+                            }
                             Err(error) => return DestSendAttempt::failed_pre_send(error),
                         }
                     } else {

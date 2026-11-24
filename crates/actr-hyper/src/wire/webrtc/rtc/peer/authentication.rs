@@ -11,15 +11,64 @@ use crate::wire::relay::{RelayClient, now_secs, secure_error, verified_peer_cont
 #[derive(Clone)]
 pub(crate) enum ActorChannelCredentials {
     Enrollment(Arc<RelayClient>),
-    #[cfg(feature = "test-utils")]
+    #[cfg(any(test, feature = "test-utils"))]
     Fixture(Arc<actr_relay_security::ActorChannelIdentity>),
 }
 
 impl ActorChannelCredentials {
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn fixture(id: &ActrId) -> Self {
+        use actr_relay_security::{
+            ActorChannelCertificate, ActorChannelClaims, ActorChannelIdentity, ActorIdentityKey,
+            IdentityKey, IssuerKey,
+        };
+        let issuer = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+        let now = crate::wire::relay::now_secs();
+        let expires_at = now + 3600;
+        let noise = IdentityKey::generate().expect("fixture Noise key");
+        let actor = ActorIdentityKey::generate().expect("fixture Actor key");
+        let claims = ActorChannelClaims {
+            realm: id.realm.clone(),
+            actor_id: id.to_string_repr(),
+            actor_type: "test/Peer@1.0.0".into(),
+            member: "fixture".into(),
+            client_key: "fixture".into(),
+            role: "editor".into(),
+            actor_public_key: actor.public,
+            noise_public_key: noise.public,
+            actor_credential_digest: [1; 32],
+            policy_digest: [2; 32],
+            actor_state_digest: [3; 32],
+            issuer: id.realm.clone(),
+            provider: "fixture".into(),
+            audience: actr_relay_security::ACTOR_CHANNEL_AUDIENCE.into(),
+            expires_at,
+            runtime_instance_id: uuid::Uuid::new_v4().to_string(),
+        };
+        let certificate =
+            ActorChannelCertificate::issue(&claims, 1, &issuer).expect("fixture Actor certificate");
+        let issuer = IssuerKey {
+            key_id: 1,
+            public_key: issuer.verifying_key().to_bytes(),
+            expires_at,
+        };
+        let identity = ActorChannelIdentity::certify(
+            noise,
+            actor,
+            certificate,
+            issuer,
+            &id.realm,
+            &claims.actor_id,
+            now,
+        )
+        .expect("fixture channel identity");
+        Self::Fixture(Arc::new(identity))
+    }
+
     async fn identity(&self) -> NetworkResult<Arc<actr_relay_security::ActorChannelIdentity>> {
         match self {
             Self::Enrollment(provider) => provider.actor_channel_identity().await,
-            #[cfg(feature = "test-utils")]
+            #[cfg(any(test, feature = "test-utils"))]
             Self::Fixture(identity) => Ok(identity.clone()),
         }
     }
@@ -27,11 +76,11 @@ impl ActorChannelCredentials {
     async fn issuer(&self, id: u32) -> NetworkResult<actr_relay_security::IssuerKey> {
         match self {
             Self::Enrollment(provider) => provider.issuer(id).await,
-            #[cfg(feature = "test-utils")]
+            #[cfg(any(test, feature = "test-utils"))]
             Self::Fixture(identity) if identity.issuer().key_id == id => {
                 Ok(identity.issuer().clone())
             }
-            #[cfg(feature = "test-utils")]
+            #[cfg(any(test, feature = "test-utils"))]
             Self::Fixture(_) => Err(NetworkError::ConnectionError(
                 "unrecognized fixture Issuer".into(),
             )),

@@ -523,6 +523,25 @@ impl TestRtcControl {
             })
     }
 
+    async fn wait_verified_channel(&self, peer: &ActrId, timeout: Duration) {
+        let handle = self
+            .manager
+            .get_controller(peer)
+            .await
+            .expect("peer controller");
+        tokio::time::timeout(timeout, async {
+            loop {
+                let epoch = handle.secure_epoch();
+                if handle.secure_cell().is_io_sendable() {
+                    return;
+                }
+                handle.await_secure_state_change(epoch).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("peer {peer} did not authenticate within {timeout:?}"));
+    }
+
     /// Await a snapshot satisfying a test predicate. The latest snapshot is
     /// evaluated immediately, so late subscribers do not miss a transition.
     pub async fn wait_state<F>(
@@ -1523,57 +1542,6 @@ impl TestHarness {
         .await;
     }
 
-    fn actor_channel_credentials(
-        id: &ActrId,
-    ) -> crate::wire::webrtc::rtc::peer::authentication::ActorChannelCredentials {
-        use crate::wire::webrtc::rtc::peer::authentication::ActorChannelCredentials;
-        use actr_relay_security::{
-            ActorChannelCertificate, ActorChannelClaims, ActorChannelIdentity, ActorIdentityKey,
-            IdentityKey, IssuerKey,
-        };
-        let issuer = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
-        let now = crate::wire::relay::now_secs();
-        let expires_at = now + 3600;
-        let noise = IdentityKey::generate().expect("fixture Noise key");
-        let actor = ActorIdentityKey::generate().expect("fixture Actor key");
-        let claims = ActorChannelClaims {
-            realm: id.realm.clone(),
-            actor_id: id.to_string_repr(),
-            actor_type: "test/Peer@1.0.0".into(),
-            member: "fixture".into(),
-            client_key: "fixture".into(),
-            role: "editor".into(),
-            actor_public_key: actor.public,
-            noise_public_key: noise.public,
-            actor_credential_digest: [1; 32],
-            policy_digest: [2; 32],
-            actor_state_digest: [3; 32],
-            issuer: id.realm.clone(),
-            provider: "fixture".into(),
-            audience: actr_relay_security::ACTOR_CHANNEL_AUDIENCE.into(),
-            expires_at,
-            runtime_instance_id: uuid::Uuid::new_v4().to_string(),
-        };
-        let certificate =
-            ActorChannelCertificate::issue(&claims, 1, &issuer).expect("fixture Actor certificate");
-        let issuer = IssuerKey {
-            key_id: 1,
-            public_key: issuer.verifying_key().to_bytes(),
-            expires_at,
-        };
-        let identity = ActorChannelIdentity::certify(
-            noise,
-            actor,
-            certificate,
-            issuer,
-            &id.realm,
-            &claims.actor_id,
-            now,
-        )
-        .expect("fixture channel identity");
-        ActorChannelCredentials::Fixture(Arc::new(identity))
-    }
-
     async fn add_peer_with_options_and_identity(
         &mut self,
         serial: u64,
@@ -1647,7 +1615,11 @@ impl TestHarness {
         })));
         let (signaling_tx, signaling_rx) = mpsc::channel(128);
         let manager = RtcConnectionManager::with_inbound(factory, signaling_tx, router)
-            .with_actor_channel_identity(Self::actor_channel_credentials(&id));
+            .with_actor_channel_identity(
+                crate::wire::webrtc::rtc::peer::authentication::ActorChannelCredentials::fixture(
+                    &id,
+                ),
+            );
         let manager = if self.rtc_matrix_instrumentation {
             let local_id = id.clone();
             let handler_evidence = self.evidence.clone();
@@ -1904,6 +1876,10 @@ impl TestHarness {
         self.peer(from).rtc.wait_sendable(&target, timeout).await;
         let source = self.peer(from).id.clone();
         self.peer(to).rtc.wait_sendable(&source, timeout).await;
+        tokio::join!(
+            self.peer(from).rtc.wait_verified_channel(&target, timeout),
+            self.peer(to).rtc.wait_verified_channel(&source, timeout),
+        );
     }
 
     /// Wait until the production signaling handler has completed the

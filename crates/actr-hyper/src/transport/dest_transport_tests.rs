@@ -136,9 +136,9 @@ impl WireHandle for FakeWire {
     fn verified_peer_context(
         &self,
     ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
-        Some(std::sync::Arc::new(
-            crate::transport::secure_channel::test_context(1),
-        ))
+        let mut context = crate::transport::secure_channel::test_context(1);
+        context.channel_id = format!("test-{:?}", self.conn_type);
+        Some(Arc::new(context))
     }
     fn connection_type(&self) -> ConnType {
         self.conn_type
@@ -309,6 +309,35 @@ async fn unsupported_handover_retains_the_old_ordered_route() {
     .unwrap()
     .unwrap();
     assert_eq!(relay.send_count.load(Ordering::Relaxed), 4);
+}
+
+#[tokio::test]
+async fn channel_bound_stream_returns_when_handover_keeps_the_old_wire() {
+    let (transport, rtc, relay) = handover_transport().await;
+    // A previous barrier timed out, so the handover must keep the relay for now.
+    transport.reliable.lock().await.retry_at = Some(Instant::now() + Duration::from_secs(30));
+    let chunk = actr_protocol::DataChunk {
+        metadata: vec![actr_protocol::MetadataEntry {
+            key: crate::actrium::metadata::CHANNEL_ID.into(),
+            value: rtc.verified_peer_context().unwrap().channel_id.clone(),
+        }],
+        ..Default::default()
+    }
+    .encode_to_vec();
+
+    let attempt = timeout(
+        Duration::from_secs(1),
+        transport.send_with_progress(PayloadType::StreamReliable, &chunk, None),
+    )
+    .await
+    .expect("a handover backoff must not wait for another readiness event");
+    assert!(matches!(
+        attempt.result,
+        Err(NetworkError::SecureChannelNotReady(_))
+    ));
+    assert!(attempt.proven_pre_send);
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 0);
+    assert_eq!(relay.send_count.load(Ordering::Relaxed), 1);
 }
 
 #[tokio::test]

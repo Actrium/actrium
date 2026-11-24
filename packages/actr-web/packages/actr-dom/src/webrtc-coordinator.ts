@@ -22,6 +22,13 @@ export interface PeerConnectionInfo {
   actorChannelExpiry?: number;
   actorChannelTimer?: ReturnType<typeof setTimeout>;
   dtlsBinding?: { local: string; remote: string };
+  pendingActorFrames?: PendingActorFrame[];
+}
+
+interface PendingActorFrame {
+  channelId: number;
+  channel: RTCDataChannel;
+  frame: Uint8Array;
 }
 
 interface PendingPortFrame {
@@ -41,6 +48,7 @@ interface FragmentEntry {
 export class WebRtcCoordinator {
   private static readonly ACTOR_AUTH_PREFIX = new TextEncoder().encode('ACTR\0\0\0\0');
   private static readonly MAX_ACTOR_AUTH_FRAMES = 8;
+  private static readonly MAX_PENDING_ACTOR_FRAMES = 8;
   private static readonly FRAGMENT_HEADER_SIZE = 8;
   private static readonly DC_MAX_MESSAGE_SIZE = 65535;
   private static readonly DC_MAX_PAYLOAD_SIZE =
@@ -151,6 +159,7 @@ export class WebRtcCoordinator {
     const peer = this.peers.get(peerId);
     if (peer) {
       peer.actorChannelExpiry = undefined;
+      peer.pendingActorFrames = undefined;
       if (peer.actorChannelTimer !== undefined) clearTimeout(peer.actorChannelTimer);
     }
     const port = this.rpcPorts.get(peerId);
@@ -316,6 +325,14 @@ export class WebRtcCoordinator {
     }
     if (peer.state === 'connected' && (peer.actorChannelExpiry ?? 0) > Date.now()) {
       this.extractFragmentAndForward(peer.peerId, channelId, frame);
+    } else if (!peer.actorChannelExpiry && this.rpcPorts.has(peer.peerId) &&
+      frame.byteLength <= WebRtcCoordinator.DC_MAX_MESSAGE_SIZE) {
+      // The Worker may still be processing the final proof when this frame
+      // arrives, particularly when a different SCTP lane carries the payload.
+      peer.pendingActorFrames ??= [];
+      if (peer.pendingActorFrames.length < WebRtcCoordinator.MAX_PENDING_ACTOR_FRAMES) {
+        peer.pendingActorFrames.push({ channelId, channel, frame });
+      }
     }
   }
 
@@ -687,6 +704,15 @@ export class WebRtcCoordinator {
         peer.actorChannelTimer = setTimeout(() => {
           if (this.rpcPorts.get(peerId) === mc.port1) this.closePeerConnection(peerId);
         }, Math.max(0, e.data - Date.now()));
+        const pending = peer.pendingActorFrames;
+        peer.pendingActorFrames = undefined;
+        if (pending && peer.state === 'connected' && e.data > Date.now()) {
+          for (const { channelId, channel: source, frame } of pending) {
+            if (peer.dataChannels.get(channelId) === source) {
+              this.extractFragmentAndForward(peerId, channelId, frame);
+            }
+          }
+        }
         this.flushPendingPortFrames(peerId, channel);
         return;
       }
