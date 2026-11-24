@@ -33,6 +33,19 @@ const tell = service.tell as unknown as InputSchema;
 const on = service.on as unknown as EventSchema;
 const uploadAttachment = service.uploadAttachment as unknown as InputSchema;
 
+const cachedFileId = '824be89f-48d0-451e-b016-ef133fde55c2';
+
+test('cached picks return metadata and uploads accept the opaque ID only', () => {
+  const pick = descriptor('host:file-import', 'pick').schema!;
+  expect(pick.parseInput?.({ cache: true })).toMatchObject({ cache: true });
+  expect(pick.parseOutput?.({ files: [{ fileId: cachedFileId, name: 'original.png', size: 10 }] }))
+    .toEqual({ files: [{ fileId: cachedFileId, name: 'original.png', size: 10 }] });
+  expect(uploadAttachment.schema?.parseInput?.({ fileId: cachedFileId, type: 'image' }))
+    .toMatchObject({ fileId: cachedFileId, type: 'image' });
+  expect(() => uploadAttachment.schema?.parseInput?.({ fileId: cachedFileId, filename: 'override.png', base64: 'AAEC' })).toThrow();
+  expect(() => pick.parseOutput?.({ files: [{ fileId: 'file:///private/image.png', name: 'image.png', size: 10 }] })).toThrow();
+});
+
 describe('host:service contract', () => {
   test('call accepts a valid request and keeps the route opaque', () => {
     const parsed = call.schema?.parseInput?.({
@@ -347,5 +360,12 @@ describe('placeholder host module contracts', () => {
         descriptor(moduleId, exportName).schema?.parseOutput?.(output)
       ).toThrow();
     }
+  });
+
+  test('preserves the optional file picker thumbnail and validates its encoding', () => {
+    const parse = descriptor('host:file-import', 'pick').schema?.parseOutput;
+    const file = { name: 'photo.jpg', base64: 'AAEC', thumbnailBase64: '/9j/4AAQSkZJRg==' };
+    expect(parse?.({ files: [file] })).toEqual({ files: [file] });
+    expect(() => parse?.({ files: [{ ...file, thumbnailBase64: 'AAEC' }] })).toThrow('JPEG thumbnail');
   });
 });

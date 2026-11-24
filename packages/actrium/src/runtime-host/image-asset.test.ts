@@ -6,6 +6,15 @@ describe('isAllowedImageSource', () => {
     expect(isAllowedImageSource(42)).toBe(true);
   });
 
+  test('allows bounded inline JPEG thumbnails', () => {
+    const uri = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+    expect(isAllowedImageSource({ uri })).toBe(true);
+    expect(isAllowedImageSource({ uri, headers: { Authorization: 'secret' } })).toBe(false);
+    expect(isAllowedImageSource({ uri: 'data:image/svg+xml;base64,PHN2Zz4=' })).toBe(false);
+    expect(isAllowedImageSource({ uri: 'data:image/jpeg;base64,YQ==' })).toBe(false);
+    expect(isAllowedImageSource({ uri: `data:image/jpeg;base64,/9j/${'AAAA'.repeat(4096)}` })).toBe(false);
+  });
+
   test('rejects remote and header-bearing sources', () => {
     expect(isAllowedImageSource('https://example.com/image.png')).toBe(false);
     expect(isAllowedImageSource({ uri: 'https://example.com/image.png' })).toBe(

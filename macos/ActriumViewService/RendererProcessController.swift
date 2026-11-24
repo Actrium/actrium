@@ -308,10 +308,20 @@ final class RendererProcessController {
     private var serviceEventTabs: [UUID: String] = [:]
     private var cancelledServiceEventSubscriptions: Set<UUID> = []
     private var fileImports: [String: (id: UUID, reloadKey: Int, reply: (GuestFileImportReply) -> Void)] = [:]
+    private let attachmentCache = RendererAttachmentCache()
     private var attachmentPrepareReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentPrepareReply) -> Void)] = [:]
     private var attachmentChunkReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentChunkReply) -> Void)] = [:]
     private var attachmentUnregisterReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentUnregisterReply) -> Void)] = [:]
     private var attachmentAvailabilityReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentAvailabilityReply) -> Void)] = [:]
+
+    static func withAttachmentCache<T>(
+        tabId: String, _ operation: (RendererAttachmentCache) throws -> T
+    ) throws -> T {
+        guard let controller = RendererProcessLifetime.shared.controller, controller.surfaces[tabId] != nil else {
+            throw RendererAttachmentCache.Failure.unavailable
+        }
+        return try operation(controller.attachmentCache)
+    }
 
     static func pickFiles(
         _ call: GuestFileImportCall, tabId: String, reply: @escaping (GuestFileImportReply) -> Void
@@ -853,6 +863,7 @@ final class RendererProcessController {
         if let pending = fileImports[tabId], pending.reloadKey != Int(request.reloadKey) {
             cancelFileImport(tabId)
         }
+        attachmentCache.load(tabId: tabId, reloadKey: Int(request.reloadKey))
         config["tabId"] = tabId
         if config["title"] == nil {
             config["title"] = request.title
@@ -988,6 +999,7 @@ final class RendererProcessController {
 
     private func destroyTab(_ tabId: String) {
         cancelFileImport(tabId)
+        attachmentCache.close(tabId: tabId)
         failPendingAttachmentCalls(tabId: tabId)
         if let surface = surfaces.removeValue(forKey: tabId) {
             // Before the hierarchy is detached: afterwards backing.window is

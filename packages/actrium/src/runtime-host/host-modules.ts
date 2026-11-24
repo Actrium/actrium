@@ -50,7 +50,7 @@ export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>
   'host:clipboard': new Set(['writeText']),
   'host:local-storage': new Set(['getItem', 'setItem', 'removeItem']),
   'host:speech': new Set(['recognize', 'onInterimResult', 'stop', 'onStateChange']),
-  'host:file-import': new Set(['pick']),
+  'host:file-import': new Set(['pick', 'openPreview', 'release']),
 };
 
 /** Modules with a real Host implementation, not just a contract declaration. */
@@ -100,6 +100,9 @@ export function createHostModules(options: {
   writeClipboardText: (text: string) => Promise<void>;
   localStorage?: LocalStorageCall;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
+  openFilePreview?: (fileId: string) => Promise<void>;
+  releaseCachedFile?: (fileId: string) => Promise<void>;
+  readCachedFile?: (fileId: string) => Promise<{ filename: string; base64: string }>;
   recognizeSpeech?: (
     input: SpeechRecognizeInput, onInterim?: SpeechInterimHandler, onState?: SpeechStateHandler
   ) => Promise<SpeechRecognizeOutput>;
@@ -227,6 +230,11 @@ export function createHostModules(options: {
           throw new Error('The native attachment upload bridge is unavailable.');
         }
         await options.authorizeCapability('service.attachmentUpload');
+        if ('fileId' in input) {
+          if (!options.readCachedFile) throw new Error('The attachment cache is unavailable.');
+          const file = await options.readCachedFile(input.fileId);
+          return options.attachmentUploader.upload({ ...file, type: input.type, id: input.id });
+        }
         return options.attachmentUploader.upload(input);
       },
     },
@@ -315,7 +323,21 @@ export function createHostModules(options: {
       pick: async (input) => {
         if (!options.pickFiles) throw new Error('The host file picker is unavailable.');
         await options.authorizeCapability('host:file-import.pick');
-        return options.pickFiles(input);
+        const selected = await options.pickFiles(input);
+        if (selected.files.some((file) => ('fileId' in file) !== Boolean(input.cache))) {
+          throw new Error('The file picker returned a different attachment representation.');
+        }
+        return selected;
+      },
+      openPreview: async ({ fileId }) => {
+        await options.authorizeCapability('host:file-import.openPreview');
+        if (!options.openFilePreview) throw new Error('The attachment preview is unavailable.');
+        await options.openFilePreview(fileId);
+      },
+      release: async ({ fileId }) => {
+        await options.authorizeCapability('host:file-import.release');
+        if (!options.releaseCachedFile) throw new Error('The attachment cache is unavailable.');
+        await options.releaseCachedFile(fileId);
       },
     },
     'host:file-export': {

@@ -529,7 +529,7 @@ export function parseAttachmentUploadInput(
   return { filename: input.filename, base64: input.base64, type, id };
 }
 
-function parseAttachmentUploadType(value: unknown): AttachmentUploadType {
+export function parseAttachmentUploadType(value: unknown): AttachmentUploadType {
   if (
     typeof value !== 'string' ||
     !(ATTACHMENT_UPLOAD_TYPES as readonly string[]).includes(value)

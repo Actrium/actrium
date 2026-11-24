@@ -1,8 +1,11 @@
 import { defineKeelContract, rpc, subscription } from 'keel/contract';
+import { isAllowedThumbnailBase64 } from './image-asset';
 
 import {
+  ATTACHMENT_UPLOAD_MAX_BYTES,
   type AttachmentUploadType,
   parseAttachmentUploadInput,
+  parseAttachmentUploadType,
 } from './attachment-upload';
 
 /**
@@ -48,6 +51,10 @@ export type ServiceUploadAttachmentInput = {
   type?: AttachmentUploadType;
   /** Optional caller-chosen attachment id. */
   id?: string;
+} | {
+  fileId: string;
+  type?: AttachmentUploadType;
+  id?: string;
 };
 
 export type ServiceUploadAttachmentOutput = {
@@ -86,13 +93,16 @@ export type ExternalLinkOpenInput = { url: string };
 
 export type NavigateInput = { path: string; mode?: 'push' | 'replace' };
 
-export type FileImportFile = { name: string; base64: string };
+export type FileImportFile = { name: string; base64: string; thumbnailBase64?: string };
+export type CachedFileImport = { fileId: string; name: string; size: number; thumbnailBase64?: string };
+export type CachedFileInput = { fileId: string };
 export type FileImportPickInput = {
   source?: 'files' | 'photos';
   accept?: string[];
   multiple?: boolean;
+  cache?: boolean;
 };
-export type FileImportPickOutput = { files: FileImportFile[] };
+export type FileImportPickOutput = { files: (FileImportFile | CachedFileImport)[] };
 
 export type FileExportSaveInput = { name: string; base64: string };
 export type FileExportSaveOutput = { saved: boolean };
@@ -107,6 +117,36 @@ export type NetRequestInput = {
   timeoutMs?: number;
 };
 export type NetRequestOutput = { status: number; bodyBase64: string };
+
+function parseCachedFileId(value: unknown): string {
+  const id = requireString(value, 'attachment fileId');
+  if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)) {
+    throw new Error('Attachment fileId must be a UUID.');
+  }
+  return id;
+}
+
+function parseCachedFileInput(value: unknown): CachedFileInput {
+  return { fileId: parseCachedFileId(asObject(value, 'cached attachment input').fileId) };
+}
+
+function parsePickedFile(value: unknown, label: string): FileImportFile | CachedFileImport {
+  const file = asObject(value, label);
+  const name = requireString(file.name, `${label}.name`);
+  const thumbnailBase64 = file.thumbnailBase64;
+  if (thumbnailBase64 !== undefined && !isAllowedThumbnailBase64(thumbnailBase64)) {
+    throw new Error(`${label}.thumbnailBase64 must be a bounded JPEG thumbnail`);
+  }
+  const preview = thumbnailBase64 === undefined ? {} : { thumbnailBase64 };
+  if (Object.hasOwn(file, 'fileId')) {
+    if (Object.hasOwn(file, 'base64')) throw new Error('Cached file metadata must not contain the original bytes.');
+    return {
+      name, fileId: parseCachedFileId(file.fileId), ...preview,
+      size: requireNumber(file.size, `${label}.size`, { min: 0, max: ATTACHMENT_UPLOAD_MAX_BYTES, integer: true }),
+    };
+  }
+  return { name, base64: requireBase64(file.base64, `${label}.base64`), ...preview };
+}
 
 function asObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object') {
@@ -382,6 +422,17 @@ export const contract = defineKeelContract({
       uploadAttachment: rpc<ServiceUploadAttachmentInput, ServiceUploadAttachmentOutput>({
         schema: {
           parseInput: (value) => {
+            const request = asObject(value, 'uploadAttachment input');
+            if (Object.hasOwn(request, 'fileId')) {
+              if (Object.hasOwn(request, 'base64') || Object.hasOwn(request, 'filename')) {
+                throw new Error('A cached upload takes a fileId without filename or base64.');
+              }
+              return {
+                fileId: parseCachedFileId(request.fileId),
+                type: request.type === undefined ? 'document' : parseAttachmentUploadType(request.type),
+                id: optionalString(request.id, 'uploadAttachment input.id'),
+              };
+            }
             // Shared boundary validation: strict base64, 7 MiB cap, type
             // defaulting to `document`.
             const input = parseAttachmentUploadInput(value);
@@ -654,6 +705,7 @@ export const contract = defineKeelContract({
                 input.multiple,
                 'file-import.pick input.multiple'
               ),
+              ...(input.cache === undefined ? {} : { cache: optionalBoolean(input.cache, 'file-import.pick input.cache') }),
             };
           },
           parseOutput: (value) => {
@@ -662,18 +714,13 @@ export const contract = defineKeelContract({
               throw new Error('file-import.pick output.files must be an array');
             }
             return {
-              files: output.files.map((item, index) => {
-                const label = `file-import.pick output.files[${index}]`;
-                const file = asObject(item, label);
-                return {
-                  name: requireString(file.name, `${label}.name`),
-                  base64: requireBase64(file.base64, `${label}.base64`),
-                };
-              }),
+              files: output.files.map((item, index) => parsePickedFile(item, `file-import.pick output.files[${index}]`)),
             };
           },
         },
       }),
+      openPreview: rpc<CachedFileInput, void>({ schema: { parseInput: parseCachedFileInput } }),
+      release: rpc<CachedFileInput, void>({ schema: { parseInput: parseCachedFileInput } }),
     },
     'host:file-export': {
       save: rpc<FileExportSaveInput, FileExportSaveOutput>({

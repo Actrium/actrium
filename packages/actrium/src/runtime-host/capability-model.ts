@@ -213,6 +213,14 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     requiresSandbox: true,
     implemented: true,
   },
+  'host:file-import.openPreview': {
+    name: 'host:file-import.openPreview', audience: 'third_party', requiresGrant: 'none',
+    requiresBroker: false, requiresSandbox: true, implemented: true,
+  },
+  'host:file-import.release': {
+    name: 'host:file-import.release', audience: 'third_party', requiresGrant: 'none',
+    requiresBroker: false, requiresSandbox: true, implemented: true,
+  },
   'host:file-export.save': {
     name: 'host:file-export.save',
     audience: 'third_party',

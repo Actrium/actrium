@@ -1,11 +1,20 @@
-/**
- * Only package-local asset ids can be rendered without a network capability.
- * Remote URIs would let a Guest bypass the host:net broker and attach
- * arbitrary headers, so they stay rejected until image loading is routed
- * through that broker.
- */
+const JPEG_PREFIX = 'data:image/jpeg;base64,';
+const MAX_THUMBNAIL_BASE64_LENGTH = 16 * 1024;
+
+export function isAllowedThumbnailBase64(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= MAX_THUMBNAIL_BASE64_LENGTH &&
+    value.startsWith('/9j/') &&
+    /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value);
+}
+
+/** Render package assets and bounded, local raster thumbnails. */
 export function isAllowedImageSource(source: unknown): boolean {
-  return typeof source === 'number';
+  if (typeof source === 'number') return true;
+  if (!source || typeof source !== 'object' || !('uri' in source) ||
+      Object.keys(source).length !== 1 || !Object.hasOwn(source, 'uri')) return false;
+  const { uri } = source;
+  return typeof uri === 'string' && uri.startsWith(JPEG_PREFIX) &&
+    isAllowedThumbnailBase64(uri.slice(JPEG_PREFIX.length));
 }
 
 /**
@@ -33,6 +42,10 @@ export function pickGuestImageProps(
     if (props[key] !== undefined) {
       picked[key] = props[key];
     }
+  }
+  const source = props.source;
+  if (source && typeof source === 'object' && 'uri' in source && isAllowedImageSource(source)) {
+    picked.source = { uri: source.uri };
   }
   return picked;
 }

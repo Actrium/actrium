@@ -279,7 +279,8 @@ private final class NativeFilePicker: FileImportPicking {
             guard block.count <= limit - bytes.count else { throw Failure.tooLarge }
             bytes.append(block)
         }
-        return File(name: url.lastPathComponent, data: bytes)
+        let thumbnail = RendererAttachmentThumbnail.make(data: bytes, fileExtension: url.pathExtension)
+        return File(name: url.lastPathComponent, data: bytes, thumbnail: thumbnail)
     }
 }
 
