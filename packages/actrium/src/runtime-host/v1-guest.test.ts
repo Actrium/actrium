@@ -242,7 +242,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
             Hello
           </View>
           {'Standalone text'}<Supramark markdown="# Hello" />
-          <Select value="zh" options={[{ value: 'zh', label: '简体中文' }]} onValueChange={(text) => writeText({ text })} />
+          <Select value="zh" options={[{ value: 'zh', label: 'Chinese' }]} onValueChange={(text) => writeText({ text })} />
           <Menu title="More" items={[{ value: 'rename', label: 'Rename' }]} onSelect={(text) => writeText({ text })} />
           <Svg width={48} height={32} viewBox="0 0 24 16" paths={[{ d: 'M2 2 L22 14', stroke: '#123456' }]} />
         </>;
@@ -321,7 +321,7 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
           { props: { children: { type: ProtocolText, props: { children: 'Hello' } } } },
           { type: ProtocolText, props: { children: 'Standalone text' } },
           { type: HostSupramark, props: { markdown: '# Hello' } },
-          { type: HostSelect, props: { value: 'zh', options: [{ value: 'zh', label: '简体中文' }] } },
+          { type: HostSelect, props: { value: 'zh', options: [{ value: 'zh', label: 'Chinese' }] } },
           { type: HostMenu, props: { title: 'More', items: [{ value: 'rename', label: 'Rename' }] } },
           { type: HostSvg, props: { width: 48, height: 32, viewBox: '0 0 24 16', paths: [{ d: 'M2 2 L22 14', stroke: '#123456' }] } },
         ],

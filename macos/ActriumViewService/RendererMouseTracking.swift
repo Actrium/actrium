@@ -13,13 +13,18 @@ final class RendererHoverTracking {
         init(_ view: NSView) { self.view = view }
     }
 
+    private let tracksHover: (NSView) -> Bool
     private var targets: [Target] = []
+
+    init(tracksHover: @escaping (NSView) -> Bool) {
+        self.tracksHover = tracksHover
+    }
 
     func update(hitView: NSView?, windowNumber: Int, location: NSPoint) {
         let previous = targets.compactMap(\.view)
         let next = sequence(first: hitView, next: { $0?.superview })
             .prefix(while: { $0 != nil }).compactMap { $0 }
-            .filter(ActriumRendererTracksHover)
+            .filter(tracksHover)
         let oldIDs = Set(previous.map(ObjectIdentifier.init))
         let newIDs = Set(next.map(ObjectIdentifier.init))
         guard oldIDs != newIDs else { return }

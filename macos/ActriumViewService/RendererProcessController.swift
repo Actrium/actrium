@@ -1133,7 +1133,7 @@ private final class RendererTabSurface {
     private var accessibilityObservers: [NSObjectProtocol] = []
     private var accessibilityPublishWork: DispatchWorkItem?
     private let mouseTracking = RendererMouseTracking()
-    private let hoverTracking = RendererHoverTracking()
+    private let hoverTracking = RendererHoverTracking(tracksHover: ActriumRendererTracksHover)
     private var textInputPresses: Set<UInt32> = []
     /// Character index where the current text drag started. AppKit's
     /// mouse-tracking selection cannot run here (mouse events arrive
