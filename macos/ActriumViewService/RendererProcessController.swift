@@ -1086,13 +1086,13 @@ final class RendererSurfaceMountObserver: NSObject {
 /// here. One object owns both the active gesture and the anchor a later Shift
 /// gesture extends from, which keeps the invalidation rules in one place.
 private final class TextSelectionGesture {
-    private enum Phase {
+    private enum Phase: Int {
         /// No text-input button is down.
-        case idle
+        case idle = 0
         /// The press that starts a gesture has been handled.
-        case pressing
+        case pressing = 1
         /// A move while the button is down has applied a range.
-        case dragging
+        case dragging = 2
     }
 
     private var phase: Phase = .idle
@@ -1144,6 +1144,14 @@ private final class TextSelectionGesture {
         invalidate()
     }
 
+    /// Invalidates the gesture only if the given owner matches the current
+    /// gesture owner. Used by text-change observers to avoid retiring an
+    /// anchor that belongs to a different control.
+    func invalidateIfOwned(by owner: AnyObject) {
+        guard self.owner === owner else { return }
+        invalidate()
+    }
+
     func invalidate() {
         phase = .idle
         owner = nil
@@ -1171,6 +1179,9 @@ private final class RendererTabSurface {
     /// every invalidation path funnels through this one object.
     private let selectionGesture = TextSelectionGesture()
     private var selectionObservers: [NSObjectProtocol] = []
+    /// Multi-click selection state: the initial range and granularity for
+    /// double-click (word) or triple-click (paragraph) drag extension.
+    private var multiClickStart: (range: NSRange, granularity: NSSelectionGranularity)?
     /// Last text-input focus state reported to the Host. The Host mirrors
     /// IME composition for whichever surface owns the focused text input.
     private var lastReportedTextFocus = false
@@ -1321,6 +1332,9 @@ private final class RendererTabSurface {
             ServiceReactNativeHost.shared.sendDocumentSelectionCommand("clear", tabId: tabId)
             mouseTracking.cancel()
             textInputPresses.removeAll()
+            // Reset the gesture so a stale phase cannot block anchor retirement.
+            selectionGesture.invalidate()
+            multiClickStart = nil
         }
         window.setHostKeyboardFocus(focused)
         commit()
@@ -1404,7 +1418,9 @@ private final class RendererTabSurface {
                 // Marked text churns during composition; the anchor retires
                 // when committed text changes instead.
                 guard view.markedRange().length == 0 else { return }
-                self.selectionGesture.invalidate()
+                // Only invalidate if the edit belongs to the gesture's owner,
+                // so typing in field B does not retire field A's anchor.
+                self.selectionGesture.invalidateIfOwned(by: self.control(for: view))
             }
         })
     }
@@ -1502,10 +1518,17 @@ private final class RendererTabSurface {
                 let point = editor.convert(location, from: nil)
                 let index = editor.characterIndexForInsertion(at: point)
                 if index != NSNotFound, index <= textLength {
-                    let range = NSRange(
+                    var range = NSRange(
                         location: min(anchor, index),
                         length: abs(index - anchor)
                     )
+                    // Extend multi-click selection (double-click word, triple-click paragraph).
+                    if let start = multiClickStart, start.range.upperBound <= textLength {
+                        let caret = NSRange(location: index, length: 0)
+                        let target = editor.selectionRange(forProposedRange: caret, granularity: start.granularity)
+                        let extended = extendMultiClickSelection(from: start.range, to: target, at: index)
+                        range = extended.range
+                    }
                     // Keep the stored selection in sync with what the drag
                     // applies, so a later Shift+click still recognises the
                     // anchor as the creator of the current selection.
@@ -1528,6 +1551,7 @@ private final class RendererTabSurface {
             } else if input.type == .mouseUp {
                 if textInputPresses.remove(input.button) != nil {
                     selectionGesture.endPress()
+                    multiClickStart = nil
                     return
                 }
                 mouseTracking.end(event, button: input.button)
@@ -1860,6 +1884,7 @@ private final class RendererTabSurface {
         let focused = window.makeFirstResponder(view)
         let editor = (view as? NSTextField)?.currentEditor() as? NSTextView ?? view as? NSTextView
         focusedEditor = focused ? editor : nil
+        multiClickStart = nil
         guard focused, let editor else { return }
         let owner = control(for: editor)
         let point = editor.convert(location, from: nil)
@@ -1904,14 +1929,48 @@ private final class RendererTabSurface {
             publishCaret()
             commit()
         } else {
+            // Determine selection granularity from click count.
+            let granularity: NSSelectionGranularity = switch clickCount {
+            case 2: .selectByWord
+            case 3...: .selectByParagraph
+            default: .selectByCharacter
+            }
+            let caret = NSRange(location: index, length: 0)
+            let range = editor.selectionRange(forProposedRange: caret, granularity: granularity)
+            if granularity != .selectByCharacter {
+                multiClickStart = (range, granularity)
+            }
             selectionGesture.beginPress(
                 owner: owner,
-                anchor: index,
-                range: NSRange(location: index, length: 0)
+                anchor: range.location,
+                range: range
             )
-            editor.setSelectedRange(NSRange(location: index, length: 0))
+            editor.setSelectedRange(range)
             publishCaret()
         }
+    }
+
+    /// Extends a multi-click selection (word or paragraph) during drag.
+    /// Returns the new range and anchor to use for the selection.
+    private func extendMultiClickSelection(
+        from start: NSRange,
+        to target: NSRange,
+        at index: Int
+    ) -> (range: NSRange, anchor: Int) {
+        // Dragging right: extend from start's left edge to target's right edge.
+        if index >= start.location {
+            let range = NSRange(
+                location: start.location,
+                length: target.upperBound - start.location
+            )
+            return (range, start.location)
+        }
+        // Dragging left: extend from target's left edge to start's right edge.
+        let range = NSRange(
+            location: target.location,
+            length: start.upperBound - target.location
+        )
+        return (range, start.upperBound)
     }
 
     /// Publishes the caret rect to the Host so native IME UI (candidate
