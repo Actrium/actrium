@@ -45,6 +45,7 @@ export type ServiceEvent = {
  * prepare/chunk/result protocol natively.
  */
 export type ServiceUploadAttachmentInput = {
+  fileId?: undefined;
   filename: string;
   base64: string;
   /** Defaults to `document`. */
@@ -94,7 +95,9 @@ export type ExternalLinkOpenInput = { url: string };
 export type NavigateInput = { path: string; mode?: 'push' | 'replace' };
 
 export type FileImportFile = { name: string; base64: string; thumbnailBase64?: string };
-export type CachedFileImport = { fileId: string; name: string; size: number; thumbnailBase64?: string };
+export type CachedFileImport = {
+  fileId: string; name: string; size: number; thumbnailBase64?: string; canPreview?: boolean;
+};
 export type CachedFileInput = { fileId: string };
 export type FileImportPickInput = {
   source?: 'files' | 'photos';
@@ -140,9 +143,11 @@ function parsePickedFile(value: unknown, label: string): FileImportFile | Cached
   const preview = thumbnailBase64 === undefined ? {} : { thumbnailBase64 };
   if (Object.hasOwn(file, 'fileId')) {
     if (Object.hasOwn(file, 'base64')) throw new Error('Cached file metadata must not contain the original bytes.');
+    const canPreview = optionalBoolean(file.canPreview, `${label}.canPreview`);
     return {
       name, fileId: parseCachedFileId(file.fileId), ...preview,
       size: requireNumber(file.size, `${label}.size`, { min: 0, max: ATTACHMENT_UPLOAD_MAX_BYTES, integer: true }),
+      ...(canPreview === undefined ? {} : { canPreview }),
     };
   }
   return { name, base64: requireBase64(file.base64, `${label}.base64`), ...preview };
@@ -423,7 +428,7 @@ export const contract = defineKeelContract({
         schema: {
           parseInput: (value) => {
             const request = asObject(value, 'uploadAttachment input');
-            if (Object.hasOwn(request, 'fileId')) {
+            if (Object.hasOwn(request, 'fileId') && request.fileId !== undefined) {
               if (Object.hasOwn(request, 'base64') || Object.hasOwn(request, 'filename')) {
                 throw new Error('A cached upload takes a fileId without filename or base64.');
               }
@@ -720,6 +725,7 @@ export const contract = defineKeelContract({
         },
       }),
       openPreview: rpc<CachedFileInput, void>({ schema: { parseInput: parseCachedFileInput } }),
+      // Releasing an already absent file in the active document is idempotent.
       release: rpc<CachedFileInput, void>({ schema: { parseInput: parseCachedFileInput } }),
     },
     'host:file-export': {

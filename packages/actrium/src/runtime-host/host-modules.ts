@@ -230,7 +230,7 @@ export function createHostModules(options: {
           throw new Error('The native attachment upload bridge is unavailable.');
         }
         await options.authorizeCapability('service.attachmentUpload');
-        if ('fileId' in input) {
+        if (input.fileId !== undefined) {
           if (!options.readCachedFile) throw new Error('The attachment cache is unavailable.');
           const file = await options.readCachedFile(input.fileId);
           return options.attachmentUploader.upload({ ...file, type: input.type, id: input.id });

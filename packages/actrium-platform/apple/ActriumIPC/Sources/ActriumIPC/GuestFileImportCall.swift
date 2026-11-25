@@ -41,11 +41,13 @@ public struct GuestFileImportReply: Codable, Sendable {
         public let name: String
         public let data: Data
         public let thumbnail: Data?
+        public let canPreview: Bool?
 
-        public init(name: String, data: Data, thumbnail: Data? = nil) {
+        public init(name: String, data: Data, thumbnail: Data? = nil, canPreview: Bool? = nil) {
             self.name = name
             self.data = data
             self.thumbnail = thumbnail
+            self.canPreview = canPreview
         }
     }
 

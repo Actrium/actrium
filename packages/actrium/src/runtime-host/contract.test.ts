@@ -40,10 +40,19 @@ test('cached picks return metadata and uploads accept the opaque ID only', () =>
   expect(pick.parseInput?.({ cache: true })).toMatchObject({ cache: true });
   expect(pick.parseOutput?.({ files: [{ fileId: cachedFileId, name: 'original.png', size: 10 }] }))
     .toEqual({ files: [{ fileId: cachedFileId, name: 'original.png', size: 10 }] });
+  const image = { fileId: cachedFileId, name: 'original.png', size: 10, canPreview: true };
+  expect(pick.parseOutput?.({ files: [image] })).toEqual({ files: [image] });
+  expect(() => pick.parseOutput?.({ files: [{ ...image, canPreview: 'yes' }] })).toThrow();
   expect(uploadAttachment.schema?.parseInput?.({ fileId: cachedFileId, type: 'image' }))
     .toMatchObject({ fileId: cachedFileId, type: 'image' });
   expect(() => uploadAttachment.schema?.parseInput?.({ fileId: cachedFileId, filename: 'override.png', base64: 'AAEC' })).toThrow();
   expect(() => pick.parseOutput?.({ files: [{ fileId: 'file:///private/image.png', name: 'image.png', size: 10 }] })).toThrow();
+});
+
+test('an undefined fileId preserves the legacy Base64 upload', () => {
+  const legacy = { filename: 'original.png', base64: 'AAEC' };
+  const parse = uploadAttachment.schema?.parseInput;
+  expect(parse?.({ ...legacy, fileId: undefined })).toEqual(parse?.(legacy));
 });
 
 describe('host:service contract', () => {
@@ -362,10 +371,9 @@ describe('placeholder host module contracts', () => {
     }
   });
 
-  test('preserves the optional file picker thumbnail and validates its encoding', () => {
+  test('rejects a truncated file picker thumbnail', () => {
     const parse = descriptor('host:file-import', 'pick').schema?.parseOutput;
     const file = { name: 'photo.jpg', base64: 'AAEC', thumbnailBase64: '/9j/4AAQSkZJRg==' };
-    expect(parse?.({ files: [file] })).toEqual({ files: [file] });
-    expect(() => parse?.({ files: [{ ...file, thumbnailBase64: 'AAEC' }] })).toThrow('JPEG thumbnail');
+    expect(() => parse?.({ files: [file] })).toThrow('JPEG thumbnail');
   });
 });

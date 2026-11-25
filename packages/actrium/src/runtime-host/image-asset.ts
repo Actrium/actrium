@@ -1,10 +1,17 @@
+import { decodeBase64 } from './attachment-upload';
+
 const JPEG_PREFIX = 'data:image/jpeg;base64,';
 const MAX_THUMBNAIL_BASE64_LENGTH = 16 * 1024;
 
 export function isAllowedThumbnailBase64(value: unknown): value is string {
-  return typeof value === 'string' && value.length <= MAX_THUMBNAIL_BASE64_LENGTH &&
-    value.startsWith('/9j/') &&
-    /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value);
+  if (typeof value !== 'string' || value.length < 12 ||
+      value.length > MAX_THUMBNAIL_BASE64_LENGTH || value.length % 4 !== 0 ||
+      !value.startsWith('/9j/') ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    return false;
+  }
+  const tail = decodeBase64(value.slice(-8));
+  return tail[tail.length - 2] === 0xff && tail[tail.length - 1] === 0xd9;
 }
 
 /** Render package assets and bounded, local raster thumbnails. */

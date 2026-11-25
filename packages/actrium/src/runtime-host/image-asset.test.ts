@@ -7,11 +7,14 @@ describe('isAllowedImageSource', () => {
   });
 
   test('allows bounded inline JPEG thumbnails', () => {
-    const uri = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+    const jpeg = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AP7//2Q==';
+    const uri = `data:image/jpeg;base64,${jpeg}`;
     expect(isAllowedImageSource({ uri })).toBe(true);
     expect(isAllowedImageSource({ uri, headers: { Authorization: 'secret' } })).toBe(false);
     expect(isAllowedImageSource({ uri: 'data:image/svg+xml;base64,PHN2Zz4=' })).toBe(false);
     expect(isAllowedImageSource({ uri: 'data:image/jpeg;base64,YQ==' })).toBe(false);
+    expect(isAllowedImageSource({ uri: 'data:image/jpeg;base64,/9j/' })).toBe(false);
+    expect(isAllowedImageSource({ uri: `data:image/jpeg;base64,${jpeg.slice(0, -8)}` })).toBe(false);
     expect(isAllowedImageSource({ uri: `data:image/jpeg;base64,/9j/${'AAAA'.repeat(4096)}` })).toBe(false);
   });
 

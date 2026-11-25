@@ -522,12 +522,17 @@ final class RendererProcessPool: ObservableObject {
 
         let process = Process()
         process.executableURL = executableURL
-        process.arguments = [
+        let attachmentDirectory = RendererAttachmentDirectory.url(rendererID: id)
+        var arguments = [
             "--renderer-id", id,
             "--fingerprint", fingerprint ?? "prewarm",
             "--ipc-stdin",
             "--host-pid", String(ProcessInfo.processInfo.processIdentifier)
         ]
+        if let attachmentDirectory {
+            arguments += ["--attachment-cache-directory", attachmentDirectory.path]
+        }
+        process.arguments = arguments
         process.standardInput = childInput
 
         let worker = Worker(
@@ -539,6 +544,10 @@ final class RendererProcessPool: ObservableObject {
         configureCallbacks(for: worker)
 
         process.terminationHandler = { [weak self, weak worker] process in
+            if let attachmentDirectory {
+                do { try RendererAttachmentDirectory.remove(attachmentDirectory) }
+                catch { NSLog("Could not remove the exited renderer's attachment cache: %@", error.localizedDescription) }
+            }
             DispatchQueue.main.async {
                 guard let self, let worker else { return }
                 self.handleTermination(
