@@ -1836,10 +1836,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                       let index = tabIndex() else { return }
                 let profileData = admission.body
                 let profileBody = String(decoding: profileData, as: UTF8.self)
+                // The signed Profile names this Realm instance; the Front manifest
+                // names the application package and must not replace the instance title.
+                let instanceTitle = profile.displayName.isEmpty ? title : profile.displayName
                 let isLoadingTab = tab.url != address || loadedRealmFronts[replacingTabId]?.address != address
                 if isLoadingTab, localFrontApprovals[replacingTabId] == nil {
                     unloadRealmFront(at: index)
-                    tabs[index].title = deferredTitle ?? title
+                    tabs[index].title = deferredTitle ?? instanceTitle
                     tabs[index].url = address
                     navigationNonce = tabs[index].reloadNonce
                     objectWillChange.send()
@@ -1912,8 +1915,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         isCurrent: { (try? profileIsCurrent()) == true }
                     ) {
                         loadedRealmFronts[installedTabId] = loadedFront
-                        if let deferredTitle, let index = tabs.firstIndex(where: { $0.id == installedTabId }) {
-                            tabs[index].title = deferredTitle
+                        if let index = tabs.firstIndex(where: { $0.id == installedTabId }) {
+                            tabs[index].title = deferredTitle ?? instanceTitle
                             persistBrowserPageSession()
                         }
                         let installedName = "\(realmName)/\(installedTabId.uuidString)"
@@ -2060,9 +2063,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     loadedRealmFronts[replacingTabId] = loadedFront
                     if let index = tabs.firstIndex(where: { $0.id == replacingTabId }) {
                         tabs[index].realmProfileSigner = (realmName, accepted.signingKeyId)
-                        if let deferredTitle {
-                            tabs[index].title = deferredTitle
-                        }
+                        tabs[index].title = deferredTitle ?? instanceTitle
                     }
                     do {
                         try saveRealmTrust(profileBody, .installedProfile, name: installedProfileName)

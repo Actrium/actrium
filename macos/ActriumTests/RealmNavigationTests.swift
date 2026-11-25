@@ -360,6 +360,10 @@ final class RealmNavigationTests: XCTestCase {
         XCTAssertEqual(realmTab.url?.absoluteString, realmURI)
         XCTAssertEqual(realmTab.appId, appId)
         XCTAssertEqual(realmTab.unifiedScript, fixture.script)
+        // The console instance name comes from the signed Realm Profile, not
+        // the Front package's application name ("echo-front").
+        XCTAssertEqual(realmTab.title, "Echo")
+        XCTAssertEqual(realmTab.verifiedAppName, "echo-front")
         XCTAssertEqual(joinAttempts, 1)
         XCTAssertEqual(downloads, 1)
         XCTAssertTrue(FileManager.default.fileExists(atPath: cachedArchive.path))
