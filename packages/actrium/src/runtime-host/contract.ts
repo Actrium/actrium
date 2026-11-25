@@ -66,6 +66,7 @@ export type AssetsReadInput = { path: string };
 export type AssetsReadOutput = { base64: string };
 
 export type ClipboardWriteTextInput = { text: string };
+export type TabSetTitleInput = { title: string };
 export type LocalStorageKeyInput = { key: string };
 export type LocalStorageSetInput = LocalStorageKeyInput & { value: string };
 
@@ -490,6 +491,22 @@ export const contract = defineKeelContract({
               text: requireString(
                 input.text,
                 'clipboard.writeText input.text',
+                true
+              ),
+            };
+          },
+        },
+      }),
+    },
+    'host:tab': {
+      setTitle: rpc<TabSetTitleInput, void>({
+        schema: {
+          parseInput: (value) => {
+            const input = asObject(value, 'tab.setTitle input');
+            return {
+              title: requireString(
+                input.title,
+                'tab.setTitle input.title',
                 true
               ),
             };

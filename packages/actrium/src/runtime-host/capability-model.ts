@@ -95,6 +95,14 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     requiresSandbox: true,
     implemented: true,
   },
+  'host:tab.setTitle': {
+    name: 'host:tab.setTitle',
+    audience: 'third_party',
+    requiresGrant: 'none',
+    requiresBroker: false,
+    requiresSandbox: true,
+    implemented: true,
+  },
   'host:local-storage.getItem': {
     name: 'host:local-storage.getItem',
     audience: 'third_party',

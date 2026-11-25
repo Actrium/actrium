@@ -107,6 +107,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     private let realmPreferences: UserDefaults
     private let realmTrustDirectory: URL?
     private var realmTrustObserver: AnyCancellable?
+    private var tabTitleObserver: AnyCancellable?
 
     /// Realm names remembered for session restore. Admission checks the current device separately.
     private var redeemedRealms: Set<String> {
@@ -247,6 +248,14 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                           let keyIds = notice.userInfo?["signingKeyIds"] as? [String] {
                     self?.stopRevokedRealmRuntimes(domain: domain, trustedKeys: Set(keyIds))
                 }
+            }
+
+        tabTitleObserver = NotificationCenter.default
+            .publisher(for: .tabTitleChanged)
+            .sink { [weak self] notice in
+                guard let tabId = notice.userInfo?["tabId"] as? UUID,
+                      let title = notice.userInfo?["title"] as? String else { return }
+                self?.updateTabTitle(for: tabId, title: title)
             }
     }
 

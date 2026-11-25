@@ -157,6 +157,19 @@ const setClipboardText = (text: string): void => {
 
 const writeClipboardText = async (text: string): Promise<void> => setClipboardText(text);
 
+type TabTitleBridge = {
+  setTitle?: (title: string, tabId: string) => void;
+};
+
+/** Runtime tab title update, analogous to `document.title`. */
+const setTabTitle = (tabId: string, title: string): void => {
+  const bridge = NativeModules.TabTitle as TabTitleBridge | undefined;
+  if (!bridge?.setTitle) {
+    throw new Error('The host tab title bridge is not available.');
+  }
+  bridge.setTitle(title, tabId);
+};
+
 type CapabilityPermissionBridge = {
   requestGrant?: (tabId: string, capability: string) => void;
 };
@@ -416,6 +429,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
         authorizer.onRevoked(capability, listener),
       trackServiceEventSubscription,
       writeClipboardText,
+      setTabTitle: (title) => setTabTitle(tab.id, title),
       localStorage,
       pickFiles: nativePick && ((input) => {
         const pick = input.cache ? nativePickCached : nativePick;

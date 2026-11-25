@@ -241,6 +241,22 @@ final class RendererProcessController {
     }
 
     @discardableResult
+    nonisolated static func sendTitleChanged(_ title: String, tabId: String) -> Bool {
+        guard isRendererProcess else { return false }
+        // React Native may call from its module queue. Only immutable values
+        // cross to the renderer's main-actor lifecycle and callback state.
+        DispatchQueue.main.async {
+            guard let controller = RendererProcessLifetime.shared.controller else { return }
+            do {
+                try controller.connection.sendTitleChanged(title, tabId: tabId)
+            } catch {
+                NSLog("ActriumRenderer title change failed: %@", error.localizedDescription)
+            }
+        }
+        return true
+    }
+
+    @discardableResult
     nonisolated static func sendConsoleLog(level: String, source: String, message: String) -> Bool {
         guard isRendererProcess else { return false }
         DispatchQueue.main.async {

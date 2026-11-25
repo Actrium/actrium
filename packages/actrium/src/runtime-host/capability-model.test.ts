@@ -293,6 +293,7 @@ describe('capability model data', () => {
       'service.on',
       'service.attachmentUpload',
       'host:clipboard.write',
+      'host:tab.setTitle',
       'host:file-import.pick',
       'host:file-import.openPreview',
       'host:file-import.release',
