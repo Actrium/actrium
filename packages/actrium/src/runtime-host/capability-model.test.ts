@@ -304,6 +304,8 @@ describe('capability model data', () => {
       'host:speech.onInterimResult',
       'host:speech.stop',
       'host:speech.onStateChange',
+      'host:tts.speak',
+      'host:tts.stop',
     ]));
     for (const capability of FRONT_CAPABILITIES) {
       if (HOST_SUPPORTED_CAPABILITIES.has(capability)) continue;

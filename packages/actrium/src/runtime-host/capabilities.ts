@@ -103,6 +103,8 @@ export const FRONT_CAPABILITY_SPECS = {
   },
   'host:speech.stop': { module: 'host:speech', hostModule: 'host:speech', hostMethod: 'stop' },
   'host:speech.onStateChange': { module: 'host:speech', hostModule: 'host:speech', hostMethod: 'onStateChange' },
+  'host:tts.speak': { module: 'host:tts', hostModule: 'host:tts', hostMethod: 'speak' },
+  'host:tts.stop': { module: 'host:tts', hostModule: 'host:tts', hostMethod: 'stop' },
   'host:location.getCurrentPosition': {
     module: 'host:location',
     hostModule: 'host:location',

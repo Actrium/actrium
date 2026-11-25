@@ -22,6 +22,7 @@ import type { FrontCapability } from './capabilities';
 import type { LocalStorageCall } from './local-storage';
 import type { ServiceEventSource } from './service-events';
 import type { AttachmentUploadManager } from './attachment-upload';
+import type { GuestTTS } from './guest-tts';
 
 export type ServiceCallRequest = ServiceCallInput;
 
@@ -52,6 +53,7 @@ export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>
   'host:tab': new Set(['setTitle']),
   'host:local-storage': new Set(['getItem', 'setItem', 'removeItem']),
   'host:speech': new Set(['recognize', 'onInterimResult', 'stop', 'onStateChange']),
+  'host:tts': new Set(['speak', 'stop']),
   'host:file-import': new Set(['pick', 'openPreview', 'release']),
 };
 
@@ -111,6 +113,7 @@ export function createHostModules(options: {
     input: SpeechRecognizeInput, onInterim?: SpeechInterimHandler, onState?: SpeechStateHandler
   ) => Promise<SpeechRecognizeOutput>;
   stopSpeech?: () => Promise<void>;
+  tts?: GuestTTS;
   /**
    * Fixed transport attachment uploader. When absent, `uploadAttachment`
    * fails closed; there is deliberately no HTTP or legacy fallback.
@@ -315,6 +318,16 @@ export function createHostModules(options: {
       onStateChange: (handler) => {
         speechStateListeners.add(handler);
         return () => { speechStateListeners.delete(handler); };
+      },
+    },
+    'host:tts': {
+      speak: async (input) => {
+        if (!options.tts) throw new Error('Text-to-speech is unavailable.');
+        return options.tts.speak(input);
+      },
+      stop: async () => {
+        if (!options.tts) throw new Error('Text-to-speech is unavailable.');
+        await options.tts.stop();
       },
     },
     'host:location': {

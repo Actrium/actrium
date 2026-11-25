@@ -7,6 +7,7 @@ import {
   parseAttachmentUploadInput,
   parseAttachmentUploadType,
 } from './attachment-upload';
+import type { TTSSpeakInput, TTSSpeakOutput, TTSVoice } from './guest-tts';
 
 /**
  * Host capabilities declared to Guests (v1 runtime spec, section 5.2/5.3).
@@ -201,6 +202,21 @@ function optionalString(
 ): string | undefined {
   if (value === undefined) return undefined;
   return requireString(value, label, allowEmpty);
+}
+
+function parseTTSSpeakInput(value: unknown): TTSSpeakInput {
+  if (Array.isArray(value)) throw new Error('tts.speak input must be an object');
+  const input = asObject(value, 'tts.speak input');
+  const text = requireString(input.text, 'tts.speak input.text');
+  if (!text.trim()) throw new Error('tts.speak input.text must be non-blank');
+  const locale = optionalString(input.locale, 'tts.speak input.locale');
+  if (locale !== undefined && (locale.length > 64 || !/^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/i.test(locale))) {
+    throw new Error('tts.speak input.locale must be a language tag');
+  }
+  const voice = input.voice === undefined ? 'system' : requireEnum<TTSVoice>(
+    input.voice, 'tts.speak input.voice', ['system', 'female', 'male']
+  );
+  return locale === undefined ? { text, voice } : { text, locale, voice };
 }
 
 const BASE64_PATTERN =
@@ -647,6 +663,20 @@ export const contract = defineKeelContract({
               'speech.onStateChange event.state', ['recording', 'finalizing']),
           }),
         },
+      }),
+    },
+    'host:tts': {
+      speak: rpc<TTSSpeakInput, TTSSpeakOutput>({
+        schema: {
+          parseInput: parseTTSSpeakInput,
+          parseOutput: (value) => {
+            const { status } = asObject(value, 'tts.speak output');
+            return { status: requireEnum(status, 'tts.speak output.status', ['finished', 'cancelled']) };
+          },
+        },
+      }),
+      stop: rpc<void, void>({
+        schema: { parseInput: (value) => requireNoInput(value, 'tts.stop input') },
       }),
     },
     'host:location': {

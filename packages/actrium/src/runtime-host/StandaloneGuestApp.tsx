@@ -34,6 +34,7 @@ import {
 } from './attachment-upload';
 import { createHostModules, type ActorCall } from './host-modules';
 import { createGuestMenuComponents, guestMenuNames } from './guest-menu';
+import { GuestTTS, type GuestTTSBridge } from './guest-tts';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
 import { bindNativeLocalStorage } from './local-storage';
 import { Supramark } from './guest-markdown-renderer';
@@ -377,6 +378,23 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       setError('Speech recognition is unavailable for this application.');
       return;
     }
+    const ttsBridge = NativeModules.GuestTTS as GuestTTSBridge | undefined;
+    const ttsLinked = v1?.ok && v1.linkage.links.some(([id]) => id === 'host:tts');
+    const reportTTSCleanupError = () => {
+      logToNative('[StandaloneGuestApp] Could not stop text-to-speech playback.');
+    };
+    const tts = ttsLinked && typeof ttsBridge?.speak === 'function' && typeof ttsBridge.stop === 'function'
+      ? new GuestTTS({
+          bridge: ttsBridge,
+          authorize: (capability) => authorizer.authorize(capability),
+          onRevoked: (capability, listener) => authorizer.onRevoked(capability, listener),
+          onCleanupError: reportTTSCleanupError,
+        })
+      : undefined;
+    if (ttsLinked && !tts) {
+      setError('Text-to-speech is unavailable for this application.');
+      return;
+    }
     // The fixed upload transport is native-only through the per-tab
     // RealmService module. HTTP tabs and the legacy echo tab never reach the
     // native uploader; when the manifest links uploadAttachment there, the
@@ -458,6 +476,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       stopSpeech: speechAvailable ? async () => {
         if (!disposed) await stopSpeech();
       } : undefined,
+      tts,
       attachmentUploader,
     });
     // Expose exactly the verified method and component set to this Guest Engine.
@@ -581,6 +600,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     return () => {
       disposed = true;
       cancelSpeech();
+      void tts?.dispose().catch(reportTTSCleanupError);
       for (const cleanup of [...eventSubscriptions]) cleanup();
       eventSubscriptions.clear();
       attachmentUploader.dispose();
