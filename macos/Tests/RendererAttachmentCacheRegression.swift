@@ -4,13 +4,8 @@ import Foundation
 @main
 struct RendererAttachmentCacheRegression {
     static func main() async throws {
-        if CommandLine.arguments.count == 2 {
-            let directory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
-            let cache = RendererAttachmentCache(directory: directory)
-            cache.load(tabId: "worker", reloadKey: 1)
-            let file = RendererAttachmentCache.File(name: "note.txt", data: Data([1]), thumbnail: nil, canPreview: false)
-            _ = try await cache.store([file], tabId: "worker", reloadKey: 1)
-            exit(17)
+        if CommandLine.arguments.count > 1 {
+            try await runWorker()
         }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
@@ -20,8 +15,26 @@ struct RendererAttachmentCacheRegression {
         }
         try await verifyCache(in: root.appendingPathComponent("renderer-one"))
         try verifyExitedWorkerCleanup(in: root)
+        try verifyStartupRecoversOrphans(in: root)
+        try verifyStartupPreservesActiveCaches(in: root)
         try verifyPreviewMetadata()
         print("PASS: attachment cache preview, upload, limits, tab scope, and cleanup")
+    }
+
+    private static func runWorker() async throws -> Never {
+        let directory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
+        let lock = try RendererAttachmentDirectory.acquireRendererLock(for: directory)
+        let cache = RendererAttachmentCache(directory: directory)
+        cache.load(tabId: "worker", reloadKey: 1)
+        let file = RendererAttachmentCache.File(name: "note.txt", data: Data([1]), thumbnail: nil, canPreview: false)
+        _ = try await cache.store([file], tabId: "worker", reloadKey: 1)
+        return withExtendedLifetime(lock) {
+            if CommandLine.arguments.last == "--hold" {
+                FileHandle.standardOutput.write(Data([1]))
+                _ = FileHandle.standardInput.readData(ofLength: 1)
+            }
+            exit(17)
+        }
     }
 
     private static func verifyCache(in directory: URL) async throws {
@@ -55,16 +68,21 @@ struct RendererAttachmentCacheRegression {
 
     }
 
-    private static func verifyExitedWorkerCleanup(in root: URL) throws {
+    private static func makeWorker(in root: URL) -> (process: Process, directory: URL) {
         let rendererID = "renderer-\(UUID().uuidString)"
         guard let directory = RendererAttachmentDirectory.url(rendererID: rendererID, in: root) else {
             fatalError("Expected an attachment cache directory for a valid renderer ID")
         }
-        let sibling = root.appendingPathComponent("renderer-two")
-        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: false)
         let worker = Process()
         worker.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
         worker.arguments = [directory.path]
+        return (worker, directory)
+    }
+
+    private static func verifyExitedWorkerCleanup(in root: URL) throws {
+        let (worker, directory) = makeWorker(in: root)
+        let sibling = root.appendingPathComponent("renderer-two")
+        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: false)
         try worker.run()
         worker.waitUntilExit()
         precondition(worker.terminationStatus == 17)
@@ -73,6 +91,43 @@ struct RendererAttachmentCacheRegression {
         try RendererAttachmentDirectory.remove(directory)
         precondition(!FileManager.default.fileExists(atPath: directory.path))
         precondition(FileManager.default.fileExists(atPath: sibling.path))
+    }
+
+    private static func verifyStartupRecoversOrphans(in root: URL) throws {
+        let (worker, directory) = makeWorker(in: root)
+        try worker.run()
+        worker.waitUntilExit()
+        precondition(worker.terminationStatus == 17)
+        precondition(FileManager.default.fileExists(atPath: directory.path))
+
+        let startupLock = try RendererAttachmentDirectory.acquireHostLock(in: root)
+        withExtendedLifetime(startupLock) {
+            precondition(!FileManager.default.fileExists(atPath: directory.path))
+            precondition(FileManager.default.fileExists(atPath: root.appendingPathComponent("renderer-two").path))
+        }
+    }
+
+    private static func verifyStartupPreservesActiveCaches(in root: URL) throws {
+        let (worker, directory) = makeWorker(in: root)
+        let control = Pipe()
+        let ready = Pipe()
+        worker.arguments = [directory.path, "--hold"]
+        worker.standardInput = control
+        worker.standardOutput = ready
+        try worker.run()
+        defer {
+            control.fileHandleForWriting.closeFile()
+            worker.waitUntilExit()
+        }
+        let signal = try ready.fileHandleForReading.read(upToCount: 1)
+        precondition(signal == Data([1]), "Renderer did not store its attachment")
+
+        let startupLock = try RendererAttachmentDirectory.acquireHostLock(in: root)
+        try withExtendedLifetime(startupLock) {
+            precondition(FileManager.default.fileExists(atPath: directory.path))
+            let files = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            precondition(files.count == 1)
+        }
     }
 
     private static func verifyPreviewMetadata() throws {

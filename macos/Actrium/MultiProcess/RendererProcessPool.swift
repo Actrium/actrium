@@ -148,6 +148,17 @@ final class RendererProcessPool: ObservableObject {
     private var tabWorkerMap: [UUID: String] = [:]
     private let localStorage: RendererLocalStorage
     private let fileImport = RendererFileImport()
+    private lazy var attachmentStorage: (container: URL, lock: FileHandle)? = {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: ActriumRuntimePaths.appGroupID
+        ) else { return nil }
+        do {
+            return (container, try RendererAttachmentDirectory.acquireHostLock(in: container))
+        } catch {
+            NSLog("Could not prepare the Host attachment cache: %@", error.localizedDescription)
+            return nil
+        }
+    }()
     var documentWindow: ((UUID, Int) -> NSWindow?)?
     var fileImportWindow: ((UUID, Int) -> NSWindow?)?
     private var fingerprintWorkerMap: [String: String] = [:]
@@ -529,9 +540,9 @@ final class RendererProcessPool: ObservableObject {
 
         let process = Process()
         process.executableURL = executableURL
-        let attachmentDirectory = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: ActriumRuntimePaths.appGroupID)
-            .flatMap { RendererAttachmentDirectory.url(rendererID: id, in: $0) }
+        let attachmentDirectory = attachmentStorage.flatMap {
+            RendererAttachmentDirectory.url(rendererID: id, in: $0.container)
+        }
         var arguments = [
             "--renderer-id", id,
             "--fingerprint", fingerprint ?? "prewarm",

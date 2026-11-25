@@ -314,7 +314,8 @@ final class RendererProcessController {
     private var cancelledServiceEventSubscriptions: Set<UUID> = []
     private var fileImports: [String: (id: UUID, reloadKey: Int, reply: (GuestFileImportReply) -> Void)] = [:]
     private var guestMenus: [String: (call: GuestMenuCall, reply: (GuestMenuReply) -> Void)] = [:]
-    private let attachmentCache: RendererAttachmentCache?
+    private let attachmentStorage: (cache: RendererAttachmentCache, lock: FileHandle)?
+    private var attachmentCache: RendererAttachmentCache? { attachmentStorage?.cache }
     private var attachmentPrepareReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentPrepareReply) -> Void)] = [:]
     private var attachmentChunkReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentChunkReply) -> Void)] = [:]
     private var attachmentUnregisterReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentUnregisterReply) -> Void)] = [:]
@@ -611,7 +612,15 @@ final class RendererProcessController {
 
     private init(arguments: Arguments) {
         self.arguments = arguments
-        attachmentCache = arguments.attachmentDirectory.map { RendererAttachmentCache(directory: $0) }
+        attachmentStorage = arguments.attachmentDirectory.flatMap { directory in
+            do {
+                let lock = try RendererAttachmentDirectory.acquireRendererLock(for: directory)
+                return (RendererAttachmentCache(directory: directory), lock)
+            } catch {
+                NSLog("Could not lock the renderer attachment cache: %@", error.localizedDescription)
+                return nil
+            }
+        }
         installRNMarkedTextGate()
         connection = IPCHelperConnection(
             tabId: arguments.rendererId,
