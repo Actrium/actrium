@@ -1626,6 +1626,13 @@ final class ViewBridgeCoordinatorManager: ObservableObject {
         return newCoordinator
     }
 
+    func existingRendererSurface(for tabId: UUID) -> RendererSurfaceHostView? {
+        guard let surface = coordinators[tabId]?.rendererHostView, surface.tabId == tabId else {
+            return nil
+        }
+        return surface
+    }
+
     func removeCoordinator(for tabId: UUID) {
         coordinators.removeValue(forKey: tabId)?.cleanup(releaseRenderer: false)
         RendererProcessPool.shared.releaseRenderer(for: tabId)

@@ -35,8 +35,18 @@ using namespace facebook::react;
     [text updateProps:props oldProps:[text props]];
     NSView *child = [NSView new];
     [text addSubview:child];
-    XCTAssertTrue(ActriumRendererUsesTextCursor(child));
-    XCTAssertFalse(ActriumRendererUsesTextCursor([NSView new]));
+    XCTAssertEqualObjects(ActriumRendererCursorForHitView(child), @"text");
+    XCTAssertEqualObjects(ActriumRendererCursorForHitView([NSView new]), @"default");
+
+    RCTViewComponentView *button = [[RCTViewComponentView alloc] initWithFrame:NSZeroRect];
+    auto buttonProps = std::make_shared<ViewProps>();
+    buttonProps->cursor = Cursor::Pointer;
+    [button updateProps:buttonProps oldProps:[button props]];
+    [text addSubview:button];
+    NSTextView *label = [NSTextView new];
+    [button addSubview:label];
+    XCTAssertEqualObjects(ActriumRendererCursorForHitView(label), @"pointer");
+    XCTAssertEqualObjects(ActriumRendererCursorForHitView([NSTextView new]), @"text");
 }
 
 - (void)layOutList:(RCTScrollViewComponentView *)list

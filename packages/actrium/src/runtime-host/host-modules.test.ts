@@ -350,13 +350,8 @@ describe('host:service.attachmentUpload implementation', () => {
       attachmentUploader: uploader as unknown as AttachmentUploadManager,
     });
 
-    await expect(
-      hostModules['host:service'].uploadAttachment({
-        filename: 'a.txt',
-        base64: 'AAEC',
-        type: 'image',
-      })
-    ).resolves.toEqual({ attachmentId: 'a-1' });
+    const legacy = { filename: 'a.txt', base64: 'AAEC', type: 'image' as const, fileId: undefined };
+    await expect(hostModules['host:service'].uploadAttachment(legacy)).resolves.toEqual({ attachmentId: 'a-1' });
     expect(grants).toEqual(['service.attachmentUpload']);
     expect(uploads).toEqual([{ filename: 'a.txt', base64: 'AAEC', type: 'image' }]);
   });
@@ -406,6 +401,38 @@ describe('host:service.attachmentUpload implementation', () => {
     expect(() =>
       dispatch['host:service'].uploadAttachment({ filename: 'a.txt', base64: 'AAE' })
     ).toThrow('Boundary input validation failed');
+  });
+
+  test('dispatches cached picks, preview, upload and release with the same file ID', async () => {
+    const fileId = '824be89f-48d0-451e-b016-ef133fde55c2';
+    const original = { filename: 'photo.png', base64: 'AAEC' };
+    const files = [{ fileId, name: original.filename, size: 3, canPreview: true }];
+    const operations: string[] = [];
+    const { uploader, uploads } = createUploader();
+    const dispatch = createHostModuleDispatch(contract, createHostModules({
+      hasServiceCapability: true,
+      hasServiceOnCapability: false,
+      callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
+      authorizeCapability: async (capability) => { operations.push(capability); },
+      writeClipboardText: async () => {},
+      pickFiles: async () => ({ files }),
+      openFilePreview: async (id) => { expect(id).toBe(fileId); },
+      releaseCachedFile: async (id) => { expect(id).toBe(fileId); },
+      readCachedFile: async (id) => {
+        expect(id).toBe(fileId);
+        return original;
+      },
+      attachmentUploader: uploader as unknown as AttachmentUploadManager,
+    }));
+    const picker = dispatch['host:file-import'];
+    expect(await picker.pick({ cache: true })).toEqual({ files });
+    await picker.openPreview({ fileId });
+    await dispatch['host:service'].uploadAttachment({ fileId, type: 'image' });
+    await picker.release({ fileId });
+    expect(uploads).toEqual([{ ...original, type: 'image', id: undefined }]);
+    expect(operations).toEqual([
+      'host:file-import.pick', 'host:file-import.openPreview', 'service.attachmentUpload', 'host:file-import.release',
+    ]);
   });
 });
 
