@@ -40,6 +40,9 @@ export type FlexJustify =
  * Follows React Native style conventions for cross-platform compatibility.
  */
 export interface StyleObject {
+  // Pointer appearance
+  cursor?: 'auto' | 'default' | 'pointer' | 'text';
+
   // Layout
   flex?: number;
   flexDirection?: FlexDirection;

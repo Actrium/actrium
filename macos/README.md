@@ -45,8 +45,8 @@ Runtime bundles can be generated independently with
 
 To enable the local Guest `Supramark` component, point
 `ACTRIUM_SUPRAMARK_DIR` to a Supramark checkout with its workspace dependencies
-and macOS parser dylib prepared. Use `react-native-svg` 15.15.3 in that checkout;
-its example's 15.12.1 pin fails to compile with macOS Fabric.
+and macOS parser dylib prepared. The macOS renderer uses the runtime's pinned
+`react-native-svg` dependency for both Guest SVG and Supramark.
 
 ```sh
 export ACTRIUM_SUPRAMARK_DIR=/path/to/supramark

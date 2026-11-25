@@ -3,16 +3,29 @@
 #import <React/RCTUIKit.h>
 #import <React/RCTScrollViewComponentView.h>
 
-BOOL ActriumRendererUsesTextCursor(NSView *hitView)
+BOOL ActriumRendererTracksHover(NSView *view)
 {
     using namespace facebook::react;
+    if (![view isKindOfClass:RCTViewComponentView.class]) return NO;
+    auto props = std::static_pointer_cast<const ViewProps>([(RCTViewComponentView *)view props]);
+    return props && (props->hostPlatformEvents[HostPlatformViewEvents::Offset::MouseEnter] ||
+                     props->hostPlatformEvents[HostPlatformViewEvents::Offset::MouseLeave]);
+}
+
+NSString *ActriumRendererCursorForHitView(NSView *hitView)
+{
+    using namespace facebook::react;
+    BOOL isText = NO;
     for (NSView *view = hitView; view; view = view.superview) {
-        if ([view isKindOfClass:NSTextView.class]) return YES;
+        if ([view isKindOfClass:NSTextView.class]) isText = YES;
         if (![view isKindOfClass:RCTViewComponentView.class]) continue;
         auto props = std::static_pointer_cast<const ViewProps>([(RCTViewComponentView *)view props]);
-        if (props && props->cursor != Cursor::Auto) return props->cursor == Cursor::Text;
+        if (!props || props->cursor == Cursor::Auto) continue;
+        if (props->cursor == Cursor::Pointer) return @"pointer";
+        if (props->cursor == Cursor::Text) return @"text";
+        return @"default";
     }
-    return NO;
+    return isText ? @"text" : @"default";
 }
 
 static NSScrollView *scrollViewForHit(NSView *hitView)

@@ -32,6 +32,9 @@ prepare_react_native_project!
 # keel sandbox engine: JSC for guest sandbox (Hermes is main runtime)
 ENV['KEEL_SANDBOX_ENGINE'] = 'jsc'
 
+# React Native uses the iOS codegen platform for the macOS renderer.
+ENV['ACTRIUM_MACOS_CODEGEN'] = '1'
+
 # Shared React Native configuration
 def use_actrium_react_native
   use_react_native!(
@@ -58,9 +61,10 @@ target 'ActriumRenderer' do
   platform :macos, '14.0'
   use_actrium_react_native
   pod 'ExpoSpeechRecognition', :path => File.join(ACTRIUM_RUNTIME_RELATIVE_PATH, 'node_modules/@boomsi/rn-speech-recognition/ios')
+  ENV['REACT_NATIVE_NODE_MODULES_DIR'] ||= File.join(ACTRIUM_RUNTIME_PATH, 'node_modules')
+  pod 'RNSVG', :path => File.join(ACTRIUM_RUNTIME_RELATIVE_PATH, 'node_modules/react-native-svg')
   if ENV['ACTRIUM_SUPRAMARK_DIR']
     supramark_root = File.realpath(ENV.fetch('ACTRIUM_SUPRAMARK_DIR'))
-    ENV['REACT_NATIVE_NODE_MODULES_DIR'] ||= File.join(supramark_root, 'node_modules')
     selection_root = File.join(supramark_root, 'packages/renderers/rn-selection/native/macos')
     if File.exist?(File.join(selection_root, 'SupramarkSelectionMetrics.podspec'))
       pod 'SupramarkSelectionMetrics', :path => selection_root
@@ -68,12 +72,6 @@ target 'ActriumRenderer' do
       Pod::UI.warn('SupramarkSelectionMetrics.podspec is missing from ACTRIUM_SUPRAMARK_DIR. Markdown selection will use React Native text metrics.')
     end
     pod 'SupramarkMarkdownNative', :path => File.join(supramark_root, 'crates/supramark-markdown/packages/react-native')
-    pod 'RNSVG', :path => File.dirname(
-      Pod::Executable.execute_command('node', [
-        '-p', 'require.resolve("react-native-svg/package.json", { paths: [process.argv[1]] })',
-        File.join(supramark_root, 'examples/react-native')
-      ]).strip
-    )
   end
 end
 
