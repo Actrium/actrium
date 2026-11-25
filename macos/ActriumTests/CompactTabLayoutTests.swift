@@ -25,19 +25,23 @@ struct CompactTabLayoutTests {
             tabStripWidth: 640
         )
         let newTab = try #require(frames.buttons[.newTab])
-        let history = try #require(frames.buttons[.history])
-        let bookmarks = try #require(frames.buttons[.bookmarks])
         let overview = try #require(frames.buttons[.overview])
 
+        // History and Bookmarks are library pages now; their header entries
+        // must not own a hit area.
+        #expect(frames.buttons[.history] == nil)
+        #expect(frames.buttons[.bookmarks] == nil)
+
         #expect(frames.tabStrip.maxX < newTab.minX)
-        #expect(newTab.maxX < history.minX)
-        #expect(history.maxX < bookmarks.minX)
-        #expect(bookmarks.maxX < overview.minX)
-        for frame in [newTab, history, bookmarks, overview] {
+        #expect(newTab.maxX < overview.minX)
+        #expect(overview.minX - newTab.maxX == CompactToolbarLayout.itemSpacing)
+        for frame in [newTab, overview] {
             #expect(frames.containsInteractivePoint(CGPoint(x: frame.midX, y: frame.midY)))
             #expect(!frames.containsInteractivePoint(CGPoint(x: frame.midX, y: 2)))
         }
-        #expect(!frames.containsInteractivePoint(CGPoint(x: (history.maxX + bookmarks.minX) / 2, y: history.midY)))
+        #expect(!frames.containsInteractivePoint(
+            CGPoint(x: (newTab.maxX + overview.minX) / 2, y: newTab.midY)
+        ))
     }
 
     @Test @MainActor func headerActionsCreateOrRefocusTheMatchingSystemTab() {
