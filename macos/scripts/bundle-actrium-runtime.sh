@@ -107,8 +107,14 @@ if [ ! -f "$REACT_NATIVE_CLI" ]; then
     exit 1
 fi
 
+NODE_BINARY="${NODE_BINARY:-node}"
+if ! command -v "$NODE_BINARY" >/dev/null 2>&1; then
+    echo "Error: Node.js executable '$NODE_BINARY' not found. Set NODE_BINARY in macos/.xcode.env.local or add node to PATH." >&2
+    exit 1
+fi
+
 # Apply the runtime log redaction even when dependency installation skipped lifecycle scripts.
-node scripts/patch-react-native-macos.js --runtime-props-only
+"$NODE_BINARY" scripts/patch-react-native-macos.js --runtime-props-only
 
 copy_assets_for_xcode() {
     local assets_dir="$GENERATED_ASSETS_DIR/assets"
@@ -136,7 +142,7 @@ bundle_target() {
     echo "   Output: $output_file"
 
     if [ "$DEV_MODE" = true ]; then
-        node "$REACT_NATIVE_CLI" bundle \
+        "$NODE_BINARY" "$REACT_NATIVE_CLI" bundle \
             --platform macos \
             --dev true \
             --entry-file "$entry_file" \
@@ -145,7 +151,7 @@ bundle_target() {
             --sourcemap-output "$output_file.map"
         echo "   ✅ Dev bundle created (with source map)"
     else
-        node "$REACT_NATIVE_CLI" bundle \
+        "$NODE_BINARY" "$REACT_NATIVE_CLI" bundle \
             --platform macos \
             --dev false \
             --entry-file "$entry_file" \

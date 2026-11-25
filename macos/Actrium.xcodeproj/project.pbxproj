@@ -555,7 +555,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ \"$CONFIGURATION\" = \"Debug\" ]; then\n  DEV_FLAG=\"--dev\"\nelse\n  DEV_FLAG=\"\"\nfi\n\"${SRCROOT}/scripts/bundle-actrium-runtime.sh\" --target system $DEV_FLAG\nRENDERER_RESOURCES=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nmkdir -p \"$RENDERER_RESOURCES\"\ncp \"${SRCROOT}/Actrium/Resources/system.jsbundle\" \"$RENDERER_RESOURCES/system.jsbundle\"\n";
+			shellScript = "set -e\nfor ENV_FILE in \"${SRCROOT}/.xcode.env\" \"${SRCROOT}/.xcode.env.local\"; do\n  if [ -f \"$ENV_FILE\" ]; then\n    . \"$ENV_FILE\"\n  fi\ndone\nif [ \"$CONFIGURATION\" = \"Debug\" ]; then\n  DEV_FLAG=\"--dev\"\nelse\n  DEV_FLAG=\"\"\nfi\n\"${SRCROOT}/scripts/bundle-actrium-runtime.sh\" --target system $DEV_FLAG\nRENDERER_RESOURCES=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}\"\nmkdir -p \"$RENDERER_RESOURCES\"\ncp \"${SRCROOT}/Actrium/Resources/system.jsbundle\" \"$RENDERER_RESOURCES/system.jsbundle\"\n";
 			showEnvVarsInLog = 0;
 		};
 		CBA3BCE34D80E77B0AABEFD0 /* [CP] Check Pods Manifest.lock */ = {
