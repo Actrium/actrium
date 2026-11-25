@@ -205,6 +205,7 @@ final class RendererProcessController {
     nonisolated static let fingerprintArgument = "--fingerprint"
     nonisolated static let ipcStdinArgument = "--ipc-stdin"
     nonisolated static let hostPidArgument = "--host-pid"
+    nonisolated static let attachmentCacheArgument = "--attachment-cache-directory"
 
     nonisolated static var isRendererProcess: Bool {
         ProcessInfo.processInfo.arguments.contains(rendererIdArgument)
@@ -261,6 +262,7 @@ final class RendererProcessController {
         let rendererId: String
         let fingerprint: String
         let hostPid: Int32
+        let attachmentDirectory: URL?
 
         static func parse(_ values: [String]) -> Arguments? {
             func value(after key: String) -> String? {
@@ -279,10 +281,13 @@ final class RendererProcessController {
                 return nil
             }
 
+            let attachmentPath = value(after: attachmentCacheArgument)
+            guard attachmentPath?.hasPrefix("/") != false else { return nil }
             return Arguments(
                 rendererId: rendererId,
                 fingerprint: fingerprint,
-                hostPid: hostPid
+                hostPid: hostPid,
+                attachmentDirectory: attachmentPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
             )
         }
     }
@@ -309,6 +314,8 @@ final class RendererProcessController {
     private var cancelledServiceEventSubscriptions: Set<UUID> = []
     private var fileImports: [String: (id: UUID, reloadKey: Int, reply: (GuestFileImportReply) -> Void)] = [:]
     private var guestMenus: [String: (call: GuestMenuCall, reply: (GuestMenuReply) -> Void)] = [:]
+    private let attachmentStorage: (cache: RendererAttachmentCache, lock: FileHandle)?
+    private var attachmentCache: RendererAttachmentCache? { attachmentStorage?.cache }
     private var attachmentPrepareReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentPrepareReply) -> Void)] = [:]
     private var attachmentChunkReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentChunkReply) -> Void)] = [:]
     private var attachmentUnregisterReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentUnregisterReply) -> Void)] = [:]
@@ -337,6 +344,14 @@ final class RendererProcessController {
         } catch {
             reply(GuestMenuReply(id: call.id, error: "Could not contact the menu host."))
         }
+    }
+
+    static func attachmentCache(for tabId: String) throws -> RendererAttachmentCache {
+        guard let controller = RendererProcessLifetime.shared.controller, controller.surfaces[tabId] != nil,
+              let cache = controller.attachmentCache else {
+            throw RendererAttachmentCache.Failure.unavailable
+        }
+        return cache
     }
 
     static func pickFiles(
@@ -593,9 +608,19 @@ final class RendererProcessController {
     }
     private let reactNativeHost = ServiceReactNativeHost.shared
     private var surfaces: [String: RendererTabSurface] = [:]
+    private var isTerminating = false
 
     private init(arguments: Arguments) {
         self.arguments = arguments
+        attachmentStorage = arguments.attachmentDirectory.flatMap { directory in
+            do {
+                let lock = try RendererAttachmentDirectory.acquireRendererLock(for: directory)
+                return (RendererAttachmentCache(directory: directory), lock)
+            } catch {
+                NSLog("Could not lock the renderer attachment cache: %@", error.localizedDescription)
+                return nil
+            }
+        }
         installRNMarkedTextGate()
         connection = IPCHelperConnection(
             tabId: arguments.rendererId,
@@ -886,6 +911,7 @@ final class RendererProcessController {
         if let pending = guestMenus[tabId], pending.call.reloadKey != Int(request.reloadKey) {
             cancelGuestMenu(tabId)
         }
+        attachmentCache?.load(tabId: tabId, reloadKey: Int(request.reloadKey))
         config["tabId"] = tabId
         if config["title"] == nil {
             config["title"] = request.title
@@ -1022,6 +1048,7 @@ final class RendererProcessController {
     private func destroyTab(_ tabId: String) {
         cancelFileImport(tabId)
         cancelGuestMenu(tabId)
+        attachmentCache?.close(tabId: tabId)
         failPendingAttachmentCalls(tabId: tabId)
         if let surface = surfaces.removeValue(forKey: tabId) {
             // Before the hierarchy is detached: afterwards backing.window is
@@ -1079,13 +1106,18 @@ final class RendererProcessController {
     }
 
     private func terminate(reason: String) {
+        guard !isTerminating else { return }
+        isTerminating = true
         NSLog("ActriumRenderer terminating: %@", reason)
         let tabIds = Array(surfaces.keys)
         for tabId in tabIds {
             destroyTab(tabId)
         }
         connection.disconnect()
-        NSApplication.shared.terminate(nil)
+        Task { @MainActor in
+            await attachmentCache?.finishClosing()
+            NSApplication.shared.terminate(nil)
+        }
     }
 
     private static func metrics() -> Actrium_Ipc_MetricsResponse {

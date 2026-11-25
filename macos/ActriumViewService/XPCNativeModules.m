@@ -105,6 +105,21 @@ RCT_EXTERN_METHOD(pick:(NSString *)tabId
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(pickCached:(NSString *)tabId
+                  reloadKey:(NSNumber *)reloadKey
+                  source:(NSString *)source
+                  accept:(NSArray *)accept
+                  multiple:(BOOL)multiple
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(cachedAttachment:(NSString *)tabId
+                  reloadKey:(NSNumber *)reloadKey
+                  action:(NSString *)action
+                  fileId:(NSString *)fileId
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 @end
 
 // MARK: - StartPageModule

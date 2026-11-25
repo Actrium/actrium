@@ -9,6 +9,7 @@ public struct GuestFileImportCall: Codable, Sendable {
 
     // Leave room for Base64, JSON and protobuf framing in the 10,000,000-byte IPC limit.
     public static let maxBytes = 7 * 1024 * 1024
+    public static let maxThumbnailBytes = 12 * 1024
 
     public enum Source: String, Codable, Sendable {
         case files
@@ -39,10 +40,14 @@ public struct GuestFileImportReply: Codable, Sendable {
     public struct File: Codable, Sendable {
         public let name: String
         public let data: Data
+        public let thumbnail: Data?
+        public let canPreview: Bool?
 
-        public init(name: String, data: Data) {
+        public init(name: String, data: Data, thumbnail: Data? = nil, canPreview: Bool? = nil) {
             self.name = name
             self.data = data
+            self.thumbnail = thumbnail
+            self.canPreview = canPreview
         }
     }
 

@@ -148,6 +148,17 @@ final class RendererProcessPool: ObservableObject {
     private var tabWorkerMap: [UUID: String] = [:]
     private let localStorage: RendererLocalStorage
     private let fileImport = RendererFileImport()
+    private lazy var attachmentStorage: (container: URL, lock: FileHandle)? = {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: ActriumRuntimePaths.appGroupID
+        ) else { return nil }
+        do {
+            return (container, try RendererAttachmentDirectory.acquireHostLock(in: container))
+        } catch {
+            NSLog("Could not prepare the Host attachment cache: %@", error.localizedDescription)
+            return nil
+        }
+    }()
     var documentWindow: ((UUID, Int) -> NSWindow?)?
     var fileImportWindow: ((UUID, Int) -> NSWindow?)?
     private var fingerprintWorkerMap: [String: String] = [:]
@@ -529,12 +540,19 @@ final class RendererProcessPool: ObservableObject {
 
         let process = Process()
         process.executableURL = executableURL
-        process.arguments = [
+        let attachmentDirectory = attachmentStorage.flatMap {
+            RendererAttachmentDirectory.url(rendererID: id, in: $0.container)
+        }
+        var arguments = [
             "--renderer-id", id,
             "--fingerprint", fingerprint ?? "prewarm",
             "--ipc-stdin",
             "--host-pid", String(ProcessInfo.processInfo.processIdentifier)
         ]
+        if let attachmentDirectory {
+            arguments += ["--attachment-cache-directory", attachmentDirectory.path]
+        }
+        process.arguments = arguments
         process.standardInput = childInput
 
         let worker = Worker(
@@ -546,6 +564,10 @@ final class RendererProcessPool: ObservableObject {
         configureCallbacks(for: worker)
 
         process.terminationHandler = { [weak self, weak worker] process in
+            if let attachmentDirectory {
+                do { try RendererAttachmentDirectory.remove(attachmentDirectory) }
+                catch { NSLog("Could not remove the exited renderer's attachment cache: %@", error.localizedDescription) }
+            }
             DispatchQueue.main.async {
                 guard let self, let worker else { return }
                 self.handleTermination(

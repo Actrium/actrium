@@ -294,6 +294,8 @@ describe('capability model data', () => {
       'service.attachmentUpload',
       'host:clipboard.write',
       'host:file-import.pick',
+      'host:file-import.openPreview',
+      'host:file-import.release',
       'host:local-storage.getItem',
       'host:local-storage.setItem',
       'host:local-storage.removeItem',

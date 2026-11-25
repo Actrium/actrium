@@ -118,6 +118,12 @@ export const FRONT_CAPABILITY_SPECS = {
     hostModule: 'host:file-import',
     hostMethod: 'pick',
   },
+  'host:file-import.openPreview': {
+    module: 'host:file-import', hostModule: 'host:file-import', hostMethod: 'openPreview',
+  },
+  'host:file-import.release': {
+    module: 'host:file-import', hostModule: 'host:file-import', hostMethod: 'release',
+  },
   'host:file-export.save': {
     module: 'host:file-export',
     hostModule: 'host:file-export',

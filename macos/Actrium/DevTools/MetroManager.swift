@@ -5,6 +5,8 @@ import os.log
 private let logger = OSLog(subsystem: "com.actro.devtools", category: "Metro")
 
 enum ActriumRuntimePaths {
+    static let appGroupID = "group.io.actrium.actro"
+
     static var runtimePath: String {
         if let override = ProcessInfo.processInfo.environment["ACTRIUM_RUNTIME_PATH"],
            !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -462,8 +464,6 @@ class MetroManager: ObservableObject {
         logs.removeAll()
     }
 
-    /// App Group for shared Metro config (XPC Service can read on startup)
-    private static let appGroupId = "group.io.actrium.actro"
     private static let metroHostKey = "metro.host"
     private static let metroPortKey = "metro.port"
 
@@ -473,7 +473,7 @@ class MetroManager: ObservableObject {
         guard let port = actualPort else { return }
 
         // 1. Write to shared UserDefaults (for XPC Service startup query)
-        if let sharedDefaults = UserDefaults(suiteName: Self.appGroupId) {
+        if let sharedDefaults = UserDefaults(suiteName: ActriumRuntimePaths.appGroupID) {
             sharedDefaults.set(address, forKey: Self.metroHostKey)
             sharedDefaults.set(Int(port), forKey: Self.metroPortKey)
             sharedDefaults.synchronize()

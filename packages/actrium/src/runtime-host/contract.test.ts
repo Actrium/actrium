@@ -33,6 +33,28 @@ const tell = service.tell as unknown as InputSchema;
 const on = service.on as unknown as EventSchema;
 const uploadAttachment = service.uploadAttachment as unknown as InputSchema;
 
+const cachedFileId = '824be89f-48d0-451e-b016-ef133fde55c2';
+
+test('cached picks return metadata and uploads accept the opaque ID only', () => {
+  const pick = descriptor('host:file-import', 'pick').schema!;
+  expect(pick.parseInput?.({ cache: true })).toMatchObject({ cache: true });
+  expect(pick.parseOutput?.({ files: [{ fileId: cachedFileId, name: 'original.png', size: 10 }] }))
+    .toEqual({ files: [{ fileId: cachedFileId, name: 'original.png', size: 10 }] });
+  const image = { fileId: cachedFileId, name: 'original.png', size: 10, canPreview: true };
+  expect(pick.parseOutput?.({ files: [image] })).toEqual({ files: [image] });
+  expect(() => pick.parseOutput?.({ files: [{ ...image, canPreview: 'yes' }] })).toThrow();
+  expect(uploadAttachment.schema?.parseInput?.({ fileId: cachedFileId, type: 'image' }))
+    .toMatchObject({ fileId: cachedFileId, type: 'image' });
+  expect(() => uploadAttachment.schema?.parseInput?.({ fileId: cachedFileId, filename: 'override.png', base64: 'AAEC' })).toThrow();
+  expect(() => pick.parseOutput?.({ files: [{ fileId: 'file:///private/image.png', name: 'image.png', size: 10 }] })).toThrow();
+});
+
+test('an undefined fileId preserves the legacy Base64 upload', () => {
+  const legacy = { filename: 'original.png', base64: 'AAEC' };
+  const parse = uploadAttachment.schema?.parseInput;
+  expect(parse?.({ ...legacy, fileId: undefined })).toEqual(parse?.(legacy));
+});
+
 describe('host:service contract', () => {
   test('call accepts a valid request and keeps the route opaque', () => {
     const parsed = call.schema?.parseInput?.({
@@ -347,5 +369,11 @@ describe('placeholder host module contracts', () => {
         descriptor(moduleId, exportName).schema?.parseOutput?.(output)
       ).toThrow();
     }
+  });
+
+  test('rejects a truncated file picker thumbnail', () => {
+    const parse = descriptor('host:file-import', 'pick').schema?.parseOutput;
+    const file = { name: 'photo.jpg', base64: 'AAEC', thumbnailBase64: '/9j/4AAQSkZJRg==' };
+    expect(() => parse?.({ files: [file] })).toThrow('JPEG thumbnail');
   });
 });

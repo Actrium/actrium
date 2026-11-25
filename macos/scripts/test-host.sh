@@ -20,6 +20,18 @@ xcrun swiftc -swift-version 5 -framework AppKit \
   "${PROJECT_ROOT}/Tests/RendererMouseTrackingRegression.swift" \
   -o "${TEST_DIR}/renderer-mouse-tracking"
 "${TEST_DIR}/renderer-mouse-tracking"
+IPC_SOURCES="${PROJECT_ROOT}/../packages/actrium-platform/apple/ActriumIPC/Sources/ActriumIPC"
+xcrun swiftc -module-cache-path "${TEST_DIR}/clang" -swift-version 5 -parse-as-library \
+  -module-name ActriumIPC -emit-module -emit-module-path "${TEST_DIR}/ActriumIPC.swiftmodule" \
+  -whole-module-optimization -emit-object -o "${TEST_DIR}/attachment-ipc.o" \
+  "${IPC_SOURCES}/RendererAttachmentDirectory.swift" "${IPC_SOURCES}/GuestFileImportCall.swift"
+xcrun swiftc -module-cache-path "${TEST_DIR}/clang" -swift-version 5 -I "${TEST_DIR}" \
+  "${TEST_DIR}/attachment-ipc.o" \
+  "${PROJECT_ROOT}/Actrium/MultiProcess/RendererAttachmentThumbnail.swift" \
+  "${PROJECT_ROOT}/ActriumViewService/RendererAttachmentCache.swift" \
+  "${PROJECT_ROOT}/Tests/RendererAttachmentCacheRegression.swift" \
+  -o "${TEST_DIR}/renderer-attachment-cache"
+"${TEST_DIR}/renderer-attachment-cache"
 
 # Exercise the Realm refresh models without building the full macOS app.
 REALM_TEST_DIR="${TEST_DIR}/RealmModels"
