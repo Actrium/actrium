@@ -17,7 +17,11 @@ final class GuestTTSModule: NSObject {
         DispatchQueue.main.async {
             do {
                 try self.playback.speak(sessionId: sessionId, text: text, locale: locale, voice: preference) {
-                    resolve(["status": $0.rawValue])
+                    if $0 == .failed {
+                        reject("tts_failed", "tts_failed: Text-to-speech playback stopped reporting progress.", nil)
+                    } else {
+                        resolve(["status": $0.rawValue])
+                    }
                 }
             } catch let error as GuestTTSError {
                 reject(error.rawValue, "\(error.rawValue): \(error.localizedDescription)", error)

@@ -65,7 +65,9 @@ export class GuestTTS {
   }
 
   async stop(): Promise<void> {
+    if (this.disposed) return;
     await this.options.authorize('host:tts.stop');
+    if (this.disposed) return;
     return this.cancel();
   }
 

@@ -94,8 +94,10 @@ export function stopReading() {
 
 `speak` accepts non-blank text and an optional language tag.
 The optional `voice` defaults to `'system'`. Available voices
-depend on the Mac. If the requested language and voice cannot be selected,
-`speak` rejects with `voice_unavailable`.
+depend on the Mac. Each authorized `speak` stops the Guest's previous playback,
+even if the new voice cannot be selected. An unavailable voice rejects with
+`voice_unavailable`. If playback reports no progress for 30 seconds, the Host
+stops it and `speak` rejects with `tts_failed`.
 
 `speak` resolves with `{ status: 'finished' }` after playback or
 `{ status: 'cancelled' }` if stopped or replaced. Call it again with the new

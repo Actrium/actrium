@@ -151,3 +151,26 @@ test('cancels a pending authorization on stop or disposal', async () => {
   await expect(dispatch.speak(input)).rejects.toThrow('session has ended');
   expect(bridge.speak).not.toHaveBeenCalled();
 });
+
+test('does not authorize or call native stop after disposal', async () => {
+  const authorize = mock(async (_capability: FrontCapability) => {});
+  const { guest, bridge } = setup(authorize);
+  const { tts } = guest();
+  await tts.dispose();
+  await tts.stop();
+  expect(authorize).not.toHaveBeenCalled();
+  expect(bridge.stop).toHaveBeenCalledTimes(1);
+});
+
+test('does not call native stop when disposed during authorization', async () => {
+  const grant = deferred<void>();
+  const authorize = mock((_capability: FrontCapability) => grant.promise);
+  const { guest, bridge } = setup(authorize);
+  const { tts } = guest();
+  const stop = tts.stop();
+  expect(authorize).toHaveBeenCalledWith('host:tts.stop');
+  await tts.dispose();
+  grant.resolve();
+  await stop;
+  expect(bridge.stop).toHaveBeenCalledTimes(1);
+});

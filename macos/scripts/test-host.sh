@@ -20,6 +20,11 @@ xcrun swiftc -swift-version 5 -framework AppKit \
   "${PROJECT_ROOT}/Tests/RendererMouseTrackingRegression.swift" \
   -o "${TEST_DIR}/renderer-mouse-tracking"
 "${TEST_DIR}/renderer-mouse-tracking"
+xcrun swiftc -module-cache-path "${TEST_DIR}/clang" -swift-version 6 -framework AVFoundation \
+  "${PROJECT_ROOT}/ActriumViewService/GuestTTSPlayback.swift" \
+  "${PROJECT_ROOT}/Tests/GuestTTSPlaybackRegression.swift" \
+  -o "${TEST_DIR}/guest-tts-playback"
+"${TEST_DIR}/guest-tts-playback"
 IPC_SOURCES="${PROJECT_ROOT}/../packages/actrium-platform/apple/ActriumIPC/Sources/ActriumIPC"
 xcrun swiftc -module-cache-path "${TEST_DIR}/clang" -swift-version 5 -parse-as-library \
   -module-name ActriumIPC -emit-module -emit-module-path "${TEST_DIR}/ActriumIPC.swiftmodule" \
