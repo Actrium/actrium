@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package upload;
+
+import "actr/options.proto";
+
+message FinishUploadRequest {
+  string stream_id = 1;
+  string mode = 2;
+}
+
+message FinishUploadResponse {
+  string file_id = 1;
+}
+
+message Empty {}
+
+service Upload {
+  rpc FinishUpload(FinishUploadRequest) returns (FinishUploadResponse) {
+    option (actr.reply_mode) = REPLY_MODE_EXPLICIT;
+  }
+  rpc Status(Empty) returns (Empty);
+}

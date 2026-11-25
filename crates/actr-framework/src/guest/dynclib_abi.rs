@@ -51,6 +51,8 @@ pub mod op {
     pub const HOST_UNREGISTER_STREAM: u32 = 6;
     pub const HOST_SEND_DATA_CHUNK: u32 = 7;
     pub const HOST_RESOLVE_DEPENDENCY: u32 = 8;
+    pub const HOST_CLAIM_REPLY: u32 = 9;
+    pub const HOST_COMPLETE_REPLY: u32 = 10;
     pub const GUEST_HANDLE: u32 = 101;
     pub const GUEST_DATA_CHUNK: u32 = 102;
     pub const GUEST_LIFECYCLE: u32 = 103;
@@ -333,6 +335,34 @@ pub struct GuestHandleV1 {
     pub rpc_envelope: Vec<u8>,
     #[prost(uint64, tag = "3")]
     pub bridge_token: u64,
+    #[prost(message, optional, tag = "4")]
+    pub reply: Option<GuestReplyContextV1>,
+}
+
+/// Host reply capability for an explicit RPC invocation.
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct GuestReplyContextV1 {
+    #[prost(bool, tag = "1")]
+    pub expects_response: bool,
+    #[prost(uint64, optional, tag = "2")]
+    pub remaining_budget_ns: Option<u64>,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct HostClaimReplyV1 {}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct HostCompleteReplyV1 {
+    #[prost(oneof = "HostReplyOutcomeV1", tags = "1, 2")]
+    pub outcome: Option<HostReplyOutcomeV1>,
+}
+
+#[derive(Clone, PartialEq, prost::Oneof)]
+pub enum HostReplyOutcomeV1 {
+    #[prost(bytes, tag = "1")]
+    Response(Vec<u8>),
+    #[prost(message, tag = "2")]
+    Error(ActrErrorV1),
 }
 
 /// Runtime host->guest DataChunk payload.
@@ -647,6 +677,16 @@ impl AbiPayload for HostUnregisterStreamV1 {
 impl AbiPayload for HostSendDataChunkV1 {
     const ABI_VERSION: u32 = version::V1;
     const OP: u32 = op::HOST_SEND_DATA_CHUNK;
+}
+
+impl AbiPayload for HostClaimReplyV1 {
+    const ABI_VERSION: u32 = version::V1;
+    const OP: u32 = op::HOST_CLAIM_REPLY;
+}
+
+impl AbiPayload for HostCompleteReplyV1 {
+    const ABI_VERSION: u32 = version::V1;
+    const OP: u32 = op::HOST_COMPLETE_REPLY;
 }
 
 impl AbiPayload for GuestHandleV1 {

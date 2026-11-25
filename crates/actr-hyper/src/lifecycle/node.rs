@@ -1138,9 +1138,11 @@ pub(crate) struct Inner {
     /// workloads report `Explicit` for the FFI delivery boundary, while
     /// Component Model packages use the same host-side mode because their
     /// generated dispatchers call the WIT `reply` import for both RETURN and
-    /// EXPLICIT routes. DynClib remains on the legacy RETURN boundary until
-    /// its ABI grows an equivalent reply operation.
+    /// EXPLICIT routes.
     pub(crate) linked_handle: Option<Arc<dyn crate::workload::LinkedWorkloadHandle>>,
+
+    #[cfg(feature = "dynclib-engine")]
+    native_reply_modes: Option<crate::dynclib::DynclibReplyModes>,
 
     /// Component packages opt into the explicit reply boundary only when the
     /// compiled component imports `actr:workload/host@0.6.0`. V2 components
@@ -2560,6 +2562,10 @@ impl Inner {
             .as_ref()
             .map(|h| h.reply_mode_for_route(&envelope.route_key))
             .unwrap_or_else(|| {
+                #[cfg(feature = "dynclib-engine")]
+                if let Some(modes) = &self.native_reply_modes {
+                    return modes.for_route(&envelope.route_key);
+                }
                 if self.package_uses_explicit_reply_boundary {
                     actr_protocol::ReplyMode::Explicit
                 } else {
@@ -2999,10 +3005,8 @@ impl Inner {
         }
 
         // Retain a clone of the linked handle so the pump can query
-        // `reply_mode_for_route` before dispatch (RFC-0323). Only the `Linked`
-        // variant carries a host-callable dispatcher; Component Model guests
-        // use the explicit host boundary selected above, while DynClib keeps
-        // its legacy RETURN boundary.
+        // `reply_mode_for_route` before dispatch (RFC-0323). Native guests
+        // that expose a generated lookup also select a mode per route.
         let linked_handle = match &workload {
             crate::workload::Workload::Linked(handle) => Some(handle.clone()),
             #[cfg(feature = "wasm-engine")]
@@ -3011,6 +3015,11 @@ impl Inner {
             crate::workload::Workload::DynClib(_) => None,
         };
 
+        #[cfg(feature = "dynclib-engine")]
+        let native_reply_modes = match &workload {
+            crate::workload::Workload::DynClib(workload) => workload.reply_modes(),
+            _ => None,
+        };
         let package_uses_explicit_reply_boundary = workload.uses_explicit_reply_boundary();
 
         let runner_mode = if scheduler_on {
@@ -3093,6 +3102,8 @@ impl Inner {
             actrium_peer: None,
             workload_dispatch: Arc::new(workload_dispatch),
             linked_handle,
+            #[cfg(feature = "dynclib-engine")]
+            native_reply_modes,
             package_uses_explicit_reply_boundary,
             dispatch_scheduler,
             conflict_keys,

@@ -955,7 +955,9 @@ impl TestDynclibWorkload {
         ctx: InvocationContext,
         call_executor: &HostAbiFn,
     ) -> Result<Vec<u8>, crate::dynclib::DynclibError> {
-        self.inner.handle(request_bytes, ctx, call_executor).await
+        self.inner
+            .handle(request_bytes, ctx, call_executor, None)
+            .await
     }
 
     pub async fn call_hook_event(

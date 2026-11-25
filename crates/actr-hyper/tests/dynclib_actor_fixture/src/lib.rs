@@ -16,6 +16,12 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use std::time::UNIX_EPOCH;
 
+mod upload_fixture;
+use upload_fixture::{
+    Upload,
+    dispatcher::{ActrDispatcher as UploadDispatcher, ActrWorkload as UploadWorkload},
+};
+
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
 struct TypedDoubleRequest {
     #[prost(int32, tag = "1")]
@@ -138,6 +144,10 @@ pub struct DoubleDispatcher;
 impl MessageDispatcher for DoubleDispatcher {
     type Workload = DoubleActor;
 
+    fn reply_mode_for_route(route_key: &str) -> actr_protocol::ReplyMode {
+        UploadDispatcher::<Upload>::reply_mode_for_route(route_key)
+    }
+
     async fn dispatch<C: Context>(
         _workload: &Self::Workload,
         envelope: RpcEnvelope,
@@ -241,6 +251,9 @@ impl MessageDispatcher for DoubleDispatcher {
             "test/record_hook" => {
                 let payload = envelope.payload.unwrap_or_default();
                 Ok(Bytes::from(payload))
+            }
+            _ if envelope.route_key.starts_with("upload.") => {
+                UploadDispatcher::dispatch(&UploadWorkload::new(Upload), envelope, ctx).await
             }
             _ => Err(ActrError::UnknownRoute(envelope.route_key)),
         }

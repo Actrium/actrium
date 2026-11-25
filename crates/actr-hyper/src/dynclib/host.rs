@@ -24,14 +24,20 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::ptr;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
-use actr_framework::guest::dynclib_abi::{self as guest_abi, AbiReply, InitPayloadV1};
+use actr_framework::guest::dynclib_abi::{
+    self as guest_abi, AbiPayload, AbiReply, GuestReplyContextV1, HostClaimReplyV1,
+    HostCompleteReplyV1, HostReplyOutcomeV1, InitPayloadV1,
+};
+use actr_framework::{Context as _, Deliver, ReplyOutcome};
 use libloading::Library;
 
 use actr_framework::guest::vtable::HostVTable;
-use actr_protocol::{ActrId, DataChunk};
+use actr_protocol::{ActrError, ActrId, DataChunk, ReplyMode};
+
+use crate::context::RuntimeContext;
 
 use crate::workload::{
     HostAbiFn, HostOperation, HostOperationResult, InvocationContext, PackageHookEvent,
@@ -65,6 +71,26 @@ type FreeResponseFn = unsafe extern "C" fn(ptr: *mut u8, len: usize);
 
 /// `actr_shutdown() -> i32`
 type ShutdownFn = unsafe extern "C" fn() -> i32;
+type ReplyModeFn = unsafe extern "C" fn(route: *const u8, len: usize) -> i32;
+
+/// The optional stateless lookup can run during admission, independently of
+/// the guest's serialized actor entry points.
+pub(crate) struct DynclibReplyModes {
+    library: Weak<Library>,
+    lookup: ReplyModeFn,
+}
+
+impl DynclibReplyModes {
+    pub(crate) fn for_route(&self, route: &str) -> ReplyMode {
+        let Some(_library) = self.library.upgrade() else {
+            return ReplyMode::Return;
+        };
+        // SAFETY: the library is mapped for this call and the route is
+        // readable for its duration. This export never accesses actor state.
+        let mode = unsafe { (self.lookup)(route.as_ptr(), route.len()) };
+        ReplyMode::try_from(mode).unwrap_or(ReplyMode::Return)
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Retained host bridge registry
@@ -74,6 +100,14 @@ struct BridgeEntry {
     executor: HostAbiFn,
     runtime: tokio::runtime::Handle,
     retain_count: usize,
+    reply: Option<Arc<NativeReply>>,
+}
+
+struct NativeReply {
+    deliver: Arc<dyn Deliver>,
+    claimed: Arc<AtomicBool>,
+    request_id: String,
+    expects_response: bool,
 }
 
 fn bridge_registry() -> &'static Mutex<HashMap<u64, BridgeEntry>> {
@@ -81,7 +115,11 @@ fn bridge_registry() -> &'static Mutex<HashMap<u64, BridgeEntry>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn register_bridge(executor: &HostAbiFn, runtime: tokio::runtime::Handle) -> u64 {
+fn register_bridge(
+    executor: &HostAbiFn,
+    runtime: tokio::runtime::Handle,
+    reply: Option<Arc<NativeReply>>,
+) -> u64 {
     static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
     let token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
     bridge_registry()
@@ -93,6 +131,7 @@ fn register_bridge(executor: &HostAbiFn, runtime: tokio::runtime::Handle) -> u64
                 executor: executor.clone(),
                 runtime,
                 retain_count: 1,
+                reply,
             },
         );
     token
@@ -132,8 +171,12 @@ struct BridgeRegistration {
 
 impl BridgeRegistration {
     fn new(executor: &HostAbiFn) -> Self {
+        Self::with_reply(executor, None)
+    }
+
+    fn with_reply(executor: &HostAbiFn, reply: Option<Arc<NativeReply>>) -> Self {
         Self {
-            token: register_bridge(executor, tokio::runtime::Handle::current()),
+            token: register_bridge(executor, tokio::runtime::Handle::current(), reply),
         }
     }
 }
@@ -224,6 +267,51 @@ unsafe extern "C" fn vtable_release_context(token: u64) {
     release_bridge(token);
 }
 
+/// Reply submission runs on the guest thread without waiting for any host
+/// task. The host's Deliver schedules the actual transport and dedup work.
+fn reply_operation(token: u64, frame: guest_abi::AbiFrame) -> Result<(), i32> {
+    if frame.abi_version != guest_abi::version::V1 {
+        return Err(guest_abi::code::PROTOCOL_ERROR);
+    }
+    let (reply, runtime) = bridge_registry()
+        .lock()
+        .ok()
+        .and_then(|registry| {
+            let entry = registry.get(&token)?;
+            Some((entry.reply.clone()?, entry.runtime.clone()))
+        })
+        .ok_or(guest_abi::code::UNSUPPORTED_OP)?;
+
+    if frame.op == guest_abi::op::HOST_CLAIM_REPLY {
+        HostClaimReplyV1::decode_payload(&frame.payload)?;
+        return reply
+            .claimed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| ())
+            .map_err(|_| guest_abi::code::PROTOCOL_ERROR);
+    }
+    if !reply.claimed.load(Ordering::Acquire) {
+        return Err(guest_abi::code::PROTOCOL_ERROR);
+    }
+    let result = match HostCompleteReplyV1::decode_payload(&frame.payload)?.outcome {
+        Some(HostReplyOutcomeV1::Response(bytes)) => Ok(bytes.into()),
+        Some(HostReplyOutcomeV1::Error(error)) => {
+            Err(ActrError::try_from(error).map_err(|_| guest_abi::code::PROTOCOL_ERROR)?)
+        }
+        None => return Err(guest_abi::code::PROTOCOL_ERROR),
+    };
+
+    // Deliver uses the current runtime when available. Select the host runtime
+    // explicitly, including calls made inside a guest runtime or a destructor.
+    let _entered = runtime.enter();
+    reply.deliver.deliver(ReplyOutcome {
+        request_id: reply.request_id.clone(),
+        result,
+        emit_response: reply.expects_response,
+    });
+    Ok(())
+}
+
 unsafe extern "C" fn vtable_invoke(
     token: u64,
     frame_ptr: *const u8,
@@ -241,12 +329,20 @@ unsafe extern "C" fn vtable_invoke(
         Err(code) => return code,
     };
 
-    let pending = match decode_host_operation(frame) {
-        Ok(pending) => pending,
-        Err(code) => return code,
+    let result = match frame.op {
+        guest_abi::op::HOST_CLAIM_REPLY | guest_abi::op::HOST_COMPLETE_REPLY => {
+            match reply_operation(token, frame) {
+                Ok(()) => HostOperationResult::Done,
+                Err(code) => HostOperationResult::AbiError(code),
+            }
+        }
+        _ => match decode_host_operation(frame) {
+            Ok(pending) => trampoline_execute(token, pending),
+            Err(code) => return code,
+        },
     };
 
-    let reply = match trampoline_execute(token, pending) {
+    let reply = match result {
         HostOperationResult::Bytes(bytes) => AbiReply {
             abi_version: guest_abi::version::V1,
             status: guest_abi::code::SUCCESS,
@@ -358,6 +454,7 @@ pub struct DynclibHost {
     handle_fn: HandleFn,
     free_response_fn: FreeResponseFn,
     shutdown_fn: ShutdownFn,
+    reply_mode_fn: Option<ReplyModeFn>,
 }
 
 impl std::fmt::Debug for DynclibHost {
@@ -434,6 +531,12 @@ impl DynclibHost {
             *sym
         };
 
+        // SAFETY: new guests export the versioned signature defined by entry!.
+        // Older guests have no symbol and continue to return dispatch bytes.
+        let reply_mode_fn = unsafe { library.get::<ReplyModeFn>(b"actr_reply_mode_v1\0") }
+            .ok()
+            .map(|symbol| *symbol);
+
         tracing::info!(path = %path.display(), "dynclib symbols resolved successfully");
 
         Ok(Self {
@@ -442,6 +545,7 @@ impl DynclibHost {
             handle_fn,
             free_response_fn,
             shutdown_fn,
+            reply_mode_fn,
         })
     }
 
@@ -651,6 +755,11 @@ impl DynclibInstance {
             ))
         })?;
 
+        if reply.status == guest_abi::code::ACTR_ERROR {
+            return Err(DynclibError::GuestError(guest_abi::reply_to_actr_error(
+                reply,
+            )));
+        }
         if reply.status != guest_abi::code::SUCCESS {
             let message = String::from_utf8(reply.payload)
                 .unwrap_or_else(|_| format!("guest returned status {}", reply.status));
@@ -665,15 +774,39 @@ impl DynclibInstance {
         request_bytes: &[u8],
         ctx: InvocationContext,
         call_executor: &HostAbiFn,
+        runtime_ctx: Option<&RuntimeContext>,
     ) -> DynclibResult<Vec<u8>> {
-        let bridge = BridgeRegistration::new(call_executor);
+        let reply = runtime_ctx.and_then(|ctx| {
+            Some(Arc::new(NativeReply {
+                deliver: ctx.reply_deliver()?,
+                claimed: ctx.reply_claimed_marker()?,
+                request_id: ctx.request_id().to_owned(),
+                expects_response: ctx.expects_response(),
+            }))
+        });
+        let reply_context = reply.as_ref().map(|reply| GuestReplyContextV1 {
+            expects_response: reply.expects_response,
+            remaining_budget_ns: runtime_ctx
+                .and_then(|ctx| ctx.reply_deadline())
+                .map(crate::lifecycle::dedup::remaining_reply_budget)
+                .map(|budget| u64::try_from(budget.as_nanos()).unwrap_or(u64::MAX)),
+        });
+        let bridge = BridgeRegistration::with_reply(call_executor, reply.clone());
         let request_owned =
-            encode_guest_handle_request(request_bytes, ctx, bridge.token).map_err(|code| {
-                DynclibError::DispatchFailed(format!(
-                    "guest handle frame serialization failed: {code}"
-                ))
-            })?;
-        self.handle_encoded_request(request_owned).await
+            encode_guest_handle_request(request_bytes, ctx, bridge.token, reply_context).map_err(
+                |code| {
+                    DynclibError::DispatchFailed(format!(
+                        "guest handle frame serialization failed: {code}"
+                    ))
+                },
+            )?;
+        let response = self.handle_encoded_request(request_owned).await?;
+        if reply.is_some_and(|reply| !reply.claimed.load(Ordering::Acquire)) {
+            return Err(DynclibError::ProtocolError(
+                "native explicit dispatch completed without claiming its reply".into(),
+            ));
+        }
+        Ok(response)
     }
 
     pub(crate) async fn handle_data_chunk(
@@ -849,14 +982,22 @@ impl Drop for DynclibInstance {
 }
 
 impl DynClibWorkload {
+    pub(crate) fn reply_modes(&self) -> Option<DynclibReplyModes> {
+        Some(DynclibReplyModes {
+            library: Arc::downgrade(&self._host._library),
+            lookup: self._host.reply_mode_fn?,
+        })
+    }
+
     pub(crate) async fn handle(
         &mut self,
         request_bytes: &[u8],
         ctx: InvocationContext,
         call_executor: &HostAbiFn,
+        runtime_ctx: Option<&RuntimeContext>,
     ) -> DynclibResult<Vec<u8>> {
         self.instance
-            .handle(request_bytes, ctx, call_executor)
+            .handle(request_bytes, ctx, call_executor, runtime_ctx)
             .await
     }
 

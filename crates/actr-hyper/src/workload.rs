@@ -12,7 +12,9 @@ use actr_framework::guest::dynclib_abi::{
     HostResolveDependencyV1, HostSendDataChunkV1, HostTellV1, HostUnregisterStreamV1,
 };
 #[cfg(feature = "dynclib-engine")]
-use actr_framework::guest::dynclib_abi::{AbiPayload, GuestHandleV1, GuestHookV1};
+use actr_framework::guest::dynclib_abi::{
+    AbiPayload, GuestHandleV1, GuestHookV1, GuestReplyContextV1,
+};
 use actr_framework::{
     BackpressureEvent, CredentialEvent, ErrorEvent, MessageDispatcher, PeerEvent,
     Workload as FrameworkWorkload,
@@ -758,10 +760,13 @@ impl Workload {
                 Workload::DynClib(workload) => {
                     let request_bytes = envelope.encode_to_vec();
                     workload
-                        .handle(&request_bytes, invocation, _host_abi)
+                        .handle(&request_bytes, invocation, _host_abi, Some(&ctx))
                         .await
                         .map(Bytes::from)
-                        .map_err(|e| ActrError::Internal(format!("workload dispatch failed: {e}")))
+                        .map_err(|error| match error {
+                            crate::dynclib::DynclibError::GuestError(error) => error,
+                            _ => ActrError::Internal(format!("workload dispatch failed: {error}")),
+                        })
                 }
             }
         })
@@ -899,11 +904,13 @@ pub(crate) fn encode_guest_handle_request(
     request_bytes: &[u8],
     ctx: InvocationContext,
     bridge_token: u64,
+    reply: Option<GuestReplyContextV1>,
 ) -> Result<Vec<u8>, i32> {
     let request = GuestHandleV1 {
         ctx,
         rpc_envelope: request_bytes.to_vec(),
         bridge_token,
+        reply,
     };
     let frame = request.to_frame()?;
     guest_abi::encode_message(&frame)

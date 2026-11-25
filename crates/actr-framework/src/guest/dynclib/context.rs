@@ -1,13 +1,17 @@
 //! Dynclib guest-side `Context` implementation backed by the compressed ABI.
 
 use crate::guest::dynclib_abi::{
-    self as abi, AbiPayload, AbiReply, GuestDataChunkV1, HostCallRawV1, HostCallV1, HostDiscoverV1,
-    HostRegisterStreamV1, HostResolveDependencyV1, HostSendDataChunkV1, HostTellV1,
+    self as abi, AbiPayload, AbiReply, GuestDataChunkV1, GuestReplyContextV1, HostCallRawV1,
+    HostCallV1, HostClaimReplyV1, HostCompleteReplyV1, HostDiscoverV1, HostRegisterStreamV1,
+    HostReplyOutcomeV1, HostResolveDependencyV1, HostSendDataChunkV1, HostTellV1,
     HostUnregisterStreamV1, InvocationContextV1, abi_error_to_actr, dest_to_v1,
     reply_to_actr_error,
 };
 use crate::guest::vtable::HostVTable;
-use crate::{Context, Dest, LogLevel, MaybeSendBoxFuture, MaybeSendSync, MediaSample};
+use crate::{
+    Context, Deliver, Dest, LogLevel, MaybeSendBoxFuture, MaybeSendSync, MediaSample,
+    ReplyDeadline, ReplyOutcome,
+};
 use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, DataChunk, PayloadType};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -24,6 +28,33 @@ pub struct DynclibContext {
     self_id: ActrId,
     caller_id: Option<ActrId>,
     request_id: String,
+    reply: Option<DynclibReplyContext>,
+}
+
+#[derive(Clone)]
+struct DynclibReplyContext {
+    expects_response: bool,
+    deadline: Option<ReplyDeadline>,
+}
+
+struct DynclibReplyDeliver(DynclibContext);
+
+impl Deliver for DynclibReplyDeliver {
+    fn deliver(&self, outcome: ReplyOutcome) {
+        let outcome = match outcome.result {
+            Ok(bytes) => HostReplyOutcomeV1::Response(bytes.to_vec()),
+            Err(error) => HostReplyOutcomeV1::Error(error.into()),
+        };
+        let payload = HostCompleteReplyV1 {
+            outcome: Some(outcome),
+        };
+        if let Err(error) = self.0.invoke_reply(&payload) {
+            self.0.log(
+                LogLevel::Warn,
+                &format!("native reply submission failed: {error}"),
+            );
+        }
+    }
 }
 
 unsafe impl Send for DynclibContext {}
@@ -92,7 +123,19 @@ impl DynclibContext {
             self_id: ctx.self_id,
             caller_id: ctx.caller_id,
             request_id: ctx.request_id,
+            reply: None,
         })
+    }
+
+    #[doc(hidden)]
+    pub fn with_reply(mut self, reply: Option<GuestReplyContextV1>) -> Self {
+        self.reply = reply.map(|reply| DynclibReplyContext {
+            expects_response: reply.expects_response,
+            deadline: reply.remaining_budget_ns.and_then(|budget| {
+                ReplyDeadline::now().checked_add(std::time::Duration::from_nanos(budget))
+            }),
+        });
+        self
     }
 
     fn vt(&self) -> &HostVTable {
@@ -100,12 +143,30 @@ impl DynclibContext {
     }
 
     fn invoke_frame(&self, frame: abi::AbiFrame) -> Result<AbiReply, ActrError> {
+        let token =
+            crate::guest::dynclib::runtime::active_bridge_token().unwrap_or(self.bridge_token);
+        self.invoke_with_token(frame, token)
+    }
+
+    fn invoke_reply(&self, payload: &impl AbiPayload) -> Result<(), ActrError> {
+        let frame = payload.to_frame().map_err(abi_error_to_actr)?;
+        // A reply belongs to its original RPC, even when sent inside a later
+        // RPC or DataStream callback with a different active bridge token.
+        let reply = self.invoke_with_token(frame, self.bridge_token)?;
+        if reply.status != abi::code::SUCCESS {
+            return Err(reply_to_actr_error(reply));
+        }
+        Ok(())
+    }
+
+    fn invoke_with_token(
+        &self,
+        frame: abi::AbiFrame,
+        bridge_token: u64,
+    ) -> Result<AbiReply, ActrError> {
         let frame_bytes = abi::encode_message(&frame).map_err(abi_error_to_actr)?;
         let mut reply_ptr: *mut u8 = std::ptr::null_mut();
         let mut reply_len: usize = 0;
-
-        let bridge_token =
-            crate::guest::dynclib::runtime::active_bridge_token().unwrap_or(self.bridge_token);
         let code = unsafe {
             (self.vt().invoke)(
                 bridge_token,
@@ -150,6 +211,7 @@ impl Clone for DynclibContext {
             self_id: self.self_id.clone(),
             caller_id: self.caller_id.clone(),
             request_id: self.request_id.clone(),
+            reply: self.reply.clone(),
         }
     }
 }
@@ -174,6 +236,28 @@ impl Context for DynclibContext {
 
     fn request_id(&self) -> &str {
         &self.request_id
+    }
+
+    fn reply_deliver(&self) -> Option<Arc<dyn Deliver>> {
+        self.reply.as_ref()?;
+        let context = self.clone();
+        context
+            .retained
+            .then(|| Arc::new(DynclibReplyDeliver(context)) as Arc<dyn Deliver>)
+    }
+
+    fn claim_reply(&self) -> bool {
+        self.reply.is_some() && self.invoke_reply(&HostClaimReplyV1 {}).is_ok()
+    }
+
+    fn reply_deadline(&self) -> Option<ReplyDeadline> {
+        self.reply.as_ref()?.deadline
+    }
+
+    fn expects_response(&self) -> bool {
+        self.reply
+            .as_ref()
+            .is_none_or(|reply| reply.expects_response)
     }
 
     /// Override the default `Context::log` to route the record across the FFI

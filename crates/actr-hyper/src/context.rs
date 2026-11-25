@@ -235,7 +235,7 @@ impl RuntimeContext {
         true
     }
 
-    #[cfg(feature = "wasm-engine")]
+    #[cfg(any(feature = "wasm-engine", feature = "dynclib-engine"))]
     pub(crate) fn reply_claimed_marker(&self) -> Option<Arc<AtomicBool>> {
         self.reply_claimed.clone()
     }

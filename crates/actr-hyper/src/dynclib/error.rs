@@ -20,6 +20,9 @@ pub enum DynclibError {
     #[error("dispatch failed: {0}")]
     DispatchFailed(String),
 
+    #[error("guest RPC failed: {0}")]
+    GuestError(actr_protocol::ActrError),
+
     #[error("protocol error: {0}")]
     ProtocolError(String),
 }

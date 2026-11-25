@@ -51,7 +51,7 @@ pub(crate) fn scoped_reply_deadline(deadline: tokio::time::Instant) -> Instant {
     now + deadline.saturating_duration_since(tokio::time::Instant::now())
 }
 
-#[cfg(feature = "wasm-engine")]
+#[cfg(any(feature = "wasm-engine", feature = "dynclib-engine"))]
 pub(crate) fn remaining_reply_budget(deadline: Instant) -> Duration {
     deadline.saturating_duration_since(Instant::now())
 }
