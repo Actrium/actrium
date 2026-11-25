@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use actr_framework::{Bytes, Context, Dest, MessageDispatcher, Workload};
+use actr_framework::{Bytes, Context, Dest, MessageDispatcher, WebRtcNetworkPath, Workload};
 use actr_hyper::actrium::ActriumAttachParams;
 use actr_hyper::test_support::TestSignalingServer;
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
@@ -401,16 +401,13 @@ async fn start_front_node(server: &TestSignalingServer, dir: &TempDir) -> ActrRe
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn attach_and_session_signed_business_call_over_verified_relay() {
+async fn session_traffic_stays_on_verified_relay_with_sendable_direct_rtc() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer()
         .try_init();
     let mut server = TestSignalingServer::start_with_relay().await.unwrap();
     server.enable_actor_certificates();
-    // Block SDP offer/answer/ICE forwarding so data can only flow over the
-    // verified Actor channel on the relay (no legacy WebRTC bypass).
-    server.pause_forwarding();
 
     let service_dir = TempDir::new().unwrap();
     let front_dir = TempDir::new().unwrap();
@@ -425,8 +422,48 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     .await
     .expect("both nodes authenticate their relay sockets");
 
+    // Start peer negotiation without creating an Actrium session. The remote
+    // Guard may reject this unsigned Tell; its only purpose is to materialize
+    // both routes before Attach chooses the channel for its signed request.
+    front
+        .app_context()
+        .await
+        .tell_raw(
+            &Dest::Peer(service_actor_id.clone()),
+            "transport.probe".into(),
+            PayloadType::RpcReliable,
+            Bytes::new(),
+        )
+        .await
+        .expect("start peer route negotiation");
+    let mut rtc_status = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(status) = front.subscribe_rtc_peer_status(&service_actor_id).await {
+                break status;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the direct RTC controller exists");
+    tokio::time::timeout(Duration::from_secs(30), async move {
+        loop {
+            let snapshot = rtc_status.borrow_and_update().clone();
+            if snapshot.sendable && snapshot.network_path == WebRtcNetworkPath::Direct {
+                break;
+            }
+            rtc_status
+                .changed()
+                .await
+                .expect("RTC status stays available");
+        }
+    })
+    .await
+    .expect("higher-priority direct RTC is sendable before Attach");
+
     // The peer handshake may still be in flight; Attach retries until the
-    // verified Actor channel exists on both ends.
+    // verified Actor channel exists on both ends. Every attempt must stay on
+    // that channel even though direct RTC can accept ordinary RPC bytes.
     let session = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             match front

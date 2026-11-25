@@ -14,8 +14,8 @@ use crate::transport::correlation::PendingRequestsMap;
 use crate::transport::correlation::{CompleteOutcome, RpcCorrelation};
 use crate::transport::{
     DeliveryProgress, DeliveryProgressCell, Dest, DestTransportRef, PayloadTypeExt,
-    PeerSendAttempt, PeerTransport, RpcDeadline, SentTransportSlot, WireIdentity,
-    new_delivery_progress_cell, observed_delivery_progress,
+    PeerSendAttempt, PeerTransport, RpcDeadline, SentTransportSlot, VerifiedPeerContext,
+    WireIdentity, new_delivery_progress_cell, observed_delivery_progress,
 };
 use actr_framework::Bytes;
 use actr_framework::MediaSample;
@@ -1206,6 +1206,7 @@ impl PeerGate {
         record: Option<&SentTransportSlot>,
         operation_id: &str,
         progress_sink: Option<&DeliveryProgressCell>,
+        required_channel: Option<&VerifiedPeerContext>,
     ) -> ActorResult<DestTransportRef> {
         let policy = payload_type.retry_policy();
         self.send_with_retry_policy_record_identity(
@@ -1217,6 +1218,7 @@ impl PeerGate {
             record,
             Some(operation_id),
             progress_sink,
+            required_channel,
             None::<fn(Option<WireIdentity>)>,
         )
         .await
@@ -1241,12 +1243,14 @@ impl PeerGate {
             None,
             operation_id,
             None,
+            None,
             None::<fn(Option<WireIdentity>)>,
         )
         .await
         .map(|_| ())
     }
 
+    #[allow(clippy::too_many_arguments)] // Keeps delivery and proof constraints explicit.
     async fn attempt_send(
         &self,
         dest: &Dest,
@@ -1255,6 +1259,7 @@ impl PeerGate {
         admission: SendAdmission,
         record: Option<&SentTransportSlot>,
         progress_sink: Option<&DeliveryProgressCell>,
+        required_channel: Option<&VerifiedPeerContext>,
     ) -> GateSendAttempt {
         match admission {
             SendAdmission::Normal => {
@@ -1264,7 +1269,14 @@ impl PeerGate {
                     proven_pre_send,
                 } = self
                     .transport_manager
-                    .send_with_progress(dest, payload_type, data, record, progress_sink)
+                    .send_with_progress_on_channel(
+                        dest,
+                        payload_type,
+                        data,
+                        record,
+                        progress_sink,
+                        required_channel,
+                    )
                     .await;
                 GateSendAttempt {
                     result: result.map(Some).map_err(ActrError::from),
@@ -1275,7 +1287,14 @@ impl PeerGate {
             SendAdmission::ExistingOnly => {
                 let attempt = self
                     .transport_manager
-                    .send_existing_with_progress(dest, payload_type, data, record, progress_sink)
+                    .send_existing_with_progress_on_channel(
+                        dest,
+                        payload_type,
+                        data,
+                        record,
+                        progress_sink,
+                        required_channel,
+                    )
                     .await;
                 GateSendAttempt {
                     result: attempt.result.map_err(ActrError::from),
@@ -1306,6 +1325,7 @@ impl PeerGate {
         record: Option<&SentTransportSlot>,
         operation_id: Option<&str>,
         progress_sink: Option<&DeliveryProgressCell>,
+        required_channel: Option<&VerifiedPeerContext>,
     ) -> ActorResult<DestTransportRef> {
         // Re-attempting a proven `NotAttempted` failure cannot duplicate
         // delivery (nothing entered a transport), so a single immediate
@@ -1321,7 +1341,15 @@ impl PeerGate {
         loop {
             let admission = self.tighten_with_current_projection(admission)?;
             let attempt = self
-                .attempt_send(dest, payload_type, data, admission, record, progress_sink)
+                .attempt_send(
+                    dest,
+                    payload_type,
+                    data,
+                    admission,
+                    record,
+                    progress_sink,
+                    required_channel,
+                )
                 .await;
             match attempt.result {
                 Ok(Some(identity)) => return Ok(identity),
@@ -1360,6 +1388,7 @@ impl PeerGate {
         record: Option<&SentTransportSlot>,
         operation_id: Option<&str>,
         progress_sink: Option<&DeliveryProgressCell>,
+        required_channel: Option<&VerifiedPeerContext>,
         mut on_first_attempt_resolved: Option<impl FnMut(Option<WireIdentity>) + Send>,
     ) -> ActorResult<DestTransportRef> {
         let mut delay = policy.initial_delay;
@@ -1368,7 +1397,15 @@ impl PeerGate {
         loop {
             admission = self.tighten_with_current_projection(admission)?;
             let send_attempt = self
-                .attempt_send(dest, payload_type, data, admission, record, progress_sink)
+                .attempt_send(
+                    dest,
+                    payload_type,
+                    data,
+                    admission,
+                    record,
+                    progress_sink,
+                    required_channel,
+                )
                 .await;
             if attempt_count == 0 {
                 if let Some(callback) = on_first_attempt_resolved.as_mut() {
@@ -1478,6 +1515,38 @@ impl PeerGate {
         envelope: RpcEnvelope,
         deadline: RpcDeadline,
     ) -> ActorResult<Bytes> {
+        self.send_request_with_type_until_inner(target, payload_type, envelope, deadline, None)
+            .await
+    }
+
+    /// Send a proof-bearing request only on the channel that authenticated its
+    /// proof inputs. A different ready wire is not an acceptable fallback.
+    pub(crate) async fn send_request_on_verified_channel_until(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+        deadline: RpcDeadline,
+        channel: &VerifiedPeerContext,
+    ) -> ActorResult<Bytes> {
+        self.send_request_with_type_until_inner(
+            target,
+            payload_type,
+            envelope,
+            deadline,
+            Some(channel),
+        )
+        .await
+    }
+
+    async fn send_request_with_type_until_inner(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+        deadline: RpcDeadline,
+        required_channel: Option<&VerifiedPeerContext>,
+    ) -> ActorResult<Bytes> {
         deadline.ensure_remaining()?;
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Request);
         let dest = Self::actr_id_to_dest(target);
@@ -1523,6 +1592,7 @@ impl PeerGate {
                         None,
                         &request_id,
                         Some(&progress_cell),
+                        required_channel,
                     )
                     .await?;
                 if !self
@@ -1597,6 +1667,7 @@ impl PeerGate {
             None,
             &envelope.request_id,
             None,
+            None,
         )
         .await
         .map(|_| ())
@@ -1639,6 +1710,36 @@ impl PeerGate {
         envelope: RpcEnvelope,
         deadline: RpcDeadline,
     ) -> ActorResult<()> {
+        self.send_tell_with_type_until_inner(target, payload_type, envelope, deadline, None)
+            .await
+    }
+
+    pub(crate) async fn send_tell_on_verified_channel_until(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+        deadline: RpcDeadline,
+        channel: &VerifiedPeerContext,
+    ) -> ActorResult<()> {
+        self.send_tell_with_type_until_inner(
+            target,
+            payload_type,
+            envelope,
+            deadline,
+            Some(channel),
+        )
+        .await
+    }
+
+    async fn send_tell_with_type_until_inner(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+        deadline: RpcDeadline,
+        required_channel: Option<&VerifiedPeerContext>,
+    ) -> ActorResult<()> {
         deadline.ensure_remaining()?;
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
         let dest = Self::actr_id_to_dest(target);
@@ -1678,6 +1779,7 @@ impl PeerGate {
                     None,
                     operation_id.as_deref(),
                     Some(&progress_cell),
+                    required_channel,
                 )
                 .await
                 .map(|_| ())
@@ -1729,6 +1831,7 @@ impl PeerGate {
             admission,
             None,
             &envelope.request_id,
+            None,
             None,
         )
         .await
@@ -1895,6 +1998,91 @@ impl PeerGate {
         deadline: RpcDeadline,
         operation_id: &str,
     ) -> ActorResult<()> {
+        self.send_data_chunk_until_inner(
+            target,
+            payload_type,
+            stream_id,
+            data,
+            deadline,
+            operation_id,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)] // Mirrors the data-chunk operation plus its proof channel.
+    pub(crate) async fn send_data_chunk_on_verified_channel_until(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        stream_id: &str,
+        data: Bytes,
+        deadline: RpcDeadline,
+        operation_id: &str,
+        channel: &VerifiedPeerContext,
+    ) -> ActorResult<()> {
+        self.send_data_chunk_until_inner(
+            target,
+            payload_type,
+            stream_id,
+            data,
+            deadline,
+            operation_id,
+            Some(channel),
+        )
+        .await
+    }
+
+    /// Resolve a Host-signed channel id to the live transport proof before
+    /// sending a Service-originated session chunk.
+    #[allow(clippy::too_many_arguments)] // Keeps chunk delivery parameters and channel resolution explicit.
+    pub(crate) async fn send_data_chunk_on_actrium_channel_until(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        stream_id: &str,
+        data: Bytes,
+        deadline: RpcDeadline,
+        operation_id: &str,
+        channel_id: &str,
+    ) -> ActorResult<()> {
+        let transport = self
+            .transport_manager
+            .get_or_create_transport(&Self::actr_id_to_dest(target))
+            .await
+            .map_err(ActrError::from)?;
+        let channel = transport
+            .verified_peer_context_for_channel(channel_id)
+            .await
+            .ok_or_else(|| {
+                ActrError::PermissionDenied(
+                    "the Actrium session channel is no longer verified; re-establish the session"
+                        .into(),
+                )
+            })?;
+        self.send_data_chunk_on_verified_channel_until(
+            target,
+            payload_type,
+            stream_id,
+            data,
+            deadline,
+            operation_id,
+            &channel,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn send_data_chunk_until_inner(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        stream_id: &str,
+        data: Bytes,
+        deadline: RpcDeadline,
+        operation_id: &str,
+        required_channel: Option<&VerifiedPeerContext>,
+    ) -> ActorResult<()> {
         tracing::debug!(
             "PeerGate::send_data_chunk to {:?}, stream_id={}, payload_type={:?}, size={} bytes",
             target,
@@ -1948,6 +2136,7 @@ impl PeerGate {
                     None,
                     Some(operation_id),
                     Some(&progress_cell),
+                    required_channel,
                 )
                 .await
             },

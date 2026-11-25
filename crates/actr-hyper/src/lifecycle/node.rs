@@ -464,6 +464,7 @@ async fn send_envelope_to_caller(
     response_envelope: RpcEnvelope,
     request_id: &str,
     route_key: &str,
+    peer_context: Option<&VerifiedPeerContext>,
 ) {
     // #251 response-path diagnostics: the host has the guest's response and
     // is about to push it to the caller. Info-level so the default
@@ -479,6 +480,46 @@ async fn send_envelope_to_caller(
         error_code = ?response_envelope.error.as_ref().map(|e| e.code),
         "response send attempted: routing guest response back to caller"
     );
+    // Only session-proved traffic is pinned. Ordinary verified Relay RPCs keep
+    // the existing direct-RTC response promotion below.
+    let session_bound = route_key.starts_with(crate::lifecycle::ACTRIUM_SESSION_V1_ROUTE_PREFIX)
+        || response_envelope
+            .metadata
+            .iter()
+            .any(|entry| entry.key == crate::actrium::metadata::SESSION_ID);
+    // Direct RTC has no Actor verification context, and a replacement Relay
+    // channel does not carry the request's proof-binding generation.
+    if session_bound && let Some(channel) = peer_context {
+        let sent = match ws_gate {
+            Some(gate) => match gate
+                .send_response_on_verified_channel(caller, response_envelope, channel)
+                .await
+            {
+                Ok(sent) => sent,
+                Err(error) => {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        route_key = %route_key,
+                        target_actor = %caller,
+                        %error,
+                        "verified-channel response submission failed"
+                    );
+                    false
+                }
+            },
+            None => false,
+        };
+        if !sent {
+            tracing::warn!(
+                request_id = %request_id,
+                route_key = %route_key,
+                target_actor = %caller,
+                "verified response channel is unavailable; response was not downgraded to RTC"
+            );
+        }
+        return;
+    }
+
     // Promote responses too: retaining the relay receive path must not pin
     // every reply to WSS after direct ICE becomes usable.
     let direct = if let Some(manager) = rtc_route {
@@ -729,6 +770,7 @@ pub(crate) async fn mailbox_send_reply(
     ws_gate: Option<Arc<crate::wire::websocket::WebSocketGate>>,
     rtc_route: RtcResponseRoute,
     caller: Result<ActrId, String>,
+    peer_context: Option<Arc<VerifiedPeerContext>>,
     request_id: String,
     route_key: String,
     traceparent: Option<String>,
@@ -781,6 +823,7 @@ pub(crate) async fn mailbox_send_reply(
                     response_envelope,
                     &request_id,
                     &route_key,
+                    peer_context.as_deref(),
                 )
                 .instrument(span);
                 #[cfg(not(feature = "opentelemetry"))]
@@ -791,6 +834,7 @@ pub(crate) async fn mailbox_send_reply(
                     response_envelope,
                     &request_id,
                     &route_key,
+                    peer_context.as_deref(),
                 );
                 send_fut.await;
             }
@@ -857,6 +901,7 @@ pub(crate) async fn mailbox_send_reply(
                     error_envelope,
                     &request_id,
                     &route_key,
+                    peer_context.as_deref(),
                 )
                 .await;
             }
@@ -895,6 +940,7 @@ pub(crate) async fn mailbox_reply_and_ack(
     rtc_route: RtcResponseRoute,
     mailbox: Arc<dyn Mailbox>,
     caller: Result<ActrId, String>,
+    peer_context: Option<Arc<VerifiedPeerContext>>,
     request_id: String,
     route_key: String,
     traceparent: Option<String>,
@@ -910,6 +956,7 @@ pub(crate) async fn mailbox_reply_and_ack(
         ws_gate,
         rtc_route,
         caller,
+        peer_context,
         request_id.clone(),
         route_key,
         traceparent,
@@ -2614,6 +2661,7 @@ impl Inner {
                         envelope.traceparent.clone(),
                         envelope.tracestate.clone(),
                         self.incoming_guard.clone(),
+                        peer_context.clone(),
                         envelope.metadata.clone(),
                         sink,
                         expects_response,
@@ -5071,7 +5119,7 @@ impl Inner {
                                                             IncomingOutcome::Replied(result) => {
                                                                 mailbox_reply_and_ack(
                                                                     ws_gate, rtc_route, mailbox_c,
-                                                                    caller_owned, request_id, route_key,
+                                                                    caller_owned, peer_context, request_id, route_key,
                                                                     traceparent, tracestate, incoming_guard, metadata, expects_response,
                                                                     msg_id, result, span,
                                                                 )
@@ -5099,7 +5147,7 @@ impl Inner {
                                                         IncomingOutcome::Replied(result) => {
                                                             mailbox_reply_and_ack(
                                                                 ws_gate, rtc_route, mailbox_c,
-                                                                caller_owned, request_id, route_key,
+                                                                caller_owned, peer_context, request_id, route_key,
                                                                 traceparent, tracestate, incoming_guard, metadata, expects_response,
                                                                 msg_id, result, span,
                                                             )

@@ -58,6 +58,20 @@ pub struct VerifiedPeerContext {
     pub current_state_binding: Vec<u8>,
 }
 
+impl VerifiedPeerContext {
+    /// Whether two views name the exact authenticated channel generation.
+    ///
+    /// Credential and policy fields may be refreshed independently; the peer
+    /// identities, generation, and transcript are the proof-binding identity.
+    pub(crate) fn same_channel(&self, other: &Self) -> bool {
+        self.local_actor_id == other.local_actor_id
+            && self.peer_actor_id == other.peer_actor_id
+            && self.channel_id == other.channel_id
+            && self.channel_generation == other.channel_generation
+            && self.transcript_digest == other.transcript_digest
+    }
+}
+
 /// Secure-channel state for a physical `WireHandle` session. See RFC-0563 §1.
 ///
 /// Phase 2 only ever constructs [`SecureChannelState::LegacyBypass`]; the

@@ -603,6 +603,18 @@ impl RuntimeContext {
         self.data_chunk_registry
             .authenticate_outgoing_chunk(target_id, &mut chunk)
             .await?;
+        let session_channel_id = chunk
+            .metadata
+            .iter()
+            .any(|entry| entry.key == crate::actrium::metadata::SESSION_ID)
+            .then(|| {
+                chunk
+                    .metadata
+                    .iter()
+                    .find(|entry| entry.key == crate::actrium::metadata::CHANNEL_ID)
+                    .map(|entry| entry.value.as_str())
+            })
+            .flatten();
 
         use actr_protocol::prost::Message as ProstMessage;
 
@@ -617,6 +629,7 @@ impl RuntimeContext {
             bytes::Bytes::from(payload),
             deadline,
             &operation_id,
+            session_channel_id,
         )
         .await
     }
@@ -1115,6 +1128,18 @@ impl Context for RuntimeContext {
         self.data_chunk_registry
             .authenticate_outgoing_chunk(target_id, &mut chunk)
             .await?;
+        let session_channel_id = chunk
+            .metadata
+            .iter()
+            .any(|entry| entry.key == crate::actrium::metadata::SESSION_ID)
+            .then(|| {
+                chunk
+                    .metadata
+                    .iter()
+                    .find(|entry| entry.key == crate::actrium::metadata::CHANNEL_ID)
+                    .map(|entry| entry.value.as_str())
+            })
+            .flatten();
 
         use actr_protocol::prost::Message as ProstMessage;
 
@@ -1138,6 +1163,7 @@ impl Context for RuntimeContext {
             bytes::Bytes::from(payload),
             deadline,
             &operation_id,
+            session_channel_id,
         )
         .await
     }

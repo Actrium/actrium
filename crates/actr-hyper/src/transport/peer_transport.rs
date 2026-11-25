@@ -14,6 +14,7 @@ use super::error::{NetworkError, NetworkResult};
 use super::handover::HandoverBook;
 use super::lane::{DeliveryProgress, DeliveryProgressCell};
 use super::route_table::PayloadTypeExt;
+use super::secure_channel::VerifiedPeerContext;
 use super::wire_handle::{WireHandle, WireIdentity};
 use super::wire_pool::ReadySet;
 use actr_protocol::{ActrId, PayloadType};
@@ -750,6 +751,19 @@ impl PeerTransport {
         record: Option<&SentTransportSlot>,
         progress_sink: Option<&DeliveryProgressCell>,
     ) -> PeerSendAttempt<DestTransportRef> {
+        self.send_with_progress_on_channel(dest, payload_type, data, record, progress_sink, None)
+            .await
+    }
+
+    pub(crate) async fn send_with_progress_on_channel(
+        &self,
+        dest: &Dest,
+        payload_type: PayloadType,
+        data: &[u8],
+        record: Option<&SentTransportSlot>,
+        progress_sink: Option<&DeliveryProgressCell>,
+        required_channel: Option<&VerifiedPeerContext>,
+    ) -> PeerSendAttempt<DestTransportRef> {
         // Get or create DestTransport for this Dest
         let transport = match self.get_or_create_transport(dest).await {
             Ok(transport) => transport,
@@ -771,7 +785,7 @@ impl PeerTransport {
 
         // Send through DestTransport
         let attempt = transport
-            .send_with_progress(payload_type, data, progress_sink)
+            .send_with_progress_on_channel(payload_type, data, progress_sink, required_channel)
             .await;
         let progress = attempt.progress;
         let proven_pre_send = attempt.proven_pre_send;
@@ -825,6 +839,26 @@ impl PeerTransport {
         record: Option<&SentTransportSlot>,
         progress_sink: Option<&DeliveryProgressCell>,
     ) -> PeerSendAttempt<Option<DestTransportRef>> {
+        self.send_existing_with_progress_on_channel(
+            dest,
+            payload_type,
+            data,
+            record,
+            progress_sink,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn send_existing_with_progress_on_channel(
+        &self,
+        dest: &Dest,
+        payload_type: PayloadType,
+        data: &[u8],
+        record: Option<&SentTransportSlot>,
+        progress_sink: Option<&DeliveryProgressCell>,
+        required_channel: Option<&VerifiedPeerContext>,
+    ) -> PeerSendAttempt<Option<DestTransportRef>> {
         let transport = match self.get_or_materialize_existing_transport(dest).await {
             Ok(Some(transport)) => transport,
             Ok(None) => {
@@ -850,7 +884,7 @@ impl PeerTransport {
         }
 
         let attempt = transport
-            .send_with_progress(payload_type, data, progress_sink)
+            .send_with_progress_on_channel(payload_type, data, progress_sink, required_channel)
             .await;
         let progress = attempt.progress;
         let proven_pre_send = attempt.proven_pre_send;

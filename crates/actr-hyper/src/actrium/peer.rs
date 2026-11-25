@@ -156,24 +156,31 @@ impl ActriumPeerSession {
         &self,
         method: &str,
         request: &Req,
+        channel: &VerifiedPeerContext,
     ) -> ActorResult<Resp> {
         let payload = serde_json::to_vec(request)
             .map_err(|error| ActrError::Internal(format!("session encoding failed: {error}")))?;
-        let response = self.session_rpc_bytes(method, payload).await?;
+        let response = self.session_rpc_bytes(method, payload, channel).await?;
         serde_json::from_slice(&response)
             .map_err(|error| ActrError::Internal(format!("invalid session response: {error}")))
     }
 
-    async fn session_rpc_bytes(&self, method: &str, payload: Vec<u8>) -> ActorResult<Bytes> {
+    async fn session_rpc_bytes(
+        &self,
+        method: &str,
+        payload: Vec<u8>,
+        channel: &VerifiedPeerContext,
+    ) -> ActorResult<Bytes> {
         let envelope = Self::envelope(method, payload)?;
         let deadline = RpcDeadline::from_timeout_ms(envelope.timeout_ms)?;
         self.runtime
             .gate
-            .send_request_with_type_until(
+            .send_request_on_verified_channel_until(
                 &self.service,
                 PayloadType::RpcReliable,
                 envelope,
                 deadline,
+                channel,
             )
             .await
     }
@@ -284,15 +291,18 @@ impl ActriumPeerSession {
                 let Some(session) = weak.upgrade() else {
                     break;
                 };
-                let request = {
+                let (request, channel) = {
                     let state = session.state.lock().await;
-                    HeartbeatRequest {
-                        session_id: state.session_id.clone(),
-                        lease_epoch: state.lease_epoch,
-                    }
+                    (
+                        HeartbeatRequest {
+                            session_id: state.session_id.clone(),
+                            lease_epoch: state.lease_epoch,
+                        },
+                        state.channel.clone(),
+                    )
                 };
                 match session
-                    .session_rpc::<_, HeartbeatOutcome>("Heartbeat", &request)
+                    .session_rpc::<_, HeartbeatOutcome>("Heartbeat", &request, &channel)
                     .await
                 {
                     Ok(outcome) => {
@@ -334,7 +344,7 @@ impl ActriumPeerSession {
         kind: MessageKind,
         payload: Vec<u8>,
         timeout: Duration,
-    ) -> ActorResult<(RpcEnvelope, PendingCall)> {
+    ) -> ActorResult<(RpcEnvelope, PendingCall, Arc<VerifiedPeerContext>)> {
         let state = self.state.lock().await.clone();
         let now = now_secs();
         Self::ensure_usable(&state, now)?;
@@ -377,6 +387,7 @@ impl ActriumPeerSession {
                 ..Default::default()
             },
             pending,
+            state.channel,
         ))
     }
 
@@ -398,7 +409,7 @@ impl ActriumPeerSession {
                 }
                 None => (None, None, payload),
             };
-        let (envelope, pending) = self
+        let (envelope, pending, channel) = self
             .business_envelope(route, capability, MessageKind::Request, payload, timeout)
             .await?;
         let request_id = envelope.request_id.clone();
@@ -423,11 +434,12 @@ impl ActriumPeerSession {
         let result = self
             .runtime
             .gate
-            .send_request_with_type_until(
+            .send_request_on_verified_channel_until(
                 &self.service,
                 PayloadType::RpcReliable,
                 envelope,
                 deadline,
+                &channel,
             )
             .await
             .map(|bytes| bytes.to_vec());
@@ -444,7 +456,7 @@ impl ActriumPeerSession {
     /// Fire-and-forget tell with a session-signed request. No response proof
     /// exists for tells; the Service enforces the same Guard admission.
     pub async fn tell(&self, route: &str, capability: &str, payload: Vec<u8>) -> ActorResult<()> {
-        let (envelope, _pending) = self
+        let (envelope, _pending, channel) = self
             .business_envelope(
                 route,
                 capability,
@@ -455,11 +467,12 @@ impl ActriumPeerSession {
             .await?;
         self.runtime
             .gate
-            .send_tell_with_type_until(
+            .send_tell_on_verified_channel_until(
                 &self.service,
                 PayloadType::RpcReliable,
                 envelope,
                 RpcDeadline::from_duration(Duration::from_secs(30)),
+                &channel,
             )
             .await
     }
@@ -477,7 +490,7 @@ impl ActriumPeerSession {
             prepare_request_id,
         })
         .map_err(|error| ActrError::Internal(format!("session encoding failed: {error}")))?;
-        let (envelope, pending_call) = self
+        let (envelope, pending_call, channel) = self
             .business_envelope(
                 ATTACHMENT_CANCEL_ROUTE,
                 capability,
@@ -495,11 +508,12 @@ impl ActriumPeerSession {
         let result = self
             .runtime
             .gate
-            .send_request_with_type_until(
+            .send_request_on_verified_channel_until(
                 &self.service,
                 PayloadType::RpcReliable,
                 envelope,
                 deadline,
+                &channel,
             )
             .await;
         drop(pending);
@@ -563,13 +577,14 @@ impl ActriumPeerSession {
         let operation_id = format!("{stream_id}#{}", chunk.sequence);
         self.runtime
             .gate
-            .send_data_chunk_until(
+            .send_data_chunk_on_verified_channel_until(
                 &self.service,
                 payload_type,
                 &stream_id,
                 Bytes::from(chunk.encode_to_vec()),
                 RpcDeadline::from_duration(timeout),
                 &operation_id,
+                &state.channel,
             )
             .await
     }
@@ -622,7 +637,7 @@ impl ActriumPeerSession {
             session_proof: Vec::new(),
         };
         request.session_proof = resume_proof(previous.secret.as_bytes(), &request);
-        let response: AttachResponse = self.session_rpc("Resume", &request).await?;
+        let response: AttachResponse = self.session_rpc("Resume", &request, &channel).await?;
         let secret = self.verify_response(&response, &resume_digest(&request), &channel)?;
         *self.state.lock().await = SessionState {
             session_id: response.session_id.clone(),
@@ -656,7 +671,7 @@ impl ActriumPeerSession {
             .to_bytes()
             .to_vec();
         let response: AttachResponse = self
-            .session_rpc("Takeover", &TakeoverPayload { takeover, attach })
+            .session_rpc("Takeover", &TakeoverPayload { takeover, attach }, &channel)
             .await?;
         let secret = self.verify_response(&response, &request_digest, &channel)?;
         *self.state.lock().await = SessionState {
@@ -681,16 +696,19 @@ impl ActriumPeerSession {
 
     /// Release the lease immediately and stop the heartbeat.
     pub async fn detach(&self) -> ActorResult<()> {
-        let request = {
+        let (request, channel) = {
             let state = self.state.lock().await;
-            DetachRequest {
-                session_id: state.session_id.clone(),
-                lease_epoch: state.lease_epoch,
-            }
+            (
+                DetachRequest {
+                    session_id: state.session_id.clone(),
+                    lease_epoch: state.lease_epoch,
+                },
+                state.channel.clone(),
+            )
         };
         let payload = serde_json::to_vec(&request)
             .map_err(|error| ActrError::Internal(format!("session encoding failed: {error}")))?;
-        self.session_rpc_bytes("Detach", payload).await?;
+        self.session_rpc_bytes("Detach", payload, &channel).await?;
         self.state.lock().await.recovery_required = true;
         if let Some(handle) = self.heartbeat.lock().await.take() {
             handle.abort();
@@ -761,7 +779,7 @@ impl ActrRef {
         });
         let mut attach = session.attach_request(&channel);
         sign_attach_request(&mut attach, &session.actor_signing_key);
-        let response: AttachResponse = session.session_rpc("Attach", &attach).await?;
+        let response: AttachResponse = session.session_rpc("Attach", &attach, &channel).await?;
         let secret =
             session.verify_response(&response, &attach_request_digest(&attach), &channel)?;
         *session.state.lock().await = SessionState {
