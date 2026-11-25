@@ -142,4 +142,77 @@ struct RendererProcessPoolPolicyTests {
             )
         )
     }
+
+    @Test func lateTitleFromReplacedContentIsRejected() {
+        // Same tab, same worker still owns it, but the renderer generation
+        // advanced after the content changed: the queued title must not apply.
+        #expect(
+            RendererProcessPool.acceptsTabRendererMessage(
+                senderOwnsTab: true,
+                capturedEpoch: 0,
+                currentEpoch: nil
+            )
+        )
+        #expect(
+            !RendererProcessPool.acceptsTabRendererMessage(
+                senderOwnsTab: true,
+                capturedEpoch: 0,
+                currentEpoch: 1
+            )
+        )
+        // The worker no longer owns the tab (tab moved to another renderer).
+        #expect(
+            !RendererProcessPool.acceptsTabRendererMessage(
+                senderOwnsTab: false,
+                capturedEpoch: 0,
+                currentEpoch: 0
+            )
+        )
+        #expect(
+            RendererProcessPool.acceptsTabRendererMessage(
+                senderOwnsTab: true,
+                capturedEpoch: 1,
+                currentEpoch: 1
+            )
+        )
+    }
+
+    @Test @MainActor func lateTitleFromPreviousSameWorkerReloadIsRejected() {
+        let tabId = UUID()
+        let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
+        // Reuse the same tab and renderer ownership; only the content reloadKey
+        // advances, as it does when reloadCurrentTab keeps the same worker.
+        viewModel.tabs = [Tab(title: "Replacement", id: tabId, reloadNonce: 1)]
+
+        NotificationCenter.default.post(
+            name: .tabTitleChanged,
+            object: nil,
+            userInfo: ["tabId": tabId, "title": "Stale", "reloadKey": 0]
+        )
+        #expect(viewModel.tabs[0].title == "Replacement")
+
+        NotificationCenter.default.post(
+            name: .tabTitleChanged,
+            object: nil,
+            userInfo: ["tabId": tabId, "title": "Current", "reloadKey": 1]
+        )
+        #expect(viewModel.tabs[0].title == "Current")
+    }
+
+    @Test @MainActor func lateTitleFromPreviousInPlaceNavigationIsRejected() {
+        let tabId = UUID()
+        let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
+        viewModel.tabs = [Tab(title: "Package", id: tabId)]
+        viewModel.currentTabId = tabId
+
+        viewModel.navigateCurrentTab(to: "https://example.com")
+        #expect(viewModel.tabs[0].reloadNonce == 1)
+
+        NotificationCenter.default.post(
+            name: .tabTitleChanged,
+            object: nil,
+            userInfo: ["tabId": tabId, "title": "Stale", "reloadKey": 0]
+        )
+        #expect(viewModel.tabs[0].title == "example.com")
+    }
 }

@@ -18,6 +18,7 @@ function createTestHostModules(options?: {
   onCapabilityRevoked?: (capability: FrontCapability, listener: () => void) => () => void;
   trackServiceEventSubscription?: (cleanup: () => void) => () => void;
   writeClipboardText?: (text: string) => Promise<void>;
+  setTabTitle?: (title: string) => void;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
   recognizeSpeech?: Parameters<typeof createHostModules>[0]['recognizeSpeech'];
 }): HostModules {
@@ -30,6 +31,7 @@ function createTestHostModules(options?: {
     onCapabilityRevoked: options?.onCapabilityRevoked,
     trackServiceEventSubscription: options?.trackServiceEventSubscription,
     writeClipboardText: options?.writeClipboardText ?? (async () => {}),
+    setTabTitle: options?.setTabTitle,
     pickFiles: options?.pickFiles,
     recognizeSpeech: options?.recognizeSpeech,
   });
@@ -482,6 +484,45 @@ describe('host:clipboard implementation', () => {
     expect(() => dispatch['host:clipboard'].writeText({ text: 1 })).toThrow(
       'Boundary input validation failed'
     );
+  });
+});
+
+describe('host:tab implementation', () => {
+  test('updates the tab title through the host adapter', async () => {
+    let title = '';
+    const hostModules = createTestHostModules({
+      setTabTitle: (value) => {
+        title = value;
+      },
+    });
+
+    await hostModules['host:tab'].setTitle({ title: 'Inbox' });
+    expect(title).toBe('Inbox');
+  });
+
+  test('rejects title updates when authorization fails', async () => {
+    let called = false;
+    const hostModules = createTestHostModules({
+      authorizeCapability: async () => {
+        throw new Error('permission_required: host:tab.setTitle');
+      },
+      setTabTitle: () => {
+        called = true;
+      },
+    });
+
+    await expect(
+      hostModules['host:tab'].setTitle({ title: 'Inbox' })
+    ).rejects.toThrow('permission_required');
+    expect(called).toBe(false);
+  });
+
+  test('fails closed when the host tab title adapter is unavailable', async () => {
+    const hostModules = createTestHostModules();
+
+    await expect(
+      hostModules['host:tab'].setTitle({ title: 'Inbox' })
+    ).rejects.toThrow('unavailable');
   });
 });
 

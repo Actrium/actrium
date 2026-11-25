@@ -178,7 +178,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "Allow \(tab.title) to use this capability?"
+        // The requester must be the shell's verified application identity, not
+        // the tab title: a guest can retitle its tab at runtime and must not
+        // be able to spoof the name in a permission prompt.
+        let requester = tab.verifiedAppName ?? "this application"
+        alert.messageText = "Allow \(requester) to use this capability?"
         alert.informativeText = "\(capability)\n\nThe application requested access while handling a user action."
         alert.addButton(withTitle: "Allow for This Session")
         alert.addButton(withTitle: "Always Allow")

@@ -76,6 +76,14 @@ RCT_EXTERN_METHOD(requestGrant:(NSString *)tabId capability:(NSString *)capabili
 
 @end
 
+@interface RCT_EXTERN_MODULE(TabTitle, NSObject)
+
+RCT_EXTERN_METHOD(setTitle:(NSString *)title
+                  tabId:(NSString *)tabId
+                  reloadKey:(NSNumber *)reloadKey)
+
+@end
+
 @interface RCT_EXTERN_MODULE(GuestLocalStorage, NSObject)
 
 RCT_EXTERN_METHOD(perform:(NSString *)tabId

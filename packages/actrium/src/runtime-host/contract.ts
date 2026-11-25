@@ -66,6 +66,10 @@ export type AssetsReadInput = { path: string };
 export type AssetsReadOutput = { base64: string };
 
 export type ClipboardWriteTextInput = { text: string };
+export type TabSetTitleInput = { title: string };
+
+/** Maximum UTF-8 byte size accepted for a guest-set tab title. */
+export const TAB_TITLE_MAX_BYTES = 256;
 export type LocalStorageKeyInput = { key: string };
 export type LocalStorageSetInput = LocalStorageKeyInput & { value: string };
 
@@ -493,6 +497,28 @@ export const contract = defineKeelContract({
                 true
               ),
             };
+          },
+        },
+      }),
+    },
+    'host:tab': {
+      setTitle: rpc<TabSetTitleInput, void>({
+        schema: {
+          parseInput: (value) => {
+            const input = asObject(value, 'tab.setTitle input');
+            const title = requireString(
+              input.title,
+              'tab.setTitle input.title',
+              true
+            );
+            // Tab titles are shell display strings; bound the UTF-8 byte size
+            // so a guest cannot push unbounded data through the title channel.
+            if (utf8ByteLength(title) > TAB_TITLE_MAX_BYTES) {
+              throw new Error(
+                `tab.setTitle input.title must be at most ${TAB_TITLE_MAX_BYTES} UTF-8 bytes`
+              );
+            }
+            return { title };
           },
         },
       }),

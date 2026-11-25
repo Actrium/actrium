@@ -477,6 +477,33 @@ class CapabilityPermission: NSObject {
     }
 }
 
+// MARK: - Tab Title Module
+
+/// Runtime tab title update reported by a Guest, analogous to
+/// `document.title`. The shell owns display and persistence; the renderer
+/// forwards the title with its tab id and originating content generation.
+@objc(TabTitle)
+class TabTitle: NSObject {
+    @objc
+    func setTitle(_ title: String, tabId: String, reloadKey: NSNumber) {
+        RendererProcessController.sendTitleChanged(
+            title,
+            tabId: tabId,
+            reloadKey: reloadKey.intValue
+        )
+    }
+
+    @objc
+    static func requiresMainQueueSetup() -> Bool {
+        return false
+    }
+
+    @objc
+    static func moduleName() -> String! {
+        return "TabTitle"
+    }
+}
+
 // MARK: - StartPage Module
 
 /// Native module for Start Page actions from React Native (XPC Service version)

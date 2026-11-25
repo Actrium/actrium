@@ -3,6 +3,7 @@ import type { HostModulesImplementation } from 'keel/contract';
 import type {
   ActriumContract,
   ClipboardWriteTextInput,
+  TabSetTitleInput,
   LocalStorageKeyInput,
   LocalStorageSetInput,
   FileImportPickInput,
@@ -48,6 +49,7 @@ export type HostModules = HostModulesImplementation<ActriumContract>;
 export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
   'host:service': new Set(['call', 'on', 'uploadAttachment']),
   'host:clipboard': new Set(['writeText']),
+  'host:tab': new Set(['setTitle']),
   'host:local-storage': new Set(['getItem', 'setItem', 'removeItem']),
   'host:speech': new Set(['recognize', 'onInterimResult', 'stop', 'onStateChange']),
   'host:file-import': new Set(['pick', 'openPreview', 'release']),
@@ -98,6 +100,8 @@ export function createHostModules(options: {
   /** Track the complete Guest cleanup for engine reload/tab teardown. */
   trackServiceEventSubscription?: (cleanup: () => void) => () => void;
   writeClipboardText: (text: string) => Promise<void>;
+  /** Runtime tab title update, analogous to `document.title`. */
+  setTabTitle?: (title: string) => void;
   localStorage?: LocalStorageCall;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
   openFilePreview?: (fileId: string) => Promise<void>;
@@ -247,6 +251,15 @@ export function createHostModules(options: {
       writeText: async (input: ClipboardWriteTextInput) => {
         await options.authorizeCapability('host:clipboard.write');
         await options.writeClipboardText(input.text);
+      },
+    },
+    'host:tab': {
+      setTitle: async (input: TabSetTitleInput) => {
+        await options.authorizeCapability('host:tab.setTitle');
+        if (!options.setTabTitle) {
+          throw new Error('The host tab title module is unavailable.');
+        }
+        options.setTabTitle(input.title);
       },
     },
     'host:local-storage': {

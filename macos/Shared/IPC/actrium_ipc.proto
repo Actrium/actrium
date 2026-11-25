@@ -186,6 +186,7 @@ message SurfaceUpdated {
 message TitleChanged {
     string title = 1;
     string tab_id = 10;
+    int32 reload_key = 11;
 }
 
 message NavigationRequest {

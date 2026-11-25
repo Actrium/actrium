@@ -198,6 +198,64 @@ final class RealmNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testRestoredRealmKeepsDynamicTitleAfterFrontActivation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fixture = try makeFrontArchive(in: directory)
+        let frontDigest = try digest(Data(contentsOf: fixture.archive))
+        var documents = try discoveryDocuments(membership: "open", frontDigest: frontDigest)
+        documents["https://publisher.example/.well-known/actr"] = try publisherDescriptor(
+            keyId: fixture.keyId, publicKey: fixture.publicKey
+        )
+        let preferences = try makePreferences()
+        preferences.set([realmName], forKey: "actr.redeemedRealms")
+        var savedTitles: [String] = []
+        let view = BrowserViewModel(
+            realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
+            appRepository: AppRepository(database: DatabaseManager(path: ":memory:")),
+            guestStorageDatabase: GuestStorageDatabase(database: GuestLocalStorage(path: ":memory:")),
+            fetchRealmDocument: { url, _ in
+                try XCTUnwrap(documents[url.absoluteString])
+            },
+            joinOpenRealm: { _ in },
+            downloadRealmArchive: { _ in fixture.archive },
+            saveBrowserSession: { tabs, _ in savedTitles.append(contentsOf: tabs.map(\.title)) }
+        )
+        let restoredTabId = UUID()
+        defer { RealmServiceBindings.shared.remove(restoredTabId) }
+        ActrPackageCache.$rootOverrideForTesting.withValue(directory.appendingPathComponent("cache")) {
+            ActrPackageTrustStore.$supportDirectoryOverrideForTesting.withValue(directory.appendingPathComponent("trust")) {
+                view.restoreSessionIfNeeded {
+                    BrowserDataRepository.RestoredSession(tabs: [
+                        .init(id: restoredTabId, title: "Saved Runtime Title", address: realmURI)
+                    ], activeTabIndex: 0)
+                }
+            }
+        }
+
+        XCTAssertEqual(view.tabs.count, 1)
+        XCTAssertEqual(view.currentTab?.id, restoredTabId)
+        XCTAssertEqual(view.currentTab?.title, "Saved Runtime Title")
+        try await waitUntil {
+            view.tabs.first { $0.id == restoredTabId }?.appId != nil || view.actrUriNotice != nil
+        }
+        if let notice = view.actrUriNotice {
+            XCTFail("Realm activation failed: \(notice.detail ?? "Unknown error")")
+            return
+        }
+        let realmTab = try XCTUnwrap(view.tabs.first { $0.id == restoredTabId })
+        XCTAssertEqual(realmTab.unifiedScript, fixture.script)
+        XCTAssertEqual(realmTab.title, "Saved Runtime Title")
+        XCTAssertEqual(savedTitles.last, "Saved Runtime Title")
+
+        view.updateTabTitle(for: restoredTabId, title: "Later Runtime Title")
+        XCTAssertEqual(view.currentTab?.title, "Later Runtime Title")
+        XCTAssertEqual(savedTitles.last, "Later Runtime Title")
+    }
+
+    @MainActor
     private func assertBackgroundFrontImport(membership: String, withInvite: Bool) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
@@ -231,6 +289,7 @@ final class RealmNavigationTests: XCTestCase {
             realmPreferences: try makePreferences(),
             realmTrustDirectory: realmTrustDirectory,
             appRepository: apps,
+            guestStorageDatabase: GuestStorageDatabase(database: GuestLocalStorage(path: ":memory:")),
             fetchRealmDocument: { url, _ in
                 if url.path == "/realm/echo", !profile.waiting { await profile.wait() }
                 if url.host == "publisher.example" { XCTAssertTrue(joined) }
@@ -301,6 +360,10 @@ final class RealmNavigationTests: XCTestCase {
         XCTAssertEqual(realmTab.url?.absoluteString, realmURI)
         XCTAssertEqual(realmTab.appId, appId)
         XCTAssertEqual(realmTab.unifiedScript, fixture.script)
+        // The console instance name comes from the signed Realm Profile, not
+        // the Front package's application name ("echo-front").
+        XCTAssertEqual(realmTab.title, "Echo")
+        XCTAssertEqual(realmTab.verifiedAppName, "echo-front")
         XCTAssertEqual(joinAttempts, 1)
         XCTAssertEqual(downloads, 1)
         XCTAssertTrue(FileManager.default.fileExists(atPath: cachedArchive.path))
