@@ -421,7 +421,12 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         } else {
             hoveredGroup = nil
         }
-        if hoveredGroupID != hoveredGroup {
+        // The highlight may only move when this frame can also commit the
+        // move. A blocked frame (layout still catching up with the last move,
+        // or pointer travel under the threshold) would otherwise outline a
+        // second group that a mouse-up never joins: finishDrag commits the
+        // last accepted membership.
+        if canReorderTabs(pointerX: locationX), hoveredGroupID != hoveredGroup {
             hoveredGroupID = hoveredGroup
         }
 
@@ -476,18 +481,26 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         clearExclusiveInteraction(activeTabID: activeTabID)
     }
 
+    /// Reorder decisions pause while SwiftUI catches up with the last accepted
+    /// move and until the pointer travels far enough, so the drop highlight
+    /// has to observe the same gate: what is outlined is what a release
+    /// commits.
+    private func canReorderTabs(pointerX: CGFloat) -> Bool {
+        pendingVisualTabOrder == nil
+            && pendingGroupFrameChange == nil
+            && toolbarDragCanReorder(
+                pointerX: pointerX,
+                lastReorderPointerX: inPlaceDragState?.lastReorderPointerX
+            )
+    }
+
     private func reorderTabIfNeeded(
         tabID: UUID,
         pointerX: CGFloat,
         draggedFrame: CGRect,
         viewModel: BrowserViewModel
     ) {
-        guard pendingVisualTabOrder == nil,
-              pendingGroupFrameChange == nil,
-              toolbarDragCanReorder(
-                  pointerX: pointerX,
-                  lastReorderPointerX: inPlaceDragState?.lastReorderPointerX
-              ) else {
+        guard canReorderTabs(pointerX: pointerX) else {
             dragDebugLog(
                 "reorderBlocked pendingOrder=\(pendingVisualTabOrder != nil)"
                     + " pendingGroup=\(pendingGroupFrameChange != nil) pointer=\(Int(pointerX))"
