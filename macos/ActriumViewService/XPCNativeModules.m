@@ -87,6 +87,14 @@ RCT_EXTERN_METHOD(perform:(NSString *)tabId
 
 @end
 
+@interface RCT_EXTERN_MODULE(GuestMenu, NSObject)
+RCT_EXTERN_METHOD(show:(NSString *)tabId
+                  reloadKey:(NSNumber *)reloadKey
+                  contentJSON:(NSString *)contentJSON
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+@end
+
 @interface RCT_EXTERN_MODULE(GuestFileImport, NSObject)
 
 RCT_EXTERN_METHOD(pick:(NSString *)tabId

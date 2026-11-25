@@ -89,6 +89,19 @@ const customConfig = {
       'react-reconciler': path.resolve(projectNodeModules, 'react-reconciler'),
     },
     resolveRequest: (context, moduleName, platform) => {
+      if (platform === 'macos' && moduleName === './guest-svg-renderer') {
+        return {
+          type: 'sourceFile',
+          filePath: path.join(projectRoot, 'src/runtime-host/guest-svg-renderer.rnsvg.js'),
+        };
+      }
+      if (platform === 'macos' && (
+        moduleName === 'react-native-svg' || moduleName === 'react-native-svg/lib/commonjs/xml'
+      )) {
+        // Use one Fabric component registration for both Guest SVG and Supramark.
+        const source = moduleName === 'react-native-svg' ? moduleName : 'react-native-svg/src/xml';
+        return resolveWithDefault({ ...context, originModulePath: __filename }, source, platform);
+      }
       if (platform === 'macos' && supramarkRoot) {
         const resolution = resolveSupramark(context.originModulePath, moduleName);
         if (resolution) return resolution;

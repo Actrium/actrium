@@ -6,11 +6,15 @@ import QuartzCore
 /// routes keyboard input here, so the native editor can own the insertion indicator.
 final class RendererWindow: NSWindow {
     private(set) var hasHostKeyboardFocus = false
+    var hostMouseLocation: NSPoint?
     private weak var suspendedInput: NSView?
     private var suspendedSelection = NSRange()
 
     override var canBecomeKey: Bool { true }
     override var isKeyWindow: Bool { hasHostKeyboardFocus }
+    override var mouseLocationOutsideOfEventStream: NSPoint {
+        hostMouseLocation ?? NSPoint(x: -1, y: -1)
+    }
 
     func setHostKeyboardFocus(_ focused: Bool) {
         guard hasHostKeyboardFocus != focused else { return }

@@ -11,6 +11,9 @@ export const V1_COMPONENTS = [
   'ImageAsset',
   'Supramark',
   'Switch',
+  'Select',
+  'Menu',
+  'Svg',
 ] as const;
 
 /** Runtime modules with no Actrium capability of their own. */

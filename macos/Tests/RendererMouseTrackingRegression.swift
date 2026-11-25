@@ -12,6 +12,13 @@ private final class Recorder: NSGestureRecognizer {
     override func reset() { cancellations += 1 }
 }
 
+@MainActor
+private final class HoverRecorder: NSView {
+    var received: [NSEvent.EventType] = []
+    override func mouseEntered(with event: NSEvent) { received.append(event.type) }
+    override func mouseExited(with event: NSEvent) { received.append(event.type) }
+}
+
 @main
 struct RendererMouseTrackingRegression {
     @MainActor
@@ -48,6 +55,28 @@ struct RendererMouseTrackingRegression {
         precondition(other.cancellations == 2)
         precondition(!tracking.drag(event(.rightMouseDragged), button: 1))
         checkMultiClickDrag()
+        checkHoverTransitions()
+    }
+
+    @MainActor
+    private static func checkHoverTransitions() {
+        let tracking = RendererHoverTracking(tracksHover: { $0 is HoverRecorder })
+        let root = HoverRecorder()
+        let first = HoverRecorder()
+        let second = HoverRecorder()
+        let leaf = NSView()
+        first.addSubview(leaf)
+        root.addSubview(first)
+        root.addSubview(second)
+
+        tracking.update(hitView: leaf, windowNumber: 0, location: .zero)
+        tracking.update(hitView: first, windowNumber: 0, location: .zero)
+        tracking.update(hitView: second, windowNumber: 0, location: .zero)
+        tracking.update(hitView: nil, windowNumber: 0, location: .zero)
+
+        for view in [root, first, second] {
+            precondition(view.received == [.mouseEntered, .mouseExited])
+        }
     }
 
     private static func checkMultiClickDrag() {

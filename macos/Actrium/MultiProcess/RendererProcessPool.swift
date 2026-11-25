@@ -34,7 +34,7 @@ extension Notification.Name {
     static let rendererAccessibilityUpdated = Notification.Name("rendererAccessibilityUpdated")
     static let rendererCaretUpdated = Notification.Name("rendererCaretUpdated")
     static let rendererDocumentSelection = Notification.Name("rendererDocumentSelection")
-    static let rendererTextCursor = Notification.Name("rendererTextCursor")
+    static let rendererCursor = Notification.Name("rendererCursor")
     static let rendererTextInputFocusChanged = Notification.Name("rendererTextInputFocusChanged")
 }
 
@@ -74,6 +74,7 @@ struct RendererProcessPoolSnapshot: Sendable, Equatable {
 @MainActor
 final class RendererProcessPool: ObservableObject {
     static let shared = RendererProcessPool(localStorage: RendererLocalStorage(access: .shared))
+    private let guestMenu = RendererGuestMenu()
 
     nonisolated static let systemFingerprintPrefix = "system."
 
@@ -233,6 +234,7 @@ final class RendererProcessPool: ObservableObject {
     }
 
     func releaseRenderer(for tabId: UUID) {
+        guestMenu.cancel(tabId: tabId)
         localStorage.remove(tabId)
         fileImport.cancel(tabId: tabId)
         // The renderer is going away (close or fingerprint replacement):
@@ -310,7 +312,9 @@ final class RendererProcessPool: ObservableObject {
         guard self.worker(for: tabId) === worker else {
             throw RendererProcessPoolError.rendererExited("Tab changed renderer")
         }
-        fileImport.update(tabId: tabId, reloadKey: resolvedConfig["reloadKey"] as? Int ?? 0)
+        let reloadKey = resolvedConfig["reloadKey"] as? Int ?? 0
+        guestMenu.update(tabId: tabId, reloadKey: reloadKey)
+        fileImport.update(tabId: tabId, reloadKey: reloadKey)
 
         let config = localStorage.prepare(tabId: tabId, config: resolvedConfig)
         guard JSONSerialization.isValidJSONObject(config),
@@ -475,7 +479,10 @@ final class RendererProcessPool: ObservableObject {
     }
 
     func shutdown() {
-        for tabId in tabWorkerMap.keys { fileImport.cancel(tabId: tabId) }
+        for tabId in tabWorkerMap.keys {
+            guestMenu.cancel(tabId: tabId)
+            fileImport.cancel(tabId: tabId)
+        }
         let activeWorkers = Array(workers.values)
         for worker in activeWorkers {
             terminate(worker, reason: "Actrium is terminating")
@@ -651,12 +658,20 @@ final class RendererProcessPool: ObservableObject {
         }
 
         worker.connection.onHostEvent = { [weak self, weak worker] name, userInfoJSON, tab in
-            if name == "com.actrium.documentSelection" || name == "com.actrium.textCursor" {
+            if name == "com.actrium.rendererCursor" {
+                guard let self, let worker, let id = UUID(uuidString: tab), self.worker(for: id) === worker,
+                      let payload = try? JSONDecoder().decode([String: String].self, from: Data(userInfoJSON.utf8)),
+                      let value = payload["cursor"] else { return }
+                let cursor = RendererCursor(rawValue: value) ?? .arrow
+                NotificationCenter.default.post(name: .rendererCursor, object: nil, userInfo: ["tabId": id, "cursor": cursor])
+                return
+            }
+            if name == "com.actrium.documentSelection" {
                 guard let self, let worker, let id = UUID(uuidString: tab), self.worker(for: id) === worker,
                       let flag = try? JSONDecoder().decode([String: Bool].self, from: Data(userInfoJSON.utf8)),
                       let active = flag["active"] else { return }
                 NotificationCenter.default.post(
-                    name: name == "com.actrium.textCursor" ? .rendererTextCursor : .rendererDocumentSelection,
+                    name: .rendererDocumentSelection,
                     object: nil, userInfo: ["tabId": id, "active": active]
                 )
                 return
@@ -684,6 +699,16 @@ final class RendererProcessPool: ObservableObject {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker else { return }
                 Task { await self.handleFileImport(userInfoJSON, tabId: tabId, worker: worker) }
+                return
+            }
+            if name == GuestMenuCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab) else { return }
+                // Start tracking outside the main dispatch queue so renderer events can cancel the menu.
+                RunLoop.main.perform {
+                    MainActor.assumeIsolated {
+                        self.handleGuestMenu(userInfoJSON, tabId: tabId, worker: worker)
+                    }
+                }
                 return
             }
             if name == "com.actrium.textInputFocus" {
@@ -972,6 +997,21 @@ final class RendererProcessPool: ObservableObject {
         }
     }
 
+    private func handleGuestMenu(_ json: String, tabId: UUID, worker: Worker) {
+        do {
+            let reply = try RendererGuestMenu.reply(to: json, isCurrent: { self.worker(for: tabId) === worker }) { call in
+                guestMenu.show(call, tabId: tabId)
+            }
+            let data = try JSONEncoder().encode(reply)
+            try worker.connection.sendHostEvent(
+                name: GuestMenuCall.responseEvent, userInfoJSON: String(decoding: data, as: UTF8.self),
+                tabId: tabId.uuidString
+            )
+        } catch {
+            AppLogger.reactNative.error("Could not reply to guest menu request: \(error.localizedDescription)")
+        }
+    }
+
     private func handleFileImport(_ json: String, tabId: UUID, worker: Worker) async {
         do {
             let reply = try await fileImport.reply(to: json, tabId: tabId) { reloadKey in
@@ -995,6 +1035,7 @@ final class RendererProcessPool: ObservableObject {
 
         let affectedTabs = worker.tabs
         for tabId in affectedTabs {
+            guestMenu.cancel(tabId: tabId)
             fileImport.cancel(tabId: tabId)
             rendererEpoch[tabId, default: 0] &+= 1
             RealmServiceBindings.shared.cancelAttachmentUploads(tabId)

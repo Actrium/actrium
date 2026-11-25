@@ -6,6 +6,7 @@ import {
   NativeModules,
   Pressable as NativePressable,
   Text as NativeText,
+  type ViewStyle,
   View as NativeView,
 } from 'react-native';
 import { EventHandler } from 'askit/host-events';
@@ -32,9 +33,11 @@ import {
   type RealmServiceAttachmentBridge,
 } from './attachment-upload';
 import { createHostModules, type ActorCall } from './host-modules';
+import { createGuestMenuComponents, guestMenuNames } from './guest-menu';
 import { isAllowedImageSource, pickGuestImageProps } from './image-asset';
 import { bindNativeLocalStorage } from './local-storage';
 import { Supramark } from './guest-markdown-renderer';
+import { Svg } from './guest-svg-renderer';
 import { DocumentSelectionSurface } from './DocumentSelectionSurface';
 import { CachedImagePreview } from './CachedImagePreview';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
@@ -55,6 +58,10 @@ type GuestButtonProps = {
   onPress?: () => void;
   color?: string;
   disabled?: boolean;
+  style?: ViewStyle;
+  children?: React.ReactNode;
+  accessibilityLabel?: string;
+  testID?: string;
 };
 
 const GuestButton: React.FC<GuestButtonProps> = ({
@@ -62,22 +69,27 @@ const GuestButton: React.FC<GuestButtonProps> = ({
   onPress,
   color = '#2563eb',
   disabled = false,
+  style,
+  children,
+  accessibilityLabel,
+  testID,
 }) => (
   <NativePressable
     accessibilityRole='button'
+    accessibilityLabel={accessibilityLabel ?? title}
+    testID={testID}
     disabled={disabled}
-    onPress={onPress}
-    style={({ pressed }) => ({
+    onPress={() => onPress?.()}
+    style={({ pressed }) => [{
       alignItems: 'center',
       backgroundColor: disabled ? '#31527f' : color,
       borderRadius: 10,
-      opacity: pressed ? 0.8 : 1,
       padding: 14,
-    })}
+    }, style, pressed && { opacity: 0.8 }]}
   >
-    <NativeText style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>
+    {children ?? <NativeText style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>
       {title}
-    </NativeText>
+    </NativeText>}
   </NativePressable>
 );
 
@@ -105,6 +117,7 @@ const hostComponents: ComponentMap = {
     Record<string, unknown>
   >,
   ...(Supramark && { Supramark }),
+  ...(Svg && { Svg: Svg as unknown as ComponentMap[string] }),
   ScrollView: ScrollView as React.ComponentType<Record<string, unknown>>,
   Switch: Switch as unknown as React.ComponentType<Record<string, unknown>>,
   Text: Text as React.ComponentType<Record<string, unknown>>,
@@ -261,6 +274,17 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     }
     if (v1?.ok && v1.manifest.components.includes('Supramark') && !Supramark) {
       setError('Supramark rendering is unavailable in this Host build.');
+      return;
+    }
+    if (v1?.ok && v1.manifest.components.includes('Svg') && !Svg) {
+      setError('SVG rendering is unavailable in this Host build.');
+      return;
+    }
+    const menus = createGuestMenuComponents(tab.id, tab.reloadKey ?? 0, (error) => {
+      logToNative(`[StandaloneGuestApp] Guest menu failed: ${String(error)}`);
+    });
+    if (v1?.ok && !menus && guestMenuNames.some((name) => v1.manifest.components.includes(name))) {
+      setError('Native menus are unavailable in this Host build.');
       return;
     }
     const authorizer = authorizerRef.current;
@@ -439,7 +463,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     engine.register(
       linked
         ? Object.fromEntries(
-            Object.entries(hostComponents).filter(([name]) =>
+            Object.entries({ ...hostComponents, ...menus }).filter(([name]) =>
               linked.manifest.components.includes(name === 'Image' ? 'ImageAsset' : name)
             )
           )

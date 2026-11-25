@@ -4,6 +4,50 @@ func extendMultiClickSelection(from start: NSRange, to target: NSRange, at index
     (NSUnionRange(start, target), index < start.location ? start.upperBound : start.location)
 }
 
+/// AppKit cannot track the real pointer over an offscreen window. Use the
+/// renderer's hit path and dispatch transitions to the interested Fabric views.
+@MainActor
+final class RendererHoverTracking {
+    private final class Target {
+        weak var view: NSView?
+        init(_ view: NSView) { self.view = view }
+    }
+
+    private let tracksHover: (NSView) -> Bool
+    private var targets: [Target] = []
+
+    init(tracksHover: @escaping (NSView) -> Bool) {
+        self.tracksHover = tracksHover
+    }
+
+    func update(hitView: NSView?, windowNumber: Int, location: NSPoint) {
+        let previous = targets.compactMap(\.view)
+        let next = sequence(first: hitView, next: { $0?.superview })
+            .prefix(while: { $0 != nil }).compactMap { $0 }
+            .filter(tracksHover)
+        let oldIDs = Set(previous.map(ObjectIdentifier.init))
+        let newIDs = Set(next.map(ObjectIdentifier.init))
+        guard oldIDs != newIDs else { return }
+        targets = next.map(Target.init)
+
+        send(.mouseExited, to: previous.filter { !newIDs.contains(ObjectIdentifier($0)) },
+             windowNumber: windowNumber, location: location)
+        send(.mouseEntered, to: next.reversed().filter { !oldIDs.contains(ObjectIdentifier($0)) },
+             windowNumber: windowNumber, location: location)
+    }
+
+    private func send(_ type: NSEvent.EventType, to views: [NSView], windowNumber: Int, location: NSPoint) {
+        guard !views.isEmpty, let event = NSEvent.enterExitEvent(
+            with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: windowNumber, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil
+        ) else { return }
+        for view in views {
+            if type == .mouseEntered { view.mouseEntered(with: event) }
+            else { view.mouseExited(with: event) }
+        }
+    }
+}
+
 /// The offscreen window does not dispatch synthetic events to gesture recognizers.
 /// Keep the original hit path for the lifetime of each physical press.
 @MainActor

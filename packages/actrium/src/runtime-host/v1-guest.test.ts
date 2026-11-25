@@ -232,11 +232,21 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
   let engine: Engine | undefined;
   try {
     await Bun.write(path.join(root, 'guest.tsx'), `
-      import { Supramark, View } from 'keel/guest';
+      import { Menu, Select, Supramark, Svg, View } from 'keel/guest';
       import { writeText } from 'host:clipboard';
       import { call as echo } from 'host:service/${route}';
       void echo({ payloadBase64: '' }).then(() => writeText({ text: 'Echo received' }));
-      export default function App() { return <><View>Hello</View>{'Standalone text'}<Supramark markdown="# Hello" /></>; }
+      export default function App() {
+        return <>
+          <View onMouseEnter={() => writeText({ text: 'hover-in' })} onMouseLeave={() => writeText({ text: 'hover-out' })}>
+            Hello
+          </View>
+          {'Standalone text'}<Supramark markdown="# Hello" />
+          <Select value="zh" options={[{ value: 'zh', label: 'Chinese' }]} onValueChange={(text) => writeText({ text })} />
+          <Menu title="More" items={[{ value: 'rename', label: 'Rename' }]} onSelect={(text) => writeText({ text })} />
+          <Svg width={48} height={32} viewBox="0 0 24 16" paths={[{ d: 'M2 2 L22 14', stroke: '#123456' }]} />
+        </>;
+      }
     `);
     const command = [
       Bun.argv[0], keelCli, 'build', 'guest.tsx',
@@ -252,14 +262,19 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
     const signedProfile = await Bun.file(path.join(root, 'workload/capabilities.json')).text();
     const verified = verifyV1RuntimeGuest(bundle, signedProfile, declarations);
     if (!verified.ok) throw new Error(verified.details.join(' '));
-    expect(verified.manifest.components).toEqual(['Supramark', 'View']);
-    const profileWithoutSupramark = JSON.stringify({ ...verified.manifest, components: ['View'] });
-    expect(verifyV1RuntimeGuest(bundle, profileWithoutSupramark, declarations)).toMatchObject({
+    expect(verified.manifest.components).toEqual(['Menu', 'Select', 'Supramark', 'Svg', 'View']);
+    const profileWithoutMenus = JSON.stringify({ ...verified.manifest, components: ['Supramark', 'View'] });
+    expect(verifyV1RuntimeGuest(bundle, profileWithoutMenus, declarations)).toMatchObject({
+      ok: false, code: 'capability_mismatch',
+    });
+    const profileWithoutSvg = JSON.stringify({ ...verified.manifest, components: ['Menu', 'Select', 'Supramark', 'View'] });
+    expect(verifyV1RuntimeGuest(bundle, profileWithoutSvg, declarations)).toMatchObject({
       ok: false, code: 'capability_mismatch',
     });
 
     const calls: string[] = [];
     const clipboard = Promise.withResolvers<string>();
+    const selections: string[] = [];
     const authorize = async () => {};
     const implementations = createHostModules({
       hasServiceCapability: true,
@@ -269,11 +284,17 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
         return { success: true, payloadBase64: '' };
       },
       authorizeCapability: authorize,
-      writeClipboardText: async (text) => clipboard.resolve(text),
+      writeClipboardText: async (text) => {
+        selections.push(text);
+        clipboard.resolve(text);
+      },
     });
     // Stand in for the Host's native renderer without registering a Text component.
     const ProtocolText = () => null;
     const HostSupramark = () => null;
+    const HostSelect = () => null;
+    const HostMenu = () => null;
+    const HostSvg = () => null;
     engine = new Engine({
       sandbox: 'node-vm',
       ...bindV1HostModules(verified.linkage, implementations, authorize),
@@ -281,18 +302,28 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
       textNodeRenderer: ProtocolText,
       requireWhitelist: verified.manifest.imports.filter((id) => !id.startsWith('host:')),
     });
-    engine.register({ Supramark: HostSupramark, View: () => null });
+    engine.register({ Supramark: HostSupramark, Select: HostSelect, Menu: HostMenu, Svg: HostSvg, View: () => null });
     const receiver = engine.createReceiver();
     await engine.loadBundle(bundle);
     expect(await clipboard.promise).toBe('Echo received');
     expect(calls).toEqual([route]);
     // Check rendered children, since protocol text nodes can exist without a renderer.
-    expect(receiver.render()).toMatchObject({
+    type GuestCallbacks = {
+      onMouseEnter?: () => Promise<void>;
+      onMouseLeave?: () => Promise<void>;
+      onValueChange?: (value: string) => Promise<void>;
+      onSelect?: (value: string) => Promise<void>;
+    };
+    const rendered = receiver.render() as unknown as { props: { children: Array<{ props: GuestCallbacks }> } };
+    expect(rendered).toMatchObject({
       props: {
         children: [
           { props: { children: { type: ProtocolText, props: { children: 'Hello' } } } },
           { type: ProtocolText, props: { children: 'Standalone text' } },
           { type: HostSupramark, props: { markdown: '# Hello' } },
+          { type: HostSelect, props: { value: 'zh', options: [{ value: 'zh', label: 'Chinese' }] } },
+          { type: HostMenu, props: { title: 'More', items: [{ value: 'rename', label: 'Rename' }] } },
+          { type: HostSvg, props: { width: 48, height: 32, viewBox: '0 0 24 16', paths: [{ d: 'M2 2 L22 14', stroke: '#123456' }] } },
         ],
       },
     });
@@ -304,7 +335,19 @@ test.each([false, true])('runs the built Guest through a scoped Engine (minify=%
         { op: 'CREATE', id: 999, type: 'Text', props: {} },
       ],
     }).failed).toBe(2);
-    expect(receiver.getStats().nodeCount).toBe(4);
+    expect(receiver.getStats().nodeCount).toBe(7);
+    const select = rendered.props.children[3]?.props.onValueChange;
+    const choose = rendered.props.children[4]?.props.onSelect;
+    expect(select).toBeFunction();
+    expect(choose).toBeFunction();
+    await select?.('zh');
+    await choose?.('rename');
+    const hover = rendered.props.children[0]?.props;
+    expect(hover?.onMouseEnter).toBeFunction();
+    expect(hover?.onMouseLeave).toBeFunction();
+    await hover?.onMouseEnter?.();
+    await hover?.onMouseLeave?.();
+    expect(selections).toEqual(['Echo received', 'zh', 'rename', 'hover-in', 'hover-out']);
   } finally {
     engine?.destroy();
     fs.rmSync(root, { recursive: true, force: true });

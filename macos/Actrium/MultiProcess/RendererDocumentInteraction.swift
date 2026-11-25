@@ -1,5 +1,20 @@
 import AppKit
 
+enum RendererCursor: String, Decodable, Sendable {
+    case arrow = "default"
+    case text
+    case pointer
+
+    @MainActor
+    var appKitCursor: NSCursor {
+        switch self {
+        case .arrow: .arrow
+        case .text: .iBeam
+        case .pointer: .pointingHand
+        }
+    }
+}
+
 /// The visible window tracks selection and cursor state.
 /// The renderer supplies the selected text when the user invokes Copy.
 @MainActor
@@ -8,21 +23,27 @@ final class RendererDocumentInteraction {
     private var observers: [NSObjectProtocol] = []
     private var outsidePressMonitor: Any?
     private(set) var hasSelection = false
-    private(set) var usesTextCursor = false
+    private(set) var cursor: RendererCursor = .arrow
 
     init(surface: RendererSurfaceHostView) {
         self.surface = surface
         let center = NotificationCenter.default
-        let names: [Notification.Name] = [.rendererDocumentSelection, .rendererTextCursor]
-        observers = names.map { name in
-            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+        observers = [
+            center.addObserver(forName: .rendererDocumentSelection, object: nil, queue: .main) { [weak self] note in
                 guard let tabId = note.userInfo?["tabId"] as? UUID,
                       let active = note.userInfo?["active"] as? Bool else { return }
                 MainActor.assumeIsolated {
-                    self?.update(name, tabId: tabId, active: active)
+                    self?.updateSelection(tabId: tabId, active: active)
                 }
-            }
-        }
+            },
+            center.addObserver(forName: .rendererCursor, object: nil, queue: .main) { [weak self] note in
+                guard let tabId = note.userInfo?["tabId"] as? UUID,
+                      let cursor = note.userInfo?["cursor"] as? RendererCursor else { return }
+                MainActor.assumeIsolated {
+                    self?.updateCursor(tabId: tabId, cursor: cursor)
+                }
+            },
+        ]
     }
 
     isolated deinit {
@@ -30,17 +51,18 @@ final class RendererDocumentInteraction {
         removeOutsidePressMonitor()
     }
 
-    private func update(_ name: Notification.Name, tabId: UUID, active: Bool) {
+    private func updateSelection(tabId: UUID, active: Bool) {
+        guard surface?.tabId == tabId else { return }
+        hasSelection = active
+        updateOutsidePressMonitor()
+    }
+
+    private func updateCursor(tabId: UUID, cursor: RendererCursor) {
         guard let surface, surface.tabId == tabId else { return }
-        if name == .rendererDocumentSelection {
-            hasSelection = active
-            updateOutsidePressMonitor()
-        } else {
-            usesTextCursor = active
-            guard surface.allowsInput, let window = surface.window, window.isKeyWindow,
-                  contains(window.mouseLocationOutsideOfEventStream, in: window) else { return }
-            (active ? NSCursor.iBeam : NSCursor.arrow).set()
-        }
+        self.cursor = cursor
+        guard surface.allowsInput, let window = surface.window, window.isKeyWindow,
+              contains(window.mouseLocationOutsideOfEventStream, in: window) else { return }
+        cursor.appKitCursor.set()
     }
 
     private func contains(_ point: NSPoint, in window: NSWindow) -> Bool {
@@ -72,7 +94,7 @@ final class RendererDocumentInteraction {
     }
 
     func reset() {
-        usesTextCursor = false
+        cursor = .arrow
         clearSelection()
     }
 
@@ -81,5 +103,5 @@ final class RendererDocumentInteraction {
         removeOutsidePressMonitor()
     }
 
-    func mouseExited() { usesTextCursor = false }
+    func mouseExited() { cursor = .arrow }
 }
