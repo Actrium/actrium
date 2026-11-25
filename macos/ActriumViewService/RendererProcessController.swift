@@ -1190,10 +1190,13 @@ private final class TextSelectionGesture {
     }
 
     /// Anchors the range a drag move applies. Returns `false` once the drag no
-    /// longer belongs to the press that started it.
-    func trackDrag(owner: AnyObject, range: NSRange) -> Bool {
+    /// longer belongs to the press that started it. For multi-click drags, pass
+    /// the extended anchor so Shift+click after mouse-up extends from the
+    /// stationary end of the drag.
+    func trackDrag(owner: AnyObject, range: NSRange, anchor: Int? = nil) -> Bool {
         guard phase != .idle, self.owner === owner else { return false }
         trackedRange = range
+        if let anchor { self.anchor = anchor }
         phase = .dragging
         return true
     }
@@ -1222,10 +1225,11 @@ private final class TextSelectionGesture {
     }
 
     /// Invalidates the gesture only if the given owner matches the current
-    /// gesture owner. Used by text-change observers to avoid retiring an
-    /// anchor that belongs to a different control.
+    /// gesture owner and no drag is in progress. Used by text-change observers
+    /// to avoid retiring an anchor that belongs to a different control or
+    /// interrupting an active drag.
     func invalidateIfOwned(by owner: AnyObject) {
-        guard self.owner === owner else { return }
+        guard phase == .idle, self.owner === owner else { return }
         invalidate()
     }
 
@@ -1289,9 +1293,13 @@ private final class RendererTabSurface {
 
     /// The identity a control's selection and undo state is keyed on. The
     /// window field editor is shared between fields, so a field is identified
-    /// by its delegate rather than the shared editor.
-    private func control(for editor: NSTextView) -> AnyObject {
-        editor.isFieldEditor ? (editor.delegate.map { $0 as AnyObject } ?? editor) : editor
+    /// by its delegate rather than the shared editor. Returns nil when the
+    /// delegate is unknown, so callers can treat it as "no owner".
+    private func control(for editor: NSTextView) -> AnyObject? {
+        if editor.isFieldEditor {
+            return editor.delegate.map { $0 as AnyObject }
+        }
+        return editor
     }
 
     private func currentControl() -> AnyObject? {
@@ -1477,9 +1485,10 @@ private final class RendererTabSurface {
             MainActor.assumeIsolated {
                 guard let self,
                       let view = notification.object as? NSTextView,
-                      view.window === self.window else { return }
+                      view.window === self.window,
+                      let owner = self.control(for: view) else { return }
                 self.selectionGesture.noteSelectionChange(
-                    owner: self.control(for: view),
+                    owner: owner,
                     current: view.selectedRange()
                 )
             }
@@ -1492,13 +1501,14 @@ private final class RendererTabSurface {
             MainActor.assumeIsolated {
                 guard let self,
                       let view = notification.object as? NSTextView,
-                      view.window === self.window else { return }
+                      view.window === self.window,
+                      let owner = self.control(for: view) else { return }
                 // Marked text churns during composition; the anchor retires
                 // when committed text changes instead.
                 guard view.markedRange().length == 0 else { return }
                 // Only invalidate if the edit belongs to the gesture's owner,
                 // so typing in field B does not retire field A's anchor.
-                self.selectionGesture.invalidateIfOwned(by: self.control(for: view))
+                self.selectionGesture.invalidateIfOwned(by: owner)
             }
         })
     }
@@ -1603,16 +1613,18 @@ private final class RendererTabSurface {
                         length: abs(index - anchor)
                     )
                     // Extend multi-click selection (double-click word, triple-click paragraph).
+                    var extendedAnchor: Int?
                     if let start = multiClickStart, start.range.upperBound <= textLength {
                         let caret = NSRange(location: index, length: 0)
                         let target = editor.selectionRange(forProposedRange: caret, granularity: start.granularity)
                         let extended = extendMultiClickSelection(from: start.range, to: target, at: index)
                         range = extended.range
+                        extendedAnchor = extended.anchor
                     }
                     // Keep the stored selection in sync with what the drag
                     // applies, so a later Shift+click still recognises the
                     // anchor as the creator of the current selection.
-                    guard selectionGesture.trackDrag(owner: owner, range: range) else {
+                    guard selectionGesture.trackDrag(owner: owner, range: range, anchor: extendedAnchor) else {
                         textInputPresses.remove(input.button)
                         selectionGesture.invalidate()
                         return
@@ -1973,8 +1985,7 @@ private final class RendererTabSurface {
         let editor = (view as? NSTextField)?.currentEditor() as? NSTextView ?? view as? NSTextView
         focusedEditor = focused ? editor : nil
         multiClickStart = nil
-        guard focused, let editor else { return }
-        let owner = control(for: editor)
+        guard focused, let editor, let owner = control(for: editor) else { return }
         let point = editor.convert(location, from: nil)
         let index = editor.characterIndexForInsertion(at: point)
         guard index != NSNotFound, index <= (editor.string as NSString).length else {
