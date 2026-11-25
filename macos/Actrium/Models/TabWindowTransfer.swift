@@ -59,7 +59,8 @@ enum TabWindowTransfer {
             contractVersion: tab.contractVersion, permissions: tab.permissions,
             reloadNonce: tab.reloadNonce, leftPanelDefaultVisible: tab.leftPanelDefaultVisible,
             rightPanelDefaultVisible: tab.rightPanelDefaultVisible,
-            backgroundColor: tab.backgroundColor, appIcon: tab.appIcon
+            backgroundColor: tab.backgroundColor, appIcon: tab.appIcon,
+            verifiedAppName: tab.verifiedAppName
         )
         result.realmProfileSigner = tab.realmProfileSigner
         result.historyPageIndex = tab.historyPageIndex

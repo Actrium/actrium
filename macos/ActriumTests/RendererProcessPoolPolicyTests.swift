@@ -176,4 +176,26 @@ struct RendererProcessPoolPolicyTests {
             )
         )
     }
+
+    @Test @MainActor func lateTitleFromPreviousSameWorkerReloadIsRejected() {
+        let tabId = UUID()
+        let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
+        // Reuse the same tab and renderer ownership; only the content reloadKey
+        // advances, as it does when reloadCurrentTab keeps the same worker.
+        viewModel.tabs = [Tab(title: "Replacement", id: tabId, reloadNonce: 1)]
+
+        NotificationCenter.default.post(
+            name: .tabTitleChanged,
+            object: nil,
+            userInfo: ["tabId": tabId, "title": "Stale", "reloadKey": 0]
+        )
+        #expect(viewModel.tabs[0].title == "Replacement")
+
+        NotificationCenter.default.post(
+            name: .tabTitleChanged,
+            object: nil,
+            userInfo: ["tabId": tabId, "title": "Current", "reloadKey": 1]
+        )
+        #expect(viewModel.tabs[0].title == "Current")
+    }
 }

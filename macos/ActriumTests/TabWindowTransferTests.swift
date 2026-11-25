@@ -84,7 +84,8 @@ struct TabWindowTransferTests {
             guestEntry: "workload/guest.js", capabilityManifestJSON: Self.manifest,
             localStorageOrigin: origin, localStoragePublisherIdentity: "host-publisher-context", capabilityRevision: 3,
             contractName: "counter", contractVersion: 1,
-            permissions: ["host:local-storage.getItem", "host:local-storage.setItem"], reloadNonce: 2
+            permissions: ["host:local-storage.getItem", "host:local-storage.setItem"], reloadNonce: 2,
+            verifiedAppName: "Verified Counter"
         )
         tab.realmProfileSigner = ("realm@example.com", "profile-key")
         return tab
@@ -104,6 +105,7 @@ struct TabWindowTransferTests {
         #expect(moved.permissions == original.permissions)
         #expect(moved.capabilityRevision == original.capabilityRevision)
         #expect(moved.reloadNonce == original.reloadNonce)
+        #expect(moved.verifiedAppName == original.verifiedAppName)
         let store = GuestLocalStorage(path: ":memory:")
         let broker = RendererLocalStorage(database: store)
         let oldDocument = try prepare(broker, tab: original)

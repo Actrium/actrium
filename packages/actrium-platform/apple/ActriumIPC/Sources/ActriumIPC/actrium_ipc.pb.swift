@@ -699,6 +699,8 @@ public struct Actrium_Ipc_TitleChanged: Sendable {
 
   public var tabID: String = String()
 
+  public var reloadKey: Int32 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -2306,7 +2308,7 @@ extension Actrium_Ipc_SurfaceUpdated: SwiftProtobuf.Message, SwiftProtobuf._Mess
 
 extension Actrium_Ipc_TitleChanged: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".TitleChanged"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{4}\u{9}tab_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{4}\u{9}tab_id\0\u{3}reload_key\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2316,6 +2318,7 @@ extension Actrium_Ipc_TitleChanged: SwiftProtobuf.Message, SwiftProtobuf._Messag
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.title) }()
       case 10: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
+      case 11: try { try decoder.decodeSingularInt32Field(value: &self.reloadKey) }()
       default: break
       }
     }
@@ -2328,12 +2331,16 @@ extension Actrium_Ipc_TitleChanged: SwiftProtobuf.Message, SwiftProtobuf._Messag
     if !self.tabID.isEmpty {
       try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 10)
     }
+    if self.reloadKey != 0 {
+      try visitor.visitSingularInt32Field(value: self.reloadKey, fieldNumber: 11)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Actrium_Ipc_TitleChanged, rhs: Actrium_Ipc_TitleChanged) -> Bool {
     if lhs.title != rhs.title {return false}
     if lhs.tabID != rhs.tabID {return false}
+    if lhs.reloadKey != rhs.reloadKey {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

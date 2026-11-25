@@ -28,7 +28,7 @@ public final class IPCConnection {
     public var onDisconnected: (() -> Void)?
     public var onRendererReady: ((String, Int32) -> Void)?
     public var onTabSurfaceUpdated: ((String, UInt32) -> Void)?
-    public var onTabTitleChanged: ((String, String) -> Void)?
+    public var onTabTitleChanged: ((String, String, Int) -> Void)?
     public var onTabNavigationRequest: ((String, String, Bool) -> Void)?
     public var onTabConsoleLog: ((String, String, String, String) -> Void)?
     public var onTabCrash: ((String, String) -> Void)?
@@ -335,7 +335,7 @@ public final class IPCConnection {
 
             case .titleChanged(let title):
                 onTitleChanged?(title.title)
-                onTabTitleChanged?(title.tabID, title.title)
+                onTabTitleChanged?(title.tabID, title.title, Int(title.reloadKey))
 
             case .navigationRequest(let nav):
                 onNavigationRequest?(nav.url, nav.newTab)
@@ -460,11 +460,16 @@ public final class IPCHelperConnection {
     }
 
     /// Send title changed notification
-    nonisolated public func sendTitleChanged(_ title: String, tabId: String = "") throws {
+    nonisolated public func sendTitleChanged(
+        _ title: String,
+        tabId: String = "",
+        reloadKey: Int = 0
+    ) throws {
         var msg = Actrium_Ipc_IPCMessage()
         msg.titleChanged = Actrium_Ipc_TitleChanged()
         msg.titleChanged.title = title
         msg.titleChanged.tabID = tabId
+        msg.titleChanged.reloadKey = Int32(reloadKey)
 
         try send(msg)
     }

@@ -228,17 +228,23 @@ describe('host:tab.setTitle contract', () => {
   });
 
   test('counts multibyte characters as UTF-8 bytes, not characters', () => {
-    // 'ü' is 2 UTF-8 bytes: 128 chars = 256 bytes, 129 chars = 258 bytes.
-    expect(parse?.({ title: 'ü'.repeat(128) })).toEqual({ title: 'ü'.repeat(128) });
-    expect(() => parse?.({ title: 'ü'.repeat(129) })).toThrow();
-    // Mixed boundary: 254 ASCII bytes + one 2-byte char = 256 bytes exactly.
-    expect(parse?.({ title: `${'a'.repeat(254)}ü` })).toEqual({
-      title: `${'a'.repeat(254)}ü`,
+    const twoByteCharacter = String.fromCharCode(0xfc);
+    const fourByteCharacter = String.fromCodePoint(0x1f642);
+    // The two-byte character makes 128 chars = 256 bytes and 129 = 258 bytes.
+    expect(parse?.({ title: twoByteCharacter.repeat(128) })).toEqual({
+      title: twoByteCharacter.repeat(128),
     });
-    expect(() => parse?.({ title: `${'a'.repeat(255)}ü` })).toThrow();
-    // An emoji surrogate pair is 4 bytes.
-    expect(parse?.({ title: '🙂'.repeat(64) })).toEqual({ title: '🙂'.repeat(64) });
-    expect(() => parse?.({ title: '🙂'.repeat(65) })).toThrow();
+    expect(() => parse?.({ title: twoByteCharacter.repeat(129) })).toThrow();
+    // Mixed boundary: 254 ASCII bytes + one 2-byte char = 256 bytes exactly.
+    expect(parse?.({ title: `${'a'.repeat(254)}${twoByteCharacter}` })).toEqual({
+      title: `${'a'.repeat(254)}${twoByteCharacter}`,
+    });
+    expect(() => parse?.({ title: `${'a'.repeat(255)}${twoByteCharacter}` })).toThrow();
+    // The emoji is a surrogate pair in UTF-16 and four bytes in UTF-8.
+    expect(parse?.({ title: fourByteCharacter.repeat(64) })).toEqual({
+      title: fourByteCharacter.repeat(64),
+    });
+    expect(() => parse?.({ title: fourByteCharacter.repeat(65) })).toThrow();
   });
 
   test('rejects a missing or non-string title', () => {

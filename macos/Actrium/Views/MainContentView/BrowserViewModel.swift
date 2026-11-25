@@ -184,6 +184,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     private let inviteMembershipExchange: RealmJoinService.InviteExchange?
     private let confirmRealmMembership: @MainActor (RealmJoinService.VerifiedProfile) async throws -> Bool
     private let downloadRealmArchive: @MainActor (URL) async throws -> URL
+    private let guestStorageDatabase: GuestStorageDatabase
 
     var currentTab: Tab? {
         guard let currentTabId = currentTabId else { return nil }
@@ -197,6 +198,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         realmPreferences: UserDefaults = .standard,
         realmTrustDirectory: URL? = nil,
         appRepository: AppRepository? = nil,
+        guestStorageDatabase: GuestStorageDatabase = .shared,
         pendingRealmInvites: PendingRealmInvites? = nil,
         fetchRealmDocument: (@MainActor (URL, String) async throws -> Data)? = nil,
         joinOpenRealm: (@MainActor (RealmJoinService.VerifiedProfile) async throws -> Void)? = nil,
@@ -210,6 +212,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         self.chooseLocalFrontFile = chooseLocalFrontFile
         self.realmPreferences = realmPreferences
         self.realmTrustDirectory = realmTrustDirectory
+        self.guestStorageDatabase = guestStorageDatabase
         self.pendingRealmInvites = pendingRealmInvites ?? .shared
         self.fetchRealmDocument = fetchRealmDocument ?? Self.fetchBoundedDocument(from:insecureMessage:)
         self.joinOpenRealm = joinOpenRealm ?? {
@@ -253,9 +256,16 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         tabTitleObserver = NotificationCenter.default
             .publisher(for: .tabTitleChanged)
             .sink { [weak self] notice in
-                guard let tabId = notice.userInfo?["tabId"] as? UUID,
-                      let title = notice.userInfo?["title"] as? String else { return }
-                self?.updateTabTitle(for: tabId, title: title)
+                guard let self,
+                      let tabId = notice.userInfo?["tabId"] as? UUID,
+                      let title = notice.userInfo?["title"] as? String,
+                      let tab = self.tabs.first(where: { $0.id == tabId }) else { return }
+                // Multi-process titles carry their originating reloadKey. A
+                // queued title from before a same-worker reload must not
+                // overwrite the replacement content. Legacy IPC has no key.
+                if let reloadKey = notice.userInfo?["reloadKey"] as? Int,
+                   reloadKey != tab.reloadNonce { return }
+                self.updateTabTitle(for: tabId, title: title)
             }
     }
 
@@ -1639,6 +1649,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         invite: RealmJoinService.Invite? = nil
     ) {
         let replacingTabId = tab.id
+        // A restored or transferred deferred tab carries a user-visible title
+        // from its previous session. Keep it until this activation finishes;
+        // subsequent runtime title updates remain unrestricted.
+        let deferredTitle = deferredRealmLinks[replacingTabId] == nil ? nil : tab.title
         let refreshId = UUID()
         let realmName = "\(realmId)@\(domain)"
         let reservations = pendingRealmInvites
@@ -1822,7 +1836,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 let isLoadingTab = tab.url != address || loadedRealmFronts[replacingTabId]?.address != address
                 if isLoadingTab, localFrontApprovals[replacingTabId] == nil {
                     unloadRealmFront(at: index)
-                    tabs[index].title = title
+                    tabs[index].title = deferredTitle ?? title
                     tabs[index].url = address
                     navigationNonce = tabs[index].reloadNonce
                     objectWillChange.send()
@@ -1895,6 +1909,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         isCurrent: { (try? profileIsCurrent()) == true }
                     ) {
                         loadedRealmFronts[installedTabId] = loadedFront
+                        if let deferredTitle, let index = tabs.firstIndex(where: { $0.id == installedTabId }) {
+                            tabs[index].title = deferredTitle
+                            persistBrowserPageSession()
+                        }
                         let installedName = "\(realmName)/\(installedTabId.uuidString)"
                         do {
                             try saveRealmTrust(profileBody, .installedProfile, name: installedName)
@@ -2009,7 +2027,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 guard try profileIsCurrent() else { return }
                 try await RealmProfileStore.withPublisherKeys([
                     .init(publicKey: verified.trustedKey, domain: publisherDomain)
-                ], database: .shared) {
+                ], database: guestStorageDatabase) {
                     try Task.checkCancellation()
                     guard try profileIsCurrent() else { return }
                     guard let publisherIdentity = publisher.storageIdentity else {
@@ -2039,6 +2057,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     loadedRealmFronts[replacingTabId] = loadedFront
                     if let index = tabs.firstIndex(where: { $0.id == replacingTabId }) {
                         tabs[index].realmProfileSigner = (realmName, accepted.signingKeyId)
+                        if let deferredTitle {
+                            tabs[index].title = deferredTitle
+                        }
                     }
                     do {
                         try saveRealmTrust(profileBody, .installedProfile, name: installedProfileName)
@@ -2077,7 +2098,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             throw RealmServiceError(message: "The Publisher information is not valid text.")
         }
         return try await RealmProfileStore.acceptPublisher(
-            body: body, domain: domain, preferences: realmPreferences, database: .shared,
+            body: body, domain: domain, preferences: realmPreferences, database: guestStorageDatabase,
             fallbackPins: { try self.readRealmTrust(.publisher, name: domain) }
         )
     }
@@ -2239,7 +2260,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             origin: manifest.storageOrigin(devDirectory: nil), publisherIdentity: publisher.storageIdentity,
             manifest: capabilities, permissions: manifest.permissions
         )
-        try await RealmProfileStore.requirePublisherKeys(publisherKeys, database: .shared)
+        try await RealmProfileStore.requirePublisherKeys(publisherKeys, database: guestStorageDatabase)
         guard isCurrent() else { return nil }
         do {
             // Verification is complete before the old lease is released. The
@@ -2258,7 +2279,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
         do {
             let activated: UUID? = try await RealmProfileStore.withPublisherKeys(
-                publisherKeys, database: .shared
+                publisherKeys, database: guestStorageDatabase
             ) { () -> UUID? in
                 guard isCurrent(), let index = tabs.firstIndex(where: { $0.id == tabId }) else {
                     return nil
@@ -2276,7 +2297,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     contractName: manifest.contractName,
                     contractVersion: manifest.contractVersion, permissions: manifest.permissions,
                     leftPanelDefaultVisible: manifest.leftPanelDefaultVisible,
-                    rightPanelDefaultVisible: manifest.rightPanelDefaultVisible, backgroundColor: manifest.themeColor
+                    rightPanelDefaultVisible: manifest.rightPanelDefaultVisible, backgroundColor: manifest.themeColor,
+                    verifiedAppName: manifest.name ?? front.href
                 )
                 tab.realmProfileSigner = (profile.realmName, accepted.signingKeyId)
                 let position = tabSlotPositions.removeValue(forKey: tabId) ?? index
@@ -3283,7 +3305,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         localStorageOrigin: manifestInfo.storageOrigin(devDirectory: directoryURL),
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
-                        themeColor: manifestInfo.themeColor
+                        themeColor: manifestInfo.themeColor,
+                        verifiedAppName: tabTitle
                     )
                 } else if leftPanelScript != nil || rightPanelScript != nil {
                     self?.appendRuntimeTab(
@@ -3298,7 +3321,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                         leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
                         rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
-                        themeColor: manifestInfo.themeColor
+                        themeColor: manifestInfo.themeColor,
+                        verifiedAppName: tabTitle
                     )
                 } else if let script = guestScript {
                     self?.appendRuntimeTab(
@@ -3310,7 +3334,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         contractVersion: manifestInfo.contractVersion,
                         permissions: manifestInfo.permissions,
                         capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
-                        themeColor: manifestInfo.themeColor
+                        themeColor: manifestInfo.themeColor,
+                        verifiedAppName: tabTitle
                     )
                 } else {
                     logger.warning(" [loadFromDevDirectory] No script file found")

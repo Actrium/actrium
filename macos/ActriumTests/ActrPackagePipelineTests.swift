@@ -286,7 +286,7 @@ struct ActrPackagePipelineTests {
 
     // MARK: - Helpers
 
-    @Test func restoredActroPackageTabKeepsPersistedSessionTitle() throws {
+    @Test func restoredPackageTabKeepsPersistedSessionTitle() throws {
         let fm = FileManager.default
         let packageDir = fm.temporaryDirectory
             .appendingPathComponent("actr-restore-title-\(UUID().uuidString)", isDirectory: true)
@@ -344,13 +344,16 @@ struct ActrPackagePipelineTests {
             encoding: .utf8
         )
 
+        let packageAddress = try #require(
+            ActriumAppURLScheme.appURL(filePath: packageDir.path)
+        ).absoluteString
         let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
         // A guest-set dynamic title must survive a restart restore even
         // though importACTRPackage titles the tab with the manifest name.
         let savedTitle = "Demo (3 unread)"
         viewModel.restoreSessionIfNeeded {
             BrowserDataRepository.RestoredSession(tabs: [
-                .init(id: UUID(), title: savedTitle, address: "actro://\(packageDir.path)")
+                .init(id: UUID(), title: savedTitle, address: packageAddress)
             ], activeTabIndex: 0)
         }
 

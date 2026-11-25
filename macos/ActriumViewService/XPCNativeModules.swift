@@ -481,12 +481,16 @@ class CapabilityPermission: NSObject {
 
 /// Runtime tab title update reported by a Guest, analogous to
 /// `document.title`. The shell owns display and persistence; the renderer
-/// only forwards the semantic title with its tab id.
+/// forwards the title with its tab id and originating content generation.
 @objc(TabTitle)
 class TabTitle: NSObject {
     @objc
-    func setTitle(_ title: String, tabId: String) {
-        RendererProcessController.sendTitleChanged(title, tabId: tabId)
+    func setTitle(_ title: String, tabId: String, reloadKey: NSNumber) {
+        RendererProcessController.sendTitleChanged(
+            title,
+            tabId: tabId,
+            reloadKey: reloadKey.intValue
+        )
     }
 
     @objc

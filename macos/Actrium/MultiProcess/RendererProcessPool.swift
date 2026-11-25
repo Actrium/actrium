@@ -639,12 +639,12 @@ final class RendererProcessPool: ObservableObject {
             self?.publish(tree: tree)
         }
 
-        worker.connection.onTabTitleChanged = { [weak self, weak worker] tabIdString, title in
+        worker.connection.onTabTitleChanged = { [weak self, weak worker] tabIdString, title, reloadKey in
             guard let self, let worker, let tabId = UUID(uuidString: tabIdString),
                   self.worker(for: tabId) === worker else { return }
-            // The IPC ownership check happened before this task was queued.
-            // Re-check worker and epoch before applying; a title queued by an
-            // old renderer generation must not overwrite a newer page's title.
+            // Re-check renderer ownership after queueing. The BrowserViewModel
+            // separately compares reloadKey with the tab's current content
+            // generation, which also changes during a same-worker reload.
             let capturedEpoch = self.rendererEpoch[tabId] ?? 0
             Task { [weak self, weak worker] in
                 guard let self, let worker,
@@ -656,7 +656,7 @@ final class RendererProcessPool: ObservableObject {
                 NotificationCenter.default.post(
                     name: .tabTitleChanged,
                     object: nil,
-                    userInfo: ["tabId": tabId, "title": title]
+                    userInfo: ["tabId": tabId, "title": title, "reloadKey": reloadKey]
                 )
             }
         }
