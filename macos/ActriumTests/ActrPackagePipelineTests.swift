@@ -286,6 +286,79 @@ struct ActrPackagePipelineTests {
 
     // MARK: - Helpers
 
+    @Test func restoredActroPackageTabKeepsPersistedSessionTitle() throws {
+        let fm = FileManager.default
+        let packageDir = fm.temporaryDirectory
+            .appendingPathComponent("actr-restore-title-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: packageDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: packageDir) }
+        let workloadDir = packageDir.appendingPathComponent("workload", isDirectory: true)
+        try fm.createDirectory(at: workloadDir, withIntermediateDirectories: true)
+        let guestJS = "console.log('demo')\n"
+        try guestJS.write(
+            to: workloadDir.appendingPathComponent("guest.js"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let guestData = Data(guestJS.utf8)
+        let guestDigest = SHA256.hash(data: guestData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        try """
+        format = "actr-package/2"
+
+        [actor]
+        publisher = "publisher.example"
+        name = "demo"
+        version = "0.0.1"
+
+        [workload]
+        profile = "keel.guest/1"
+        entry = "workload/guest.js"
+
+        [workload.keel]
+        runtime = "js"
+        guest-api = "keel.guest/1"
+
+        [host]
+        profile = "actr.host/1"
+        api = "^1.0.0"
+        required-capabilities = []
+
+        [signature]
+        algorithm = "ed25519"
+        key-id = "actr-pub-0000000000000000"
+
+        [extensions.actrium]
+        title = "Demo Package"
+
+        [[files]]
+        path = "workload/guest.js"
+        role = "workload"
+        media-type = "text/javascript"
+        size = \(guestData.count)
+        sha256 = "\(guestDigest)"
+        """.write(
+            to: packageDir.appendingPathComponent("manifest.toml"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
+        // A guest-set dynamic title must survive a restart restore even
+        // though importACTRPackage titles the tab with the manifest name.
+        let savedTitle = "Demo (3 unread)"
+        viewModel.restoreSessionIfNeeded {
+            BrowserDataRepository.RestoredSession(tabs: [
+                .init(id: UUID(), title: savedTitle, address: "actro://\(packageDir.path)")
+            ], activeTabIndex: 0)
+        }
+
+        let restored = try #require(viewModel.tabs.first { $0.title == savedTitle })
+        #expect(restored.verifiedAppName == "Demo Package")
+        #expect(viewModel.tabs.contains { $0.title == "Demo Package" && $0.id != restored.id } == false)
+    }
+
     private func makeStore() -> (MockActrServiceInstanceStore, URL) {
         let storeURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("actr-instances-\(UUID().uuidString).json")

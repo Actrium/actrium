@@ -117,6 +117,19 @@ final class RendererProcessPool: ObservableObject {
         (currentEpoch ?? 0) == capturedEpoch
     }
 
+    /// Gate for tab-scoped renderer messages (e.g. TitleChanged): the queued
+    /// message applies only while the sending worker still owns the tab and
+    /// the renderer generation is unchanged. A late message from a released
+    /// renderer generation must not overwrite newer content's state.
+    nonisolated static func acceptsTabRendererMessage(
+        senderOwnsTab: Bool,
+        capturedEpoch: Int,
+        currentEpoch: Int?
+    ) -> Bool {
+        senderOwnsTab
+            && rendererEpochIsCurrent(capturedEpoch: capturedEpoch, currentEpoch: currentEpoch)
+    }
+
     private final class Worker {
         let id: String
         let connection: IPCConnection
@@ -626,13 +639,26 @@ final class RendererProcessPool: ObservableObject {
             self?.publish(tree: tree)
         }
 
-        worker.connection.onTabTitleChanged = { tabIdString, title in
-            guard let tabId = UUID(uuidString: tabIdString) else { return }
-            NotificationCenter.default.post(
-                name: .tabTitleChanged,
-                object: nil,
-                userInfo: ["tabId": tabId, "title": title]
-            )
+        worker.connection.onTabTitleChanged = { [weak self, weak worker] tabIdString, title in
+            guard let self, let worker, let tabId = UUID(uuidString: tabIdString),
+                  self.worker(for: tabId) === worker else { return }
+            // The IPC ownership check happened before this task was queued.
+            // Re-check worker and epoch before applying; a title queued by an
+            // old renderer generation must not overwrite a newer page's title.
+            let capturedEpoch = self.rendererEpoch[tabId] ?? 0
+            Task { [weak self, weak worker] in
+                guard let self, let worker,
+                      Self.acceptsTabRendererMessage(
+                          senderOwnsTab: self.worker(for: tabId) === worker,
+                          capturedEpoch: capturedEpoch,
+                          currentEpoch: self.rendererEpoch[tabId]
+                      ) else { return }
+                NotificationCenter.default.post(
+                    name: .tabTitleChanged,
+                    object: nil,
+                    userInfo: ["tabId": tabId, "title": title]
+                )
+            }
         }
 
         worker.connection.onTabNavigationRequest = { tabIdString, url, newTab in

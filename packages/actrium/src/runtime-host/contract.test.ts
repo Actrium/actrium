@@ -215,6 +215,41 @@ describe('host:service contract', () => {
   });
 });
 
+describe('host:tab.setTitle contract', () => {
+  const parse = descriptor('host:tab', 'setTitle').schema?.parseInput;
+
+  test('accepts a valid title', () => {
+    expect(parse?.({ title: 'Inbox' })).toEqual({ title: 'Inbox' });
+  });
+
+  test('enforces the UTF-8 byte limit on the ASCII boundary', () => {
+    expect(parse?.({ title: 'a'.repeat(256) })).toEqual({ title: 'a'.repeat(256) });
+    expect(() => parse?.({ title: 'a'.repeat(257) })).toThrow();
+  });
+
+  test('counts multibyte characters as UTF-8 bytes, not characters', () => {
+    // 'ü' is 2 UTF-8 bytes: 128 chars = 256 bytes, 129 chars = 258 bytes.
+    expect(parse?.({ title: 'ü'.repeat(128) })).toEqual({ title: 'ü'.repeat(128) });
+    expect(() => parse?.({ title: 'ü'.repeat(129) })).toThrow();
+    // Mixed boundary: 254 ASCII bytes + one 2-byte char = 256 bytes exactly.
+    expect(parse?.({ title: `${'a'.repeat(254)}ü` })).toEqual({
+      title: `${'a'.repeat(254)}ü`,
+    });
+    expect(() => parse?.({ title: `${'a'.repeat(255)}ü` })).toThrow();
+    // An emoji surrogate pair is 4 bytes.
+    expect(parse?.({ title: '🙂'.repeat(64) })).toEqual({ title: '🙂'.repeat(64) });
+    expect(() => parse?.({ title: '🙂'.repeat(65) })).toThrow();
+  });
+
+  test('rejects a missing or non-string title', () => {
+    expect(() => parse?.({})).toThrow();
+    expect(() => parse?.({ title: 1 })).toThrow();
+    // Empty strings stay allowed (matching clipboard.writeText): the shell
+    // renders its own fallback for a blank title.
+    expect(parse?.({ title: '' })).toEqual({ title: '' });
+  });
+});
+
 /**
  * The twelve placeholder modules are declared so builds accept their imports
  * and the Host-side boundary schemas exist; the Host still throws on every

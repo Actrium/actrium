@@ -777,7 +777,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 contractVersion: manifestInfo.contractVersion,
                 permissions: manifestInfo.permissions,
                 leftPanelDefaultVisible: manifestInfo.leftPanelDefaultVisible,
-                rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible
+                rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
+                verifiedAppName: manifestInfo.name
             )
             tabs.append(newTab)
             tabSlotPositions[newTab.id] = tabs.count - 1
@@ -1445,6 +1446,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
             tabs[tabIndex].contractName = manifestInfo.contractName
             tabs[tabIndex].contractVersion = manifestInfo.contractVersion
+            tabs[tabIndex].verifiedAppName = manifestInfo.name
             tabs[tabIndex].permissions = manifestInfo.permissions
             tabs[tabIndex].capabilityManifestJSON = manifestInfo.capabilityManifestJSON
             tabs[tabIndex].localStorageOrigin = manifestInfo.storageOrigin(
@@ -2872,7 +2874,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     // address after creation (04 §4, 15-B B6).
                     recordHistoryVisit: isDirectory.boolValue,
                     replacingTabId: replacingTabId,
-                    realmAddress: realmAddress
+                    realmAddress: realmAddress,
+                    verifiedAppName: manifestInfo.name
                 )
                 // 15-B B6: after rendering a package archive, offer instance
                 // creation (confirm page → serviceCreate → URI replace).
@@ -2908,7 +2911,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     rightPanelDefaultVisible: manifestInfo.rightPanelDefaultVisible,
                     themeColor: manifestInfo.themeColor,
                     replacingTabId: replacingTabId,
-                    realmAddress: realmAddress
+                    realmAddress: realmAddress,
+                    verifiedAppName: manifestInfo.name
                 )
                 schedulePackageCacheEviction()
                 return newTab
@@ -2927,7 +2931,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     capabilityManifestJSON: manifestInfo.capabilityManifestJSON,
                     themeColor: manifestInfo.themeColor,
                     replacingTabId: replacingTabId,
-                    realmAddress: realmAddress
+                    realmAddress: realmAddress,
+                    verifiedAppName: manifestInfo.name
                 )
                 schedulePackageCacheEviction()
                 return newTab
@@ -2946,7 +2951,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     appId: manifestInfo.appId,
                     htmlContent: html,
                     guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
-                    replacingTabId: replacingTabId
+                    replacingTabId: replacingTabId,
+                    verifiedAppName: manifestInfo.name
                 )
                 schedulePackageCacheEviction()
                 return newTab
@@ -3115,6 +3121,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         presentInstanceCreation: false
                     )
                     if let tab {
+                        // importACTRPackage titles the tab with the package's
+                        // default name; the persisted session title wins so a
+                        // guest-set dynamic title survives restarts. Tab is a
+                        // value type, so mutate the stored copy by id.
+                        if let storedIndex = tabs.firstIndex(where: { $0.id == tab.id }) {
+                            tabs[storedIndex].title = sessionTab.title
+                        }
                         restoredTabIds.append(tab.id)
                         tabId = tab.id
                     } else {
@@ -3389,7 +3402,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         themeColor: String? = nil,
         recordHistoryVisit: Bool = true,
         replacingTabId: UUID? = nil,
-        realmAddress: URL? = nil
+        realmAddress: URL? = nil,
+        verifiedAppName: String? = nil
     ) -> Tab {
         // Use actro:// URL for History and address bar
         let appURL = realmAddress ?? ActriumAppURLScheme.appURL(filePath: sourceURL.path) ?? sourceURL
@@ -3413,6 +3427,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].guestEntry = guestEntry
             tabs[index].contractName = contractName
             tabs[index].contractVersion = contractVersion
+            tabs[index].verifiedAppName = verifiedAppName
             tabs[index].permissions = permissions
             tabs[index].capabilityManifestJSON = capabilityManifestJSON
             tabs[index].localStorageOrigin = localStorageOrigin
@@ -3456,7 +3471,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             permissions: permissions,
             leftPanelDefaultVisible: leftPanelDefaultVisible,
             rightPanelDefaultVisible: rightPanelDefaultVisible,
-            backgroundColor: themeColor
+            backgroundColor: themeColor,
+            verifiedAppName: verifiedAppName
         )
         logger.debug("📝 [appendRuntimeTab] Create New Tab: \(title), ID=\(newTab.id.uuidString.prefix(8)), bg=\(newTab.backgroundColor)")
         tabs.append(newTab)

@@ -162,6 +162,13 @@ struct Tab: Identifiable {
     /// Custom app icon (SF Symbol name) - can be set by RCTNApp
     var appIcon: String?
 
+    /// Application identity captured from the host-verified package manifest at
+    /// tab creation. Unlike `title` (which a guest can update at runtime), this
+    /// is immutable guest-independent identity for host prompts such as the
+    /// capability permission requester name. Only host code may replace it
+    /// (e.g. same-tab content replacement with a verified package).
+    var verifiedAppName: String?
+
     init(
         title: String,
         id: UUID = UUID(),
@@ -190,7 +197,8 @@ struct Tab: Identifiable {
         leftPanelDefaultVisible: Bool = true,
         rightPanelDefaultVisible: Bool = false,
         backgroundColor: String? = nil,
-        appIcon: String? = nil
+        appIcon: String? = nil,
+        verifiedAppName: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -220,6 +228,7 @@ struct Tab: Identifiable {
         self.rightPanelDefaultVisible = rightPanelDefaultVisible
         self.backgroundColor = backgroundColor ?? "#1e1e1e"
         self.appIcon = appIcon
+        self.verifiedAppName = verifiedAppName
     }
 
     // MARK: - Content Type Detection

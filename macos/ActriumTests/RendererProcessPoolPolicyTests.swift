@@ -142,4 +142,38 @@ struct RendererProcessPoolPolicyTests {
             )
         )
     }
+
+    @Test func lateTitleFromReplacedContentIsRejected() {
+        // Same tab, same worker still owns it, but the renderer generation
+        // advanced after the content changed: the queued title must not apply.
+        #expect(
+            RendererProcessPool.acceptsTabRendererMessage(
+                senderOwnsTab: true,
+                capturedEpoch: 0,
+                currentEpoch: nil
+            )
+        )
+        #expect(
+            !RendererProcessPool.acceptsTabRendererMessage(
+                senderOwnsTab: true,
+                capturedEpoch: 0,
+                currentEpoch: 1
+            )
+        )
+        // The worker no longer owns the tab (tab moved to another renderer).
+        #expect(
+            !RendererProcessPool.acceptsTabRendererMessage(
+                senderOwnsTab: false,
+                capturedEpoch: 0,
+                currentEpoch: 0
+            )
+        )
+        #expect(
+            RendererProcessPool.acceptsTabRendererMessage(
+                senderOwnsTab: true,
+                capturedEpoch: 1,
+                currentEpoch: 1
+            )
+        )
+    }
 }
