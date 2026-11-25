@@ -522,7 +522,9 @@ final class RendererProcessPool: ObservableObject {
 
         let process = Process()
         process.executableURL = executableURL
-        let attachmentDirectory = RendererAttachmentDirectory.url(rendererID: id)
+        let attachmentDirectory = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: ActriumRuntimePaths.appGroupID)
+            .flatMap { RendererAttachmentDirectory.url(rendererID: id, in: $0) }
         var arguments = [
             "--renderer-id", id,
             "--fingerprint", fingerprint ?? "prewarm",

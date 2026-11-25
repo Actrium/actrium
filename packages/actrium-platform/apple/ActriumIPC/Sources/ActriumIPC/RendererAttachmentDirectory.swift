@@ -2,12 +2,9 @@ import Foundation
 
 #if os(macOS)
 public enum RendererAttachmentDirectory {
-    public static func url(rendererID: String) -> URL? {
+    public static func url(rendererID: String, in container: URL) -> URL? {
         guard rendererID.hasPrefix("renderer-"),
-              let id = UUID(uuidString: String(rendererID.dropFirst("renderer-".count))),
-              let container = FileManager.default.containerURL(
-                forSecurityApplicationGroupIdentifier: "group.io.actrium.actro"
-              ) else { return nil }
+              let id = UUID(uuidString: String(rendererID.dropFirst("renderer-".count))) else { return nil }
         return container.appendingPathComponent("AttachmentCaches", isDirectory: true)
             .appendingPathComponent(id.uuidString, isDirectory: true)
     }

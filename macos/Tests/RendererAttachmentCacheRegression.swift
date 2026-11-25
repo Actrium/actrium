@@ -56,7 +56,10 @@ struct RendererAttachmentCacheRegression {
     }
 
     private static func verifyExitedWorkerCleanup(in root: URL) throws {
-        let directory = root.appendingPathComponent("renderer-exited")
+        let rendererID = "renderer-\(UUID().uuidString)"
+        guard let directory = RendererAttachmentDirectory.url(rendererID: rendererID, in: root) else {
+            fatalError("Expected an attachment cache directory for a valid renderer ID")
+        }
         let sibling = root.appendingPathComponent("renderer-two")
         try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: false)
         let worker = Process()
