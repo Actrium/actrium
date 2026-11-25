@@ -496,3 +496,186 @@ async fn certified_identity_heals_unbound_actor_key_via_reissue() {
     reissue_mock.assert_async().await;
     issued_mock.assert_async().await;
 }
+
+/// A pre-Actor-channel Issuer denies unknown request fields, so a relay-only
+/// client must not send `"actor": null` (issue #523).
+#[tokio::test]
+async fn legacy_enrollment_omits_the_actor_key_for_pre_actor_issuers() {
+    let local = ActrId::from_string_repr("2.test@example.com").unwrap();
+    let endpoint = local.to_string_repr();
+    let now = now_secs();
+    let issuer_signing = SigningKey::from_bytes(&[7; 32]);
+    let issuer_public = IssuerKey {
+        key_id: 1,
+        public_key: issuer_signing.verifying_key().to_bytes(),
+        expires_at: now + 600,
+    };
+    let mut server = mockito::Server::new_async().await;
+    let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let response_requests = requests.clone();
+    let response_issuer = issuer_public.clone();
+    let mock = server
+        .mock("POST", "/relay-identity")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body_from_request(move |request| {
+            let body = request.body().unwrap().to_vec();
+            response_requests.lock().unwrap().push(body.clone());
+            let enrollment: IdentityRequest = serde_json::from_slice(&body).unwrap();
+            let relay_claims = serde_json::to_vec(&IdentityClaims {
+                domain: CERTIFICATE_DOMAIN.into(),
+                endpoint: enrollment.endpoint.clone(),
+                actor_type: "actrium/actrium-front@1.0.0".into(),
+                client_key: "fixture-client".into(),
+                public_key: enrollment.public_key,
+                admission_commitment: enrollment.admission_commitment,
+                expires_at: now + 120,
+            })
+            .unwrap();
+            let signature = issuer_signing
+                .sign(&signing_bytes(&relay_claims))
+                .to_bytes()
+                .to_vec();
+            serde_json::to_vec(&IssuedIdentity {
+                certificate: Certificate {
+                    key_id: 1,
+                    claims: relay_claims,
+                    signature,
+                },
+                issuer: response_issuer.clone(),
+                actor_certificate: None,
+            })
+            .unwrap()
+        })
+        .expect(1)
+        .create_async()
+        .await;
+    let session = SessionState::new(SessionSnapshot::empty_with_id(local.clone(), 1));
+    let gate = Arc::new(WebSocketGate::new_relay(
+        Arc::new(RpcCorrelation::new()),
+        Arc::new(DataChunkRegistry::new()),
+        PeerTypes::default(),
+    ));
+    let client = RelayClient::new(
+        "ws://unused".into(),
+        server.url(),
+        None,
+        session,
+        gate,
+        CancellationToken::new(),
+        None,
+        None,
+        None,
+    );
+
+    let (identity, actor) = client
+        .certified_identity(&endpoint, &[3; 32])
+        .await
+        .unwrap();
+    assert_eq!(identity.endpoint, endpoint);
+    assert!(actor.is_none());
+    mock.assert_async().await;
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    let body: serde_json::Value = serde_json::from_slice(&requests[0]).unwrap();
+    assert!(
+        !body.as_object().unwrap().contains_key("actor"),
+        "legacy enrollment must omit the actor key: {body}"
+    );
+    // The legacy request shape stays parseable by an Issuer that denies the
+    // unknown field, and by the current one.
+    let parsed: IdentityRequest = serde_json::from_slice(&requests[0]).unwrap();
+    assert!(parsed.actor.is_none());
+}
+
+/// An enrollment rejection must name the stage and the HTTP status instead of
+/// surfacing only "Relay channel closed", without leaking the request or
+/// response bodies (issue #523).
+#[tokio::test]
+async fn actor_enrollment_rejection_reports_the_issuer_http_status() {
+    let root = tempfile::tempdir().unwrap();
+    let actor_type = ActrType::from_string_repr("actrium/actrium-front@1.0.0").unwrap();
+    let realm = "test@example.com".to_string();
+    let signer = crate::issuer_client::actor_signer_for_scoped(
+        root.path(),
+        &realm,
+        &actor_type,
+        Some("tab-1"),
+    )
+    .unwrap();
+    let local = ActrId::from_string_repr("2.test@example.com").unwrap();
+    let endpoint = local.to_string_repr();
+    let now = now_secs();
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/relay-identity")
+        .with_status(400)
+        .with_body("unknown field `actor`, expected legacy fields only")
+        .expect(1)
+        .create_async()
+        .await;
+    let claims = actr_protocol::IdentityClaims {
+        realm: realm.clone(),
+        actor_id: endpoint.clone(),
+        expires_at: now + 600,
+        protocol_version: 1,
+        issuer: realm.clone(),
+        provider: "provider.example".into(),
+        audience: "actr.signaling".into(),
+        actor_type: actor_type.clone(),
+        member: "member-1".into(),
+        client_key: "fixture-client".into(),
+        role: actr_protocol::MemberRole::Owner as i32,
+        development: Some(false),
+        actor_public_key: Some(signer.public_key().to_vec().into()),
+    };
+    let credential = actr_protocol::AIdCredential {
+        key_id: 1,
+        claims: claims.encode_to_vec().into(),
+        signature: bytes::Bytes::from_static(&[0; 64]),
+    };
+    let mut snapshot = SessionSnapshot::empty_with_id(local.clone(), 1);
+    snapshot.credential = credential;
+    snapshot.renewal_token = bytes::Bytes::from_static(&[3; 32]);
+    let session = SessionState::new(snapshot);
+    let gate = Arc::new(WebSocketGate::new_relay(
+        Arc::new(RpcCorrelation::new()),
+        Arc::new(DataChunkRegistry::new()),
+        PeerTypes::default(),
+    ));
+    let client = RelayClient::new(
+        "ws://unused".into(),
+        server.url(),
+        None,
+        session,
+        gate,
+        CancellationToken::new(),
+        Some(root.path().to_path_buf()),
+        Some("tab-1".into()),
+        None,
+    );
+
+    let error = client
+        .certified_identity(&endpoint, &[3; 32])
+        .await
+        .err()
+        .expect("a rejected Actor enrollment must fail");
+    let message = error.to_string();
+    assert!(
+        message.contains("Relay identity enrollment failed"),
+        "the failure must name the enrollment stage: {message}"
+    );
+    assert!(
+        message.contains("400 Bad Request"),
+        "the failure must carry the Issuer status: {message}"
+    );
+    assert!(
+        !message.contains("unknown field"),
+        "the response body is not part of the error: {message}"
+    );
+    assert!(
+        !message.contains("Relay channel closed"),
+        "the generic closure hid the enrollment failure: {message}"
+    );
+    mock.assert_async().await;
+}

@@ -307,3 +307,91 @@ fn reconnect_has_fresh_ephemeral_keys_and_old_ciphertext_fails() {
     assert_ne!(old, new);
     assert!(sessions[1].1.receive(&old, None, 1001).is_err());
 }
+
+/// An Issuer deployed before Actor channels deserializes the legacy request
+/// with `deny_unknown_fields`, so a relay-only enrollment must not mention the
+/// `actor` key at all. Sending `"actor": null` made such an Issuer answer 400
+/// before authentication (issue #523).
+#[test]
+fn legacy_enrollment_wire_format_omits_optional_actor_fields() {
+    #[derive(Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyIdentityRequest {
+        endpoint: String,
+        renewal_token: Vec<u8>,
+        public_key: [u8; 32],
+        admission_commitment: [u8; 32],
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyIssuedIdentity {
+        #[allow(dead_code)]
+        certificate: Certificate,
+        #[allow(dead_code)]
+        issuer: IssuerKey,
+    }
+
+    let key = IdentityKey::generate().unwrap();
+    let request = IdentityRequest {
+        endpoint: "1.test@example.com".into(),
+        renewal_token: vec![3; 32],
+        public_key: key.public,
+        admission_commitment: key.admission_commitment(),
+        actor: None,
+    };
+    let body = serde_json::to_vec(&request).unwrap();
+    let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(!parsed.as_object().unwrap().contains_key("actor"));
+    let legacy: LegacyIdentityRequest = serde_json::from_slice(&body).unwrap();
+    let roundtrip: IdentityRequest = serde_json::from_slice(&body).unwrap();
+    assert!(roundtrip.actor.is_none());
+    assert_eq!(legacy.public_key, key.public);
+
+    // The symmetric response direction: a legacy client must not meet an
+    // `actor_certificate` key it does not know.
+    let identity = identity("1.test@example.com");
+    assert!(identity.issued.actor_certificate.is_none());
+    let body = serde_json::to_vec(&identity.issued).unwrap();
+    let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        !parsed
+            .as_object()
+            .unwrap()
+            .contains_key("actor_certificate")
+    );
+    let _: LegacyIssuedIdentity = serde_json::from_slice(&body).unwrap();
+    let roundtrip: IssuedIdentity = serde_json::from_slice(&body).unwrap();
+    assert!(roundtrip.actor_certificate.is_none());
+}
+
+#[test]
+fn actor_enrollment_wire_format_still_carries_the_actor_field() {
+    let enrollment = actor::ActorChannelEnrollment {
+        policy_digest: [1; 32],
+        actor_state_digest: [2; 32],
+        runtime_instance_id: "runtime-1".into(),
+        actor_credential: vec![7, 8, 9],
+        actor_credential_digest: [3; 32],
+    };
+    let body = serde_json::to_vec(&IdentityRequest {
+        endpoint: "1.test@example.com".into(),
+        renewal_token: vec![3; 32],
+        public_key: [4; 32],
+        admission_commitment: [5; 32],
+        actor: Some(enrollment.clone()),
+    })
+    .unwrap();
+    let parsed: IdentityRequest = serde_json::from_slice(&body).unwrap();
+    assert_eq!(parsed.actor, Some(enrollment));
+    // An explicit null remains accepted for peers that still send it.
+    let with_null = serde_json::to_vec(&serde_json::json!({
+        "endpoint": "1.test@example.com",
+        "renewal_token": vec![3; 32],
+        "public_key": vec![4; 32],
+        "admission_commitment": vec![5; 32],
+        "actor": null,
+    }))
+    .unwrap();
+    let parsed: IdentityRequest = serde_json::from_slice(&with_null).unwrap();
+    assert!(parsed.actor.is_none());
+}
