@@ -198,4 +198,21 @@ struct RendererProcessPoolPolicyTests {
         )
         #expect(viewModel.tabs[0].title == "Current")
     }
+
+    @Test @MainActor func lateTitleFromPreviousInPlaceNavigationIsRejected() {
+        let tabId = UUID()
+        let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
+        viewModel.tabs = [Tab(title: "Package", id: tabId)]
+        viewModel.currentTabId = tabId
+
+        viewModel.navigateCurrentTab(to: "https://example.com")
+        #expect(viewModel.tabs[0].reloadNonce == 1)
+
+        NotificationCenter.default.post(
+            name: .tabTitleChanged,
+            object: nil,
+            userInfo: ["tabId": tabId, "title": "Stale", "reloadKey": 0]
+        )
+        #expect(viewModel.tabs[0].title == "example.com")
+    }
 }

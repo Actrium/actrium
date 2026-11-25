@@ -1054,6 +1054,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             if let systemType = SystemTabType.from(url: url) {
                 logger.notice("📱 [navigateCurrentTab] Navigation to System Application: \(url.absoluteString)")
                 RealmServiceBindings.shared.remove(currentTabId)
+                tabs[index].reloadNonce &+= 1
                 // Update Tab to system app
                 tabs[index].systemTabType = systemType
                 tabs[index].url = url
@@ -1122,6 +1123,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
             logger.notice("🌐 [navigateCurrentTab] Navigator to URL: \(url.absoluteString)")
             RealmServiceBindings.shared.remove(currentTabId)
+            tabs[index].reloadNonce &+= 1
             // Update Tab Yes Web Contents
             tabs[index].url = url
             tabs[index].title = url.host ?? url.absoluteString
@@ -1422,6 +1424,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             }
 
             RealmServiceBindings.shared.remove(tabs[tabIndex].id)
+            tabs[tabIndex].reloadNonce &+= 1
             // Update current tab in-place (like about: URL handling)
             logger.notice("📱 [loadActrPackageIntoCurrentTab] Update Current Tab: \(tabTitle), url=\(appURL.absoluteString)")
 
@@ -2689,6 +2692,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].appId = manifestInfo.appId
             tabs[index].contractName = manifestInfo.contractName
             tabs[index].contractVersion = manifestInfo.contractVersion
+            tabs[index].verifiedAppName = manifestInfo.name
             tabs[index].permissions = manifestInfo.permissions
             tabs[index].capabilityManifestJSON = manifestInfo.capabilityManifestJSON
             tabs[index].localStorageOrigin = manifestInfo.storageOrigin(

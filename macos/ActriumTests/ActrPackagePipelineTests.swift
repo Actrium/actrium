@@ -287,11 +287,81 @@ struct ActrPackagePipelineTests {
     // MARK: - Helpers
 
     @Test func restoredPackageTabKeepsPersistedSessionTitle() throws {
+        let packageDir = try makeDevelopmentPackage()
+        defer { try? FileManager.default.removeItem(at: packageDir) }
+        let packageAddress = try #require(
+            ActriumAppURLScheme.appURL(filePath: packageDir.path)
+        ).absoluteString
+        let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
+        // A guest-set dynamic title must survive a restart restore even
+        // though importACTRPackage titles the tab with the manifest name.
+        let savedTitle = "Demo (3 unread)"
+        viewModel.restoreSessionIfNeeded {
+            BrowserDataRepository.RestoredSession(tabs: [
+                .init(id: UUID(), title: savedTitle, address: packageAddress)
+            ], activeTabIndex: 0)
+        }
+
+        let restored = try #require(viewModel.tabs.first { $0.title == savedTitle })
+        #expect(restored.verifiedAppName == "Demo Package")
+        #expect(viewModel.tabs.contains { $0.title == "Demo Package" && $0.id != restored.id } == false)
+    }
+
+    @Test func inPlacePackageNavigationRejectsPreviousContentTitle() throws {
+        let packageDir = try makeDevelopmentPackage()
+        defer { try? FileManager.default.removeItem(at: packageDir) }
+        let packageAddress = try #require(
+            ActriumAppURLScheme.appURL(filePath: packageDir.path)
+        ).absoluteString
+        let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
+        let tabId = try #require(viewModel.currentTabId)
+
+        viewModel.navigateCurrentTab(to: packageAddress)
+        let tab = try #require(viewModel.tabs.first { $0.id == tabId })
+        #expect(tab.title == "Demo Package")
+        #expect(tab.reloadNonce == 1)
+
+        NotificationCenter.default.post(
+            name: .tabTitleChanged,
+            object: nil,
+            userInfo: ["tabId": tabId, "title": "Stale", "reloadKey": 0]
+        )
+        #expect(viewModel.tabs[0].title == "Demo Package")
+    }
+
+    @Test func packageReloadRefreshesVerifiedIdentityFromChangedManifest() throws {
+        let packageDir = try makeDevelopmentPackage()
+        defer { try? FileManager.default.removeItem(at: packageDir) }
+        let tabId = UUID()
+        var tab = Tab(title: "Demo Package", id: tabId)
+        tab.url = URL(fileURLWithPath: packageDir.path, isDirectory: true)
+        tab.appId = "publisher.example/demo@0.0.1"
+        tab.verifiedAppName = "Demo Package"
+        let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
+        viewModel.tabs = [tab]
+        viewModel.currentTabId = tabId
+
+        let manifestURL = packageDir.appendingPathComponent("manifest.toml")
+        let original = try String(contentsOf: manifestURL, encoding: .utf8)
+        let updated = original
+            .replacingOccurrences(of: "name = \"demo\"", with: "name = \"updated\"")
+            .replacingOccurrences(of: "title = \"Demo Package\"", with: "title = \"Updated Package\"")
+        #expect(updated != original)
+        try updated.write(to: manifestURL, atomically: true, encoding: .utf8)
+
+        viewModel.reloadCurrentTab()
+        let reloaded = try #require(viewModel.tabs.first { $0.id == tabId })
+        #expect(reloaded.reloadNonce == 1)
+        #expect(reloaded.appId == "publisher.example/updated@0.0.1")
+        #expect(reloaded.verifiedAppName == "Updated Package")
+        #expect(reloaded.title == "Updated Package")
+    }
+
+    private func makeDevelopmentPackage() throws -> URL {
         let fm = FileManager.default
         let packageDir = fm.temporaryDirectory
-            .appendingPathComponent("actr-restore-title-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("actr-test-package-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: packageDir, withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: packageDir) }
         let workloadDir = packageDir.appendingPathComponent("workload", isDirectory: true)
         try fm.createDirectory(at: workloadDir, withIntermediateDirectories: true)
         let guestJS = "console.log('demo')\n"
@@ -343,23 +413,7 @@ struct ActrPackagePipelineTests {
             atomically: true,
             encoding: .utf8
         )
-
-        let packageAddress = try #require(
-            ActriumAppURLScheme.appURL(filePath: packageDir.path)
-        ).absoluteString
-        let viewModel = BrowserViewModel(saveBrowserSession: { _, _ in })
-        // A guest-set dynamic title must survive a restart restore even
-        // though importACTRPackage titles the tab with the manifest name.
-        let savedTitle = "Demo (3 unread)"
-        viewModel.restoreSessionIfNeeded {
-            BrowserDataRepository.RestoredSession(tabs: [
-                .init(id: UUID(), title: savedTitle, address: packageAddress)
-            ], activeTabIndex: 0)
-        }
-
-        let restored = try #require(viewModel.tabs.first { $0.title == savedTitle })
-        #expect(restored.verifiedAppName == "Demo Package")
-        #expect(viewModel.tabs.contains { $0.title == "Demo Package" && $0.id != restored.id } == false)
+        return packageDir
     }
 
     private func makeStore() -> (MockActrServiceInstanceStore, URL) {
