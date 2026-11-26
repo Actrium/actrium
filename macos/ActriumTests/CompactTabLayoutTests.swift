@@ -123,6 +123,86 @@ struct CompactTabLayoutTests {
         ) == nil)
     }
 
+    @Test func edgeUngroupZoneOutranksTheGroupUnderThePointer() {
+        let group = UUID()
+        // An expanded leading group painted from the strip's content inset
+        // (3 pt) reaches into the 8 pt ungroup zone.
+        let frames = [group: CGRect(x: 3, y: 0, width: 200, height: 32)]
+        let tabGroupIDs = [group, group, nil] as [UUID?]
+
+        // Inside the overlap a release ungroups, so the group must not be
+        // highlighted even though its frame covers the pointer.
+        #expect(toolbarDropTargetGroupID(
+            pointerX: 5,
+            viewportWidth: 400,
+            sourceGroupID: group,
+            tabGroupIDs: tabGroupIDs,
+            groupFrames: frames,
+            expandedGroupIDs: [group]
+        ) == nil)
+
+        // Past the zone the same group is the drop target.
+        #expect(toolbarDropTargetGroupID(
+            pointerX: 40,
+            viewportWidth: 400,
+            sourceGroupID: group,
+            tabGroupIDs: tabGroupIDs,
+            groupFrames: frames,
+            expandedGroupIDs: [group]
+        ) == group)
+    }
+
+    @Test func trailingEdgeUngroupsBeforeHighlightingTheGroup() {
+        let group = UUID()
+        let frames = [group: CGRect(x: 200, y: 0, width: 197, height: 32)]
+        let tabGroupIDs = [nil, group, group] as [UUID?]
+
+        #expect(toolbarDropTargetGroupID(
+            pointerX: 395,
+            viewportWidth: 400,
+            sourceGroupID: group,
+            tabGroupIDs: tabGroupIDs,
+            groupFrames: frames,
+            expandedGroupIDs: [group]
+        ) == nil)
+        #expect(toolbarDropTargetGroupID(
+            pointerX: 300,
+            viewportWidth: 400,
+            sourceGroupID: group,
+            tabGroupIDs: tabGroupIDs,
+            groupFrames: frames,
+            expandedGroupIDs: [group]
+        ) == group)
+    }
+
+    @Test func onlyExpandedGroupsOwnThePointer() {
+        let group = UUID()
+        let other = UUID()
+        let frames = [group: CGRect(x: 3, y: 0, width: 60, height: 32)]
+
+        // A collapsed group owns a header frame but never accepts a Tab.
+        #expect(toolbarDropTargetGroupID(
+            pointerX: 40,
+            viewportWidth: 400,
+            sourceGroupID: nil,
+            tabGroupIDs: [nil, nil],
+            groupFrames: frames,
+            expandedGroupIDs: []
+        ) == nil)
+
+        // The ungroup slot only releases a Tab that belongs to the group at
+        // that end, so another Tab dragged into the same zone still joins the
+        // group painted under the pointer.
+        #expect(toolbarDropTargetGroupID(
+            pointerX: 5,
+            viewportWidth: 400,
+            sourceGroupID: other,
+            tabGroupIDs: [group, group, other],
+            groupFrames: frames,
+            expandedGroupIDs: [group, other]
+        ) == group)
+    }
+
     @Test func groupBoundaryReorderWaitsForPointerTravel() {
         #expect(toolbarDragCanReorder(pointerX: 100, lastReorderPointerX: nil))
         #expect(!toolbarDragCanReorder(pointerX: 100, lastReorderPointerX: 100))

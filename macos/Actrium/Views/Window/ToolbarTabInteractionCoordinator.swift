@@ -135,6 +135,39 @@ func toolbarEdgeUngroupInsertionIndex(
     return nil
 }
 
+/// The group a release at `pointerX` would put the moving Tab into, or `nil`
+/// when the drop leaves every group.
+///
+/// This is the single definition of the Tab drop target, so the strip cannot
+/// outline a group the release will not join. Like `reorderTabIfNeeded` it
+/// resolves the strip-edge ungroup slot first and only then falls back to the
+/// expanded group under the pointer. A group whose painted frame reaches into
+/// that edge zone therefore never lights up: a release there ungroups the Tab
+/// instead of joining it.
+func toolbarDropTargetGroupID(
+    pointerX: CGFloat,
+    viewportWidth: CGFloat,
+    sourceGroupID: UUID?,
+    tabGroupIDs: [UUID?],
+    groupFrames: [UUID: CGRect],
+    expandedGroupIDs: Set<UUID>
+) -> UUID? {
+    if toolbarEdgeUngroupInsertionIndex(
+        pointerX: pointerX,
+        viewportWidth: viewportWidth,
+        sourceGroupID: sourceGroupID,
+        tabGroupIDs: tabGroupIDs
+    ) != nil {
+        return nil
+    }
+
+    return groupFrames
+        .filter { expandedGroupIDs.contains($0.key) }
+        .filter { $0.value.minX <= pointerX && pointerX <= $0.value.maxX }
+        .min(by: { $0.value.width < $1.value.width })?
+        .key
+}
+
 func toolbarDragCanReorder(
     pointerX: CGFloat,
     lastReorderPointerX: CGFloat?,
@@ -405,19 +438,16 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
             inPlaceDragState = drag
         }
 
-        // Track the expanded group under the pointer so the strip can
-        // highlight it as a drop target and the membership decision does not
+        // Track the group a release would put this Tab into, so the strip
+        // highlights exactly that group and the membership decision does not
         // depend on where the Tab's own origin happens to sit.
         let hoveredGroup: UUID?
-        if case .tab = subject {
-            hoveredGroup = groupFrames
-                .filter { $0.value.minX <= locationX && locationX <= $0.value.maxX }
-                .min(by: { $0.value.width < $1.value.width })
-                .flatMap { candidate in
-                    viewModel.tabGroups.contains { $0.id == candidate.key && !$0.isCollapsed }
-                        ? candidate.key
-                        : nil
-                }
+        if case let .tab(tabID) = subject {
+            hoveredGroup = dropTargetGroupID(
+                movingTabID: tabID,
+                pointerX: locationX,
+                viewModel: viewModel
+            )
         } else {
             hoveredGroup = nil
         }
@@ -492,6 +522,29 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
                 pointerX: pointerX,
                 lastReorderPointerX: inPlaceDragState?.lastReorderPointerX
             )
+    }
+
+    /// Feeds the strip's live geometry to `toolbarDropTargetGroupID`, the one
+    /// rule the highlight and `reorderTabIfNeeded` share.
+    private func dropTargetGroupID(
+        movingTabID: UUID,
+        pointerX: CGFloat,
+        viewModel: BrowserViewModel
+    ) -> UUID? {
+        let tabs = viewModel.tabs
+        guard let sourceIndex = tabs.firstIndex(where: { $0.id == movingTabID }) else {
+            return nil
+        }
+        return toolbarDropTargetGroupID(
+            pointerX: pointerX,
+            viewportWidth: tabStripWidth,
+            sourceGroupID: tabs[sourceIndex].groupId,
+            tabGroupIDs: tabs.map(\.groupId),
+            groupFrames: groupFrames,
+            expandedGroupIDs: Set(
+                viewModel.tabGroups.lazy.filter { !$0.isCollapsed }.map(\.id)
+            )
+        )
     }
 
     private func reorderTabIfNeeded(
