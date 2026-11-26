@@ -3930,7 +3930,9 @@ impl Inner {
                 session_state.clone(),
                 relay_gate.clone(),
                 self.shutdown_token.clone(),
-                Some(actor_storage_root.clone()),
+                self.actrium_peer
+                    .as_ref()
+                    .map(|_| actor_storage_root.clone()),
                 self.actor_key_namespace.clone(),
                 Some(credential_manager.clone()),
             );

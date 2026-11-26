@@ -9,6 +9,8 @@ use actr_relay_security::{
 use js_sys::{Function, Uint8Array};
 use wasm_bindgen::closure::Closure;
 
+const ACTOR_CHANNEL_AUTHENTICATION_ENABLED: bool = false;
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(catch, js_namespace = globalThis, js_name = __actrRelayTrustedRequest)]
@@ -109,6 +111,9 @@ fn runtime_instance_id(manager: &Manager) -> String {
 async fn actor_binding_digests(
     ctx: &Rc<ClientContext>,
 ) -> Result<Option<([u8; 32], [u8; 32])>, JsValue> {
+    if !ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+        return Ok(None);
+    }
     let rt = ctx.runtime.lock().await;
     let Some(credential) = rt.credential.clone() else {
         return Ok(None);

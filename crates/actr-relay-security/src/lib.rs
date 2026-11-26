@@ -58,7 +58,7 @@ pub struct IdentityRequest {
     /// A commitment to a private relay admission secret, not the secret itself.
     pub admission_commitment: [u8; 32],
     /// Optional Actor channel enrollment. Legacy relay-only clients omit it.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor: Option<actor::ActorChannelEnrollment>,
 }
 
