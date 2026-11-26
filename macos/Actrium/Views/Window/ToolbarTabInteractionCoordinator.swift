@@ -2,21 +2,6 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// Temporary drag diagnostics. Writes one line per decision to a fixed file so
-/// a manual drag can be inspected without attaching a debugger.
-private func dragDebugLog(_ message: @autoclosure () -> String) {
-    let path = "/tmp/actrium_tab_drag.log"
-    let line = "\(Date().timeIntervalSince1970) \(message())\n"
-    let data = Data(line.utf8)
-    if let handle = FileHandle(forWritingAtPath: path) {
-        defer { try? handle.close() }
-        handle.seekToEndOfFile()
-        handle.write(data)
-    } else {
-        try? data.write(to: URL(fileURLWithPath: path))
-    }
-}
-
 private enum ToolbarInPlaceDragSubject: Equatable {
     case tab(UUID)
     case group(UUID)
@@ -553,13 +538,7 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         draggedFrame: CGRect,
         viewModel: BrowserViewModel
     ) {
-        guard canReorderTabs(pointerX: pointerX) else {
-            dragDebugLog(
-                "reorderBlocked pendingOrder=\(pendingVisualTabOrder != nil)"
-                    + " pendingGroup=\(pendingGroupFrameChange != nil) pointer=\(Int(pointerX))"
-            )
-            return
-        }
+        guard canReorderTabs(pointerX: pointerX) else { return }
         guard let sourceIndex = viewModel.tabs.firstIndex(where: { $0.id == tabID }) else {
             return
         }
@@ -595,7 +574,6 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         let groupID = chromeTargetGroupID(
             movingTabID: tabID,
             targetIndex: targetIndex,
-            pointerX: pointerX,
             viewModel: viewModel
         )
         performInteractiveMove(
@@ -730,20 +708,11 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
     private func chromeTargetGroupID(
         movingTabID: UUID,
         targetIndex: Int,
-        pointerX: CGFloat,
         viewModel: BrowserViewModel
     ) -> UUID? {
-        dragDebugLog(
-            "targetGroup pointer=\(Int(pointerX)) target=\(targetIndex) groups="
-                + groupFrames.map { "\($0.key.uuidString.prefix(4))@\(Int($0.value.minX))-\(Int($0.value.maxX))" }
-                    .joined(separator: ",")
-                + " collapsed=" + viewModel.tabGroups.map { "\($0.id.uuidString.prefix(4)):\($0.isCollapsed)" }
-                    .joined(separator: ",")
-        )
         // Authoritative: the expanded group the pointer is over, tracked on
         // every drag update. This is what the strip highlights.
         if let hoveredGroupID {
-            dragDebugLog("targetGroup -> hovered \(hoveredGroupID.uuidString.prefix(4))")
             return hoveredGroupID
         }
 
@@ -757,10 +726,8 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         if let leftGroupID,
            leftGroupID == rightGroupID,
            viewModel.tabGroups.first(where: { $0.id == leftGroupID })?.isCollapsed == false {
-            dragDebugLog("targetGroup -> slot \(leftGroupID.uuidString.prefix(4))")
             return leftGroupID
         }
-        dragDebugLog("targetGroup -> nil")
         return nil
     }
 
@@ -775,11 +742,6 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
         let boundedTargetIndex = min(max(0, targetIndex), max(0, viewModel.tabs.count - 1))
 
         let currentGroupID = viewModel.tabs[fromIndex].groupId
-        dragDebugLog(
-            "move from=\(fromIndex) to=\(boundedTargetIndex) group="
-                + "\(groupID?.uuidString.prefix(4).description ?? "nil") currentGroup="
-                + "\(currentGroupID?.uuidString.prefix(4).description ?? "nil")"
-        )
         guard boundedTargetIndex != fromIndex || currentGroupID != groupID else { return }
 
         let previousVisualOrder = visibleModelTabOrder(viewModel)
