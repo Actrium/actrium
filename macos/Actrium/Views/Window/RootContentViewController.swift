@@ -114,16 +114,24 @@ enum CompactToolbarLayout {
     static let compactTrafficLightReserve: CGFloat = 78
     static let fullScreenLeadingReserve: CGFloat = 4
     static let inactiveTabMinWidth: CGFloat = 88
-    /// The narrowest a Tab may be squeezed to: its icon plus the tightened
-    /// side padding. Every Tab keeps this much, so two Tabs can never occupy
-    /// the same slot and the strip overflows instead.
-    static let inactiveTabCompressedMinWidth: CGFloat = 28
+    /// Box the site icon draws in.
+    static let tabIconSize: CGFloat = 16
+    /// Painted width of the narrowest Tab: the icon and equal padding either
+    /// side, so a Tab sitting on its floor still shows the site it holds.
+    static let iconOnlyTabPaintedWidth: CGFloat = 28
+    /// Padding the icon-only Tab's content needs inside its slot: its margin
+    /// within the painted Tab, plus the half seam the slot reserves per side.
+    static let iconOnlyTabContentPadding: CGFloat =
+        (iconOnlyTabPaintedWidth - tabIconSize) / 2 + tabSeparationWidth
+    /// The narrowest a Tab may be squeezed to, seam included. The two half
+    /// seams sit outside the painted floor, so resizing a Tab never eats into
+    /// the gap between it and its neighbour.
+    static let inactiveTabCompressedMinWidth: CGFloat =
+        iconOnlyTabPaintedWidth + tabSeparationWidth * 2
     /// At or below this width a Tab shows its icon alone. Below it there is
     /// room for the icon, its gaps, the side padding and only a few
     /// characters of title, which reads as noise rather than a name.
     static let inactiveTabIconOnlyMaxWidth: CGFloat = 68
-    /// Side padding around a Tab that shows its icon alone.
-    static let iconOnlyTabHorizontalPadding: CGFloat = 6
     /// No Tab grows past this, however much horizontal room the strip has.
     static let tabMaxWidth: CGFloat = 230
     static let inactiveTabMaxWidth: CGFloat = tabMaxWidth
@@ -1592,7 +1600,7 @@ struct MainWindowTabsView: View {
         }
         .padding(
             .horizontal,
-            showsTitle ? 10 : CompactToolbarLayout.iconOnlyTabHorizontalPadding
+            showsTitle ? 10 : CompactToolbarLayout.iconOnlyTabContentPadding
         )
         .frame(height: 32)
         .background {
@@ -2242,7 +2250,10 @@ private struct TabIdentityIcon: View {
                 ChromeTabLoadingRing()
             }
         }
-        .frame(width: 16, height: 16)
+        .frame(
+            width: CompactToolbarLayout.tabIconSize,
+            height: CompactToolbarLayout.tabIconSize
+        )
         .task(id: webURL?.host) {
             guard let webURL else {
                 loadedFavicon = nil
@@ -2270,7 +2281,10 @@ private struct ChromeTabLoadingRing: View {
                 )
                 .rotationEffect(.degrees(rotation))
         }
-        .frame(width: 16, height: 16)
+        .frame(
+            width: CompactToolbarLayout.tabIconSize,
+            height: CompactToolbarLayout.tabIconSize
+        )
         .onAppear {
             withAnimation(.linear(duration: 0.72).repeatForever(autoreverses: false)) {
                 rotation = 360
