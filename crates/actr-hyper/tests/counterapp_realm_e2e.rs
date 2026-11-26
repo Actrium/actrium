@@ -525,6 +525,19 @@ async fn counterapp_front_attaches_to_the_real_service_package() {
         runtime: metadata.runtime.clone(),
         requested_capabilities: vec![SERVICE_CAPABILITY.to_string()],
     };
+    if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+        assert!(matches!(
+            front_ref.attach_actrium(&discovered, attach_params).await,
+            Err(actr_protocol::ActrError::PermissionDenied(message))
+                if message.contains("no verified Actor channel")
+        ));
+        front_ref.shutdown();
+        front_ref.wait_for_shutdown().await;
+        service_ref.shutdown();
+        service_ref.wait_for_shutdown().await;
+        server.shutdown().await;
+        return;
+    }
     let session = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             match front_ref

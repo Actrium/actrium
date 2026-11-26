@@ -145,6 +145,11 @@ impl RunCommand {
 
         // 4. Load runtime configuration
         let mut config = actr_config::ConfigParser::from_runtime_file(&config_path, package_info)?;
+        if config.actrium.is_some() && !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+            return Err(ActrCliError::command_error(
+                "[actrium] requires verified Attach, which is disabled in this build",
+            ));
+        }
         if self.open_join {
             let (profile, key_path) = super::realm_members::join_open_service(
                 &config.realm,

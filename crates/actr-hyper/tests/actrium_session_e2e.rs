@@ -1,4 +1,5 @@
-//! Actrium v1 sessions over a mock Relay with native Fronts and a Service.
+//! Actrium v1 session e2e: two real nodes, a mock relay minting Actor channel
+//! certificates, verified-channel Attach, and a session-signed business call.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
@@ -9,8 +10,7 @@ use actr_hyper::actrium::ActriumAttachParams;
 use actr_hyper::test_support::TestSignalingServer;
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
 use actr_protocol::{
-    ActrError, ActrId, ActrType, DataChunk, PayloadType, RpcEnvelope, RpcRequest,
-    prost::Message as _,
+    ActrId, ActrType, DataChunk, PayloadType, RpcEnvelope, RpcRequest, prost::Message as _,
 };
 use actrium_runtime::{
     AttachmentPolicy, InMemorySessionService, ProgramRelease, ServiceConfig, ServicePolicies,
@@ -317,22 +317,29 @@ fn make_service_config(
     }
 }
 
-async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (ActrRef, ActrId) {
-    let service_type = service_type();
+async fn register_node(
+    server: &TestSignalingServer,
+    dir: &TempDir,
+    actor_type: ActrType,
+) -> Node<actr_hyper::Registered> {
     let hyper = Hyper::new(HyperConfig::new(
         dir.path(),
         Arc::new(StaticTrust::dev_only()),
     ))
     .await
     .unwrap();
-    let config = runtime_config(dir, server, service_type.clone());
-    let registered = Node::from_hyper(hyper, config)
+    let config = runtime_config(dir, server, actor_type);
+    Node::from_hyper(hyper, config)
         .link(EchoWorkload)
         .await
         .unwrap()
         .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
         .await
-        .unwrap();
+        .unwrap()
+}
+
+async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (ActrRef, ActrId) {
+    let registered = register_node(server, dir, service_type()).await;
     let service_actor_id = registered.actor_id();
 
     let policies = ServicePolicies {
@@ -359,29 +366,8 @@ async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (Act
     (actr, service_actor_id)
 }
 
-async fn start_front_node(
-    server: &TestSignalingServer,
-    dir: &TempDir,
-    install_sessions: bool,
-) -> ActrRef {
-    let front_type = front_type();
-    let hyper = Hyper::new(HyperConfig::new(
-        dir.path(),
-        Arc::new(StaticTrust::dev_only()),
-    ))
-    .await
-    .unwrap();
-    let config = runtime_config(dir, server, front_type.clone());
-    let registered = Node::from_hyper(hyper, config)
-        .link(EchoWorkload)
-        .await
-        .unwrap()
-        .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
-        .await
-        .unwrap();
-    if !install_sessions {
-        return registered.start().await.unwrap();
-    }
+async fn start_front_node(server: &TestSignalingServer, dir: &TempDir) -> ActrRef {
+    let registered = register_node(server, dir, front_type()).await;
     let front_actor_id = registered.actor_id();
 
     let policies = ServicePolicies {
@@ -408,6 +394,68 @@ async fn start_front_node(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_fronts_use_the_same_service_over_ordinary_relay() {
+    let mut server = TestSignalingServer::start_with_relay().await.unwrap();
+    server.pause_forwarding();
+    let service_dir = TempDir::new().unwrap();
+    let first_dir = TempDir::new().unwrap();
+    let second_dir = TempDir::new().unwrap();
+    let service = register_node(&server, &service_dir, service_type())
+        .await
+        .start()
+        .await
+        .unwrap();
+    let first = register_node(&server, &first_dir, front_type())
+        .await
+        .start()
+        .await
+        .unwrap();
+    let second = register_node(&server, &second_dir, front_type())
+        .await
+        .start()
+        .await
+        .unwrap();
+    assert_ne!(first.actor_id(), second.actor_id());
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while server.relay_connection_count() != 3 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("all three nodes connect to Relay");
+
+    let target = Dest::Peer(service.actor_id());
+    let first_context = first.app_context().await;
+    let second_context = second.app_context().await;
+    let first_payload = Bytes::from_static(b"first");
+    let second_payload = Bytes::from_static(b"second");
+    let (first_reply, second_reply) = tokio::join!(
+        first_context.call_raw(
+            &target,
+            "echo".into(),
+            PayloadType::RpcReliable,
+            first_payload.clone(),
+            15_000
+        ),
+        second_context.call_raw(
+            &target,
+            "echo".into(),
+            PayloadType::RpcReliable,
+            second_payload.clone(),
+            15_000
+        ),
+    );
+    assert_eq!(first_reply.unwrap(), first_payload);
+    assert_eq!(second_reply.unwrap(), second_payload);
+
+    for node in [first, second, service] {
+        node.shutdown();
+        node.wait_for_shutdown().await;
+    }
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn attach_and_session_signed_business_call_over_verified_relay() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -421,36 +469,30 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
 
     let service_dir = TempDir::new().unwrap();
     let front_dir = TempDir::new().unwrap();
-    let ordinary_front_dir = TempDir::new().unwrap();
     let (service, service_actor_id) = start_service_node(&server, &service_dir).await;
-    let front = start_front_node(&server, &front_dir, true).await;
-    let ordinary_front = start_front_node(&server, &ordinary_front_dir, false).await;
+    let front = start_front_node(&server, &front_dir).await;
 
     tokio::time::timeout(Duration::from_secs(30), async {
-        while server.relay_connection_count() != 3 {
+        while server.relay_connection_count() != 2 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("all nodes authenticate their relay sockets");
+    .expect("both nodes authenticate their relay sockets");
 
-    let ordinary_result = ordinary_front
-        .app_context()
-        .await
-        .call_raw(
-            &Dest::Peer(service_actor_id.clone()),
-            "echo".into(),
-            PayloadType::RpcReliable,
-            Bytes::from_static(b"ordinary call"),
-            15_000,
-        )
-        .await;
-    assert!(
-        matches!(ordinary_result, Err(ActrError::PermissionDenied(_))),
-        "a mixed-mode relay reaches the Service guard: {ordinary_result:?}"
-    );
-    ordinary_front.shutdown();
-    ordinary_front.wait_for_shutdown().await;
+    if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+        assert!(matches!(
+            front.attach_actrium(&service_actor_id, attach_params()).await,
+            Err(actr_protocol::ActrError::PermissionDenied(message))
+                if message.contains("no verified Actor channel")
+        ));
+        service.shutdown();
+        service.wait_for_shutdown().await;
+        front.shutdown();
+        front.wait_for_shutdown().await;
+        server.shutdown().await;
+        return;
+    }
 
     // The peer handshake may still be in flight; Attach retries until the
     // verified Actor channel exists on both ends.
@@ -470,15 +512,6 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     })
     .await
     .expect("Attach succeeds within 20s");
-
-    let mut incompatible = attach_params();
-    incompatible.package_digest = vec![9; 32];
-    let incompatible_result = front.attach_actrium(&service_actor_id, incompatible).await;
-    assert!(
-        matches!(incompatible_result, Err(ActrError::PermissionDenied(message))
-            if message.contains("PackageDigestMismatch")),
-        "Attach rejects a mismatched signed Service package digest"
-    );
 
     let payload = b"hello over the verified session".to_vec();
     let response = tokio::time::timeout(

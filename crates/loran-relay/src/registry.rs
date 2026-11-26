@@ -14,7 +14,6 @@ type Key = (String, String);
 
 pub(crate) struct Peer {
     pub principal: Principal,
-    pub actor_channel: bool,
     pub session: u64,
     pub tx: mpsc::Sender<Queued>,
     pub budget: Arc<Semaphore>,
@@ -65,7 +64,6 @@ struct Channel {
     target_request: Option<u64>,
     created: Instant,
     accepted: bool,
-    actor_channel: bool,
 }
 
 #[derive(Default)]
@@ -199,7 +197,6 @@ impl Registry {
                     request: Some(request),
                     peer: endpoint.to_owned(),
                     metadata: target.principal.metadata.clone(),
-                    actor_channel: existing.actor_channel,
                 });
             } else if existing.target == *key && existing.target_request.is_none() {
                 existing.target_request = Some(request);
@@ -223,7 +220,6 @@ impl Registry {
             return;
         }
         let metadata = source.principal.metadata.clone();
-        let actor_channel = source.actor_channel && target.actor_channel;
         let id = self.id();
         self.channels.insert(
             id,
@@ -234,7 +230,6 @@ impl Registry {
                 target_request: None,
                 created: Instant::now(),
                 accepted: false,
-                actor_channel,
             },
         );
         self.peers.get_mut(key).unwrap().channels.insert(id);
@@ -244,7 +239,6 @@ impl Registry {
             channel: id,
             peer: key.1.clone(),
             metadata,
-            actor_channel,
         });
     }
 
@@ -283,14 +277,12 @@ impl Registry {
             request: Some(channel.request),
             peer: channel.target.1.clone(),
             metadata: target.principal.metadata.clone(),
-            actor_channel: channel.actor_channel,
         });
         target.control(ServerControl::Connected {
             channel: id,
             request: channel.target_request,
             peer: channel.source.1.clone(),
             metadata: source.principal.metadata.clone(),
-            actor_channel: channel.actor_channel,
         });
     }
 
@@ -410,7 +402,6 @@ mod tests {
                     authorization_context: String::new(),
                     expires_at: None,
                 },
-                actor_channel: false,
                 session: 0,
                 tx,
                 budget: Arc::new(Semaphore::new(bytes)),

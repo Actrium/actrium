@@ -22,6 +22,8 @@ pub const CERTIFICATE_DOMAIN: &str = "ACTR-RELAY-IDENTITY-V2";
 pub const CERTIFICATE_TTL: u64 = 300;
 pub const MAX_APPLICATION_BYTES: usize = 8 * 1024 * 1024 + 5;
 pub const MAX_RECORD_BYTES: usize = 65535 + 13;
+/// Enables the additional mutual Actor proof for Relay channels.
+pub const ACTOR_CHANNEL_AUTHENTICATION_ENABLED: bool = false;
 const MAGIC: &[u8; 8] = b"ACTRE2E1";
 const HEADER: usize = 13;
 #[cfg(not(test))]

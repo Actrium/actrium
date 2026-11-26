@@ -21,8 +21,8 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use loran_relay_protocol::{
-    ACTOR_CHANNEL_SUBPROTOCOL, ClientControl, MAX_CONTROL_BYTES, RelayDiscovery, SUBPROTOCOL,
-    ServerControl, decode_data, encode_data,
+    ClientControl, MAX_CONTROL_BYTES, RelayDiscovery, SUBPROTOCOL, ServerControl, decode_data,
+    encode_data,
 };
 use sha2::Digest as _;
 use std::{
@@ -518,14 +518,9 @@ impl RelayClient {
             .certified_identity(&endpoint, &snapshot.renewal_token)
             .await?;
         let mut request = url.into_client_request()?;
-        let protocols = if actor_identity.is_some() {
-            format!("{ACTOR_CHANNEL_SUBPROTOCOL}, {SUBPROTOCOL}")
-        } else {
-            SUBPROTOCOL.to_owned()
-        };
         request
             .headers_mut()
-            .insert("Sec-WebSocket-Protocol", protocols.parse().unwrap());
+            .insert("Sec-WebSocket-Protocol", SUBPROTOCOL.parse().unwrap());
         let (mut socket, response) = timer::timeout(
             timer::ids::RELAY_SOCKET_CONNECT,
             CONNECT_TIMEOUT,
@@ -542,27 +537,15 @@ impl RelayClient {
         )
         .await
         .map_err(|_| closed())??;
-        let actor_identity = match response
+        if response
             .headers()
             .get("sec-websocket-protocol")
-            .and_then(|header| header.to_str().ok())
+            .is_none_or(|header| header != SUBPROTOCOL)
         {
-            Some(ACTOR_CHANNEL_SUBPROTOCOL) if actor_identity.is_some() => actor_identity,
-            Some(SUBPROTOCOL) => {
-                if actor_identity.is_some() {
-                    tracing::warn!(
-                        required_subprotocol = ACTOR_CHANNEL_SUBPROTOCOL,
-                        "Relay does not support verified Actor channels; Attach requires upgrading the Relay and session peers"
-                    );
-                }
-                None
-            }
-            _ => {
-                return Err(NetworkError::ConnectionError(
-                    "Relay subprotocol not negotiated".into(),
-                ));
-            }
-        };
+            return Err(NetworkError::ConnectionError(
+                "Relay subprotocol not negotiated".into(),
+            ));
+        }
         let hello = ClientControl::Hello {
             endpoint,
             token: STANDARD
@@ -676,13 +659,12 @@ impl RelayClient {
         channel: u64,
         endpoint: String,
         transport: &Transport,
-        actor_channel: bool,
         actor_front: bool,
     ) -> NetworkResult<Arc<Channel>> {
         if let Some(entry) = self.channels.read().await.get(&channel).cloned() {
-            if entry.peer.to_string_repr() != endpoint || entry.actrium != actor_channel {
+            if entry.peer.to_string_repr() != endpoint {
                 return Err(NetworkError::DeserializationError(
-                    "Relay channel identity or mode changed".into(),
+                    "Relay channel identity changed".into(),
                 ));
             }
             return Ok(entry);
@@ -700,12 +682,7 @@ impl RelayClient {
                 "Relay peer identity mismatch".into(),
             ));
         }
-        let security = if actor_channel {
-            // Relay control only selects a handshake. The Actor proof still
-            // has to verify before this wire can supply an Attach context.
-            let identity = transport.actor_identity.as_ref().ok_or_else(|| {
-                NetworkError::ConnectionError("Actor channel was not negotiated".into())
-            })?;
+        let (security, actrium) = if let Some(identity) = &transport.actor_identity {
             let channel_id = channel.to_string();
             let session = if actor_front {
                 ActorChannelSession::new_front(identity, &endpoint, &channel_id, now_secs())
@@ -713,12 +690,16 @@ impl RelayClient {
                 ActorChannelSession::new_service(identity, &endpoint, &channel_id, now_secs())
             }
             .map_err(secure_error)?;
-            session.into_inner()
+            (Arc::new(Mutex::new(session.into_inner())), true)
         } else {
-            SecureSession::new(&transport.identity, &endpoint, channel, now_secs())
-                .map_err(secure_error)?
+            (
+                Arc::new(Mutex::new(
+                    SecureSession::new(&transport.identity, &endpoint, channel, now_secs())
+                        .map_err(secure_error)?,
+                )),
+                false,
+            )
         };
-        let security = Arc::new(Mutex::new(security));
         let (tx, rx) = mpsc::channel::<Message>(16);
         let (ready, ready_rx) = watch::channel(false);
         let cancel = transport.cancel.child_token();
@@ -791,7 +772,7 @@ impl RelayClient {
             Ok::<_, WsError>(state)
         });
         let incoming = tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok);
-        let conn = if actor_channel {
+        let conn = if actrium {
             WebSocketConnection::from_actrium_encrypted_parts(
                 Box::pin(sink),
                 incoming,
@@ -804,7 +785,7 @@ impl RelayClient {
             security,
             receive_permits: Mutex::new(Vec::new()),
             connected: AtomicBool::new(false),
-            actrium: actor_channel,
+            actrium,
             pending_request: Mutex::new(None),
             created: tokio::time::Instant::now(),
             peer: peer.clone(),
@@ -823,17 +804,8 @@ impl RelayClient {
         transport: &Transport,
     ) -> NetworkResult<()> {
         match control {
-            ServerControl::Incoming {
-                channel,
-                peer,
-                actor_channel,
-                ..
-            } => {
-                if self
-                    .install(channel, peer, transport, actor_channel, false)
-                    .await
-                    .is_err()
-                {
+            ServerControl::Incoming { channel, peer, .. } => {
+                if self.install(channel, peer, transport, false).await.is_err() {
                     self.close_channel(channel).await;
                     transport.control(ClientControl::Reject { channel }).await?;
                 } else {
@@ -844,7 +816,6 @@ impl RelayClient {
                 channel,
                 mut request,
                 peer,
-                actor_channel,
                 ..
             } => {
                 if let Some(request_id) = request {
@@ -882,10 +853,7 @@ impl RelayClient {
                         }
                     }
                 }
-                let entry = match self
-                    .install(channel, peer.clone(), transport, actor_channel, true)
-                    .await
-                {
+                let entry = match self.install(channel, peer.clone(), transport, true).await {
                     Ok(entry) => entry,
                     Err(error) => {
                         // The untrusted channel id may refer to another live

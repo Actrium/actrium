@@ -1120,8 +1120,6 @@ pub(crate) struct Inner {
     /// PeerGate exists, enabling outbound Attach and response verification.
     pub(crate) actrium_peer: Option<Arc<crate::actrium::service::Shared>>,
 
-    pub(crate) actor_channel_authentication: bool,
-
     /// Handle to the per-actor serial command runner.
     ///
     /// `handle_incoming` dispatches through this handle. The runner owns the
@@ -3125,7 +3123,6 @@ impl Inner {
             incoming_guard: None,
             session_registry: None,
             actrium_peer: None,
-            actor_channel_authentication: false,
             workload_dispatch: Arc::new(workload_dispatch),
             linked_handle,
             #[cfg(feature = "dynclib-engine")]
@@ -3933,8 +3930,7 @@ impl Inner {
                 session_state.clone(),
                 relay_gate.clone(),
                 self.shutdown_token.clone(),
-                (self.actor_channel_authentication || self.actrium_peer.is_some())
-                    .then(|| actor_storage_root.clone()),
+                crate::ACTOR_CHANNEL_AUTHENTICATION_ENABLED.then(|| actor_storage_root.clone()),
                 self.actor_key_namespace.clone(),
                 Some(credential_manager.clone()),
             );

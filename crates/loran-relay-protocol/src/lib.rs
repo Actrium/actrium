@@ -8,8 +8,6 @@ use bytes::{BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 
 pub const SUBPROTOCOL: &str = "loran-relay.v1";
-/// Opt-in to a per-channel Actor handshake when both WebSockets select it.
-pub const ACTOR_CHANNEL_SUBPROTOCOL: &str = "loran-relay.v1.actor";
 pub const DATA_HEADER_LEN: usize = 8;
 pub const MAX_ENDPOINT_LEN: usize = 512;
 pub const MAX_CONTROL_BYTES: usize = 32 * 1024;
@@ -51,16 +49,12 @@ pub enum ServerControl {
         channel: u64,
         peer: String,
         metadata: String,
-        #[serde(default, skip_serializing_if = "is_false")]
-        actor_channel: bool,
     },
     Connected {
         channel: u64,
         request: Option<u64>,
         peer: String,
         metadata: String,
-        #[serde(default, skip_serializing_if = "is_false")]
-        actor_channel: bool,
     },
     Closed {
         channel: u64,
@@ -74,10 +68,6 @@ pub enum ServerControl {
         request: Option<u64>,
         code: ErrorCode,
     },
-}
-
-fn is_false(value: &bool) -> bool {
-    !value
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
