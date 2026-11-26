@@ -543,7 +543,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                 guard let self = self else { return }
                 self.webView.evaluateJavaScript("location.href") { [weak self] result, _ in
                     guard let self = self,
-                          let newURL = Self.reportedPageURL(result as? String) else { return }
+                          let newURL = Self.provisionalPageURL(result as? String) else { return }
                     self.loadedURL = newURL
                     if self.lastKnownURL != newURL {
                         NSLog("🔗 WebViewHolder: URL changed to: %@", newURL.absoluteString)
@@ -579,10 +579,12 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         }
     }
 
-    /// WebKit reports the bare `about:blank` placeholder before the first
-    /// navigation commits. Treating it as the page address would make the tab
-    /// look empty and tear down its web overlay before the real page arrives.
-    private static func reportedPageURL(_ urlString: String?) -> URL? {
+    /// WebKit reports the bare `about:blank` placeholder through the URL
+    /// observer before the first navigation commits. Treating it as the page
+    /// address would make the tab look empty and tear down its web overlay
+    /// before the real page arrives. Only the provisional observation needs
+    /// this filter: a completed navigation reports the URL it actually reached.
+    private static func provisionalPageURL(_ urlString: String?) -> URL? {
         guard let urlString, urlString != "about:blank", let url = URL(string: urlString) else { return nil }
         return url
     }
@@ -808,7 +810,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         webView.evaluateJavaScript("location.href") { [weak self] result, _ in
             guard let self = self else { return }
             let url: URL?
-            if let parsed = Self.reportedPageURL(result as? String) {
+            if let urlString = result as? String, let parsed = URL(string: urlString) {
                 self.lastKnownURL = parsed
                 url = parsed
             } else {
