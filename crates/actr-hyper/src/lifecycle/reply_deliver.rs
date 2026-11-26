@@ -32,6 +32,8 @@ const DELIVER_PENDING: u8 = 0;
 const DELIVERED: u8 = 1;
 const DELIVER_TIMED_OUT: u8 = 2;
 
+type RetireCallback = Box<dyn FnOnce() + Send>;
+
 /// Path-specific reply routing state, captured by the receive loop and passed
 /// to [`Inner::admit_incoming`](crate::lifecycle::Inner::admit_incoming) so the
 /// `ReplyDeliver` can reach the right transport + ACK the right message.
@@ -84,7 +86,7 @@ pub(crate) struct ReplyDeliver {
     /// and the `Reply::Drop` fallback — with the TTL sweep.
     state: Arc<AtomicU8>,
     delivered: Arc<AtomicBool>,
-    retire: Arc<std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>>,
+    retire: Arc<std::sync::Mutex<Option<RetireCallback>>>,
 }
 
 // `ReplySink` is not `Clone` (it carries a `tracing::Span` which is Clone, but
