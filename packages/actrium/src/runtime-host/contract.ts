@@ -73,6 +73,9 @@ export type TabSetTitleInput = { title: string };
 export const TAB_TITLE_MAX_BYTES = 256;
 export type LocalStorageKeyInput = { key: string };
 export type LocalStorageSetInput = LocalStorageKeyInput & { value: string };
+export type LocalStorageReplaceInput = LocalStorageKeyInput & {
+  replacement: { expected: string | null; remove: string[]; set: LocalStorageSetInput[] };
+};
 
 export type NotificationsShowInput = { title: string; body?: string };
 
@@ -193,6 +196,14 @@ function parseLocalStorageKey(value: unknown): LocalStorageKeyInput {
   const text = requireString(key, 'local storage key', true);
   if (utf8ByteLength(text) > 1024) throw new Error('local storage key is too long');
   return { key: text };
+}
+
+function parseLocalStorageSet(value: unknown): LocalStorageSetInput {
+  const { key } = parseLocalStorageKey(value);
+  const input = asObject(value, 'local storage input');
+  const text = requireString(input.value, 'local storage value', true);
+  if (utf8ByteLength(text) > 64 * 1024) throw new Error('local storage value is too large');
+  return { key, value: text };
 }
 
 function optionalString(
@@ -548,18 +559,27 @@ export const contract = defineKeelContract({
         },
       }),
       setItem: rpc<LocalStorageSetInput, void>({
-        schema: {
-          parseInput: (value) => {
-            const { key } = parseLocalStorageKey(value);
-            const input = asObject(value, 'local storage input');
-            const text = requireString(input.value, 'local storage value', true);
-            if (utf8ByteLength(text) > 64 * 1024) throw new Error('local storage value is too large');
-            return { key, value: text };
-          },
-        },
+        schema: { parseInput: parseLocalStorageSet },
       }),
       removeItem: rpc<LocalStorageKeyInput, void>({
         schema: { parseInput: parseLocalStorageKey },
+      }),
+      replaceItems: rpc<LocalStorageReplaceInput, void>({
+        schema: {
+          parseInput: (value) => {
+            const input = asObject(value, 'local storage replacement');
+            const { key } = parseLocalStorageKey(input);
+            const replacement = asObject(input.replacement, 'local storage replacement operations');
+            const expected = replacement.expected === null
+              ? null : requireString(replacement.expected, 'expected local storage value', true);
+            if (!Array.isArray(replacement.remove) || !Array.isArray(replacement.set)) {
+              throw new Error('local storage replacement must contain arrays of removals and writes');
+            }
+            const remove = replacement.remove.map((key) => parseLocalStorageKey({ key }).key);
+            const set = replacement.set.map(parseLocalStorageSet);
+            return { key, replacement: { expected, remove, set } };
+          },
+        },
       }),
     },
     'host:notifications': {

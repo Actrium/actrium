@@ -96,9 +96,11 @@ final class RendererLocalStorage {
     }
 
     func reply(to json: String, tabId: UUID) async throws -> String? {
-        // A valid key and value fit even if every byte needs JSON escaping.
-        guard json.utf8.count <= 512 * 1024 else { return nil }
+        guard json.utf8.count <= GuestLocalStorageCall.maxRequestBytes else { return nil }
         let call = try JSONDecoder().decode(GuestLocalStorageCall.self, from: Data(json.utf8))
+        if call.operation != .replaceItems && json.utf8.count > GuestLocalStorageCall.maxSingleRequestBytes {
+            return nil
+        }
         let reply = await perform(call, tabId: tabId)
         return String(decoding: try JSONEncoder().encode(reply), as: UTF8.self)
     }
@@ -128,9 +130,12 @@ final class RendererLocalStorage {
             return GuestLocalStorageReply(id: call.id, error: "Too many pending local storage operations.")
         } catch GuestLocalStorageError.InvalidPublisher, GuestLocalStorageError.IdentityChanged {
             return GuestLocalStorageReply(id: call.id, error: "Local storage access was denied.")
+        } catch GuestLocalStorageError.QuotaExceeded(let message) {
+            return GuestLocalStorageReply(id: call.id, error: message, errorCode: .quotaExceeded)
+        } catch GuestLocalStorageError.Conflict(let message) {
+            return GuestLocalStorageReply(id: call.id, error: message, errorCode: .conflict)
         } catch GuestLocalStorageError.InvalidKey(let message),
-                GuestLocalStorageError.InvalidValue(let message),
-                GuestLocalStorageError.QuotaExceeded(let message) {
+                GuestLocalStorageError.InvalidValue(let message) {
             return GuestLocalStorageReply(id: call.id, error: message)
         } catch {
             AppLogger.database.error("Guest local storage database failure (code \((error as NSError).code)).")
@@ -162,6 +167,14 @@ final class RendererLocalStorage {
             try store.setItem(origin: origin, key: call.key, value: value)
         case .removeItem:
             try store.removeItem(origin: origin, key: call.key)
+        case .replaceItems:
+            guard let replacement = call.replacement else {
+                throw GuestLocalStorageError.InvalidValue(message: "Invalid local storage replacement.")
+            }
+            try store.replaceItems(
+                origin: origin, key: call.key, expected: replacement.expected,
+                remove: replacement.remove, set: replacement.set.map { GuestLocalStorageItem(key: $0.key, value: $0.value) }
+            )
         }
         return nil
     }

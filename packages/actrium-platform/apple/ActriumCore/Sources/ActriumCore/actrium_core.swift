@@ -580,6 +580,8 @@ public protocol GuestLocalStorageProtocol: AnyObject, Sendable {
 
     func removeItem(origin: String, key: String) throws
 
+    func replaceItems(origin: String, key: String, expected: String?, remove: [String], set: [GuestLocalStorageItem]) throws
+
     func resolveSignedOrigin(origin: String, publisherIdentity: String?, migrationApproval: String?) throws  -> String
 
     func setItem(origin: String, key: String, value: String) throws
@@ -699,6 +701,17 @@ open func removeItem(origin: String, key: String)throws   {try rustCallWithError
     uniffi_actrium_core_fn_method_guestlocalstorage_remove_item(self.uniffiClonePointer(),
         FfiConverterString.lower(origin),
         FfiConverterString.lower(key),$0
+    )
+}
+}
+
+open func replaceItems(origin: String, key: String, expected: String?, remove: [String], set: [GuestLocalStorageItem])throws   {try rustCallWithError(FfiConverterTypeGuestLocalStorageError_lift) {
+    uniffi_actrium_core_fn_method_guestlocalstorage_replace_items(self.uniffiClonePointer(),
+        FfiConverterString.lower(origin),
+        FfiConverterString.lower(key),
+        FfiConverterOptionString.lower(expected),
+        FfiConverterSequenceString.lower(remove),
+        FfiConverterSequenceTypeGuestLocalStorageItem.lower(set),$0
     )
 }
 }
@@ -5068,6 +5081,76 @@ public func FfiConverterTypeEmailBridgeContractInfo_lower(_ value: EmailBridgeCo
 }
 
 
+public struct GuestLocalStorageItem {
+    public var key: String
+    public var value: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(key: String, value: String) {
+        self.key = key
+        self.value = value
+    }
+}
+
+#if compiler(>=6)
+extension GuestLocalStorageItem: Sendable {}
+#endif
+
+
+extension GuestLocalStorageItem: Equatable, Hashable {
+    public static func ==(lhs: GuestLocalStorageItem, rhs: GuestLocalStorageItem) -> Bool {
+        if lhs.key != rhs.key {
+            return false
+        }
+        if lhs.value != rhs.value {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(key)
+        hasher.combine(value)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGuestLocalStorageItem: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GuestLocalStorageItem {
+        return
+            try GuestLocalStorageItem(
+                key: FfiConverterString.read(from: &buf),
+                value: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: GuestLocalStorageItem, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.key, into: &buf)
+        FfiConverterString.write(value.value, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGuestLocalStorageItem_lift(_ buf: RustBuffer) throws -> GuestLocalStorageItem {
+    return try FfiConverterTypeGuestLocalStorageItem.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGuestLocalStorageItem_lower(_ value: GuestLocalStorageItem) -> RustBuffer {
+    return FfiConverterTypeGuestLocalStorageItem.lower(value)
+}
+
+
 public struct LocalRealmFront {
     public var signingKeyId: String
     public var allowRebuild: Bool
@@ -8250,6 +8333,8 @@ public enum GuestLocalStorageError: Swift.Error {
 
     case MigrationConflict(message: String)
 
+    case Conflict(message: String)
+
 }
 
 
@@ -8298,6 +8383,10 @@ public struct FfiConverterTypeGuestLocalStorageError: FfiConverterRustBuffer {
             message: try FfiConverterString.read(from: &buf)
         )
 
+        case 9: return .Conflict(
+            message: try FfiConverterString.read(from: &buf)
+        )
+
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -8325,6 +8414,8 @@ public struct FfiConverterTypeGuestLocalStorageError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(7))
         case .MigrationConflict(_ /* message is ignored*/):
             writeInt(&buf, Int32(8))
+        case .Conflict(_ /* message is ignored*/):
+            writeInt(&buf, Int32(9))
 
 
         }
@@ -8868,6 +8959,31 @@ fileprivate struct FfiConverterSequenceTypeDefaultTagInfo: FfiConverterRustBuffe
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeDefaultTagInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeGuestLocalStorageItem: FfiConverterRustBuffer {
+    typealias SwiftType = [GuestLocalStorageItem]
+
+    public static func write(_ value: [GuestLocalStorageItem], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeGuestLocalStorageItem.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [GuestLocalStorageItem] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [GuestLocalStorageItem]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeGuestLocalStorageItem.read(from: &buf))
         }
         return seq
     }
@@ -12514,6 +12630,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_method_guestlocalstorage_remove_item() != 23454) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actrium_core_checksum_method_guestlocalstorage_replace_items() != 34003) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actrium_core_checksum_method_guestlocalstorage_resolve_signed_origin() != 29707) {

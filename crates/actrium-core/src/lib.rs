@@ -24,7 +24,7 @@ pub mod session;
 pub mod speech;
 
 pub use ffi::*;
-pub use guest_local_storage::{GuestLocalStorage, GuestLocalStorageError};
+pub use guest_local_storage::{GuestLocalStorage, GuestLocalStorageError, GuestLocalStorageItem};
 
 uniffi::include_scaffolding!("actrium_core");
 
