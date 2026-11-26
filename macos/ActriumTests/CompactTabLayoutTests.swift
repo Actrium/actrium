@@ -290,10 +290,10 @@ struct CompactTabLayoutTests {
             ),
         ]
 
-        // Squeezed, but both still above their floors: the sum lands exactly
-        // on the room available, so nothing overlaps and nothing overflows.
+        // The current Tab holds its width, so its neighbour absorbs the whole
+        // squeeze and the sum still lands on the room available.
         let squeezed = toolbarAdaptiveTabWidths(inputs: inputs, availableWidth: 280)
-        #expect(squeezed[active]! > CompactToolbarLayout.activeTabCompressedMinWidth)
+        #expect(squeezed[active] == CompactToolbarLayout.activeTabPreferredWidth)
         #expect(squeezed[inactive]! > CompactToolbarLayout.inactiveTabCompressedMinWidth)
         #expect(abs(squeezed.values.reduce(0, +) - 280) < 0.001)
 
