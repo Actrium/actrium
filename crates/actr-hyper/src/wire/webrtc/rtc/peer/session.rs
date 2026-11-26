@@ -31,6 +31,7 @@ use webrtc::media_stream::track_remote::TrackRemote;
 use actr_protocol::ActrId;
 
 use crate::inbound::MediaFrameRegistry;
+use crate::wire::webrtc::rtc::flow::{self, SessionFlow};
 use crate::wire::webrtc::rtc::inbound::InboundRouter;
 use crate::wire::webrtc::rtc::media::TrackMeta;
 use crate::wire::webrtc::rtc::status::LaneKind;
@@ -502,12 +503,69 @@ const INBOUND_ADMISSION_WAIT: std::time::Duration = std::time::Duration::from_se
 /// controller as `LaneEvent`s and payloads to the inbound router. This is a
 /// plain async fn (not a spawn wrapper) so the owning session registers it in
 /// its `JoinSet` and cancels it on close.
+struct ReservedMessage {
+    id: u32,
+    bytes: usize,
+    next: u16,
+    credit: actr_relay_security::peer_flow::ReceiveCredit,
+}
+
+fn accept_reserved_fragment(
+    pending: &mut Option<ReservedMessage>,
+    flow_state: Option<&SessionFlow>,
+    (id, index, count, bytes): (u32, u16, u16, usize),
+    fragment_bytes: usize,
+    lane: LaneKind,
+    max_message_bytes: usize,
+) -> Result<(), ()> {
+    let offset = usize::from(index) * flow::CREDITED_PAYLOAD;
+    if bytes > max_message_bytes
+        || index >= count
+        || usize::from(count) != bytes.div_ceil(flow::CREDITED_PAYLOAD).max(1)
+        || fragment_bytes != bytes.saturating_sub(offset).min(flow::CREDITED_PAYLOAD)
+    {
+        return Err(());
+    }
+    if index == 0 {
+        if pending.is_some() {
+            return Err(());
+        }
+        let credit = flow_state
+            .and_then(|flow| flow::class(lane).and_then(|class| flow.peer.admit(class, bytes)))
+            .ok_or(())?;
+        *pending = Some(ReservedMessage {
+            id,
+            bytes,
+            next: 0,
+            credit,
+        });
+    }
+    let record = pending.as_mut().ok_or(())?;
+    if record.id != id || record.bytes != bytes || record.next != index {
+        return Err(());
+    }
+    record.next += 1;
+    Ok(())
+}
+
+#[cfg(test)]
 pub(crate) async fn lane_pump(
     generation: u64,
     lane: LaneKind,
     channel: Arc<dyn LaneDataChannel>,
     plumbing: LanePlumbing,
     cancellation: CancellationToken,
+) {
+    pump(generation, lane, channel, plumbing, cancellation, None).await;
+}
+
+async fn pump(
+    generation: u64,
+    lane: LaneKind,
+    channel: Arc<dyn LaneDataChannel>,
+    plumbing: LanePlumbing,
+    cancellation: CancellationToken,
+    flow_state: Option<Arc<SessionFlow>>,
 ) {
     let LanePlumbing {
         peer_id,
@@ -533,10 +591,16 @@ pub(crate) async fn lane_pump(
     let mut admission = inbound_generation.subscribe();
     let mut admission_deadline = None;
     let mut message_admissions = InboundAdmissionCache::new(reassembly_limits.max_messages);
+    let mut reserved: Option<ReservedMessage> = None;
 
     while let Some(event) = channel.poll().await {
         match event {
             E::OnOpen => {
+                if lane == LaneKind::READINESS_ANCHOR
+                    && let Some(flow) = &flow_state
+                {
+                    flow.opened();
+                }
                 tracing::debug!(
                     peer = %peer_id.to_string_repr(),
                     generation,
@@ -555,6 +619,19 @@ pub(crate) async fn lane_pump(
                 // Strip the 8-byte fragment header (wire-compatible with 0.14)
                 // and reassemble multi-fragment messages before dispatch.
                 let raw = message.data.freeze();
+                if lane == LaneKind::READINESS_ANCHOR
+                    && let Some(flow) = &flow_state
+                {
+                    match flow.receive(&raw) {
+                        Ok(true) => continue,
+                        Ok(false) => {}
+                        Err(()) => {
+                            let _ = channel.close().await;
+                            let _ = lane_tx.send(LaneEvent::Closed { generation, lane }).await;
+                            return;
+                        }
+                    }
+                }
                 let (msg_id, frag_index, total_frags, payload) = match decode_fragment_header(raw) {
                     Ok(fragment) => fragment,
                     Err(e) => {
@@ -567,6 +644,42 @@ pub(crate) async fn lane_pump(
                         );
                         continue;
                     }
+                };
+
+                let Some((total_frags, declared, payload)) =
+                    flow::split_length(total_frags, payload)
+                else {
+                    inbound.record_drop();
+                    continue;
+                };
+                if let Some(bytes) = declared {
+                    let result = accept_reserved_fragment(
+                        &mut reserved,
+                        flow_state.as_deref(),
+                        (msg_id, frag_index, total_frags, bytes),
+                        payload.len(),
+                        lane,
+                        reassembly_limits.max_message_bytes,
+                    );
+                    if result.is_err() {
+                        let _ = channel.close().await;
+                        let _ = lane_tx.send(LaneEvent::Closed { generation, lane }).await;
+                        return;
+                    }
+                }
+                let mut route = |payload| {
+                    let message = InboundMessage {
+                        peer: peer_id.clone(),
+                        generation,
+                        lane,
+                        payload,
+                    };
+                    if declared.is_some() {
+                        let reservation = reserved.take().expect("admitted RTC fragment");
+                        inbound.route_reserved(message, reservation.credit);
+                        return true;
+                    }
+                    inbound.route(message)
                 };
 
                 let admitted = if total_frags == 1 {
@@ -602,12 +715,7 @@ pub(crate) async fn lane_pump(
                 match admitted {
                     InboundAdmission::Admitted => {
                         if total_frags == 1 {
-                            if !inbound.route(InboundMessage {
-                                peer: peer_id.clone(),
-                                generation,
-                                lane,
-                                payload,
-                            }) {
+                            if !route(payload) {
                                 tracing::warn!(
                                     peer = %peer_id.to_string_repr(),
                                     generation,
@@ -627,12 +735,7 @@ pub(crate) async fn lane_pump(
                                         total_frags,
                                         "RTC reassembled multi-fragment message"
                                     );
-                                    if !inbound.route(InboundMessage {
-                                        peer: peer_id.clone(),
-                                        generation,
-                                        lane,
-                                        payload: complete,
-                                    }) {
+                                    if !route(complete) {
                                         tracing::warn!(
                                             peer = %peer_id.to_string_repr(),
                                             generation,
@@ -643,6 +746,13 @@ pub(crate) async fn lane_pump(
                                 }
                                 Ok(None) => {}
                                 Err(error) => {
+                                    if declared.is_some() {
+                                        let _ = channel.close().await;
+                                        let _ = lane_tx
+                                            .send(LaneEvent::Closed { generation, lane })
+                                            .await;
+                                        return;
+                                    }
                                     message_admissions.remove(msg_id);
                                     inbound.record_drop();
                                     tracing::warn!(
@@ -659,6 +769,9 @@ pub(crate) async fn lane_pump(
                         // else: fragment stored, waiting for the rest
                     }
                     InboundAdmission::Rejected => {
+                        if declared.is_some() {
+                            reserved.take();
+                        }
                         inbound.record_drop();
                         let admitted_generation = *admission.borrow();
                         tracing::debug!(
@@ -736,6 +849,7 @@ pub(crate) struct PeerConnectionSession {
     /// A cancelled close future leaves this false so runner teardown can
     /// safely resume cleanup from the remaining registries/tasks.
     close_complete: bool,
+    flow: Option<Arc<SessionFlow>>,
 }
 
 impl PeerConnectionSession {
@@ -758,6 +872,7 @@ impl PeerConnectionSession {
             tracks: HashMap::new(),
             local_tracks: HashMap::new(),
             close_complete: false,
+            flow: None,
         }
     }
 
@@ -789,14 +904,27 @@ impl PeerConnectionSession {
         channel: Arc<dyn LaneDataChannel>,
         plumbing: LanePlumbing,
     ) -> LaneHandle {
-        let handle = LaneHandle::new(self.generation, lane, channel.clone(), self.cancellation());
+        if self.flow.is_none()
+            && let Some(pools) = plumbing.inbound.flow.clone()
+        {
+            self.flow = Some(SessionFlow::new(pools, self.cancellation()));
+        }
+        let mut handle =
+            LaneHandle::new(self.generation, lane, channel.clone(), self.cancellation());
+        handle.flow = self.flow.clone();
+        if lane == LaneKind::READINESS_ANCHOR
+            && let Some(flow) = &self.flow
+        {
+            self.tasks.spawn(flow.clone().writer(channel.clone()));
+        }
         // Spawn the pump as a session-owned task (cancelled on close).
-        self.tasks.spawn(lane_pump(
+        self.tasks.spawn(pump(
             self.generation,
             lane,
             channel.clone(),
             plumbing,
             self.cancellation(),
+            self.flow.clone(),
         ));
         self.channels.insert(lane, channel);
         handle

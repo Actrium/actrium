@@ -22,7 +22,8 @@
 //! ```
 
 #[path = "relay_security.rs"]
-mod relay_security;
+pub(crate) mod relay_security;
+pub(crate) use relay_security::dispatch_application;
 pub use relay_security::{handle_relay_record, prepare_relay_connection, start_relay_handshake};
 
 use std::cell::RefCell;
@@ -4365,6 +4366,26 @@ pub async fn register_datachannel_port(
     connection_id: String,
     port: MessagePort,
 ) -> Result<(), JsValue> {
+    register_rtc_port(client_id, peer_id, connection_id, port, false).await
+}
+
+#[wasm_bindgen]
+pub async fn register_flow_datachannel_port(
+    client_id: String,
+    peer_id: String,
+    connection_id: String,
+    port: MessagePort,
+) -> Result<(), JsValue> {
+    register_rtc_port(client_id, peer_id, connection_id, port, true).await
+}
+
+async fn register_rtc_port(
+    client_id: String,
+    peer_id: String,
+    connection_id: String,
+    port: MessagePort,
+    flow: bool,
+) -> Result<(), JsValue> {
     log::info!(
         "[SW] register_datachannel_port: client_id={} peer_id={}",
         client_id,
@@ -4385,6 +4406,14 @@ pub async fn register_datachannel_port(
     let mut rtc_conn = crate::transport::WebRtcConnection::new(peer_id.clone());
     rtc_conn.set_connection_id(connection_id);
     rtc_conn.set_network_path(ctx.rtc_paths.borrow().get(&peer_id).copied().flatten());
+    if flow {
+        rtc_conn.set_flow(crate::transport::rtc_flow::RtcFlow::attach(
+            client_id.clone(),
+            peer_id.clone(),
+            port.clone(),
+            ctx.relay_security.flow_pools(),
+        ));
+    }
     rtc_conn.set_datachannel_port(port);
 
     let wire_handle = crate::transport::WireHandle::WebRTC(rtc_conn);
@@ -4572,7 +4601,8 @@ pub async fn register_relay_connection(
             "Relay channel is not mutually authenticated",
         ));
     }
-    let connection = crate::transport::RelayConnection::new(send);
+    let connection = crate::transport::RelayConnection::new(send)
+        .with_flow(relay_security::flow_sender(&ctx, &channel));
     ctx.relay_channels
         .borrow_mut()
         .insert(peer.clone(), channel);

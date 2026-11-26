@@ -51,6 +51,11 @@ pub struct WebRtcTransportLifecycle {
 /// - Platform-specific implementations (native, web) implement this trait
 #[async_trait]
 pub trait WireHandle: Send + Sync + std::fmt::Debug {
+    /// End recovery scoped to this physical transport type when a stream
+    /// starts submitting on a different transport.
+    #[doc(hidden)]
+    fn abandon_stream_recovery(&self) {}
+
     /// Get connection type
     fn connection_type(&self) -> ConnType;
 

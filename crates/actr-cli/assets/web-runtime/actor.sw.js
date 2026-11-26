@@ -477,7 +477,13 @@ class LoranRelayClient {
     return dial;
   }
 
-  send(channel, payload) {
+  outboundRoom(control = false) {
+    if (!this.socket || this.socket.readyState !== 1 || !this.authenticated) throw new Error('Relay not connected');
+    const limit = 16 * 1024 * 1024 - (control ? 0 : 64 * 1024);
+    return Math.max(0, limit - this.socket.bufferedAmount);
+  }
+
+  send(channel, payload, control = false) {
     const entry = this.channels.get(channel);
     if (!entry || !entry.active || !this.authenticated || !this.socket || this.socket.readyState !== 1) throw new Error('Relay peer not ready');
     const bytes = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
@@ -485,7 +491,7 @@ class LoranRelayClient {
     const frame = new Uint8Array(8 + bytes.byteLength);
     new DataView(frame.buffer).setBigUint64(0, BigInt(channel), false);
     frame.set(bytes, 8);
-    if (this.socket.bufferedAmount + frame.byteLength > 16 * 1024 * 1024) { this.closeChannel(channel); throw new Error('Relay send budget exhausted'); }
+    if (this.outboundRoom(control) < frame.byteLength) { this.closeChannel(channel); throw new Error('Relay send budget exhausted'); }
     // A submitted message is never replayed on reconnect; its delivery may
     // already have happened even if the socket closes immediately afterwards.
     this.socket.send(frame);
@@ -598,10 +604,11 @@ function startRelayForClient(clientId) {
       } finally { clearTimeout(timer); }
     },
     prepare: async (channel, endpoint, key, initiator) => {
-      const rawSend = (payload) => {
+      const rawSend = (payload, control = false) => {
         if (relay.channels.get(channel)?.key !== key) throw new Error('Stale encrypted relay channel');
+        if (payload === undefined) return relay.outboundRoom(control);
         if (payload === null) relay.closeChannel(channel);
-        else relay.send(channel, payload);
+        else relay.send(channel, payload, control);
       };
       const peer = await wasm_bindgen.prepare_relay_connection(clientId, endpoint, key, rawSend, initiator);
       let announced = false;
@@ -1379,7 +1386,11 @@ self.addEventListener('message', async (event) => {
           const dcPeerId = message.payload.peerId;
           const dcConnectionId = message.payload.connectionId;
           if (dcPort && dcPeerId && dcConnectionId) {
-            await wasm_bindgen.register_datachannel_port(clientId, dcPeerId, dcConnectionId, dcPort);
+            if (message.payload.flowControl) {
+              await wasm_bindgen.register_flow_datachannel_port(clientId, dcPeerId, dcConnectionId, dcPort);
+            } else {
+              await wasm_bindgen.register_datachannel_port(clientId, dcPeerId, dcConnectionId, dcPort);
+            }
           } else {
             console.warn('[SW] register_datachannel_port: missing port, peerId, or connectionId');
           }

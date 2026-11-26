@@ -129,3 +129,34 @@ test('unrecognized selected candidate types do not claim a direct path', async (
   await f.coordinator.observeNetworkPath('peer', f.connection);
   assert.equal(f.events[0].payload.data.relayed, null);
 });
+
+test('credited WebRTC fragments go to the worker before DOM reassembly', () => {
+  const forwarded = [];
+  const coordinator = new WebRtcCoordinator(
+    { onMessage() {} },
+    { forward() { throw new Error('credited frames must bypass legacy reassembly'); } },
+  );
+  coordinator.rpcPorts.set('peer', {
+    postMessage(message) {
+      forwarded.push(message);
+    },
+  });
+
+  const payload = new Uint8Array(70_000).fill(27);
+  const fragments = coordinator.createFrames('peer', 2, payload, true);
+  assert.equal(fragments.length, 2);
+  for (const fragment of fragments) {
+    const header = new DataView(fragment.buffer);
+    assert.equal(header.getUint16(6), 0x8002);
+    assert.equal(header.getUint32(8), payload.length);
+    coordinator.extractFragmentAndForward('peer', 2, fragment);
+  }
+
+  const control = new Uint8Array([0x41, 0x43, 0x54, 0x52, 0, 0, 0, 0, 0]);
+  coordinator.extractFragmentAndForward('peer', 0, control);
+  assert.deepEqual(forwarded.map(({ lane }) => lane), [2, 2, 0]);
+  assert.deepEqual(new Uint8Array(forwarded[0].flowFrame), fragments[0]);
+  assert.deepEqual(new Uint8Array(forwarded[1].flowFrame), fragments[1]);
+  assert.deepEqual(new Uint8Array(forwarded[2].flowFrame), control);
+  assert.equal(coordinator.reassembly.size, 0);
+});

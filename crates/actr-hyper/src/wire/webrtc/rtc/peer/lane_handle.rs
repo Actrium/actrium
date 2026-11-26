@@ -92,6 +92,7 @@ pub(crate) struct LaneHandle {
     channel: Arc<dyn LaneDataChannel>,
     cancellation: CancellationToken,
     readiness: Arc<LaneReadinessState>,
+    pub(super) flow: Option<Arc<crate::wire::webrtc::rtc::flow::SessionFlow>>,
 }
 
 impl LaneHandle {
@@ -107,6 +108,7 @@ impl LaneHandle {
             channel,
             cancellation,
             readiness: LaneReadinessState::new(),
+            flow: None,
         }
     }
 

@@ -21,6 +21,7 @@ export interface PeerConnectionInfo {
 }
 
 interface PendingPortFrame {
+  credited: boolean;
   channelId: number;
   payload: Uint8Array;
 }
@@ -47,6 +48,7 @@ export class WebRtcCoordinator {
   private pendingSends: Map<string, Map<number, Uint8Array[]>> = new Map();
   private pendingPortFrames: Map<string, PendingPortFrame[]> = new Map();
   private rpcPorts: Map<string, MessagePort> = new Map();
+  private pendingFlowWindows = new Map<string, ArrayBuffer>();
   private fragmentCounters: Map<string, number> = new Map();
   private reassembly: Map<string, FragmentEntry> = new Map();
   private commandQueues: Map<string, Promise<void>> = new Map();
@@ -322,6 +324,21 @@ export class WebRtcCoordinator {
    * Wire format: [msg_id(4) | frag_index(2) | total_frags(2) | Data(N)].
    */
   private extractFragmentAndForward(peerId: string, channelId: number, frame: Uint8Array): void {
+    if (frame.byteLength >= 8) {
+      const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+      const count = view.getUint16(6, false);
+      const control = channelId === 0 && count === 0
+        && view.getUint32(0, false) === 0x41435452 && view.getUint16(4, false) === 0;
+      if (control || (count & 0x8000) !== 0) {
+        const bytes = frame.slice().buffer;
+        const port = this.rpcPorts.get(peerId);
+        if (port) port.postMessage({ lane: channelId, flowFrame: bytes }, [bytes]);
+        else if (control && frame.byteLength === 41 && frame[8] === 0) {
+          this.pendingFlowWindows.set(peerId, bytes);
+        }
+        return;
+      }
+    }
     const payload = this.reassembleFrame(peerId, channelId, frame);
     if (!payload) return;
 
@@ -629,16 +646,18 @@ export class WebRtcCoordinator {
   private queuePendingPortFrameForChannel(
     peerId: string,
     channelId: number,
-    payload: Uint8Array
+    payload: Uint8Array,
+    credited = false
   ): void {
     const queue = this.pendingPortFrames.get(peerId) ?? [];
-    queue.push({ channelId, payload: new Uint8Array(payload) });
+    queue.push({ channelId, payload: new Uint8Array(payload), credited });
     this.pendingPortFrames.set(peerId, queue);
   }
 
   private dropPendingPeerFrames(peerId: string): void {
     this.pendingSends.delete(peerId);
     this.pendingPortFrames.delete(peerId);
+    this.pendingFlowWindows.delete(peerId);
   }
 
   private bindRpcPort(peerId: string, channel: RTCDataChannel): void {
@@ -667,14 +686,20 @@ export class WebRtcCoordinator {
         return;
       }
 
-      const payloadType = src[0];
-      const payload = src.subarray(5); // Strip SW transport header [PayloadType(1)|Length(4)].
+      const tag = src[0];
+      const payload = src.subarray(5); // Strip the worker's transport header.
+      if (tag === 255) {
+        if (channel.readyState === 'open') channel.send(payload.slice().buffer);
+        return;
+      }
+      const credited = (tag & 128) !== 0;
+      const payloadType = tag & 127;
       const targetChannel = peer?.dataChannels.get(payloadType);
 
       if (targetChannel?.readyState === 'open') {
-        this.sendFramedData(peerId, payloadType, targetChannel, payload);
+        this.sendFramedData(peerId, payloadType, targetChannel, payload, credited);
       } else if (targetChannel?.readyState === 'connecting') {
-        this.queuePendingPortFrameForChannel(peerId, payloadType, payload);
+        this.queuePendingPortFrameForChannel(peerId, payloadType, payload, credited);
       } else {
         this.dropPendingPeerFrames(peerId);
         this.notifySW('command_error', {
@@ -687,6 +712,11 @@ export class WebRtcCoordinator {
 
     this.rpcPorts.set(peerId, mc.port1);
     this.swBridge.sendDataChannelPort(peerId, peer.connectionId, mc.port2);
+    const earlyWindow = this.pendingFlowWindows.get(peerId);
+    if (earlyWindow) {
+      this.pendingFlowWindows.delete(peerId);
+      mc.port1.postMessage({ lane: 0, flowFrame: earlyWindow }, [earlyWindow]);
+    }
     this.flushPendingPortFrames(peerId, channel);
   }
 
@@ -717,10 +747,10 @@ export class WebRtcCoordinator {
     for (const frame of queue) {
       const targetChannel = this.peers.get(peerId)?.dataChannels.get(frame.channelId);
       if (!targetChannel || targetChannel.readyState !== 'open') {
-        this.queuePendingPortFrameForChannel(peerId, frame.channelId, frame.payload);
+        this.queuePendingPortFrameForChannel(peerId, frame.channelId, frame.payload, frame.credited);
         continue;
       }
-      this.sendFramedData(peerId, frame.channelId, targetChannel, frame.payload);
+      this.sendFramedData(peerId, frame.channelId, targetChannel, frame.payload, frame.credited);
     }
   }
 
@@ -735,20 +765,20 @@ export class WebRtcCoordinator {
     peerId: string,
     channelId: number,
     channel: RTCDataChannel,
-    payload: Uint8Array
+    payload: Uint8Array,
+    credited = false
   ): void {
-    for (const frame of this.createFrames(peerId, channelId, payload)) {
+    for (const frame of this.createFrames(peerId, channelId, payload, credited)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       channel.send(frame as any);
     }
   }
 
-  private createFrames(peerId: string, channelId: number, payload: Uint8Array): Uint8Array[] {
-    const totalFrags = Math.max(
-      1,
-      Math.ceil(payload.byteLength / WebRtcCoordinator.DC_MAX_PAYLOAD_SIZE)
-    );
-    if (totalFrags > 0xffff) {
+  private createFrames(peerId: string, channelId: number, payload: Uint8Array, credited = false): Uint8Array[] {
+    const lengthBytes = credited ? 4 : 0;
+    const maxPayload = WebRtcCoordinator.DC_MAX_PAYLOAD_SIZE - lengthBytes;
+    const totalFrags = Math.max(1, Math.ceil(payload.byteLength / maxPayload));
+    if (totalFrags > 0x7fff) {
       throw new Error(`DataChannel payload too large: ${payload.byteLength} bytes`);
     }
 
@@ -758,15 +788,16 @@ export class WebRtcCoordinator {
 
     const frames: Uint8Array[] = [];
     for (let fragIndex = 0; fragIndex < totalFrags; fragIndex++) {
-      const start = fragIndex * WebRtcCoordinator.DC_MAX_PAYLOAD_SIZE;
-      const end = Math.min(start + WebRtcCoordinator.DC_MAX_PAYLOAD_SIZE, payload.byteLength);
+      const start = fragIndex * maxPayload;
+      const end = Math.min(start + maxPayload, payload.byteLength);
       const chunk = payload.subarray(start, end);
-      const frame = new Uint8Array(WebRtcCoordinator.FRAGMENT_HEADER_SIZE + chunk.byteLength);
+      const frame = new Uint8Array(WebRtcCoordinator.FRAGMENT_HEADER_SIZE + lengthBytes + chunk.byteLength);
       const view = new DataView(frame.buffer);
       view.setUint32(0, msgId, false);
       view.setUint16(4, fragIndex, false);
-      view.setUint16(6, totalFrags, false);
-      frame.set(chunk, WebRtcCoordinator.FRAGMENT_HEADER_SIZE);
+      view.setUint16(6, totalFrags | (credited ? 0x8000 : 0), false);
+      if (credited) view.setUint32(8, payload.byteLength, false);
+      frame.set(chunk, WebRtcCoordinator.FRAGMENT_HEADER_SIZE + lengthBytes);
       frames.push(frame);
     }
 
@@ -777,7 +808,9 @@ export class WebRtcCoordinator {
     channel.binaryType = 'arraybuffer';
 
     channel.onmessage = (event) => {
-      this.handleDataChannelMessage(peerId, laneId, event.data);
+      if (this.peers.get(peerId)?.dataChannels.get(laneId) === channel) {
+        this.handleDataChannelMessage(peerId, laneId, event.data);
+      }
     };
 
     channel.onopen = () => {

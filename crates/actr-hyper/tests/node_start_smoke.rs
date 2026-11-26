@@ -1287,6 +1287,128 @@ async fn relay_only_rpc_streams_and_warm_reconnection_need_no_peer_listener() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn relay_credit_stalls_only_the_peer_with_a_slow_consumer() {
+    let server = TestSignalingServer::start_with_relay().await.unwrap();
+    server.pause_forwarding();
+    exercise_credit_with_slow_consumer(server, true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn webrtc_credit_stalls_only_the_peer_with_a_slow_consumer() {
+    let server = TestSignalingServer::start().await.unwrap();
+    exercise_credit_with_slow_consumer(server, false).await;
+}
+
+async fn exercise_credit_with_slow_consumer(mut server: TestSignalingServer, relay: bool) {
+    use std::time::Duration;
+    let dirs = [
+        TempDir::new().unwrap(),
+        TempDir::new().unwrap(),
+        TempDir::new().unwrap(),
+    ];
+    let (ready, _events) = tokio::sync::mpsc::unbounded_channel();
+    let sender = relay_node(&dirs[0], &server, "CreditSender", ready.clone()).await;
+    let slow = relay_node(&dirs[1], &server, "CreditSlow", ready.clone()).await;
+    let healthy = relay_node(&dirs[2], &server, "CreditHealthy", ready).await;
+    let wait = Duration::from_secs(15);
+    if relay {
+        tokio::time::timeout(wait, async {
+            while server.relay_connection_count() != 3 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("three peers authenticate relay sockets");
+    }
+    assert_echo_rpc(&sender, slow.actor_id(), b"prepare slow route").await;
+    assert_echo_rpc(&sender, healthy.actor_id(), b"prepare healthy route").await;
+
+    let releases = Arc::new(tokio::sync::Semaphore::new(0));
+    let (entered_tx, mut entered) = tokio::sync::mpsc::unbounded_channel();
+    let (received_tx, mut received) = tokio::sync::mpsc::unbounded_channel();
+    slow.app_context()
+        .await
+        .register_stream("slow-peer-credit".into(), {
+            let releases = releases.clone();
+            move |chunk, _| {
+                let entered_tx = entered_tx.clone();
+                let received_tx = received_tx.clone();
+                let releases = releases.clone();
+                Box::pin(async move {
+                    entered_tx.send(chunk.sequence).unwrap();
+                    releases.acquire().await.unwrap().forget();
+                    received_tx.send(chunk.sequence).unwrap();
+                    Ok(())
+                })
+            }
+        })
+        .await
+        .unwrap();
+
+    let ctx = sender.app_context().await;
+    let slow_id = slow.actor_id();
+    let (sent_tx, mut sent) = tokio::sync::mpsc::unbounded_channel();
+    let send = tokio::spawn(async move {
+        for sequence in 0..23 {
+            ctx.send_data_chunk(
+                &Dest::Peer(slow_id.clone()),
+                actr_protocol::DataChunk {
+                    stream_id: "slow-peer-credit".into(),
+                    sequence,
+                    payload: Bytes::from_static(b"small reliable message"),
+                    ..Default::default()
+                },
+                PayloadType::StreamReliable,
+            )
+            .await
+            .unwrap();
+            sent_tx.send(sequence).unwrap();
+        }
+    });
+    assert_eq!(
+        tokio::time::timeout(wait, entered.recv()).await.unwrap(),
+        Some(0)
+    );
+    for sequence in 0..16 {
+        assert_eq!(
+            tokio::time::timeout(wait, sent.recv()).await.unwrap(),
+            Some(sequence)
+        );
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), sent.recv())
+            .await
+            .is_err()
+    );
+
+    // RPC has its own window even on the backpressured stream's peer.
+    assert_echo_rpc(&sender, slow.actor_id(), b"RPC bypasses the stalled stream").await;
+
+    // Both shared sockets must continue serving a different logical channel.
+    assert_echo_rpc(&sender, healthy.actor_id(), b"sender socket remains live").await;
+    assert_echo_rpc(&healthy, slow.actor_id(), b"receiver socket remains live").await;
+    assert_eq!(server.relay_connection_count(), if relay { 3 } else { 0 });
+    assert!(!send.is_finished());
+
+    releases.add_permits(23);
+    for sequence in 0..23 {
+        assert_eq!(
+            tokio::time::timeout(wait, received.recv()).await.unwrap(),
+            Some(sequence)
+        );
+    }
+    tokio::time::timeout(wait, send).await.unwrap().unwrap();
+    assert_echo_rpc(&sender, slow.actor_id(), b"original slow channel recovered").await;
+    for node in [&sender, &slow, &healthy] {
+        node.shutdown();
+        tokio::time::timeout(wait, node.wait_for_shutdown())
+            .await
+            .unwrap();
+    }
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn relay_discovery_recovers_after_being_enabled_without_restarting_nodes() {
     let mut server = TestSignalingServer::start_with_relay().await.unwrap();
     server.set_relay_discovery_enabled(false);

@@ -1,6 +1,8 @@
 //! Outbound peer relay adapter. Business identities and rotating credentials
 //! are mapped here, outside the application-independent relay crates.
 
+use super::relay_flow::{INBOUND_SLOTS, MAX_CHANNELS, ReceiveCredit, RelayFlow, SHARED_HEADROOM};
+use super::relay_recovery::{self, RecoveryBook, RecoveryChannel};
 use super::websocket::{WebSocketConnection, WebSocketGate};
 use crate::timer;
 use crate::{
@@ -11,6 +13,8 @@ use crate::{
     },
 };
 use actr_protocol::{ActrId, ActrType, PayloadType, prost::Message as ProstMessage};
+use actr_relay_security::RecoveryControl;
+use actr_relay_security::flow_control::Class;
 use actr_relay_security::{
     ActorChannelEnrollment, ActorChannelIdentity, ActorChannelSession, IdentityKey,
     IdentityRequest, IssuedIdentity, IssuerKey, LocalIdentity, SecureSession, VerifiedActorChannel,
@@ -46,6 +50,7 @@ const MAX_FRAME: usize = 8 * 1024 * 1024 + 64;
 const QUEUE_BYTES: usize = 16 * 1024 * 1024;
 const OUTGOING_QUEUE_SLOTS: usize = 128;
 const CLOSE_QUEUE_SLOTS: usize = 512;
+const FLOW_QUEUE_SLOTS: usize = MAX_CHANNELS;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_DESIRED_PEERS: usize = 1024;
@@ -89,6 +94,9 @@ struct Transport {
     budget: Arc<Semaphore>,
     outgoing_slots: Arc<Semaphore>,
     close_slots: Arc<Semaphore>,
+    flow_slots: Arc<Semaphore>,
+    flow_windows: Arc<Semaphore>,
+    flow_wait_bytes: Arc<Semaphore>,
     pending_closes: Arc<std::sync::Mutex<HashSet<u64>>>,
     encryption_budget: Arc<Semaphore>,
     cancel: CancellationToken,
@@ -126,6 +134,33 @@ impl Transport {
                     message,
                     ack: Some(tx),
                     _permit: Some(permit),
+                    _slot: slot,
+                    _close: None,
+                })
+                .await
+                .map_err(|_| ws_closed())?;
+            rx.await.map_err(|_| ws_closed())?
+        };
+        tokio::select! {
+            _ = self.cancel.cancelled() => Err(ws_closed()),
+            result = timer::timeout(timer::ids::RELAY_SUBMIT, IO_TIMEOUT, send) => result.unwrap_or_else(|_| Err(ws_closed())),
+        }
+    }
+
+    async fn submit_flow(&self, message: Message) -> Result<(), WsError> {
+        let send = async {
+            let slot = self
+                .flow_slots
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|_| ws_closed())?;
+            let (tx, rx) = oneshot::channel();
+            self.tx
+                .send(Outgoing {
+                    message,
+                    ack: Some(tx),
+                    _permit: None,
                     _slot: slot,
                     _close: None,
                 })
@@ -197,6 +232,7 @@ enum Status {
 struct BudgetedPayload {
     payload: Bytes,
     _permits: Vec<OwnedSemaphorePermit>,
+    _credit: Option<ReceiveCredit>,
 }
 impl AsRef<[u8]> for BudgetedPayload {
     fn as_ref(&self) -> &[u8] {
@@ -220,6 +256,9 @@ impl Drop for PendingGuard {
 struct Channel {
     security: Arc<Mutex<SecureSession>>,
     receive_permits: Mutex<Vec<OwnedSemaphorePermit>>,
+    receive_credit: Mutex<Option<ReceiveCredit>>,
+    flow: Arc<RelayFlow>,
+    recovery: Arc<RecoveryChannel>,
     connected: AtomicBool,
     actrium: bool,
     pending_request: Mutex<Option<u64>>,
@@ -231,18 +270,82 @@ struct Channel {
     cancel: CancellationToken,
 }
 
-struct SinkState {
+#[derive(Clone)]
+struct ApplicationWriter {
     transport: Transport,
     channel: u64,
-    ready: watch::Receiver<bool>,
     security: Arc<Mutex<SecureSession>>,
+    write_order: Arc<Mutex<()>>,
+}
+
+impl ApplicationWriter {
+    async fn write(
+        &self,
+        payload: Bytes,
+        replay: Option<(u64, u64)>,
+        recovery: &RecoveryChannel,
+    ) -> Result<(), WsError> {
+        let delivery = if replay.is_some() {
+            replay
+        } else if let Some(journal) = recovery.journal.get()
+            && relay_recovery::can_replay(&payload)
+        {
+            let id = journal
+                .record(payload.clone())
+                .await
+                .map_err(|error| WsError::Io(std::io::Error::other(error.to_string())))?;
+            Some((journal.epoch, id))
+        } else {
+            None
+        };
+        let bytes = actr_relay_security::encrypted_bytes(payload.len()).map_err(|_| ws_closed())?;
+        let _encrypted = timer::timeout(
+            timer::ids::RELAY_SUBMIT,
+            IO_TIMEOUT,
+            self.transport
+                .encryption_budget
+                .clone()
+                .acquire_many_owned(bytes as u32),
+        )
+        .await
+        .map_err(|_| ws_closed())?
+        .map_err(|_| ws_closed())?;
+        // Encryption advances the Noise nonce. The marker and its data must
+        // be submitted in order, ahead of any other writer on this link.
+        let _order = self.write_order.lock().await;
+        let mut security = self.security.lock().await;
+        let marker = delivery
+            .map(|(epoch, id)| {
+                security.send_recovery_control(RecoveryControl::Message { epoch, id }, now_secs())
+            })
+            .transpose()
+            .map_err(|_| ws_closed())?;
+        let records = security
+            .send(&payload, now_secs())
+            .map_err(|_| ws_closed())?;
+        drop(security);
+        for record in marker.into_iter().chain(records) {
+            self.transport
+                .submit(Message::Binary(
+                    encode_data(self.channel, &record).map_err(|_| ws_closed())?,
+                ))
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+struct SinkState {
+    writer: ApplicationWriter,
+    recovery: Arc<RecoveryChannel>,
+    ready: watch::Receiver<bool>,
     cancel: CancellationToken,
     write_cancel: CancellationToken,
 }
 impl Drop for SinkState {
     fn drop(&mut self) {
         if !self.cancel.is_cancelled() {
-            self.transport.try_close(self.channel);
+            self.writer.transport.try_close(self.writer.channel);
             self.cancel.cancel();
         }
     }
@@ -269,6 +372,7 @@ pub(crate) struct RelayClient {
     /// loop.
     heal_attempted: std::sync::Mutex<HashSet<[u8; 32]>>,
     runtime_instance_id: String,
+    recovery: RecoveryBook,
     session: SessionState,
     gate: Arc<WebSocketGate>,
     shutdown: CancellationToken,
@@ -312,6 +416,7 @@ impl RelayClient {
             actor_legacy_issuers: RwLock::new(HashSet::new()),
             heal_attempted: std::sync::Mutex::new(HashSet::new()),
             runtime_instance_id: runtime_instance_id().to_owned(),
+            recovery: RecoveryBook::default(),
             session,
             gate,
             shutdown,
@@ -572,7 +677,8 @@ impl RelayClient {
             return Err(closed());
         }
         let (mut sink, mut stream) = socket.split();
-        let (tx, mut rx) = mpsc::channel::<Outgoing>(OUTGOING_QUEUE_SLOTS + CLOSE_QUEUE_SLOTS);
+        let (tx, mut rx) =
+            mpsc::channel::<Outgoing>(OUTGOING_QUEUE_SLOTS + CLOSE_QUEUE_SLOTS + FLOW_QUEUE_SLOTS);
         let cancel = self.shutdown.child_token();
         let _cancel_on_drop = cancel.clone().drop_guard();
         let transport = Transport {
@@ -580,6 +686,9 @@ impl RelayClient {
             budget: Arc::new(Semaphore::new(QUEUE_BYTES)),
             outgoing_slots: Arc::new(Semaphore::new(OUTGOING_QUEUE_SLOTS)),
             close_slots: Arc::new(Semaphore::new(CLOSE_QUEUE_SLOTS)),
+            flow_slots: Arc::new(Semaphore::new(FLOW_QUEUE_SLOTS)),
+            flow_windows: Arc::new(Semaphore::new(MAX_CHANNELS)),
+            flow_wait_bytes: Arc::new(Semaphore::new(QUEUE_BYTES)),
             pending_closes: Arc::new(std::sync::Mutex::new(HashSet::new())),
             encryption_budget: Arc::new(Semaphore::new(QUEUE_BYTES)),
             cancel: cancel.clone(),
@@ -610,13 +719,16 @@ impl RelayClient {
         });
         self.status.send_replace(Status::Ready(transport.clone()));
         let warm = tokio::spawn(self.clone().warm(cancel.clone()));
-        let budget = Arc::new(Semaphore::new(QUEUE_BYTES));
+        // Each live channel owns an independent base window. Legacy frames
+        // and large reservations share the remaining connection budget.
+        let budget = Arc::new(Semaphore::new(QUEUE_BYTES - SHARED_HEADROOM));
         let mut identity_check =
             timer::interval(timer::ids::RELAY_IDENTITY_POLL, Duration::from_secs(1));
         let result = loop {
             tokio::select! {
                 _ = cancel.cancelled() => break Ok(()),
                 _ = identity_check.tick() => {
+                    self.recovery.expire();
                     let current = self.session.snapshot().await;
                     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
                     if identity.expires_at <= now_secs() + 30 { break Ok(()); }
@@ -655,7 +767,7 @@ impl RelayClient {
     }
 
     async fn install(
-        &self,
+        self: &Arc<Self>,
         channel: u64,
         endpoint: String,
         transport: &Transport,
@@ -672,7 +784,7 @@ impl RelayClient {
         let peer = ActrId::from_string_repr(&endpoint).map_err(|_| {
             NetworkError::DeserializationError("Invalid relay peer identity".into())
         })?;
-        if self.channels.read().await.len() >= 256 {
+        if self.channels.read().await.len() >= MAX_CHANNELS {
             return Err(NetworkError::ConnectionError(
                 "Relay channel capacity exceeded".into(),
             ));
@@ -690,25 +802,43 @@ impl RelayClient {
                 ActorChannelSession::new_service(identity, &endpoint, &channel_id, now_secs())
             }
             .map_err(secure_error)?;
-            (Arc::new(Mutex::new(session.into_inner())), true)
+            (
+                Arc::new(Mutex::new(
+                    session
+                        .into_inner()
+                        .with_flow_control()
+                        .with_delivery_recovery(),
+                )),
+                true,
+            )
         } else {
             (
                 Arc::new(Mutex::new(
                     SecureSession::new(&transport.identity, &endpoint, channel, now_secs())
-                        .map_err(secure_error)?,
+                        .map_err(secure_error)?
+                        .with_flow_control(),
                 )),
                 false,
             )
         };
-        let (tx, rx) = mpsc::channel::<Message>(16);
+        let (tx, rx) = mpsc::channel::<Message>(INBOUND_SLOTS);
         let (ready, ready_rx) = watch::channel(false);
         let cancel = transport.cancel.child_token();
         let write_cancel = cancel.child_token();
-        let state = SinkState {
+        let write_order = Arc::new(Mutex::new(()));
+        let (flow, mut flow_controls) =
+            RelayFlow::new(cancel.clone(), transport.flow_wait_bytes.clone());
+        let recovery = RecoveryChannel::new(cancel.clone());
+        let writer = ApplicationWriter {
             transport: transport.clone(),
             channel,
-            ready: ready_rx,
             security: security.clone(),
+            write_order: write_order.clone(),
+        };
+        let state = SinkState {
+            writer: writer.clone(),
+            recovery: recovery.clone(),
+            ready: ready_rx,
             cancel: cancel.clone(),
             write_cancel: write_cancel.clone(),
         };
@@ -719,46 +849,14 @@ impl RelayClient {
                 }
                 match message {
                     Message::Binary(payload) => {
-                        // Bound the full ciphertext batch before allocating it.
-                        // This budget is separate from the socket queue so
-                        // concurrent peers cannot deadlock their own writes.
-                        let bytes = actr_relay_security::encrypted_bytes(payload.len())
-                            .map_err(|_| ws_closed())?;
-                        let _encrypted = timer::timeout(
-                            timer::ids::RELAY_SUBMIT,
-                            IO_TIMEOUT,
-                            state
-                                .transport
-                                .encryption_budget
-                                .clone()
-                                .acquire_many_owned(bytes as u32),
-                        )
-                        .await
-                        .map_err(|_| ws_closed())?
-                        .map_err(|_| ws_closed())?;
-                        let records = state
-                            .security
-                            .lock()
-                            .await
-                            .send(&payload, now_secs())
-                            .map_err(|_| ws_closed())?;
-                        for record in records {
-                            if state
-                                .transport
-                                .submit(Message::Binary(
-                                    encode_data(state.channel, &record).map_err(|_| ws_closed())?,
-                                ))
-                                .await
-                                .is_err()
-                            {
-                                state.cancel.cancel();
-                                return Err(ws_closed());
-                            }
+                        let result = state.writer.write(payload, None, &state.recovery).await;
+                        if result.is_err() {
+                            state.cancel.cancel();
                         }
-                        Ok(())
+                        result
                     }
                     Message::Close(_) => {
-                        state.transport.try_close(state.channel);
+                        state.writer.transport.try_close(state.writer.channel);
                         Ok(())
                     }
                     _ => Err(ws_closed()),
@@ -771,19 +869,154 @@ impl RelayClient {
             }
             Ok::<_, WsError>(state)
         });
+        let flow_writer = flow.clone();
+        let flow_cancel = cancel.clone();
+        let flow_transport = transport.clone();
+        let flow_security = security.clone();
+        let flow_client = Arc::downgrade(self);
+        let mut flow_ready = ready.subscribe();
+        let flow_recovery = recovery.clone();
+        tokio::spawn(async move {
+            let run = async {
+                while !*flow_ready.borrow_and_update() {
+                    flow_ready.changed().await.map_err(|_| closed())?;
+                }
+                if !flow_writer.enabled() {
+                    return Ok(());
+                }
+                // Wait on this peer's writer, never the shared WebSocket reader.
+                // Old generation buffers retain their window until consumed.
+                let window = flow_transport
+                    .flow_windows
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| closed())?;
+                flow_writer.open_window(window);
+                loop {
+                    let next = tokio::select! {
+                        biased;
+                        control = flow_controls.recv() => Ok(control.ok_or_else(closed)?),
+                        receipt = flow_recovery.next_receipt(), if flow_recovery.journal.get().is_some() => Err(receipt),
+                        update = flow_writer.window_update() => Ok(update),
+                    };
+                    let _order = write_order.lock().await;
+                    let record = {
+                        let mut security = flow_security.lock().await;
+                        match next {
+                            Ok(control) => security.send_flow_control(control, now_secs()),
+                            Err(receipt) => security.send_recovery_control(receipt, now_secs()),
+                        }
+                        .map_err(secure_error)?
+                    };
+                    flow_transport
+                        .submit_flow(Message::Binary(
+                            encode_data(channel, &record).map_err(|_| closed())?,
+                        ))
+                        .await
+                        .map_err(NetworkError::from)?;
+                }
+            };
+            let result: NetworkResult<()> = tokio::select! {
+                biased;
+                _ = flow_cancel.cancelled() => Ok(()),
+                result = run => result,
+            };
+            if let Err(error) = &result {
+                tracing::debug!(channel, %error, "Relay flow control write failed");
+            }
+            if flow_writer.enabled() || result.is_err() {
+                flow_cancel.cancel();
+                if let Some(client) = flow_client.upgrade() {
+                    let entry = {
+                        let mut channels = client.channels.write().await;
+                        if channels
+                            .get(&channel)
+                            .is_some_and(|entry| Arc::ptr_eq(&entry.flow, &flow_writer))
+                        {
+                            channels.remove(&channel)
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(entry) = entry {
+                        flow_transport.try_close(channel);
+                        client.dispose_channel(channel, entry).await;
+                    }
+                }
+            }
+        });
+        let mut replay_ready = ready.subscribe();
+        let replay_recovery = recovery.clone();
+        let replay_flow = flow.clone();
+        let replay_cancel = cancel.clone();
+        tokio::spawn(async move {
+            let replay = async {
+                while !*replay_ready.borrow_and_update() {
+                    replay_ready.changed().await.map_err(|_| closed())?;
+                }
+                if let Some(journal) = replay_recovery.journal.get() {
+                    for frame in journal.replay() {
+                        let Ok(credit) = timer::timeout_at(
+                            timer::ids::RELAY_SUBMIT,
+                            tokio::time::Instant::from_std(frame.expires),
+                            replay_flow.reserve(Class::Stream, frame.data.len()),
+                        )
+                        .await
+                        else {
+                            continue;
+                        };
+                        let mut credit = credit?.ok_or_else(closed)?;
+                        if !journal.pending(frame.id) {
+                            continue;
+                        }
+                        credit.commit();
+                        writer
+                            .write(
+                                frame.data.clone(),
+                                Some((journal.epoch, frame.id)),
+                                &replay_recovery,
+                            )
+                            .await
+                            .map_err(NetworkError::from)?;
+                        credit.submitted();
+                    }
+                }
+                replay_recovery.ready();
+                Ok::<(), NetworkError>(())
+            };
+            tokio::select! {
+                biased;
+                _ = replay_cancel.cancelled() => {}
+                result = replay => if let Err(error) = result {
+                    tracing::debug!(channel, %error, "Relay stream replay failed");
+                    replay_cancel.cancel();
+                }
+            }
+        });
         let incoming = tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok);
         let conn = if actrium {
             WebSocketConnection::from_actrium_encrypted_parts(
                 Box::pin(sink),
                 incoming,
                 write_cancel,
+                flow.clone(),
+                recovery.clone(),
             )
         } else {
-            WebSocketConnection::from_encrypted_parts(Box::pin(sink), incoming, write_cancel)
+            WebSocketConnection::from_encrypted_parts(
+                Box::pin(sink),
+                incoming,
+                write_cancel,
+                flow.clone(),
+            )
         };
         let entry = Arc::new(Channel {
             security,
             receive_permits: Mutex::new(Vec::new()),
+            receive_credit: Mutex::new(None),
+            flow,
+            recovery,
             connected: AtomicBool::new(false),
             actrium,
             pending_request: Mutex::new(None),
@@ -972,9 +1205,10 @@ impl RelayClient {
                 let _ = pending.reply.send(Err(closed()));
             }
         }
-        entry.cancel.cancel();
+        entry.flow.retire();
         entry.security.lock().await.close();
         entry.receive_permits.lock().await.clear();
+        entry.receive_credit.lock().await.take();
         let mut peers = self.peers.write().await;
         if peers.get(&entry.peer) == Some(&id) {
             peers.remove(&entry.peer);
@@ -1119,6 +1353,10 @@ impl std::fmt::Debug for RelayWire {
 
 #[async_trait]
 impl WireHandle for RelayWire {
+    fn abandon_stream_recovery(&self) {
+        self.client.recovery.abandon_peer(&self.peer);
+    }
+
     fn connection_type(&self) -> ConnType {
         ConnType::WebSocket
     }
@@ -1565,22 +1803,49 @@ impl RelayClient {
         if !entry.connected.load(Ordering::Acquire) {
             return Err(closed());
         }
-        let permit = budget
-            .clone()
-            .try_acquire_many_owned(payload.len().max(1) as u32)
-            .map_err(|_| closed())?;
+        let permit = if entry.flow.enabled() {
+            None
+        } else {
+            Some(
+                budget
+                    .clone()
+                    .try_acquire_many_owned(payload.len().max(1) as u32)
+                    .map_err(|_| closed())?,
+            )
+        };
         let issuer = if let Some(id) = signing_key_id(&payload).map_err(secure_error)? {
             Some(self.issuer(id).await?)
         } else {
             None
         };
+        let mut new_credit = None;
         let (received, partial) = {
             let mut session = entry.security.lock().await;
             let received = session
-                .receive(&payload, issuer.as_ref(), now_secs())
+                .receive_with_admission(&payload, issuer.as_ref(), now_secs(), |bytes, tag| {
+                    if !entry.flow.enabled() {
+                        return true;
+                    }
+                    new_credit = tag
+                        .and_then(Class::from_payload_tag)
+                        .and_then(|class| entry.flow.admit(class, bytes));
+                    new_credit.is_some()
+                })
                 .map_err(secure_error)?;
             (received, session.buffered_bytes())
         };
+        if let Some(control) = received.recovery_control {
+            return entry.recovery.receive(control);
+        }
+        if let Some(control) = received.flow_control {
+            if let Some(reservation) = entry.flow.receive_control(control, budget)? {
+                tokio::spawn(reservation);
+            }
+            return Ok(());
+        }
+        if let Some(credit) = new_credit {
+            *entry.receive_credit.lock().await = Some(credit);
+        }
         for record in received.outbound {
             transport
                 .submit(Message::Binary(
@@ -1600,27 +1865,39 @@ impl RelayClient {
                 return Err(closed());
             }
             let mut permits = std::mem::take(&mut *entry.receive_permits.lock().await);
-            permits.push(permit);
+            permits.extend(permit);
+            let credit = entry.receive_credit.lock().await.take();
             entry
                 .tx
                 .try_send(Message::Binary(Bytes::from_owner(BudgetedPayload {
-                    payload: application.into(),
+                    payload: entry.recovery.mark(application)?,
                     _permits: permits,
+                    _credit: credit,
                 })))
                 .map_err(|_| closed())?;
-        } else if partial != 0 {
+        } else if partial != 0
+            && let Some(permit) = permit
+        {
             entry.receive_permits.lock().await.push(permit);
         }
         Ok(())
     }
     async fn secure_ready(self: &Arc<Self>, id: u64, entry: &Arc<Channel>) -> NetworkResult<()> {
-        let (actor_type, verified) = {
+        let (actor_type, verified, flow_control, delivery_recovery) = {
             let session = entry.security.lock().await;
             let value = session.peer_actor_type().ok_or_else(closed)?;
             let actor_type =
                 actr_protocol::ActrType::from_string_repr(value).map_err(|_| closed())?;
-            (actor_type, session.verified_actor().cloned())
+            (
+                actor_type,
+                session.verified_actor().cloned(),
+                session.flow_control(),
+                session.delivery_recovery(),
+            )
         };
+        if flow_control {
+            entry.flow.activate();
+        }
         let published = if entry.actrium {
             let verified = verified.ok_or_else(closed)?;
             let context = actrium_peer_context(
@@ -1629,6 +1906,12 @@ impl RelayClient {
                 id,
                 verified,
             )?;
+            if delivery_recovery {
+                let journal = self.recovery.bind(&context).ok_or_else(|| {
+                    NetworkError::ConnectionError("Relay recovery peer capacity exhausted".into())
+                })?;
+                entry.recovery.journal.set(journal).map_err(|_| closed())?;
+            }
             entry.conn.publish_actrium_verified(context)
         } else {
             entry.conn.mark_relay_verified()

@@ -111,6 +111,8 @@ pub(crate) struct WebSocketConnection {
 
     /// Cancel an in-flight virtual relay write before acquiring the sink lock.
     relay_write_cancel: Option<CancellationToken>,
+    relay_flow: Option<Arc<crate::wire::relay_flow::RelayFlow>>,
+    recovery: Option<Arc<crate::wire::relay_recovery::RecoveryChannel>>,
 }
 
 impl WebSocketConnection {
@@ -125,6 +127,8 @@ impl WebSocketConnection {
             secure: SecureCell::new(SecureChannelState::LegacyBypass),
             teardown: Arc::new(CancelOnDrop(CancellationToken::new())),
             relay_write_cancel: None,
+            relay_flow: None,
+            recovery: None,
         }
     }
 
@@ -137,7 +141,7 @@ impl WebSocketConnection {
         + Send
         + 'static,
     ) -> Self {
-        Self::from_parts_with_state(sink, stream, SecureChannelState::LegacyBypass, None)
+        Self::from_parts_with_state(sink, stream, SecureChannelState::LegacyBypass, None, None)
     }
 
     pub(crate) fn from_encrypted_parts(
@@ -146,12 +150,14 @@ impl WebSocketConnection {
         + Send
         + 'static,
         write_cancel: CancellationToken,
+        flow: Arc<crate::wire::relay_flow::RelayFlow>,
     ) -> Self {
         Self::from_parts_with_state(
             sink,
             stream,
             SecureChannelState::Handshaking,
             Some(write_cancel),
+            Some(flow),
         )
     }
 
@@ -163,13 +169,18 @@ impl WebSocketConnection {
         + Send
         + 'static,
         write_cancel: CancellationToken,
+        flow: Arc<crate::wire::relay_flow::RelayFlow>,
+        recovery: Arc<crate::wire::relay_recovery::RecoveryChannel>,
     ) -> Self {
-        Self::from_parts_with_secure_cell(
+        let mut connection = Self::from_parts_with_secure_cell(
             sink,
             stream,
             SecureCell::new_actrium(SecureChannelState::Handshaking),
             Some(write_cancel),
-        )
+            Some(flow),
+        );
+        connection.recovery = Some(recovery);
+        connection
     }
 
     pub(crate) fn mark_relay_verified(&self) -> bool {
@@ -191,12 +202,14 @@ impl WebSocketConnection {
         + 'static,
         initial: SecureChannelState,
         relay_write_cancel: Option<CancellationToken>,
+        relay_flow: Option<Arc<crate::wire::relay_flow::RelayFlow>>,
     ) -> Self {
         Self::from_parts_with_secure_cell(
             sink,
             stream,
             SecureCell::new(initial),
             relay_write_cancel,
+            relay_flow,
         )
     }
 
@@ -207,6 +220,7 @@ impl WebSocketConnection {
         + 'static,
         secure: SecureCell,
         relay_write_cancel: Option<CancellationToken>,
+        relay_flow: Option<Arc<crate::wire::relay_flow::RelayFlow>>,
     ) -> Self {
         let router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>> =
             Arc::new(RwLock::new([None, None, None, None, None]));
@@ -231,7 +245,17 @@ impl WebSocketConnection {
             secure,
             teardown,
             relay_write_cancel,
+            relay_flow,
+            recovery: None,
         }
+    }
+
+    pub(crate) fn recovery(&self) -> Option<Arc<crate::wire::relay_recovery::RecoveryChannel>> {
+        self.recovery.clone()
+    }
+
+    pub(crate) fn relay_flow(&self) -> Option<Arc<crate::wire::relay_flow::RelayFlow>> {
+        self.relay_flow.clone()
     }
 
     /// The relay adapter owns dialing; this virtual channel is already installed.
@@ -432,7 +456,11 @@ impl WebSocketConnection {
         // lane gates both outbound `send()` and the response-reader `recv()`
         // on this session's `SecureCell` (RFC-0563 review point 3).
         let lane: Arc<dyn DataLane> = Arc::new(SecureDataLane::new(
-            Arc::new(WebSocketDataLane::new(sink, payload_type, rx)),
+            Arc::new(
+                WebSocketDataLane::new(sink, payload_type, rx)
+                    .with_relay_flow(self.relay_flow.clone())
+                    .with_recovery(self.recovery()),
+            ),
             self.secure.clone(),
         ));
         Ok(lane)

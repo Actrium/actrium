@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use actr_protocol::prost::Message as ProstMessage;
+use actr_protocol::realm_membership::{CLIENT_PROOF_HEADER, ClientProof, ProofOp};
 use actr_protocol::{
     RegisterRequest, RegisterResponse, RenewCredentialRequest, RenewCredentialResponse,
     register_response, renew_credential_response,
@@ -14,7 +15,7 @@ use actr_protocol::{
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use base64::Engine;
 use ed25519_dalek::VerifyingKey;
@@ -41,6 +42,7 @@ pub async fn health_handler() -> impl IntoResponse {
 /// handler via [`signaling::build_register_ok`].
 pub async fn register_handler(
     State(state): State<Arc<MockState>>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
     let req = RegisterRequest::decode(body.as_ref())
@@ -50,7 +52,17 @@ pub async fn register_handler(
     // Lazily register the realm so callers don't have to pre-seed.
     state.add_realm(req.realm.clone()).await;
 
-    let register_ok = signaling::build_register_ok(&req, &state).await;
+    // The in-memory mock has no membership registry. Preserve the key named
+    // by a structurally valid fixture proof in the issued test credential.
+    let client = mock_client_proof(&headers, ProofOp::Register, &req.realm, &body);
+    let register_ok = signaling::build_register_ok_for_client(
+        &req,
+        &state,
+        client
+            .as_ref()
+            .map(|proof| (proof.provider_id.as_str(), proof.signer_key_id())),
+    )
+    .await;
 
     // Track the HTTP-registered actor in the WS registry so route discovery
     // works once the actor opens its authenticated WebSocket. We record an
@@ -96,6 +108,7 @@ pub async fn register_handler(
 /// `ActrId`.
 pub async fn renew_handler(
     State(state): State<Arc<MockState>>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
     let req = RenewCredentialRequest::decode(body.as_ref())
@@ -145,7 +158,15 @@ pub async fn renew_handler(
             })
         });
 
-    let mut register_ok = signaling::build_register_ok(&fake_req, &state).await;
+    let client = mock_client_proof(&headers, ProofOp::Renew, &actor_id.realm, &body);
+    let mut register_ok = signaling::build_register_ok_for_client(
+        &fake_req,
+        &state,
+        client
+            .as_ref()
+            .map(|proof| (proof.provider_id.as_str(), proof.signer_key_id())),
+    )
+    .await;
     // Preserve the original ActrId (mock assigns a new serial, so override).
     register_ok.actr_id = actor_id.clone();
     // Keep the mock renewal token bound to the preserved ActrId, not to the
@@ -170,6 +191,19 @@ pub async fn renew_handler(
         bytes,
     )
         .into_response())
+}
+
+fn mock_client_proof(
+    headers: &HeaderMap,
+    op: ProofOp,
+    realm: &str,
+    body: &[u8],
+) -> Option<ClientProof> {
+    let proof = ClientProof::parse_header(headers.get(CLIENT_PROOF_HEADER)?.to_str().ok()?).ok()?;
+    proof
+        .check(op, realm, &proof.provider_id, body, chrono::Utc::now())
+        .ok()?;
+    Some(proof)
 }
 
 // ---------------------------------------------------------------------------
@@ -476,9 +510,13 @@ mod tests {
             realm: "mock@example.com".into(),
             ..Default::default()
         };
-        let response = register_handler(State(state.clone()), Bytes::from(request.encode_to_vec()))
-            .await
-            .unwrap();
+        let response = register_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Bytes::from(request.encode_to_vec()),
+        )
+        .await
+        .unwrap();
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
@@ -490,6 +528,7 @@ mod tests {
 
         let response = renew_handler(
             State(state.clone()),
+            HeaderMap::new(),
             Bytes::from(
                 RenewCredentialRequest {
                     actr_id: initial.actr_id.clone(),

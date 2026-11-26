@@ -1,12 +1,18 @@
 //! Worker-only end-to-end security. Enrollment proofs and private keys never
 //! cross the DOM bridge and are never given to the relay.
 use super::*;
+use actr_relay_security::flow_control::{Class, Control};
+use actr_relay_security::peer_flow::{
+    INBOUND_SLOTS, MAX_CHANNELS, PeerFlow, ReceiveCredit, SHARED_HEADROOM,
+};
 use actr_relay_security::{
     ActorChannelEnrollment, ActorChannelIdentity, ActorChannelSession, ActorIdentityKey,
     IdentityKey, IdentityRequest, IssuedIdentity, IssuerKey, LocalIdentity, SecureSession,
     signing_key_id,
 };
 use js_sys::{Function, Uint8Array};
+use tokio::sync::{Semaphore, mpsc};
+use tokio_util::sync::CancellationToken;
 use wasm_bindgen::closure::Closure;
 
 #[wasm_bindgen]
@@ -21,7 +27,6 @@ extern "C" {
     ) -> Result<JsValue, JsValue>;
 }
 
-#[derive(Default)]
 pub(super) struct Manager {
     enrollment: Mutex<()>,
     identity: RefCell<Option<LocalIdentity>>,
@@ -38,12 +43,90 @@ pub(super) struct Manager {
     runtime_instance_id: RefCell<Option<String>>,
     issuers: RefCell<HashMap<u32, IssuerKey>>,
     channels: RefCell<HashMap<String, Rc<Channel>>>,
+    windows: Arc<Semaphore>,
+    large: Arc<Semaphore>,
+    waiting: Arc<Semaphore>,
+}
+
+const TRANSPORT_BYTES: usize = 16 * 1024 * 1024;
+
+impl Manager {
+    pub(super) fn flow_pools(&self) -> (Arc<Semaphore>, Arc<Semaphore>, Arc<Semaphore>) {
+        (
+            self.windows.clone(),
+            self.large.clone(),
+            self.waiting.clone(),
+        )
+    }
+}
+
+impl Default for Manager {
+    fn default() -> Self {
+        Self {
+            enrollment: Mutex::new(()),
+            identity: RefCell::default(),
+            actor_identity: RefCell::default(),
+            actor_binding: RefCell::default(),
+            actor_legacy_issuers: RefCell::default(),
+            runtime_instance_id: RefCell::default(),
+            issuers: RefCell::default(),
+            channels: RefCell::default(),
+            windows: Arc::new(Semaphore::new(MAX_CHANNELS)),
+            large: Arc::new(Semaphore::new(TRANSPORT_BYTES - SHARED_HEADROOM)),
+            waiting: Arc::new(Semaphore::new(TRANSPORT_BYTES)),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct RelayFlowSender {
+    pub(crate) flow: Arc<PeerFlow>,
+    raw_send: Function,
+    cancel: CancellationToken,
+}
+
+impl RelayFlowSender {
+    fn close(&self) {
+        self.flow.retire();
+        let _ = self.raw_send.call1(&JsValue::NULL, &JsValue::NULL);
+    }
+
+    /// Await browser transport capacity without submitting any bytes. The
+    /// caller can abandon this Rust future before committing peer credit.
+    pub(crate) async fn writable(&self, bytes: usize, control: bool) -> Result<(), JsValue> {
+        loop {
+            if self.cancel.is_cancelled() {
+                return Err(error("Relay channel closed"));
+            }
+            let room = self.raw_send.call2(
+                &JsValue::NULL,
+                &JsValue::UNDEFINED,
+                &JsValue::from_bool(control),
+            )?;
+            if room.as_f64().is_none_or(|room| room >= bytes as f64) {
+                return Ok(());
+            }
+            tokio::select! {
+                _ = self.cancel.cancelled() => return Err(error("Relay channel closed")),
+                _ = gloo_timers::future::TimeoutFuture::new(4) => {}
+            }
+        }
+    }
+}
+
+struct RelayDelivery {
+    message: Vec<u8>,
+    _credit: ReceiveCredit,
 }
 struct Channel {
     peer: String,
     session: Rc<RefCell<SecureSession>>,
     raw_send: Function,
     application_send: RefCell<Option<ApplicationSender>>,
+    sender: RelayFlowSender,
+    control: RefCell<Option<mpsc::Receiver<Control>>>,
+    deliveries: [mpsc::Sender<RelayDelivery>; 2],
+    partial_credit: RefCell<Option<ReceiveCredit>>,
 }
 type ApplicationSender = Closure<dyn FnMut(JsValue) -> Result<(), JsValue>>;
 fn now() -> u64 {
@@ -407,16 +490,50 @@ pub async fn prepare_relay_connection(
             }
         }
     };
-    if ctx.relay_security.channels.borrow().len() >= 256 {
+    if ctx.relay_security.channels.borrow().len() >= MAX_CHANNELS {
         return Err(error("Secure channel capacity exceeded"));
     }
+    let cancel = CancellationToken::new();
+    let (flow, control) = PeerFlow::new(cancel.clone(), ctx.relay_security.waiting.clone());
+    let sender = RelayFlowSender {
+        flow,
+        raw_send: send.clone(),
+        cancel,
+    };
+    let deliveries = Class::ALL.map(|_| {
+        let (queue, mut deliveries) = mpsc::channel::<RelayDelivery>(INBOUND_SLOTS);
+        let peer = peer.clone();
+        let client_id = client_id.clone();
+        let sender = sender.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let deliver = async {
+                while let Some(RelayDelivery { message, _credit }) = deliveries.recv().await {
+                    dispatch_application(&client_id, &peer, message).await?;
+                }
+                Ok::<_, JsValue>(())
+            };
+            tokio::select! {
+                biased;
+                _ = sender.cancel.cancelled() => {}
+                result = deliver => if let Err(error) = result {
+                    log::debug!("Relay application dispatch failed: {error:?}");
+                    sender.close();
+                }
+            }
+        });
+        queue
+    });
     ctx.relay_security.channels.borrow_mut().insert(
         channel,
         Rc::new(Channel {
             peer: peer.clone(),
-            session: Rc::new(RefCell::new(session)),
+            session: Rc::new(RefCell::new(session.with_flow_control())),
             raw_send: send,
             application_send: RefCell::new(None),
+            sender,
+            control: RefCell::new(Some(control)),
+            deliveries,
+            partial_credit: RefCell::new(None),
         }),
     );
     Ok(peer)
@@ -459,19 +576,43 @@ pub async fn handle_relay_record(
     } else {
         None
     };
+    let mut credit = None;
     let received = entry
         .session
         .borrow_mut()
-        .receive(&payload, key.as_ref(), now())
+        .receive_with_admission(&payload, key.as_ref(), now(), |bytes, tag| {
+            if !entry.sender.flow.enabled() {
+                return true;
+            }
+            credit = tag
+                .and_then(Class::from_payload_tag)
+                .and_then(|class| entry.sender.flow.admit(class, bytes));
+            credit.is_some()
+        })
         .map_err(error)?;
+    if let Some(control) = received.flow_control {
+        if let Some(reservation) = entry
+            .sender
+            .flow
+            .receive_control(control, &ctx.relay_security.large)
+            .map_err(error)?
+        {
+            wasm_bindgen_futures::spawn_local(reservation);
+        }
+        return Ok(true);
+    }
+    if let Some(credit) = credit {
+        *entry.partial_credit.borrow_mut() = Some(credit);
+    }
     let buffered: usize = ctx
         .relay_security
         .channels
         .borrow()
         .values()
+        .filter(|entry| !entry.sender.flow.enabled())
         .map(|entry| entry.session.borrow().buffered_bytes())
         .sum();
-    if buffered > 16 * 1024 * 1024 {
+    if buffered > TRANSPORT_BYTES - SHARED_HEADROOM {
         entry.session.borrow_mut().close();
         return Err(error("Encrypted receive budget exceeded"));
     }
@@ -481,6 +622,10 @@ pub async fn handle_relay_record(
             .call1(&JsValue::NULL, &Uint8Array::from(record.as_slice()))?;
     }
     if received.became_ready {
+        if entry.session.borrow().flow_control() {
+            entry.sender.flow.activate();
+            start_flow_writer(&entry, ctx.relay_security.windows.clone())?;
+        }
         let session = entry.session.clone();
         let raw = entry.raw_send.clone();
         let send = Closure::wrap(Box::new(move |payload: JsValue| -> Result<(), JsValue> {
@@ -512,23 +657,103 @@ pub async fn handle_relay_record(
         .await?;
     }
     if let Some(application) = received.application {
-        if application.len() < 5
-            || application[0] > 3
-            || u32::from_be_bytes(application[1..5].try_into().unwrap()) as usize
-                != application.len() - 5
-        {
-            return Err(error("Invalid encrypted application frame"));
+        if entry.sender.flow.enabled() {
+            let class = application
+                .first()
+                .copied()
+                .and_then(Class::from_payload_tag)
+                .ok_or_else(|| error("Invalid encrypted application class"))?;
+            let credit = entry
+                .partial_credit
+                .borrow_mut()
+                .take()
+                .ok_or_else(|| error("Relay application credit missing"))?;
+            entry.deliveries[class.index()]
+                .try_send(RelayDelivery {
+                    message: application,
+                    _credit: credit,
+                })
+                .map_err(error)?;
+        } else {
+            dispatch_application(&client_id, &entry.peer, application).await?;
         }
-        let value = js_sys::Object::new();
-        js_sys::Reflect::set(
-            &value,
-            &"streamId".into(),
-            &format!("{}:{}", entry.peer, application[0]).into(),
-        )?;
-        js_sys::Reflect::set(&value, &"data".into(), &Uint8Array::from(&application[5..]))?;
-        handle_relay_data(client_id, value.into()).await?;
     }
     Ok(entry.session.borrow().is_ready())
+}
+
+fn start_flow_writer(entry: &Channel, windows: Arc<Semaphore>) -> Result<(), JsValue> {
+    let mut control = entry
+        .control
+        .borrow_mut()
+        .take()
+        .ok_or_else(|| error("Relay flow writer already started"))?;
+    let sender = entry.sender.clone();
+    let session = entry.session.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let run = async {
+            let window = windows.acquire_owned().await.map_err(error)?;
+            sender.flow.open_window(window);
+            loop {
+                let record = tokio::select! {
+                    biased;
+                    control = control.recv() => control.ok_or_else(|| error("Relay flow writer closed"))?,
+                    update = sender.flow.window_update() => update,
+                };
+                // Control frames have a reserved share of the browser's send
+                // buffer. Encrypt only after it can accept this record.
+                sender.writable(128, true).await?;
+                let encoded = session
+                    .borrow_mut()
+                    .send_flow_control(record, now())
+                    .map_err(error)?;
+                sender.raw_send.call2(
+                    &JsValue::NULL,
+                    &Uint8Array::from(encoded.as_slice()),
+                    &JsValue::TRUE,
+                )?;
+            }
+        };
+        let result: Result<(), JsValue> = tokio::select! {
+            biased;
+            _ = sender.cancel.cancelled() => Ok(()),
+            result = run => result,
+        };
+        if result.is_err() || session.borrow().is_ready() {
+            sender.close();
+        }
+    });
+    Ok(())
+}
+
+pub(crate) async fn dispatch_application(
+    client_id: &str,
+    peer: &str,
+    application: Vec<u8>,
+) -> Result<(), JsValue> {
+    if application.len() < 5
+        || application[0] > 3
+        || u32::from_be_bytes(application[1..5].try_into().unwrap()) as usize
+            != application.len() - 5
+    {
+        return Err(error("Invalid encrypted application frame"));
+    }
+    let value = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &value,
+        &"streamId".into(),
+        &format!("{peer}:{}", application[0]).into(),
+    )?;
+    js_sys::Reflect::set(&value, &"data".into(), &Uint8Array::from(&application[5..]))?;
+    handle_relay_data(client_id.to_owned(), value.into()).await
+}
+
+pub(super) fn flow_sender(ctx: &ClientContext, channel: &str) -> Option<RelayFlowSender> {
+    ctx.relay_security
+        .channels
+        .borrow()
+        .get(channel)
+        .filter(|entry| entry.sender.flow.enabled())
+        .map(|entry| entry.sender.clone())
 }
 
 pub(super) fn authenticated(ctx: &ClientContext, channel: &str, peer: &str) -> bool {
@@ -550,5 +775,6 @@ pub(super) fn access_token(ctx: &ClientContext) -> Result<String, JsValue> {
 pub(super) fn remove(ctx: &ClientContext, channel: &str) {
     if let Some(entry) = ctx.relay_security.channels.borrow_mut().remove(channel) {
         entry.session.borrow_mut().close();
+        entry.sender.flow.retire();
     }
 }

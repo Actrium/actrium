@@ -23,6 +23,7 @@ pub(crate) mod factory;
 // (RFC §"Security and privacy").
 #[cfg(any(test, feature = "test-utils"))]
 pub(crate) mod fault;
+mod flow;
 pub(crate) mod inbound;
 pub(crate) mod inbound_bridge;
 pub(crate) mod manager;

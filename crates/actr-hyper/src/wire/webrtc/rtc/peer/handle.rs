@@ -292,7 +292,7 @@ impl RtcPeerControllerHandle {
         payload: bytes::Bytes,
     ) -> Result<(), RtcSendError> {
         let permit = self.permit_for(lane).await?;
-        self.send_with_permit(&permit, payload, false).await
+        self.send_with_permit(&permit, payload, false, &|| {}).await
     }
 
     /// Latency-first non-blocking send (RFC: "the latency-first Lane MAY fail
@@ -304,7 +304,7 @@ impl RtcPeerControllerHandle {
         payload: bytes::Bytes,
     ) -> Result<(), RtcSendError> {
         let permit = self.permit_for(lane).await?;
-        self.send_with_permit(&permit, payload, true).await
+        self.send_with_permit(&permit, payload, true, &|| {}).await
     }
 
     /// Internal send seam carrying delivery progress to the transport layer.
@@ -316,10 +316,22 @@ impl RtcPeerControllerHandle {
         payload: bytes::Bytes,
         non_blocking: bool,
     ) -> RtcSendAttempt {
-        let result = if non_blocking {
-            self.try_send(lane, payload).await
-        } else {
-            self.send(lane, payload).await
+        self.send_tracked(lane, payload, non_blocking, &|| {}).await
+    }
+
+    pub(crate) async fn send_tracked(
+        &self,
+        lane: LaneKind,
+        payload: bytes::Bytes,
+        non_blocking: bool,
+        on_write: &(dyn Fn() + Sync),
+    ) -> RtcSendAttempt {
+        let result = match self.permit_for(lane).await {
+            Ok(permit) => {
+                self.send_with_permit(&permit, payload, non_blocking, on_write)
+                    .await
+            }
+            Err(error) => Err(error),
         };
         RtcSendAttempt::from_result(result)
     }
@@ -339,8 +351,10 @@ impl RtcPeerControllerHandle {
         permit: &super::send::SendPermit,
         payload: bytes::Bytes,
         non_blocking: bool,
+        on_write: &(dyn Fn() + Sync),
     ) -> Result<(), RtcSendError> {
         use crate::transport::{DC_MAX_PAYLOAD_SIZE, FRAGMENT_HEADER_SIZE, encode_fragment_header};
+        use crate::wire::webrtc::rtc::flow;
 
         // Shared outbound cap: the receiver's reassembly rejects anything
         // above `max_inbound_message_bytes` after the sender already reported
@@ -349,28 +363,78 @@ impl RtcPeerControllerHandle {
             return Err(RtcSendError::MessageTooLarge);
         }
 
+        let mut credit =
+            if let (Some(flow), Some(class)) = (&permit.flow, flow::class(permit.lane())) {
+                flow.peer
+                    .reserve(class, payload.len())
+                    .await
+                    .map_err(|error| {
+                        use actr_relay_security::peer_flow::FlowError;
+                        match error {
+                            FlowError::Busy(_) => RtcSendError::DataChannelBufferFull,
+                            FlowError::TooLarge => RtcSendError::MessageTooLarge,
+                            _ => RtcSendError::ConnectionNotReady,
+                        }
+                    })?
+            } else {
+                None
+            };
+        if !permit.is_valid(self.snapshot().pc_generation) {
+            return Err(RtcSendError::ConnectionNotReady);
+        }
+        let credited = credit.is_some();
+        let max_chunk = if credited {
+            flow::CREDITED_PAYLOAD
+        } else {
+            DC_MAX_PAYLOAD_SIZE
+        };
         let msg_id = self.msg_id_counter.fetch_add(1, Ordering::Relaxed);
         let data_len = payload.len();
+        let encode = |index, count, chunk: &[u8]| {
+            let mut buf =
+                Vec::with_capacity(FRAGMENT_HEADER_SIZE + 4 * usize::from(credited) + chunk.len());
+            encode_fragment_header(
+                &mut buf,
+                msg_id,
+                index,
+                if credited {
+                    flow::credited_count(count)
+                } else {
+                    count
+                },
+            );
+            if credited {
+                flow::append_length(&mut buf, data_len);
+            }
+            buf.extend_from_slice(chunk);
+            bytes::BytesMut::from(&buf[..])
+        };
 
-        if data_len <= DC_MAX_PAYLOAD_SIZE {
-            // Single fragment (total_frags = 1).
-            let mut buf = Vec::with_capacity(FRAGMENT_HEADER_SIZE + data_len);
-            encode_fragment_header(&mut buf, msg_id, 0, 1);
-            buf.extend_from_slice(&payload);
-            let frame = bytes::BytesMut::from(&buf[..]);
+        if data_len <= max_chunk {
+            let frame = encode(0, 1, &payload);
+            if let Some(credit) = &mut credit {
+                credit.commit();
+            }
+            on_write();
             let result = if non_blocking {
                 permit.channel().try_send(frame).await
             } else {
                 permit.channel().send(frame).await
             };
             match result {
-                Ok(()) => Ok(()),
+                Ok(()) => {
+                    if let Some(credit) = &mut credit {
+                        credit.submitted();
+                    }
+                    Ok(())
+                }
+                Err(_) if credited => Err(RtcSendError::DataChunkDeliveryUncertain),
                 Err(e) => Err(self.map_send_outcome(permit, e, false).await),
             }
         } else {
             // Multi-fragment send: split into DC_MAX_PAYLOAD_SIZE chunks.
-            let total_frags = data_len.div_ceil(DC_MAX_PAYLOAD_SIZE);
-            if total_frags > u16::MAX as usize {
+            let total_frags = data_len.div_ceil(max_chunk);
+            if total_frags > (u16::MAX >> usize::from(credited)) as usize {
                 return Err(RtcSendError::MessageTooLarge);
             }
             let total_frags = total_frags as u16;
@@ -384,7 +448,7 @@ impl RtcPeerControllerHandle {
                 fragments = total_frags,
                 "RTC fragmenting message"
             );
-            for (frag_index, chunk) in payload.chunks(DC_MAX_PAYLOAD_SIZE).enumerate() {
+            for (frag_index, chunk) in payload.chunks(max_chunk).enumerate() {
                 let generation_current = permit.is_valid(self.snapshot().pc_generation);
                 let ready_state = permit.channel().ready_state().await;
                 let channel_open = matches!(
@@ -417,17 +481,24 @@ impl RtcPeerControllerHandle {
                         _ => RtcSendError::ConnectionNotReady,
                     });
                 }
-                let mut buf = Vec::with_capacity(FRAGMENT_HEADER_SIZE + chunk.len());
-                encode_fragment_header(&mut buf, msg_id, frag_index as u16, total_frags);
-                buf.extend_from_slice(chunk);
-                let frame = bytes::BytesMut::from(&buf[..]);
+                let frame = encode(frag_index as u16, total_frags, chunk);
+                if !sent_any {
+                    if let Some(credit) = &mut credit {
+                        credit.commit();
+                    }
+                    on_write();
+                }
                 let result = if non_blocking {
                     permit.channel().try_send(frame).await
                 } else {
                     permit.channel().send(frame).await
                 };
                 if let Err(e) = result {
-                    return Err(self.map_send_outcome(permit, e, sent_any).await);
+                    return Err(if credited {
+                        RtcSendError::DataChunkDeliveryUncertain
+                    } else {
+                        self.map_send_outcome(permit, e, sent_any).await
+                    });
                 }
                 sent_any = true;
                 #[cfg(feature = "test-utils")]
@@ -441,6 +512,9 @@ impl RtcPeerControllerHandle {
                     },
                 )
                 .await;
+            }
+            if let Some(credit) = &mut credit {
+                credit.submitted();
             }
             Ok(())
         }

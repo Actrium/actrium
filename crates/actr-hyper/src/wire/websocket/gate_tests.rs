@@ -470,7 +470,11 @@ fn empty_pending() -> crate::transport::correlation::PendingRequestsMap {
 async fn insert_sink_entry(inbound_sinks: &InboundSinkMap, peer: &ActrId, sink: WsSink) {
     inbound_sinks.write().await.insert(
         peer.clone(),
-        (sink, SecureCell::new(SecureChannelState::LegacyBypass)),
+        (
+            sink,
+            SecureCell::new(SecureChannelState::LegacyBypass),
+            None,
+        ),
     );
 }
 
@@ -1495,7 +1499,7 @@ async fn send_response_falls_back_before_sending_when_channel_not_ready() {
     let sink: WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
     gate.inbound_sinks.write().await.insert(
         peer.clone(),
-        (sink, SecureCell::new(SecureChannelState::Handshaking)),
+        (sink, SecureCell::new(SecureChannelState::Handshaking), None),
     );
 
     let result = gate.send_response(&peer, RpcEnvelope::default()).await;
@@ -1533,6 +1537,7 @@ async fn send_response_strict_cell_rejects_legacy_bypass_without_writing() {
         (
             sink,
             SecureCell::new_actrium(SecureChannelState::LegacyBypass),
+            None,
         ),
     );
 
@@ -1594,7 +1599,7 @@ async fn send_response_falls_back_if_session_closes_while_waiting_for_sink() {
     gate.inbound_sinks
         .write()
         .await
-        .insert(peer.clone(), (sink.clone(), secure.clone()));
+        .insert(peer.clone(), (sink.clone(), secure.clone(), None));
     let _guard = sink.lock().await;
     let response = gate.send_response(&peer, RpcEnvelope::default());
     tokio::pin!(response);
@@ -1631,7 +1636,7 @@ async fn send_response_keeps_an_inflight_write_uncertain_on_close() {
     gate.inbound_sinks
         .write()
         .await
-        .insert(peer.clone(), (sink, secure.clone()));
+        .insert(peer.clone(), (sink, secure.clone(), None));
     let response = gate.send_response(&peer, RpcEnvelope::default());
     tokio::pin!(response);
     assert!(futures_util::poll!(response.as_mut()).is_pending());
@@ -1667,7 +1672,7 @@ async fn send_response_rechecks_sendability_after_acquiring_sink() {
     gate.inbound_sinks
         .write()
         .await
-        .insert(peer.clone(), (sink.clone(), secure.clone()));
+        .insert(peer.clone(), (sink.clone(), secure.clone(), None));
     let guard = sink.lock().await;
     let response = gate.send_response(&peer, RpcEnvelope::default());
     tokio::pin!(response);
@@ -1699,7 +1704,7 @@ async fn send_response_terminal_state_removes_registration() {
     let sink: WsSink = Arc::new(tokio::sync::Mutex::new(None));
     gate.inbound_sinks.write().await.insert(
         peer.clone(),
-        (sink, SecureCell::new(SecureChannelState::Closed)),
+        (sink, SecureCell::new(SecureChannelState::Closed), None),
     );
 
     let sent = gate

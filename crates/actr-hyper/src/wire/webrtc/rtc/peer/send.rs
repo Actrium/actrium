@@ -26,6 +26,7 @@ pub(crate) struct SendPermit {
     lane: LaneKind,
     channel: Arc<dyn LaneDataChannel>,
     cancellation: CancellationToken,
+    pub(super) flow: Option<Arc<crate::wire::webrtc::rtc::flow::SessionFlow>>,
 }
 
 impl SendPermit {
@@ -36,6 +37,7 @@ impl SendPermit {
             lane: handle.lane(),
             channel: handle.channel().clone(),
             cancellation: handle.cancellation().clone(),
+            flow: handle.flow.clone(),
         }
     }
 

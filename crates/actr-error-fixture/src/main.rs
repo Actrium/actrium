@@ -126,6 +126,9 @@ async fn main() -> anyhow::Result<()> {
 
     // ── 1. Start mock-loran with the shared outbound relay ──────────────────
     let mock = MockLoranServer::start_with_relay().await?;
+    if args.relay_test {
+        mock.enable_actor_certificates();
+    }
     if args.pause_rtc {
         mock.pause_forwarding();
     }

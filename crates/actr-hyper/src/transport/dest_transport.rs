@@ -416,15 +416,23 @@ impl DestTransport {
                             // Commit the ordered route only when a healthy lane
                             // is about to receive application bytes. Merely
                             // inspecting an unusable candidate must not pin it.
-                            if let Some(route) = reliable.as_deref_mut() {
-                                route.current = Some(conn.clone());
-                            }
+                            let retired = reliable.as_deref_mut().and_then(|route| {
+                                route
+                                    .current
+                                    .replace(conn.clone())
+                                    .filter(|previous| previous.connection_type() != conn_type)
+                            });
                             // Convert to Bytes (zero-copy)
                             let payload = bytes::Bytes::copy_from_slice(data);
-                            if let Some(cell) = progress_sink {
-                                mark_delivery_write_in_flight(cell);
-                            }
-                            let attempt = lane.send_with_progress(payload.clone()).await;
+                            let on_write = || {
+                                if let Some(previous) = &retired {
+                                    previous.abandon_stream_recovery();
+                                }
+                                if let Some(cell) = progress_sink {
+                                    mark_delivery_write_in_flight(cell);
+                                }
+                            };
+                            let attempt = lane.send_tracked(payload.clone(), &on_write).await;
                             let progress = attempt.progress;
                             if let Some(cell) = progress_sink {
                                 record_delivery_progress(cell, progress);
@@ -481,10 +489,8 @@ impl DestTransport {
                                     conn.invalidate_lane(payload_type).await;
                                     match conn.get_lane(payload_type).await {
                                         Ok(new_lane) => {
-                                            if let Some(cell) = progress_sink {
-                                                mark_delivery_write_in_flight(cell);
-                                            }
-                                            let retry = new_lane.send_with_progress(payload).await;
+                                            let retry =
+                                                new_lane.send_tracked(payload, &on_write).await;
                                             let retry_progress = retry.progress;
                                             if let Some(cell) = progress_sink {
                                                 record_delivery_progress(cell, retry_progress);

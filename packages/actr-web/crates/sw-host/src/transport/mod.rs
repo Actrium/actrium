@@ -11,6 +11,7 @@ pub mod lane;
 pub mod peer_transport;
 pub mod postmessage;
 pub mod route_table;
+pub(crate) mod rtc_flow;
 pub mod sw_transport;
 pub mod websocket;
 pub mod websocket_connection;
