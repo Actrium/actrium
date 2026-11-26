@@ -138,7 +138,7 @@ enum CompactToolbarLayout {
     static let activeTabMinWidth: CGFloat = 230
     /// The current Tab also carries the address field, so it keeps a floor
     /// wide enough to stay usable instead of shrinking to an icon.
-    static let activeTabCompressedMinWidth: CGFloat = 210
+    static let activeTabCompressedMinWidth: CGFloat = 220
     static let activeTabMaxWidth: CGFloat = tabMaxWidth
     static let activeTabPreferredWidth: CGFloat = tabMaxWidth
 
