@@ -24,9 +24,9 @@ function Renderer({ ast, selection, theme }) {
 }
 
 mock.module('react-native', () => ({ Text: 'text' }));
-mock.module('@supramark/markdown-native-rn', () => ({}));
-mock.module('@supramark/core', () => ({ parse }));
-mock.module('@supramark/rn', () => ({ Supramark: Renderer }));
+mock.module('@goaskaway/supramark-markdown-native-rn', () => ({}));
+mock.module('@goaskaway/supramark-core/rn', () => ({ parse }));
+mock.module('@goaskaway/supramark-rn', () => ({ Supramark: Renderer }));
 mock.module('./DocumentSelectionSurface', () => ({ DocumentSelectionContext }));
 
 const { Supramark } = await import('./guest-markdown-renderer.supramark');
