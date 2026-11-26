@@ -329,6 +329,7 @@ final class RendererProcessController {
     private var serviceEventTabs: [UUID: String] = [:]
     private var cancelledServiceEventSubscriptions: Set<UUID> = []
     private var fileImports: [String: (id: UUID, reloadKey: Int, reply: (GuestFileImportReply) -> Void)] = [:]
+    private lazy var fileExport = GuestFileExportClient(connection: connection)
     private var guestMenus: [String: (call: GuestMenuCall, reply: (GuestMenuReply) -> Void)] = [:]
     private let attachmentStorage: (cache: RendererAttachmentCache, lock: FileHandle)?
     private var attachmentCache: RendererAttachmentCache? { attachmentStorage?.cache }
@@ -393,6 +394,17 @@ final class RendererProcessController {
         } catch {
             reply(GuestFileImportReply(id: call.id, error: "Could not contact the file picker."))
         }
+    }
+
+    static func saveFile(
+        _ call: GuestFileExportCall, tabId: String, reply: @escaping (GuestFileExportReply) -> Void
+    ) {
+        guard let controller = RendererProcessLifetime.shared.controller,
+              controller.surfaces[tabId] != nil else {
+            reply(GuestFileExportReply(id: call.id, error: "The export tab is unavailable."))
+            return
+        }
+        controller.fileExport.send(call, tabId: tabId, reply: reply)
     }
 
     static func callRealmService(
@@ -705,6 +717,10 @@ final class RendererProcessController {
             }
             if name == GuestFileImportCall.responseEvent {
                 receiveFileImport(json, tabId: tabId)
+                return
+            }
+            if name == GuestFileExportCall.responseEvent {
+                fileExport.receive(json: json, tabId: tabId)
                 return
             }
             if name == GuestMenuCall.responseEvent {
@@ -1063,6 +1079,7 @@ final class RendererProcessController {
 
     private func destroyTab(_ tabId: String) {
         cancelFileImport(tabId)
+        fileExport.close(tabId: tabId)
         cancelGuestMenu(tabId)
         attachmentCache?.close(tabId: tabId)
         failPendingAttachmentCalls(tabId: tabId)

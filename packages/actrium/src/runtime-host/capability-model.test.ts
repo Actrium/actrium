@@ -297,6 +297,7 @@ describe('capability model data', () => {
       'host:file-import.pick',
       'host:file-import.openPreview',
       'host:file-import.release',
+      'host:file-export.save',
       'host:local-storage.getItem',
       'host:local-storage.setItem',
       'host:local-storage.removeItem',
