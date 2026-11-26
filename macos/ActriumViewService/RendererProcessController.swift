@@ -329,6 +329,7 @@ final class RendererProcessController {
     private var serviceEventTabs: [UUID: String] = [:]
     private var cancelledServiceEventSubscriptions: Set<UUID> = []
     private var fileImports: [String: (id: UUID, reloadKey: Int, reply: (GuestFileImportReply) -> Void)] = [:]
+    private var fileExports: [String: (id: UUID, reloadKey: Int, reply: (GuestFileExportReply) -> Void)] = [:]
     private var guestMenus: [String: (call: GuestMenuCall, reply: (GuestMenuReply) -> Void)] = [:]
     private let attachmentStorage: (cache: RendererAttachmentCache, lock: FileHandle)?
     private var attachmentCache: RendererAttachmentCache? { attachmentStorage?.cache }
@@ -392,6 +393,33 @@ final class RendererProcessController {
             }
         } catch {
             reply(GuestFileImportReply(id: call.id, error: "Could not contact the file picker."))
+        }
+    }
+
+    static func saveFile(
+        _ call: GuestFileExportCall, tabId: String, reply: @escaping (GuestFileExportReply) -> Void
+    ) {
+        guard let controller = RendererProcessLifetime.shared.controller,
+              controller.surfaces[tabId] != nil, controller.fileExports[tabId] == nil else {
+            reply(GuestFileExportReply(id: call.id, error: "The save dialog is unavailable or already open."))
+            return
+        }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .withoutEscapingSlashes
+            let data = try encoder.encode(call)
+            try controller.connection.sendHostEvent(
+                name: GuestFileExportCall.requestEvent, userInfoJSON: String(decoding: data, as: UTF8.self), tabId: tabId
+            )
+            let requestID = call.id
+            controller.fileExports[tabId] = (requestID, call.reloadKey, reply)
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(GuestFileExportCall.timeoutSeconds)) {
+                [weak controller] in
+                guard let controller, controller.fileExports[tabId]?.id == requestID else { return }
+                controller.cancelFileExport(tabId, message: "The file save timed out. Check the selected location.")
+            }
+        } catch {
+            reply(GuestFileExportReply(id: call.id, error: "Could not send the file to the save dialog."))
         }
     }
 
@@ -707,6 +735,10 @@ final class RendererProcessController {
                 receiveFileImport(json, tabId: tabId)
                 return
             }
+            if name == GuestFileExportCall.responseEvent {
+                receiveFileExport(json, tabId: tabId)
+                return
+            }
             if name == GuestMenuCall.responseEvent {
                 receiveGuestMenu(json, tabId: tabId)
                 return
@@ -924,6 +956,9 @@ final class RendererProcessController {
         if let pending = fileImports[tabId], pending.reloadKey != Int(request.reloadKey) {
             cancelFileImport(tabId)
         }
+        if let pending = fileExports[tabId], pending.reloadKey != Int(request.reloadKey) {
+            cancelFileExport(tabId)
+        }
         if let pending = guestMenus[tabId], pending.call.reloadKey != Int(request.reloadKey) {
             cancelGuestMenu(tabId)
         }
@@ -1063,6 +1098,7 @@ final class RendererProcessController {
 
     private func destroyTab(_ tabId: String) {
         cancelFileImport(tabId)
+        cancelFileExport(tabId)
         cancelGuestMenu(tabId)
         attachmentCache?.close(tabId: tabId)
         failPendingAttachmentCalls(tabId: tabId)
@@ -1119,6 +1155,18 @@ final class RendererProcessController {
         guard let response = try? JSONDecoder().decode(GuestFileImportReply.self, from: Data(json.utf8)),
               fileImports[tabId]?.id == response.id else { return }
         fileImports.removeValue(forKey: tabId)?.reply(response)
+    }
+
+    private func cancelFileExport(_ tabId: String, message: String = "The export document changed or closed.") {
+        if let pending = fileExports.removeValue(forKey: tabId) {
+            pending.reply(GuestFileExportReply(id: pending.id, error: message))
+        }
+    }
+
+    private func receiveFileExport(_ json: String, tabId: String) {
+        guard let response = try? JSONDecoder().decode(GuestFileExportReply.self, from: Data(json.utf8)),
+              fileExports[tabId]?.id == response.id else { return }
+        fileExports.removeValue(forKey: tabId)?.reply(response)
     }
 
     private func terminate(reason: String) {

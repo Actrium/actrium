@@ -20,6 +20,7 @@ function createTestHostModules(options?: {
   writeClipboardText?: (text: string) => Promise<void>;
   setTabTitle?: (title: string) => void;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
+  saveFile?: HostModules['host:file-export']['save'];
   recognizeSpeech?: Parameters<typeof createHostModules>[0]['recognizeSpeech'];
 }): HostModules {
   return createHostModules({
@@ -33,9 +34,21 @@ function createTestHostModules(options?: {
     writeClipboardText: options?.writeClipboardText ?? (async () => {}),
     setTabTitle: options?.setTabTitle,
     pickFiles: options?.pickFiles,
+    saveFile: options?.saveFile,
     recognizeSpeech: options?.recognizeSpeech,
   });
 }
+
+test('file export authorizes the save and preserves cancellation', async () => {
+  const calls: unknown[] = [];
+  const modules = createTestHostModules({
+    authorizeCapability: async (name) => { calls.push(name); },
+    saveFile: async (input) => { calls.push(input); return { saved: false }; },
+  });
+  const file = { name: 'history.zip', base64: 'AAEC' };
+  await expect(modules['host:file-export'].save(file)).resolves.toEqual({ saved: false });
+  expect(calls).toEqual(['host:file-export.save', file]);
+});
 
 describe('host:service implementation', () => {
   test('rejects calls when the service capability is not declared', async () => {
@@ -661,14 +674,6 @@ describe('placeholder host modules', () => {
       capability: 'host:navigate.navigate',
       call: (hostModules) =>
         hostModules['host:navigate'].navigate({ path: '/settings' }),
-    },
-    {
-      capability: 'host:file-export.save',
-      call: (hostModules) =>
-        hostModules['host:file-export'].save({
-          name: 'notes.txt',
-          base64: 'AAEC',
-        }),
     },
     {
       capability: 'host:share.share',

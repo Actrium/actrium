@@ -251,7 +251,7 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     requiresGrant: 'user',
     requiresBroker: false,
     requiresSandbox: true,
-    implemented: false,
+    implemented: true,
   },
   'host:share.share': {
     name: 'host:share.share',
