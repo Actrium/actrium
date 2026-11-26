@@ -365,7 +365,7 @@ final class IPCClient {
     private var connection: IPCSocket?
     private nonisolated let outgoing = IPCSocketSlot()
     private let queue = DispatchQueue(label: "io.actrium.actro.ipc.client")
-    private nonisolated let writer = DispatchQueue(label: "io.actrium.actro.ipc.client.writer")
+    private nonisolated let writer = DispatchQueue(label: "io.actrium.ipc.client.writer")
 
     var onMessage: ((Data) -> Void)?
     var onDisconnected: (() -> Void)?
