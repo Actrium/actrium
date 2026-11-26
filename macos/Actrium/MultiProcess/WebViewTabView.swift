@@ -812,6 +812,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             let url: URL?
             if let urlString = result as? String, let parsed = URL(string: urlString) {
                 self.lastKnownURL = parsed
+                // The provisional observer ignores `about:blank`, so keep the
+                // holder's load state in sync for a completed blank navigation.
+                self.loadedURL = parsed
                 url = parsed
             } else {
                 url = self.lastKnownURL
