@@ -57,6 +57,7 @@ enum IPCSocketPath {
 /// serialized by `sendLock`. Shutdown wakes I/O without recycling its descriptor.
 private final class IPCSocket: @unchecked Sendable {
     let descriptor: Int32
+    let writeBacklog = IPCWriteBacklog()
     private let stateLock = NSLock()
     private let sendLock = NSLock()
     private var stopped = false
@@ -109,6 +110,100 @@ private final class IPCSocket: @unchecked Sendable {
             return socket
         }
         throw IPCError.connectionClosed
+    }
+}
+
+enum IPCWritePolicy: Equatable, Sendable {
+    case required
+    case request
+    case accessibilitySnapshot(String)
+
+    var isSnapshot: Bool {
+        if case .accessibilitySnapshot = self { return true }
+        return false
+    }
+}
+
+/// Serializes the renderer's writes without retaining unbounded Dispatch work.
+/// The lock protects queue state only. The drain never holds it during I/O.
+private final class IPCWriteBacklog: @unchecked Sendable {
+    private struct Write {
+        let bytes: Int
+        let policy: IPCWritePolicy
+        let perform: @Sendable () -> Error?
+        let completion: @Sendable (Error?) -> Void
+    }
+
+    // Allow two full frames and reserve another for required messages.
+    private static let frameBytes = IPCFrameLimits.maxFrameBytes + MemoryLayout<UInt32>.size
+    private static let reservedFrames = 32
+    private let lock = NSLock()
+    private var pending: [Write] = []
+    private var occupiedBytes = 0
+    private var occupiedFrames = 0
+    private var draining = false
+
+    func enqueue(
+        bytes: Int, policy: IPCWritePolicy, on queue: DispatchQueue,
+        perform: @escaping @Sendable () -> Error?, completion: @escaping @Sendable (Error?) -> Void
+    ) throws {
+        let write = Write(bytes: bytes, policy: policy, perform: perform, completion: completion)
+        let startDrain = try lock.withLock {
+            guard try admit(write) else { return false }
+            occupiedBytes += write.bytes
+            occupiedFrames += 1
+            pending.append(write)
+            guard !draining else { return false }
+            draining = true
+            return true
+        }
+        if startDrain { queue.async { self.drain() } }
+    }
+
+    private func admit(_ write: Write) throws -> Bool {
+        switch write.policy {
+        case .accessibilitySnapshot:
+            if let previous = pending.firstIndex(where: { $0.policy == write.policy }) {
+                release(pending.remove(at: previous))
+            }
+            return hasRoom(for: write)
+        case .required:
+            while !hasRoom(for: write), let snapshot = pending.firstIndex(where: { $0.policy.isSnapshot }) {
+                release(pending.remove(at: snapshot))
+            }
+        case .request:
+            break
+        }
+        guard hasRoom(for: write) else { throw IPCError.sendQueueFull }
+        return true
+    }
+
+    private func hasRoom(for write: Write) -> Bool {
+        let required = write.policy == .required
+        let byteLimit = Self.frameBytes * (required ? 3 : 2)
+        let frameLimit = IPCFrameLimits.maxQueuedRendererFrames - (required ? 0 : Self.reservedFrames)
+        return write.bytes <= byteLimit - occupiedBytes && occupiedFrames < frameLimit
+    }
+
+    private func drain() {
+        while let write = next() {
+            let error = write.perform()
+            lock.withLock { release(write) }
+            write.completion(error)
+        }
+    }
+
+    private func next() -> Write? {
+        lock.withLock {
+            if !pending.isEmpty { return pending.removeFirst() }
+            draining = false
+            return nil
+        }
+    }
+
+    private func release(_ write: Write) {
+        occupiedBytes -= write.bytes
+        occupiedFrames -= 1
     }
 }
 
@@ -337,22 +432,29 @@ final class IPCClient {
     nonisolated func send(_ data: Data) throws { try outgoing.send(data) }
 
     nonisolated func enqueueSend(
+        bytes: Int, policy: IPCWritePolicy,
         _ prepare: @escaping @Sendable () throws -> Data?,
         beginSend: @escaping @Sendable () -> Bool = { true },
         completion: @escaping @Sendable (Error?) -> Void
     ) throws {
         let socket = try outgoing.connectedSocket()
         guard !socket.isStopped else { throw IPCError.notConnected }
-        writer.async {
-            do {
-                guard !socket.isStopped else { throw IPCError.notConnected }
-                if let data = try prepare(), beginSend() { try socket.send(data) }
-                completion(nil)
-            } catch {
-                // A partial frame cannot be followed by another frame on this connection.
-                if case IPCError.writeFailed = error { socket.stop() }
-                completion(error)
-            }
+        do {
+            try socket.writeBacklog.enqueue(bytes: bytes, policy: policy, on: writer, perform: {
+                do {
+                    guard !socket.isStopped else { throw IPCError.notConnected }
+                    if let data = try prepare(), beginSend() { try socket.send(data) }
+                    return nil
+                } catch {
+                    // A partial frame cannot be followed by another frame on this connection.
+                    if case IPCError.writeFailed = error { socket.stop() }
+                    return error
+                }
+            }, completion: completion)
+        } catch IPCError.sendQueueFull {
+            // Notify the Host of a connection failure rather than losing a required reply.
+            if policy == .required { socket.stop() }
+            throw IPCError.sendQueueFull
         }
     }
 }
@@ -377,6 +479,7 @@ private func socketAddress(_ path: String) throws -> sockaddr_un {
 enum IPCFrameLimits {
     /// Exclusive payload bound shared by the writer and both readers.
     static let maxFrameBytes = 10_000_000
+    static let maxQueuedRendererFrames = 256
 }
 
 /// Send a length-prefixed frame
@@ -478,6 +581,7 @@ public enum IPCError: Error, LocalizedError {
     case connectionClosed
     case invalidFrameLength
     case frameTooLarge
+    case sendQueueFull
 
     public var errorDescription: String? {
         switch self {
@@ -501,6 +605,8 @@ public enum IPCError: Error, LocalizedError {
             return "Invalid frame length"
         case .frameTooLarge:
             return "IPC frame exceeds the payload limit"
+        case .sendQueueFull:
+            return "IPC send queue is full"
         }
     }
 }

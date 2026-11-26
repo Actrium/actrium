@@ -56,7 +56,9 @@ public final class GuestLocalStorageClient {
         }
         queuedSends += 1
         do {
-            try connection.enqueueHostEvent(name: GuestLocalStorageCall.requestEvent, tabId: tabId) {
+            try connection.enqueueHostEvent(
+                name: GuestLocalStorageCall.requestEvent, tabId: tabId, retainedBytes: Self.retainedBytes(call)
+            ) {
                 try Self.prepareJSON(call)
             } beginSend: {
                 state.begin(before: call.deadlineUptimeNanoseconds)
@@ -76,11 +78,23 @@ public final class GuestLocalStorageClient {
         return String(decoding: data, as: UTF8.self)
     }
 
+    private static func retainedBytes(_ call: GuestLocalStorageCall) -> Int {
+        let callBytes = MemoryLayout<GuestLocalStorageCall>.stride + call.key.utf8.count + (call.value?.utf8.count ?? 0)
+        guard let replacement = call.replacement else { return callBytes }
+        let removedBytes = replacement.remove.reduce(0) { $0 + MemoryLayout<String>.stride + $1.utf8.count }
+        let writtenBytes = replacement.set.reduce(0) { total, item in
+            total + MemoryLayout<GuestLocalStorageCall.Replacement.Item>.stride + item.key.utf8.count + item.value.utf8.count
+        }
+        return callBytes + removedBytes + writtenBytes + (replacement.expected?.utf8.count ?? 0)
+    }
+
     private func sendFinished(id: UUID, error: Error?) {
         queuedSends -= 1
         guard let error else { return }
         if case RequestError.tooLarge = error {
             complete(GuestLocalStorageReply(id: id, error: "The local storage request is too large.", errorCode: .requestTooLarge))
+        } else if case IPCError.sendQueueFull = error {
+            complete(GuestLocalStorageReply(id: id, error: "Too many pending local storage operations."))
         } else {
             complete(GuestLocalStorageReply(id: id, error: "Could not send the local storage operation."))
         }

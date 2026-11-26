@@ -503,12 +503,12 @@ public final class IPCHelperConnection {
     }
 
     nonisolated func enqueueHostEvent(
-        name: String, tabId: String,
+        name: String, tabId: String, retainedBytes: Int,
         prepareJSON: @escaping @Sendable () throws -> String?,
         beginSend: @escaping @Sendable () -> Bool,
         completion: @escaping @Sendable (Error?) -> Void
     ) throws {
-        try client.enqueueSend({
+        try client.enqueueSend(bytes: retainedBytes + tabId.utf8.count, policy: .request, {
             guard let json = try prepareJSON() else { return nil }
             return try Self.hostEvent(name: name, json: json, tabId: tabId).serializedData()
         }, beginSend: beginSend, completion: completion)
@@ -552,15 +552,15 @@ public final class IPCHelperConnection {
     nonisolated public func sendAccessibilityTree(_ tree: Actrium_Ipc_AccessibilityTree) throws {
         var msg = Actrium_Ipc_IPCMessage()
         msg.accessibilityTree = tree
-        try send(msg)
+        try send(msg, policy: .accessibilitySnapshot(tree.tabID))
     }
 
     // MARK: - Private
 
-    nonisolated private func send(_ message: Actrium_Ipc_IPCMessage) throws {
+    nonisolated private func send(_ message: Actrium_Ipc_IPCMessage, policy: IPCWritePolicy = .required) throws {
         let data = try message.serializedData()
         guard data.count < IPCFrameLimits.maxFrameBytes else { throw IPCError.frameTooLarge }
-        try client.enqueueSend({ data }) { error in
+        try client.enqueueSend(bytes: data.count + MemoryLayout<UInt32>.size, policy: policy, { data }) { error in
             if let error, case IPCError.writeFailed = error {
                 NSLog("IPCHelperConnection: Failed to send a frame: %@", error.localizedDescription)
             }
