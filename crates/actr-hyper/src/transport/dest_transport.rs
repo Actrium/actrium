@@ -10,6 +10,7 @@ use super::lane::{
     DeliveryProgress, DeliveryProgressCell, mark_delivery_write_in_flight, record_delivery_progress,
 };
 use super::route_table::{DataLaneType, PayloadTypeExt};
+use super::secure_channel::VerifiedPeerContext;
 use super::wire_handle::{WebRtcTransportLifecycle, WireHandle, WireIdentity};
 use super::wire_pool::{ConnType, ReadySet, RetryConfig, WirePool};
 use crate::timer;
@@ -40,6 +41,18 @@ pub(crate) struct DestTransport {
 struct ReliableRoute {
     current: Option<Arc<dyn WireHandle>>,
     retry_at: Option<Instant>,
+}
+
+fn wire_carries_channel(wire: &Arc<dyn WireHandle>, required: &VerifiedPeerContext) -> bool {
+    wire.verified_peer_context()
+        .is_some_and(|actual| actual.same_channel(required))
+}
+
+fn verified_channel_unavailable() -> NetworkError {
+    NetworkError::PermissionError(
+        "the verified Actor channel used for this session is no longer sendable; re-establish the Actrium session"
+            .into(),
+    )
 }
 
 /// Result of one destination send, retaining the low-level delivery fact while
@@ -313,6 +326,19 @@ impl DestTransport {
         data: &[u8],
         progress_sink: Option<&DeliveryProgressCell>,
     ) -> DestSendAttempt {
+        self.send_with_progress_on_channel(payload_type, data, progress_sink, None)
+            .await
+    }
+
+    /// Send only on the exact authenticated channel whose proof covers the
+    /// payload. An unauthenticated or replacement wire is never a fallback.
+    pub(crate) async fn send_with_progress_on_channel(
+        &self,
+        payload_type: PayloadType,
+        data: &[u8],
+        progress_sink: Option<&DeliveryProgressCell>,
+        required_channel: Option<&VerifiedPeerContext>,
+    ) -> DestSendAttempt {
         let mut reliable = if payload_type == PayloadType::StreamReliable {
             Some(self.reliable.lock().await)
         } else {
@@ -371,22 +397,52 @@ impl DestTransport {
                     ConnType::WebSocket
                 };
 
-                // Check if this connection is ready
-                if !ready_connections.contains(&conn_type) {
+                // Check if this connection is ready. Channel-bound sends read
+                // the live slot below instead of trusting this snapshot: the
+                // selected verified wire may have changed since it was taken.
+                if required_channel.is_none() && !ready_connections.contains(&conn_type) {
                     tracing::trace!("🔍 {:?} not ready, trying next", conn_type);
                     continue;
                 }
 
                 // Get connection and create/get Lane
-                if let Some(conn) = self.conn_mgr.get_connection(conn_type).await {
+                if let Some(preferred_conn) = self.conn_mgr.get_connection(conn_type).await {
+                    if required_channel
+                        .is_some_and(|required| !wire_carries_channel(&preferred_conn, required))
+                    {
+                        tracing::debug!(
+                            "🔍 {:?} does not carry the required verified Actor channel",
+                            conn_type
+                        );
+                        continue;
+                    }
                     let conn = if let Some(route) = reliable.as_deref_mut() {
-                        match self.reliable_wire(conn, route).await {
-                            Ok(conn) => conn,
-                            Err(error) => return DestSendAttempt::failed_pre_send(error),
+                        // A reliable route pinned on another channel cannot be
+                        // inherited by session-proved bytes. Drop that pin
+                        // rather than handing over through an unverified wire.
+                        if required_channel.is_some_and(|required| {
+                            route
+                                .current
+                                .as_ref()
+                                .is_some_and(|current| !wire_carries_channel(current, required))
+                        }) {
+                            route.current = None;
+                            route.retry_at = None;
+                            preferred_conn
+                        } else {
+                            match self.reliable_wire(preferred_conn, route).await {
+                                Ok(conn) => conn,
+                                Err(error) => return DestSendAttempt::failed_pre_send(error),
+                            }
                         }
                     } else {
-                        conn
+                        preferred_conn
                     };
+                    if required_channel
+                        .is_some_and(|required| !wire_carries_channel(&conn, required))
+                    {
+                        return DestSendAttempt::failed_pre_send(verified_channel_unavailable());
+                    }
                     let conn_type = conn.connection_type();
                     let wire_identity = conn.identity();
 
@@ -609,6 +665,13 @@ impl DestTransport {
                         }
                     }
                 }
+            }
+
+            // A session proof is valid only on its original authenticated
+            // channel. Fail before any write so the caller can Attach/Resume
+            // again; waiting on an unrelated live RTC route cannot help.
+            if required_channel.is_some() {
+                return DestSendAttempt::failed_pre_send(verified_channel_unavailable());
             }
 
             // 5. All attempts failed, wait for connection status change
@@ -834,10 +897,11 @@ impl DestTransport {
         &self,
     ) -> Option<Arc<crate::transport::VerifiedPeerContext>> {
         let route = self.reliable.lock().await;
-        if let Some(context) = route
-            .current
-            .as_ref()
-            .and_then(|wire| wire.verified_peer_context())
+        if let Some(wire) = route.current.clone()
+            && wire.is_connected()
+            && wire.secure_channel_state().is_sendable()
+            && self.conn_mgr.owns_active_wire(&wire).await
+            && let Some(context) = wire.verified_peer_context()
         {
             return Some(context);
         }
@@ -845,6 +909,39 @@ impl DestTransport {
         for conn_type in [ConnType::WebSocket, ConnType::WebRTC] {
             if let Some(wire) = self.conn_mgr.get_connection(conn_type).await
                 && let Some(context) = wire.verified_peer_context()
+            {
+                return Some(context);
+            }
+        }
+        None
+    }
+
+    /// Resolve the live verified context named by an already-signed session
+    /// metadata field. The complete context, not caller metadata, becomes the
+    /// subsequent route constraint.
+    pub(crate) async fn verified_peer_context_for_channel(
+        &self,
+        channel_id: &str,
+    ) -> Option<Arc<crate::transport::VerifiedPeerContext>> {
+        let route = self.reliable.lock().await;
+        if let Some(wire) = route.current.clone()
+            && wire.is_connected()
+            && wire.secure_channel_state().is_sendable()
+            && self.conn_mgr.owns_active_wire(&wire).await
+            && let Some(context) = wire
+                .verified_peer_context()
+                .filter(|context| context.channel_id == channel_id)
+        {
+            return Some(context);
+        }
+        drop(route);
+        for conn_type in [ConnType::WebSocket, ConnType::WebRTC] {
+            if let Some(context) = self
+                .conn_mgr
+                .get_connection(conn_type)
+                .await
+                .and_then(|wire| wire.verified_peer_context())
+                .filter(|context| context.channel_id == channel_id)
             {
                 return Some(context);
             }

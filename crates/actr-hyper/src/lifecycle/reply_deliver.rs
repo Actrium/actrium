@@ -26,7 +26,7 @@ use crate::lifecycle::dedup::{DedupKey, DedupState};
 use crate::lifecycle::incoming_guard::IncomingGuard;
 use crate::lifecycle::outstanding_replies::{OutstandingReplies, ReplyAttemptId};
 use crate::request_scope::RequestScope;
-use crate::transport::HostTransport;
+use crate::transport::{HostTransport, VerifiedPeerContext};
 
 const DELIVER_PENDING: u8 = 0;
 const DELIVERED: u8 = 1;
@@ -62,6 +62,7 @@ struct ReplyShared {
     traceparent: Option<String>,
     tracestate: Option<String>,
     incoming_guard: Option<Arc<dyn IncomingGuard>>,
+    peer_context: Option<Arc<VerifiedPeerContext>>,
     metadata: Vec<actr_protocol::MetadataEntry>,
     emit_response: bool,
     scope: Option<Arc<RequestScope>>,
@@ -110,6 +111,7 @@ impl ReplyDeliver {
         traceparent: Option<String>,
         tracestate: Option<String>,
         incoming_guard: Option<Arc<dyn IncomingGuard>>,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
         metadata: Vec<actr_protocol::MetadataEntry>,
         sink: ReplySink,
         emit_response: bool,
@@ -148,6 +150,7 @@ impl ReplyDeliver {
                     traceparent,
                     tracestate,
                     incoming_guard,
+                    peer_context,
                     metadata,
                     emit_response,
                     scope,
@@ -300,6 +303,7 @@ impl ReplyDeliver {
                 self.shared.ws_gate.clone(),
                 self.shared.rtc_route.clone(),
                 caller,
+                self.shared.peer_context.clone(),
                 self.shared.dedup_key.request_id.clone(),
                 self.shared.dedup_key.route_key.clone(),
                 self.shared.traceparent.clone(),

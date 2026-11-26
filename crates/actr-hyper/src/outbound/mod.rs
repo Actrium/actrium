@@ -209,6 +209,7 @@ impl Gate {
     ///
     /// - Host: sends through an `mpsc` channel
     /// - Peer: sends through WebRTC DataChannel or WebSocket
+    #[allow(clippy::too_many_arguments)] // Mirrors the chunk delivery boundary across Host and Peer.
     pub(crate) async fn send_data_chunk(
         &self,
         target: &ActrId,
@@ -217,6 +218,7 @@ impl Gate {
         data: Bytes,
         deadline: RpcDeadline,
         operation_id: &str,
+        actrium_channel_id: Option<&str>,
     ) -> ActorResult<()> {
         match self {
             Gate::Host(gate) => {
@@ -231,15 +233,28 @@ impl Gate {
                 .await
             }
             Gate::Peer(gate) => {
-                gate.send_data_chunk_until(
-                    target,
-                    payload_type,
-                    stream_id,
-                    data,
-                    deadline,
-                    operation_id,
-                )
-                .await
+                if let Some(channel_id) = actrium_channel_id {
+                    gate.send_data_chunk_on_actrium_channel_until(
+                        target,
+                        payload_type,
+                        stream_id,
+                        data,
+                        deadline,
+                        operation_id,
+                        channel_id,
+                    )
+                    .await
+                } else {
+                    gate.send_data_chunk_until(
+                        target,
+                        payload_type,
+                        stream_id,
+                        data,
+                        deadline,
+                        operation_id,
+                    )
+                    .await
+                }
             }
         }
     }

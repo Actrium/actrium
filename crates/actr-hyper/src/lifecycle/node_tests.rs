@@ -1692,6 +1692,7 @@ async fn response_send_timeout_submits_recovery_hint_to_current_peer() {
             },
             "response-timeout-hint",
             "test.Response",
+            None,
         )
         .await;
     });

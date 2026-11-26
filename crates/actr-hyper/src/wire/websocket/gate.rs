@@ -219,10 +219,27 @@ impl WebSocketGate {
     /// (not an error) when there is no sendable inbound connection from
     /// `peer`, so the caller may try another transport. Returns `Ok(true)`
     /// on a successful send; an error may mean submission was attempted.
-    pub async fn send_response(
+    pub async fn send_response(&self, peer: &ActrId, envelope: RpcEnvelope) -> ActorResult<bool> {
+        self.send_response_inner(peer, envelope, None).await
+    }
+
+    /// Reply on the exact verified channel that carried the request. Returning
+    /// `Ok(false)` is a pre-send mismatch; callers must not fall back to RTC.
+    pub async fn send_response_on_verified_channel(
+        &self,
+        peer: &ActrId,
+        envelope: RpcEnvelope,
+        channel: &VerifiedPeerContext,
+    ) -> ActorResult<bool> {
+        self.send_response_inner(peer, envelope, Some(channel))
+            .await
+    }
+
+    async fn send_response_inner(
         &self,
         peer: &ActrId,
         mut envelope: RpcEnvelope,
+        required_channel: Option<&VerifiedPeerContext>,
     ) -> ActorResult<bool> {
         let entry_opt = {
             let map = self.inbound_sinks.read().await;
@@ -233,6 +250,13 @@ impl WebSocketGate {
             Some(entry) => entry,
             None => return Ok(false),
         };
+        if required_channel.is_some_and(|required| {
+            secure
+                .verified_peer()
+                .is_none_or(|actual| !actual.same_channel(required))
+        }) {
+            return Ok(false);
+        }
 
         // Secure-session gate for this raw-sink send path: the frame below
         // bypasses the lane abstraction, so check the cell directly instead.
@@ -277,6 +301,13 @@ impl WebSocketGate {
                     // The session may have stopped being sendable while the
                     // shared writer was busy. No bytes have been attempted.
                     if !secure.is_io_sendable() {
+                        return Ok(false);
+                    }
+                    if required_channel.is_some_and(|required| {
+                        secure
+                            .verified_peer()
+                            .is_none_or(|actual| !actual.same_channel(required))
+                    }) {
                         return Ok(false);
                     }
                     write_started = true;

@@ -67,6 +67,7 @@ struct FakeWire {
     invalidated: AtomicBool,
     send_count: Arc<AtomicUsize>,
     identity: Option<WireIdentity>,
+    verified_context: Option<Arc<VerifiedPeerContext>>,
     priority: AtomicU8,
 }
 
@@ -86,6 +87,7 @@ impl FakeWire {
             invalidated: AtomicBool::new(false),
             send_count: Arc::new(AtomicUsize::new(0)),
             identity: None,
+            verified_context: None,
             priority: AtomicU8::new(if conn_type == ConnType::WebRTC { 1 } else { 0 }),
         }
     }
@@ -129,6 +131,11 @@ impl FakeWire {
         self.send_count = send_count;
         self
     }
+
+    fn with_verified_context(mut self, context: Arc<VerifiedPeerContext>) -> Self {
+        self.verified_context = Some(context);
+        self
+    }
 }
 
 #[async_trait]
@@ -139,6 +146,10 @@ impl WireHandle for FakeWire {
 
     fn priority(&self) -> u8 {
         self.priority.load(Ordering::Relaxed)
+    }
+
+    fn verified_peer_context(&self) -> Option<Arc<VerifiedPeerContext>> {
+        self.verified_context.clone()
     }
 
     fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
@@ -378,6 +389,136 @@ async fn test_transport(connections: Vec<Arc<dyn WireHandle>>) -> DestTransport 
         handover: Arc::new(HandoverBook::default()),
         reliable: Mutex::new(ReliableRoute::default()),
     }
+}
+
+fn verified_context(channel_id: &str, generation: u64) -> Arc<VerifiedPeerContext> {
+    Arc::new(VerifiedPeerContext {
+        local_actor_id: actr_protocol::ActrId {
+            realm: "test@example.com".into(),
+            serial_number: 1,
+        },
+        peer_actor_id: actr_protocol::ActrId {
+            realm: "test@example.com".into(),
+            serial_number: 2,
+        },
+        peer_actor_type: actr_protocol::ActrType {
+            publisher: "example.com".into(),
+            name: "service".into(),
+            version: "1.0.0".into(),
+        },
+        peer_member: "member".into(),
+        peer_client_key: "client".into(),
+        peer_role: "owner".into(),
+        peer_actor_public_key: vec![2; 32],
+        channel_id: channel_id.into(),
+        channel_generation: generation,
+        transcript_digest: vec![generation as u8; 32],
+        local_runtime_instance_id: "front-runtime".into(),
+        peer_runtime_instance_id: "service-runtime".into(),
+        peer_credential_expires_at_epoch_secs: u64::MAX,
+        current_policy_binding: vec![3; 32],
+        current_state_binding: vec![4; 32],
+    })
+}
+
+#[tokio::test]
+async fn channel_bound_rpc_and_stream_prefer_verified_relay_over_sendable_rtc() {
+    let channel = verified_context("channel-1", 1);
+    let rtc = Arc::new(FakeWire::new(ConnType::WebRTC));
+    let relay = Arc::new(FakeWire::new(ConnType::WebSocket).with_verified_context(channel.clone()));
+    let transport = test_transport(vec![rtc.clone(), relay.clone()]).await;
+    // Pin ordinary reliable traffic to the higher-priority unverified RTC wire
+    // first; session bytes must not inherit that route.
+    transport
+        .send_with_identity(PayloadType::StreamReliable, b"ordinary stream")
+        .await
+        .unwrap();
+
+    for payload_type in [PayloadType::RpcReliable, PayloadType::StreamReliable] {
+        let attempt = transport
+            .send_with_progress_on_channel(
+                payload_type,
+                b"session proof",
+                None,
+                Some(channel.as_ref()),
+            )
+            .await;
+        assert!(
+            attempt.result.is_ok(),
+            "{payload_type:?}: {:?}",
+            attempt.result
+        );
+    }
+
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 1);
+    assert_eq!(relay.send_count.load(Ordering::Relaxed), 2);
+    assert_eq!(
+        rtc.recordings.lock().unwrap().as_slice(),
+        &[bytes::Bytes::from_static(b"ordinary stream")]
+    );
+    assert!(
+        relay
+            .recordings
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|bytes| { bytes.as_ref() == b"session proof" })
+    );
+}
+
+#[tokio::test]
+async fn channel_bound_send_fails_pre_send_when_verified_wire_is_replaced() {
+    let required = verified_context("channel-1", 1);
+    let replacement = verified_context("channel-2", 2);
+    let rtc = Arc::new(FakeWire::new(ConnType::WebRTC));
+    let relay = Arc::new(FakeWire::new(ConnType::WebSocket).with_verified_context(replacement));
+    let transport = test_transport(vec![rtc.clone(), relay.clone()]).await;
+
+    let attempt = transport
+        .send_with_progress_on_channel(
+            PayloadType::RpcReliable,
+            b"old channel proof",
+            None,
+            Some(required.as_ref()),
+        )
+        .await;
+
+    assert!(matches!(
+        attempt.result,
+        Err(NetworkError::PermissionError(message))
+            if message.contains("re-establish the Actrium session")
+    ));
+    assert_eq!(attempt.progress, DeliveryProgress::NotAttempted);
+    assert!(attempt.proven_pre_send);
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 0);
+    assert_eq!(relay.send_count.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
+async fn channel_bound_send_fails_pre_send_when_verified_wire_is_lost() {
+    let channel = verified_context("channel-1", 1);
+    let rtc = Arc::new(FakeWire::new(ConnType::WebRTC));
+    let relay = Arc::new(FakeWire::new(ConnType::WebSocket).with_verified_context(channel.clone()));
+    let transport = test_transport(vec![rtc.clone(), relay.clone()]).await;
+    *relay.secure_state.lock().unwrap() = crate::transport::SecureChannelState::Closed;
+
+    let attempt = transport
+        .send_with_progress_on_channel(
+            PayloadType::StreamReliable,
+            b"session proof",
+            None,
+            Some(channel.as_ref()),
+        )
+        .await;
+
+    assert!(matches!(
+        attempt.result,
+        Err(NetworkError::PermissionError(_))
+    ));
+    assert_eq!(attempt.progress, DeliveryProgress::NotAttempted);
+    assert!(attempt.proven_pre_send);
+    assert_eq!(rtc.send_count.load(Ordering::Relaxed), 0);
+    assert_eq!(relay.send_count.load(Ordering::Relaxed), 0);
 }
 
 #[tokio::test]
