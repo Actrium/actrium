@@ -95,10 +95,12 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures-util",
+ "libc",
  "prost",
  "tokio",
  "tracing",
  "uuid",
+ "windows-sys 0.61.2",
  "wit-bindgen 0.59.0",
 ]
 
