@@ -12,6 +12,10 @@ public struct GuestLocalStorageCall: Codable, Sendable {
         case setItem
         case removeItem
         case replaceItems
+
+        public var maxRequestBytes: Int {
+            self == .replaceItems ? GuestLocalStorageCall.maxRequestBytes : GuestLocalStorageCall.maxSingleRequestBytes
+        }
     }
 
     public struct Replacement: Codable, Sendable {
@@ -69,6 +73,7 @@ public struct GuestLocalStorageReply: Codable, Sendable {
         case outcomeUnknown = "local_storage_outcome_unknown"
         case quotaExceeded = "local_storage_quota_exceeded"
         case conflict = "local_storage_conflict"
+        case requestTooLarge = "local_storage_request_too_large"
     }
 
     public let id: UUID

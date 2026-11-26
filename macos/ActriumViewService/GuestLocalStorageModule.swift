@@ -21,7 +21,7 @@ final class GuestLocalStorageModule: NSObject {
     ) {
         guard let document = UUID(uuidString: documentId),
               let operation = GuestLocalStorageCall.Operation(rawValue: operation),
-              inputJSON.utf8.count <= Self.requestLimit(for: operation),
+              inputJSON.utf8.count <= operation.maxRequestBytes,
               let input = try? JSONDecoder().decode(Input.self, from: Data(inputJSON.utf8)) else {
             reject("invalid_local_storage_call", "Invalid local storage arguments.", nil)
             return
@@ -51,8 +51,4 @@ final class GuestLocalStorageModule: NSObject {
     }
 
     @objc static func requiresMainQueueSetup() -> Bool { false }
-
-    private static func requestLimit(for operation: GuestLocalStorageCall.Operation) -> Int {
-        operation == .replaceItems ? GuestLocalStorageCall.maxRequestBytes : GuestLocalStorageCall.maxSingleRequestBytes
-    }
 }

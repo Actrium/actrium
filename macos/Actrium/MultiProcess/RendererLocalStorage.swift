@@ -96,11 +96,10 @@ final class RendererLocalStorage {
     }
 
     func reply(to json: String, tabId: UUID) async throws -> String? {
-        guard json.utf8.count <= GuestLocalStorageCall.maxRequestBytes else { return nil }
+        let bytes = json.utf8.count
+        guard bytes <= GuestLocalStorageCall.maxRequestBytes else { return nil }
         let call = try JSONDecoder().decode(GuestLocalStorageCall.self, from: Data(json.utf8))
-        if call.operation != .replaceItems && json.utf8.count > GuestLocalStorageCall.maxSingleRequestBytes {
-            return nil
-        }
+        guard bytes <= call.operation.maxRequestBytes else { return nil }
         let reply = await perform(call, tabId: tabId)
         return String(decoding: try JSONEncoder().encode(reply), as: UTF8.self)
     }

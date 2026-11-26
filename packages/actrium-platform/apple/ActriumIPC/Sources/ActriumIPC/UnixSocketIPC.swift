@@ -131,8 +131,12 @@ private final class IPCSocketSlot: @unchecked Sendable {
     }
 
     func send(_ data: Data) throws {
+        try connectedSocket().send(data)
+    }
+
+    func connectedSocket() throws -> IPCSocket {
         guard let current = lock.withLock({ socket }) else { throw IPCError.notConnected }
-        try current.send(data)
+        return current
     }
 }
 
@@ -266,6 +270,7 @@ final class IPCClient {
     private var connection: IPCSocket?
     private nonisolated let outgoing = IPCSocketSlot()
     private let queue = DispatchQueue(label: "io.actrium.actro.ipc.client")
+    private nonisolated let writer = DispatchQueue(label: "io.actrium.actro.ipc.client.writer")
 
     var onMessage: ((Data) -> Void)?
     var onDisconnected: (() -> Void)?
@@ -330,6 +335,26 @@ final class IPCClient {
     }
 
     nonisolated func send(_ data: Data) throws { try outgoing.send(data) }
+
+    nonisolated func enqueueSend(
+        _ prepare: @escaping @Sendable () throws -> Data?,
+        beginSend: @escaping @Sendable () -> Bool = { true },
+        completion: @escaping @Sendable (Error?) -> Void
+    ) throws {
+        let socket = try outgoing.connectedSocket()
+        guard !socket.isStopped else { throw IPCError.notConnected }
+        writer.async {
+            do {
+                guard !socket.isStopped else { throw IPCError.notConnected }
+                if let data = try prepare(), beginSend() { try socket.send(data) }
+                completion(nil)
+            } catch {
+                // A partial frame cannot be followed by another frame on this connection.
+                if case IPCError.writeFailed = error { socket.stop() }
+                completion(error)
+            }
+        }
+    }
 }
 
 private func socketAddress(_ path: String) throws -> sockaddr_un {
