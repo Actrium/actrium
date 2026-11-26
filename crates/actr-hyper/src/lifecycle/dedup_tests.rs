@@ -1,5 +1,11 @@
 use super::*;
 
+#[test]
+fn oversized_reply_timeout_does_not_panic() {
+    let deadline = caller_reply_deadline(i64::MAX).expect("positive timeout must have a deadline");
+    assert!(deadline > actr_framework::ReplyDeadline::now());
+}
+
 fn ok_bytes(s: &str) -> ActorResult<Bytes> {
     Ok(Bytes::from(s.as_bytes().to_vec()))
 }

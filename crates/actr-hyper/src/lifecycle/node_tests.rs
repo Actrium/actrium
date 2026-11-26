@@ -3961,6 +3961,34 @@ async fn native_package_explicit_reply_releases_dispatch_for_final_chunk() {
             .expect("response lane should remain open")
     };
 
+    let failed_lookup = RpcEnvelope {
+        request_id: "native-lookup-failure".into(),
+        route_key: "test.reply-mode-lookup-failure".into(),
+        direction: Some(Direction::Request as i32),
+        timeout_ms: 10_000,
+        ..Default::default()
+    };
+    for _ in 0..2 {
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(1),
+            inner.handle_incoming(
+                failed_lookup.clone(),
+                None,
+                Some(ReplySink::Inproc {
+                    response_tx: responses.clone(),
+                    span: tracing::Span::none(),
+                }),
+                None,
+            ),
+        )
+        .await
+        .expect("lookup failure must not leave the request in flight");
+        assert!(matches!(
+            outcome,
+            IncomingOutcome::Replied(Err(ActrError::Unavailable(_)))
+        ));
+    }
+
     let delayed = RpcEnvelope {
         request_id: "native-delayed-deadline".into(),
         route_key: "upload.Upload.FinishUpload".into(),
@@ -3998,6 +4026,58 @@ async fn native_package_explicit_reply_releases_dispatch_for_final_chunk() {
             .file_id,
         crate::dynclib::test_deadline_ticks().to_string()
     );
+
+    let callbacks_before = inner.data_chunk_registry.callback_len();
+    let swept = RpcEnvelope {
+        request_id: "native-swept-before-entry".into(),
+        route_key: "upload.Upload.FinishUpload".into(),
+        payload: Some(
+            FinishUploadRequest {
+                stream_id: "swept-before-entry".into(),
+                mode: "expired-before-entry".into(),
+            }
+            .encode_to_vec()
+            .into(),
+        ),
+        direction: Some(Direction::Request as i32),
+        timeout_ms: 50,
+        ..Default::default()
+    };
+    let dispatch_swept = inner
+        .admit_incoming(
+            swept,
+            None,
+            Some(ReplySink::Inproc {
+                response_tx: responses.clone(),
+                span: tracing::Span::none(),
+            }),
+            None,
+        )
+        .await;
+    let expired = inner
+        .outstanding_replies
+        .sweep_expired(
+            crate::lifecycle::dedup::INFLIGHT_TTL,
+            actr_framework::ReplyDeadline::now() + Duration::from_secs(1),
+        )
+        .await;
+    assert_eq!(expired.len(), 1);
+    inner
+        .dedup_state
+        .lock()
+        .await
+        .expire_inflight_explicit(&expired);
+    let outcome = dispatch_swept.await;
+    assert!(matches!(outcome, IncomingOutcome::Deferred));
+    let response = receive().await;
+    assert_eq!(response.request_id, "native-swept-before-entry");
+    assert!(response.error.is_some());
+    assert_eq!(
+        inner.data_chunk_registry.callback_len(),
+        callbacks_before + 1,
+        "the admitted guest handler must run after its reply capability expires"
+    );
+    inner.data_chunk_registry.unregister("swept-before-entry");
 
     for (id, mode) in [
         ("deferred-upload", "background"),

@@ -2564,7 +2564,13 @@ impl Inner {
             let native_mode = match &self.native_reply_modes {
                 Some(modes) => match modes.for_route(&envelope.route_key).await {
                     Ok(mode) => Some(mode),
-                    Err(error) => return ready_continuation(Err(error)),
+                    Err(error) => {
+                        self.dedup_state
+                            .lock()
+                            .await
+                            .complete(&dedup_key, Err(error.clone()));
+                        return ready_continuation(Err(error));
+                    }
                 },
                 None => None,
             };

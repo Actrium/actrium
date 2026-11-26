@@ -149,6 +149,32 @@ async fn cancelling_lookup_keeps_library_mapped_until_guest_thread_exits() {
     .unwrap();
 }
 
+#[tokio::test]
+async fn reply_claim_survives_retirement_of_the_reply_capability() {
+    let executor: HostAbiFn = Arc::new(|_| Box::pin(async { HostOperationResult::Done }));
+    let claimed = Arc::new(AtomicBool::new(false));
+    let bridge = BridgeRegistration::with_claim(&executor, Some(claimed.clone()));
+    let frame = HostClaimReplyV1 {}.to_frame().unwrap();
+    assert!(matches!(
+        reply_operation(bridge.token, frame),
+        Ok(HostOperationResult::Done)
+    ));
+    assert!(claimed.load(Ordering::Acquire));
+    let complete = HostCompleteReplyV1 {
+        outcome: Some(HostReplyOutcomeV1::Response(vec![])),
+    }
+    .to_frame()
+    .unwrap();
+    assert!(matches!(
+        reply_operation(bridge.token, complete),
+        Err(guest_abi::code::UNSUPPORTED_OP)
+    ));
+    assert!(matches!(
+        reply_operation(bridge.token, HostClaimReplyV1 {}.to_frame().unwrap()),
+        Err(guest_abi::code::PROTOCOL_ERROR)
+    ));
+}
+
 unsafe extern "C" fn slow_successful_shutdown() -> i32 {
     while !FALLBACK_RELEASE.load(Ordering::Acquire) {
         std::thread::sleep(Duration::from_millis(10));

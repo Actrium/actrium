@@ -23,6 +23,11 @@ impl dispatcher::ActrDispatchHandler for Upload {
         reply: Reply<upload::FinishUploadResponse>,
     ) -> ActorResult<()> {
         match request.mode.as_str() {
+            "expired-before-entry" => {
+                ctx.register_stream(request.stream_id, |_, _| Box::pin(async { Ok(()) }))
+                    .await?;
+                return Ok(());
+            }
             "expired-deadline" => {
                 let deadline = reply.deadline().unwrap();
                 assert!(deadline <= actr_framework::ReplyDeadline::now());

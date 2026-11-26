@@ -82,6 +82,12 @@ pub(crate) struct DynclibReplyModes {
 
 impl DynclibReplyModes {
     pub(crate) async fn for_route(&self, route: &str) -> Result<ReplyMode, ActrError> {
+        #[cfg(test)]
+        if route == "test.reply-mode-lookup-failure" {
+            return Err(ActrError::Unavailable(
+                "native reply-mode lookup failed".into(),
+            ));
+        }
         let library = self.library.upgrade().ok_or_else(|| {
             ActrError::Unavailable("native workload library is no longer available".into())
         })?;
@@ -117,6 +123,7 @@ struct BridgeEntry {
     executor: HostAbiFn,
     runtime: tokio::runtime::Handle,
     retain_count: usize,
+    reply_claimed: Option<Arc<AtomicBool>>,
 }
 
 struct NativeReply {
@@ -170,7 +177,11 @@ fn bridge_registry() -> &'static Mutex<HashMap<u64, BridgeEntry>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn register_bridge(executor: &HostAbiFn, runtime: tokio::runtime::Handle) -> u64 {
+fn register_bridge(
+    executor: &HostAbiFn,
+    runtime: tokio::runtime::Handle,
+    reply_claimed: Option<Arc<AtomicBool>>,
+) -> u64 {
     static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
     let token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
     bridge_registry()
@@ -182,6 +193,7 @@ fn register_bridge(executor: &HostAbiFn, runtime: tokio::runtime::Handle) -> u64
                 executor: executor.clone(),
                 runtime,
                 retain_count: 1,
+                reply_claimed,
             },
         );
     token
@@ -221,8 +233,12 @@ struct BridgeRegistration {
 
 impl BridgeRegistration {
     fn new(executor: &HostAbiFn) -> Self {
+        Self::with_claim(executor, None)
+    }
+
+    fn with_claim(executor: &HostAbiFn, reply_claimed: Option<Arc<AtomicBool>>) -> Self {
         Self {
-            token: register_bridge(executor, tokio::runtime::Handle::current()),
+            token: register_bridge(executor, tokio::runtime::Handle::current(), reply_claimed),
         }
     }
 }
@@ -319,20 +335,24 @@ fn reply_operation(token: u64, frame: guest_abi::AbiFrame) -> Result<HostOperati
     if frame.abi_version != guest_abi::version::V1 {
         return Err(guest_abi::code::PROTOCOL_ERROR);
     }
+    if frame.op == guest_abi::op::HOST_CLAIM_REPLY {
+        HostClaimReplyV1::decode_payload(&frame.payload)?;
+        let claimed = bridge_registry()
+            .lock()
+            .ok()
+            .and_then(|registry| registry.get(&token)?.reply_claimed.clone())
+            .ok_or(guest_abi::code::UNSUPPORTED_OP)?;
+        return claimed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| HostOperationResult::Done)
+            .map_err(|_| guest_abi::code::PROTOCOL_ERROR);
+    }
     let reply = reply_registry()
         .lock()
         .ok()
         .and_then(|registry| registry.get(&token).and_then(Weak::upgrade))
         .ok_or(guest_abi::code::UNSUPPORTED_OP)?;
 
-    if frame.op == guest_abi::op::HOST_CLAIM_REPLY {
-        HostClaimReplyV1::decode_payload(&frame.payload)?;
-        return reply
-            .claimed
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .map(|_| HostOperationResult::Done)
-            .map_err(|_| guest_abi::code::PROTOCOL_ERROR);
-    }
     if !reply.claimed.load(Ordering::Acquire) {
         return Err(guest_abi::code::PROTOCOL_ERROR);
     }
@@ -837,7 +857,10 @@ impl DynclibInstance {
             });
             Some((reply, deliver))
         });
-        let bridge = BridgeRegistration::new(call_executor);
+        let bridge = BridgeRegistration::with_claim(
+            call_executor,
+            reply.as_ref().map(|(reply, _)| reply.claimed.clone()),
+        );
         let reply_context = reply.as_ref().map(|(reply, _)| GuestReplyContextV1 {
             expects_response: reply.expects_response,
             token: bridge.token,
@@ -877,7 +900,11 @@ impl DynclibInstance {
             )?;
         #[cfg(test)]
         if delay_entry {
-            std::thread::sleep(std::time::Duration::from_millis(200));
+            tokio::task::spawn_blocking(|| {
+                std::thread::sleep(std::time::Duration::from_millis(200))
+            })
+            .await
+            .expect("delay guest entry");
         }
         let response = self.handle_encoded_request(request_owned).await?;
         if reply.is_some_and(|(reply, _)| !reply.claimed.load(Ordering::Acquire)) {

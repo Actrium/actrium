@@ -72,6 +72,8 @@ use bytes::Bytes;
 
 /// Caller deadline for an EXPLICIT reply (RFC-0323): arrival time plus
 /// `envelope.timeout_ms`, represented on the native system's monotonic clock.
+/// Compare it with [`ReplyDeadline::now`] or use
+/// [`ReplyDeadline::saturating_duration_since`] to obtain the remaining time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ReplyDeadline {
     #[cfg(any(all(unix, not(target_arch = "wasm32")), windows))]
@@ -171,7 +173,14 @@ impl ReplyDeadline {
 impl std::ops::Add<Duration> for ReplyDeadline {
     type Output = Self;
     fn add(self, rhs: Duration) -> Self {
-        self.checked_add(rhs).expect("reply deadline overflow")
+        #[cfg(any(all(unix, not(target_arch = "wasm32")), windows))]
+        {
+            self.checked_add(rhs).unwrap_or(Self { ticks_ns: u64::MAX })
+        }
+        #[cfg(not(any(all(unix, not(target_arch = "wasm32")), windows)))]
+        {
+            self.checked_add(rhs).expect("reply deadline overflow")
+        }
     }
 }
 
