@@ -1,0 +1,1462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Actrium Guest 开发指南</title>
+<style>
+/* ============================================================
+   Actrium Guest Dev Guide —— 工程手册风格设计系统
+   ============================================================ */
+:root {
+  --paper: #f7f5ef;
+  --paper-2: #efede4;
+  --card: #fffdf8;
+  --ink: #1e2430;
+  --ink-2: #4a5262;
+  --ink-3: #8a90a0;
+  --line: #dcd8cb;
+  --line-2: #c9c4b4;
+  --accent: #0e6e5c;          /* 深松绿 */
+  --accent-soft: #e3efe9;
+  --amber: #9a6206;           /* 琥珀：注意 */
+  --amber-soft: #f6ecd8;
+  --red: #a03a2e;             /* 朱红：限制 / 禁止 */
+  --red-soft: #f7e6e2;
+  --blue: #2b5d8a;            /* 靛蓝：信息 */
+  --blue-soft: #e4ecf4;
+  --violet: #5f4b8b;          /* 紫：系统能力 */
+  --violet-soft: #ece7f4;
+  --code-bg: #23262e;
+  --code-ink: #e8e6df;
+  --mono: "SF Mono", "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --serif: "Songti SC", "Noto Serif SC", "STSong", Georgia, serif;
+  --sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", -apple-system, sans-serif;
+  --sidebar-w: 288px;
+  --radius: 10px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.75;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- 顶栏 ---------- */
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; height: 56px; z-index: 60;
+  background: rgba(247,245,239,.92); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 16px; padding: 0 20px;
+}
+.topbar .brand {
+  font-family: var(--serif); font-size: 19px; font-weight: 700; letter-spacing: .5px;
+  display: flex; align-items: center; gap: 10px; white-space: nowrap;
+}
+.topbar .brand .sig {
+  font-family: var(--mono); font-size: 10px; font-weight: 400; color: var(--paper);
+  background: var(--ink); border-radius: 4px; padding: 2px 7px; letter-spacing: 1px;
+}
+.topbar .crumb { font-size: 12px; color: var(--ink-3); font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar .crumb b { color: var(--ink-2); font-weight: 600; }
+
+/* ---------- 侧边导航 ---------- */
+.sidebar {
+  position: fixed; top: 56px; left: 0; bottom: 0; width: var(--sidebar-w); z-index: 50;
+  background: var(--paper-2); border-right: 1px solid var(--line);
+  overflow-y: auto; padding: 18px 14px 40px;
+}
+.sidebar::-webkit-scrollbar { width: 8px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
+.search-box { position: relative; margin-bottom: 14px; }
+.search-box input {
+  width: 100%; padding: 9px 12px 9px 34px; font-size: 13px; font-family: var(--sans);
+  border: 1px solid var(--line-2); border-radius: 8px; background: var(--card); color: var(--ink);
+  outline: none; transition: border-color .2s, box-shadow .2s;
+}
+.search-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search-box svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); opacity: .45; }
+.nav-group { margin-bottom: 4px; }
+.nav-group > .nav-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 1.5px; color: var(--ink-3);
+  text-transform: uppercase; padding: 14px 10px 6px; user-select: none;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 7px;
+  font-size: 13.5px; color: var(--ink-2); text-decoration: none; cursor: pointer;
+  transition: background .15s, color .15s; position: relative;
+}
+.nav-item:hover { background: rgba(30,36,48,.06); color: var(--ink); }
+.nav-item.active { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: inset 2px 0 0 var(--accent); }
+.nav-item .no { font-family: var(--mono); font-size: 10px; color: var(--ink-3); width: 20px; flex: none; }
+.nav-item.hidden-by-search { display: none; }
+.nav-group.hidden-by-search { display: none; }
+.no-result { display: none; padding: 12px 10px; font-size: 12.5px; color: var(--ink-3); }
+
+/* ---------- 主内容 ---------- */
+.main { margin-left: var(--sidebar-w); padding: 88px 48px 120px; max-width: 1080px; }
+section.doc-section { margin-bottom: 84px; }
+.sec-head { margin-bottom: 28px; }
+.sec-kicker {
+  font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: 2px;
+  display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+}
+.sec-kicker::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+h1 {
+  font-family: var(--serif); font-size: 40px; font-weight: 900; line-height: 1.25; letter-spacing: 1px;
+}
+h1 .en { display: block; font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--ink-3); letter-spacing: 3px; margin-top: 6px; }
+h2 { font-family: var(--serif); font-size: 25px; font-weight: 800; margin: 48px 0 16px; scroll-margin-top: 80px; }
+h3 { font-size: 17px; font-weight: 700; margin: 32px 0 12px; scroll-margin-top: 80px; }
+h4 { font-size: 15px; font-weight: 700; margin: 22px 0 8px; }
+p { margin: 12px 0; }
+a { color: var(--blue); text-decoration: none; border-bottom: 1px solid transparent; }
+a:hover { border-bottom-color: var(--blue); }
+code {
+  font-family: var(--mono); font-size: .86em; background: var(--paper-2);
+  border: 1px solid var(--line); border-radius: 4px; padding: 1.5px 5px; color: #7a3b8f;
+}
+.path { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); background: var(--paper-2); border: 1px dashed var(--line-2); border-radius: 6px; padding: 2px 8px; word-break: break-all; }
+ul, ol { margin: 10px 0 10px 24px; }
+li { margin: 5px 0; }
+strong { font-weight: 700; }
+hr { border: none; border-top: 1px dashed var(--line-2); margin: 36px 0; }
+
+/* ---------- 状态徽章 ---------- */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+  padding: 2px 9px; border-radius: 99px; letter-spacing: .5px; white-space: nowrap;
+  vertical-align: 2px; margin-left: 8px;
+}
+.badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.badge.tbd { background: var(--amber-soft); color: var(--amber); }
+.badge.system { background: var(--violet-soft); color: var(--violet); }
+
+/* ---------- 提示框 ---------- */
+.callout {
+  border-radius: var(--radius); padding: 16px 18px 16px 20px; margin: 20px 0;
+  font-size: 14px; position: relative; border: 1px solid; border-left-width: 4px;
+}
+.callout .co-title { font-weight: 700; display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13.5px; letter-spacing: .5px; }
+.callout p { margin: 6px 0; }
+.callout.tip { background: var(--accent-soft); border-color: #bcd6c9; color: #24463c; }
+.callout.warn { background: var(--amber-soft); border-color: #e2cfa2; color: #5d430a; }
+.callout.danger { background: var(--red-soft); border-color: #e5bdb5; color: #6d271e; }
+.callout.info { background: var(--blue-soft); border-color: #c3d4e4; color: #24405c; }
+
+/* ---------- 代码块 ---------- */
+.codeblock {
+  position: relative; background: var(--code-bg); border-radius: var(--radius);
+  margin: 18px 0; overflow: hidden; box-shadow: 0 4px 18px rgba(30,36,48,.14);
+}
+.codeblock .cb-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: rgba(255,255,255,.04); border-bottom: 1px solid rgba(255,255,255,.07);
+}
+.codeblock .cb-lang { font-family: var(--mono); font-size: 11px; color: #8b93a7; letter-spacing: 1.5px; text-transform: uppercase; }
+.codeblock .cb-file { font-family: var(--mono); font-size: 11px; color: #6f7680; }
+.copy-btn {
+  font-family: var(--mono); font-size: 11px; color: #aab2c5; background: transparent;
+  border: 1px solid rgba(255,255,255,.16); border-radius: 6px; padding: 3px 10px; cursor: pointer;
+  transition: all .18s; display: inline-flex; align-items: center; gap: 5px;
+}
+.copy-btn:hover { color: #fff; border-color: rgba(255,255,255,.4); }
+.copy-btn.copied { color: #7ee0b8; border-color: #7ee0b8; }
+.codeblock pre { padding: 16px 18px; overflow-x: auto; font-family: var(--mono); font-size: 12.8px; line-height: 1.7; color: var(--code-ink); }
+.codeblock pre::-webkit-scrollbar { height: 8px; }
+.codeblock pre::-webkit-scrollbar-thumb { background: #3a3f4d; border-radius: 4px; }
+
+/* ---------- 表格 ---------- */
+.table-wrap { overflow-x: auto; margin: 18px 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th {
+  text-align: left; font-size: 12px; letter-spacing: 1px; color: var(--ink-3); font-weight: 700;
+  padding: 10px 14px; border-bottom: 2px solid var(--line); background: var(--paper-2); white-space: nowrap;
+}
+td { padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(30,36,48,.025); }
+td code { font-size: 12px; }
+
+/* ---------- 选项卡 ---------- */
+.tabs { margin: 20px 0; }
+.tabs .tab-btns { display: flex; gap: 4px; border-bottom: 2px solid var(--line); }
+.tab-radio { position: absolute; opacity: 0; width: 0; height: 0; }
+.tab-btn {
+  font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--ink-3);
+  background: none; border: none; padding: 8px 16px; cursor: pointer; position: relative; transition: color .18s;
+}
+.tab-btn:hover { color: var(--ink); }
+.tab-btn::after { content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 2px; background: var(--accent); opacity: 0; transition: opacity .18s; }
+#tab-contract-1:checked ~ .tab-btns .tab-btn[for="tab-contract-1"],
+#tab-contract-2:checked ~ .tab-btns .tab-btn[for="tab-contract-2"],
+#tab-contract-3:checked ~ .tab-btns .tab-btn[for="tab-contract-3"] { color: var(--accent); }
+#tab-contract-1:checked ~ .tab-btns .tab-btn[for="tab-contract-1"]::after,
+#tab-contract-2:checked ~ .tab-btns .tab-btn[for="tab-contract-2"]::after,
+#tab-contract-3:checked ~ .tab-btns .tab-btn[for="tab-contract-3"]::after { opacity: 1; }
+.tab-panel { display: none; padding-top: 4px; }
+#tab-contract-1:checked ~ #tp-contract-1,
+#tab-contract-2:checked ~ #tp-contract-2,
+#tab-contract-3:checked ~ #tp-contract-3 { display: block; animation: fadeUp .3s ease; }
+
+/* ---------- 折叠区块 ---------- */
+details.fold {
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--card);
+  margin: 14px 0; overflow: hidden;
+}
+details.fold summary {
+  cursor: pointer; padding: 12px 16px; font-weight: 600; font-size: 14px; list-style: none;
+  display: flex; align-items: center; gap: 10px; user-select: none; transition: background .15s;
+}
+details.fold summary::-webkit-details-marker { display: none; }
+details.fold summary::before {
+  content: "▸"; font-size: 12px; color: var(--accent); transition: transform .2s; flex: none;
+}
+details.fold[open] summary::before { transform: rotate(90deg); }
+details.fold summary:hover { background: var(--paper-2); }
+details.fold .fold-body { padding: 4px 18px 16px; border-top: 1px dashed var(--line); }
+
+/* ---------- 架构图（纯 CSS） ---------- */
+.arch {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 24px; margin: 24px 0; overflow-x: auto;
+}
+.arch-layer { margin-bottom: 14px; }
+.arch-layer:last-child { margin-bottom: 0; }
+.arch-label {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 2px; color: var(--ink-3);
+  margin-bottom: 6px; text-transform: uppercase;
+}
+.arch-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.arch-node {
+  flex: 1; min-width: 130px; border: 1.5px solid var(--line-2); border-radius: 8px;
+  padding: 10px 12px; font-size: 12.5px; background: var(--paper); position: relative;
+}
+.arch-node .an-title { font-weight: 700; font-size: 13px; margin-bottom: 3px; }
+.arch-node .an-sub { color: var(--ink-3); font-size: 11.5px; line-height: 1.5; }
+.arch-node.trusted { border-color: var(--accent); background: var(--accent-soft); }
+.arch-node.untrusted { border-color: var(--red); background: var(--red-soft); }
+.arch-node.transitional { border-color: var(--amber); background: var(--amber-soft); }
+.arch-node.target { border-color: var(--blue); background: var(--blue-soft); }
+.arch-node.system { border-color: var(--violet); background: var(--violet-soft); }
+.arch-arrow { text-align: center; color: var(--ink-3); font-size: 11.5px; font-family: var(--mono); padding: 3px 0; }
+.arch-arrow .arr { color: var(--accent); font-size: 14px; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); margin: 10px 0 0; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid; display: inline-block; }
+
+/* ---------- 管道步骤 ---------- */
+.pipeline { display: flex; align-items: stretch; gap: 0; margin: 22px 0; overflow-x: auto; padding: 6px 0; }
+.pipe-step {
+  flex: 1; min-width: 118px; background: var(--card); border: 1.5px solid var(--line-2);
+  border-radius: 8px; padding: 10px 12px; font-size: 12px; position: relative;
+}
+.pipe-step .ps-no {
+  font-family: var(--mono); font-size: 10px; color: var(--paper); background: var(--ink);
+  width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center;
+  justify-content: center; margin-bottom: 5px;
+}
+.pipe-step .ps-title { font-weight: 700; font-size: 12.5px; }
+.pipe-step .ps-sub { color: var(--ink-3); font-size: 11px; margin-top: 2px; line-height: 1.45; }
+.pipe-conn { flex: none; align-self: center; color: var(--line-2); font-size: 16px; padding: 0 4px; }
+
+/* ---------- 交互：能力交集计算器 ---------- */
+.cap-calc { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; margin: 22px 0; }
+.cap-calc .cc-factors { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 14px 0; }
+.cap-factor {
+  border: 1.5px solid var(--line-2); border-radius: 8px; padding: 10px 13px; cursor: pointer;
+  font-size: 13px; display: flex; align-items: center; gap: 9px; transition: all .18s; user-select: none;
+  background: var(--paper);
+}
+.cap-factor:hover { border-color: var(--ink-3); }
+.nav-item:focus-visible, .tab-btn:focus-visible, .cap-factor:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 3px;
+}
+.cap-factor .cf-check {
+  width: 17px; height: 17px; border-radius: 5px; border: 1.5px solid var(--line-2); flex: none;
+  display: inline-flex; align-items: center; justify-content: center; transition: all .18s; font-size: 11px; color: transparent;
+}
+.cap-factor.on { border-color: var(--accent); background: var(--accent-soft); }
+.cap-factor.on .cf-check { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cap-factor .cf-name { font-weight: 600; }
+.cap-factor .cf-desc { display: block; font-size: 11.5px; color: var(--ink-3); }
+.cap-calc .cc-result {
+  border-radius: 8px; padding: 13px 16px; font-size: 13.5px; font-weight: 600; transition: all .25s;
+}
+.cap-calc .cc-result.ok { background: var(--accent-soft); color: var(--accent); border: 1px solid #bcd6c9; }
+.cap-calc .cc-result.fail { background: var(--red-soft); color: var(--red); border: 1px solid #e5bdb5; }
+
+/* ---------- 组件白名单网格 ---------- */
+.comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 10px; margin: 18px 0; }
+.comp-card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 11px 13px;
+  font-size: 12.5px; transition: all .18s; cursor: default;
+}
+.comp-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(30,36,48,.08); }
+.comp-card .cc-name { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--ink); }
+.comp-card .cc-desc { color: var(--ink-3); font-size: 11.5px; margin-top: 3px; line-height: 1.5; }
+
+/* ---------- 术语 tooltip ---------- */
+.term { border-bottom: 1.5px dotted var(--accent); cursor: help; position: relative; color: inherit; }
+.term:hover::after {
+  content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  background: var(--ink); color: var(--paper); font-size: 12px; line-height: 1.55; padding: 9px 13px;
+  border-radius: 8px; width: max-content; max-width: 300px; white-space: normal; z-index: 90;
+  font-family: var(--sans); font-weight: 400; box-shadow: 0 6px 20px rgba(0,0,0,.25); pointer-events: none;
+}
+.term:hover::before {
+  content: ""; position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%);
+  border: 6px solid transparent; border-top-color: var(--ink); z-index: 90; pointer-events: none;
+}
+
+
+/* ---------- 页脚 ---------- */
+.footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
+.footer .path { margin-right: 6px; }
+
+/* ---------- 动画 ---------- */
+@keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* ---------- 单章节切换：纯 CSS radio 驱动，无 JS（企业微信预览）也可用 ---------- */
+.nav-radio { display: none; }
+.doc-section { display: none; animation: fadeUp .5s ease both; }
+#tab-sec-overview:checked ~ .page #sec-overview,
+#tab-sec-quickstart:checked ~ .page #sec-quickstart,
+#tab-sec-ui:checked ~ .page #sec-ui,
+#tab-sec-hostapi:checked ~ .page #sec-hostapi,
+#tab-sec-service:checked ~ .page #sec-service,
+#tab-sec-manifest:checked ~ .page #sec-manifest,
+#tab-sec-security:checked ~ .page #sec-security,
+#tab-sec-protocol:checked ~ .page #sec-protocol,
+#tab-sec-debug:checked ~ .page #sec-debug,
+#tab-sec-ref:checked ~ .page #sec-ref { display: block; }
+#tab-sec-overview:checked ~ .page .nav-item[for="tab-sec-overview"],
+#tab-sec-quickstart:checked ~ .page .nav-item[for="tab-sec-quickstart"],
+#tab-sec-ui:checked ~ .page .nav-item[for="tab-sec-ui"],
+#tab-sec-hostapi:checked ~ .page .nav-item[for="tab-sec-hostapi"],
+#tab-sec-service:checked ~ .page .nav-item[for="tab-sec-service"],
+#tab-sec-manifest:checked ~ .page .nav-item[for="tab-sec-manifest"],
+#tab-sec-security:checked ~ .page .nav-item[for="tab-sec-security"],
+#tab-sec-protocol:checked ~ .page .nav-item[for="tab-sec-protocol"],
+#tab-sec-debug:checked ~ .page .nav-item[for="tab-sec-debug"] {
+  background: var(--card); color: var(--ink); font-weight: 600; box-shadow: inset 2px 0 0 var(--accent);
+}
+/* 移动端章节条（label 纯 CSS 可用） */
+.mobile-tabs {
+  display: none; position: fixed; top: 56px; left: 0; right: 0; z-index: 55;
+  background: rgba(247,245,239,.95); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line); padding: 8px 12px; gap: 6px;
+  overflow-x: auto; white-space: nowrap; align-items: center;
+}
+.mobile-tabs .nav-item {
+  display: inline-flex; flex: none; padding: 5px 12px; font-size: 12.5px;
+  border: 1px solid var(--line-2); border-radius: 99px; background: var(--card);
+}
+.mobile-tabs .nav-item .no { width: auto; margin-right: 6px; }
+mark { background: #ffe9a8; border-radius: 3px; padding: 0 2px; }
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 960px) {
+  .sidebar { display: none; }
+  .main { margin-left: 0; padding: 126px 22px 80px; }
+  .mobile-tabs { display: flex; }
+}
+@media print {
+  .sidebar, .topbar, .copy-btn { display: none; }
+  .main { margin: 0; max-width: none; }
+  .doc-section { display: block !important; }
+  .tab-panel { display: block !important; padding-top: 8px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============ 章节切换 radio（纯 CSS 驱动，无 JS 环境也可单章节显示） ============ -->
+<input type="radio" name="nav" id="tab-sec-overview" class="nav-radio" checked>
+<input type="radio" name="nav" id="tab-sec-quickstart" class="nav-radio">
+<input type="radio" name="nav" id="tab-sec-ui" class="nav-radio">
+<input type="radio" name="nav" id="tab-sec-hostapi" class="nav-radio">
+<input type="radio" name="nav" id="tab-sec-service" class="nav-radio">
+<input type="radio" name="nav" id="tab-sec-manifest" class="nav-radio">
+<input type="radio" name="nav" id="tab-sec-security" class="nav-radio">
+<input type="radio" name="nav" id="tab-sec-protocol" class="nav-radio">
+<input type="radio" name="nav" id="tab-sec-debug" class="nav-radio">
+
+<div class="page">
+
+<!-- ================= 顶栏 ================= -->
+<header class="topbar">
+  <div class="brand"><span class="sig">GUEST</span> Actrium Guest 开发指南</div>
+  <div class="crumb" id="crumb">文档 / <b>概览</b></div>
+</header>
+
+<div class="mobile-tabs">
+  <label class="nav-item" for="tab-sec-overview"><span class="no">00</span>概览</label>
+  <label class="nav-item" for="tab-sec-quickstart"><span class="no">01</span>快速开始</label>
+  <label class="nav-item" for="tab-sec-ui"><span class="no">02</span>UI 开发</label>
+  <label class="nav-item" for="tab-sec-hostapi"><span class="no">03</span>Host 能力</label>
+  <label class="nav-item" for="tab-sec-service"><span class="no">04</span>service.*</label>
+  <label class="nav-item" for="tab-sec-manifest"><span class="no">05</span>manifest</label>
+  <label class="nav-item" for="tab-sec-security"><span class="no">06</span>安全模型</label>
+  <label class="nav-item" for="tab-sec-protocol"><span class="no">07</span>通信协议</label>
+  <label class="nav-item" for="tab-sec-debug"><span class="no">08</span>调试</label>
+</div>
+
+<!-- ================= 侧边导航 ================= -->
+<nav class="sidebar" id="sidebar">
+  <div class="search-box">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input type="search" id="searchInput" placeholder="搜索章节 / 组件 / 关键词…" autocomplete="off">
+  </div>
+  <div class="no-result" id="noResult">没有匹配的章节</div>
+  <div class="nav-group"><div class="nav-title">开始</div>
+    <label class="nav-item" for="tab-sec-overview"   data-group="开始" data-label="概览与架构"><span class="no">00</span>概览与架构</label>
+    <label class="nav-item" for="tab-sec-quickstart" data-group="开始" data-label="快速开始"><span class="no">01</span>快速开始</label>
+  </div>
+  <div class="nav-group"><div class="nav-title">开发</div>
+    <label class="nav-item" for="tab-sec-ui"      data-group="开发" data-label="UI 开发（组件 / Hooks）"><span class="no">02</span>UI 开发（组件 / Hooks）</label>
+    <label class="nav-item" for="tab-sec-hostapi" data-group="开发" data-label="调用 Host 能力"><span class="no">03</span>调用 Host 能力</label>
+    <label class="nav-item" for="tab-sec-service" data-group="开发" data-label="固定路由 Service"><span class="no">04</span>固定路由 Service</label>
+  </div>
+  <div class="nav-group"><div class="nav-title">契约</div>
+    <label class="nav-item" for="tab-sec-manifest" data-group="契约" data-label="能力声明 manifest"><span class="no">05</span>能力声明 manifest</label>
+    <label class="nav-item" for="tab-sec-security" data-group="契约" data-label="安全与能力模型"><span class="no">06</span>安全与能力模型</label>
+  </div>
+  <div class="nav-group"><div class="nav-title">进阶</div>
+    <label class="nav-item" for="tab-sec-protocol" data-group="进阶" data-label="通信协议"><span class="no">07</span>通信协议</label>
+    <label class="nav-item" for="tab-sec-debug"    data-group="进阶" data-label="调试与生命周期"><span class="no">08</span>调试与生命周期</label>
+  </div>
+</nav>
+
+<!-- ================= 主内容 ================= -->
+<main class="main" id="main">
+
+<!-- ========== 00 概览 ========== -->
+<section class="doc-section" id="sec-overview">
+  <div class="sec-head">
+    <div class="sec-kicker">SECTION 00 · OVERVIEW</div>
+    <h1>Guest 开发指南<span class="en">ACTRIUM MINI-PROGRAM DEVELOPMENT GUIDE</span></h1>
+  </div>
+
+  <p><strong>Guest（小程序）</strong>是运行在 Actrium 沙箱中的不受信应用代码：业务 JS 经 <span class="term" data-tip="Actrium 的沙箱引擎，基于 QuickJS-WASM，负责创建和控制 Guest 运行实例">Keel Engine</span> 的 <code>loadBundle</code> 加载后形成运行实例，通过声明式 UI 与受控能力调用和 Host 交互。本文面向 Guest 开发者，覆盖工程搭建、UI、Host 能力、固定路由 Service RPC、打包与验证。</p>
+
+  <div class="callout info">
+    <div class="co-title">文档范围与基线</div>
+    <p>本文以 Actrium <code>f09a82b4</code>、ACTR Hub <code>155c60c9</code> 为审核基线，描述 <strong>Actrium Product v1</strong>、<code>keel.guest/1</code>、<code>actr-package/2</code> 和 capability <code>schemaVersion = 1</code>。通用 Keel SDK 中存在某个导出，不代表它能通过 Product v1 构建；未列出或标为系统、内部、legacy 的 <code>host:*</code> 能力和调用方式，不应作为第三方 Guest 公共 API 使用。</p>
+  </div>
+
+  <h3>整体分层</h3>
+  <p>先建立全局观：<strong>Actr Host</strong> 是 Actor 运行时；<strong>Front Actor</strong> 是逻辑 Actor 实例；<strong>Front Host</strong> 是 Front Actor 的受信宿主部分；<strong>Keel Host</strong> 是其中负责创建 Guest 沙箱的组件，由 React Native 承载。</p>
+
+  <div class="arch">
+    <div class="arch-layer">
+      <div class="arch-label">Actrium Shell（原生产品壳 · 受信）</div>
+      <div class="arch-row">
+        <div class="arch-node trusted"><div class="an-title">Shell UI</div><div class="an-sub">Tab / 地址栏 / 权限 UI（Swift）</div></div>
+        <div class="arch-node trusted"><div class="an-title">Tab Runtime Manager</div><div class="an-sub">创建 / 重建 Front Actor</div></div>
+        <div class="arch-node trusted"><div class="an-title">Permission Manager</div><div class="an-sub">权限策略</div></div>
+        <div class="arch-node trusted"><div class="an-title">Verified Package Cache</div><div class="an-sub">只提供已验证 bytes</div></div>
+      </div>
+    </div>
+    <div class="arch-arrow"><span class="arr">↓</span> 仅提供已验证的 guestScript 与 capability manifest</div>
+    <div class="arch-layer">
+      <div class="arch-label">Actr Host（Actor 运行时 · 受信）</div>
+      <div class="arch-row">
+        <div class="arch-node system"><div class="an-title">Front Actor / Front Host</div><div class="an-sub">Attach 后的固定 Service target · Capability Broker · 会话授权</div></div>
+        <div class="arch-node system"><div class="an-title">Service Actor</div><div class="an-sub">业务状态 / Workspace / RPC handler</div></div>
+      </div>
+    </div>
+    <div class="arch-arrow"><span class="arr">↓</span> 固定路由绑定 / capability 校验 / 当前 Tab 的 Service 传输</div>
+    <div class="arch-layer">
+      <div class="arch-label">Keel Host（由 React Native 承载）</div>
+      <div class="arch-row">
+        <div class="arch-node transitional"><div class="an-title">Keel Engine / QuickJS</div><div class="an-sub">加载前校验 linkage · 创建 Guest 沙箱 · contract dispatch</div></div>
+      </div>
+    </div>
+    <div class="arch-arrow"><span class="arr">↓</span> Keel Bridge：render ops / 事件 / 调用（KBS1 envelope）</div>
+    <div class="arch-layer">
+      <div class="arch-label">信任边界</div>
+      <div class="arch-row">
+        <div class="arch-node untrusted"><div class="an-title">Keel Guest（不受信）</div><div class="an-sub">guest.js 的运行实例 · 只能通过受控接口调 Host</div></div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i style="border-color:var(--accent);background:var(--accent-soft)"></i>受信原生</span>
+      <span><i style="border-color:var(--amber);background:var(--amber-soft)"></i>RN 承载</span>
+      <span><i style="border-color:var(--violet);background:var(--violet-soft)"></i>Actor 运行时</span>
+      <span><i style="border-color:var(--red);background:var(--red-soft)"></i>不受信 Guest</span>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <div class="co-title">关键认知</div>
+    <p><strong>不是 Native 把 Service 对象逐层传给 Guest。</strong>Guest 通过 <code>host:service/&lt;固定路由&gt;</code> 的 named import 取得 <code>call</code> 或 <code>on</code>；真正传递的是 Base64 业务载荷和返回结果，Service target 由 Front 在 Attach 后固定。<code>guest.js</code> 与 Keel Guest 也不是两个概念——前者是 <code>.actr</code> 包内文件，后者是它经加载后的运行实例。</p>
+  </div>
+
+  <h3>Product v1 Service 调用路径</h3>
+  <div class="pipeline">
+    <div class="pipe-step"><span class="ps-no">1</span><div class="ps-title">Guest</div><div class="ps-sub">固定模块 call({ payloadBase64 })</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">2</span><div class="ps-title">Keel Host</div><div class="ps-sub">Boundary 校验 + 注入固定 route</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">3</span><div class="ps-title">Capability</div><div class="ps-sub">包声明 + 平台策略 + 会话授权</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">4</span><div class="ps-title">Service Transport</div><div class="ps-sub">RealmService / 当前 Tab 的 serviceCallUrl</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">5</span><div class="ps-title">Service Actor</div><div class="ps-sub">返回 Base64 业务结果</div></div>
+  </div>
+  <div class="callout warn">
+    <div class="co-title">Legacy 路径不属于新应用开发面</div>
+    <p><code>ACTR_CALL</code> 和固定 <code>127.0.0.1:8391</code> 网关仅用于 Host 指定的 legacy Echo 演示包。新应用必须使用上述固定路由与当前 Tab 附着的 Service 传输。</p>
+  </div>
+
+  <h3>Contract 校验路径</h3>
+  <p>Guest 与 Host 的能力调用走 <strong>Keel Contract</strong> 类型化路径：<code>rpc()</code> / <code>subscription()</code> 描述符经 dispatch table 路由到 Host 实现。声明了 <code>BoundarySchema</code> 的边界执行 <code>parseInput</code> / <code>parseOutput</code> / <code>parseEvent</code>；TypeScript 泛型本身不会自动生成运行时校验。</p>
+</section>
+
+<!-- ========== 01 快速开始 ========== -->
+<section class="doc-section" id="sec-quickstart">
+  <div class="sec-head">
+    <div class="sec-kicker">SECTION 01 · QUICKSTART</div>
+    <h1 style="font-size:30px">快速开始<span class="en" style="font-size:11px">YOUR FIRST GUEST APP</span></h1>
+  </div>
+
+  <p>一个 Guest 应用的核心是会被打包进 <code>.actr</code> 的 JS bundle。Product v1 使用 <code>react</code>、JSX runtime、<code>keel/guest</code> 和静态声明的 <code>host:*</code> 模块；JSX 由自定义 reconciler 转成 render ops 发给 Host 渲染。</p>
+  <div class="callout info">
+    <div class="co-title">开始前准备</div>
+    <p>准备 Bun、与本文基线匹配的 Actrium/Keel checkout 及依赖，并使用兼容的 <code>actr</code> CLI。以下命令从 package payload 根目录执行；<code>/path/to/actrium</code> 和签名 key 路径需要替换为实际值。发布到新环境时，应重新确认版本基线。</p>
+  </div>
+
+  <h2 id="qs-minimal">最小可构建示例</h2>
+  <p>工程使用 ESM，入口组件<strong>默认导出</strong>，构建器自动追加 render footer。<code>keel/guest</code> 与 <code>host:*</code> 必须使用 named imports；这里只使用 v1 白名单中的 <code>View</code>、<code>Text</code> 和 <code>Button</code>。</p>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">guest · src/guest.tsx</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>import React, { useState } from 'react';
+import { Button, Text, View } from 'keel/guest';
+
+export default function App() {
+  const [count, setCount] = useState(0);
+  return (
+    &lt;View style={{ flex: 1, padding: 24 }}&gt;
+      &lt;Text style={{ fontSize: 20 }}&gt;你好，Actrium&lt;/Text&gt;
+      &lt;Text&gt;点击次数：{count}&lt;/Text&gt;
+      &lt;Button title="点我 +1" onPress={() =&gt; setCount(c =&gt; c + 1)} /&gt;
+    &lt;/View&gt;
+  );
+}</pre></div>
+
+  <p>这个纯 UI 示例不申请 Host 方法，因此合约只声明空集合。使用 Host 或 Service 能力时，再按后文添加描述符和 BoundarySchema。</p>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · src/keel.contract.ts</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>import { defineKeelContract } from 'keel/contract';
+
+export const contract = defineKeelContract({
+  version: '1.0.0',
+  hostModules: {},
+  guestExports: {},
+});</pre></div>
+
+  <div class="callout tip">
+    <div class="co-title">Product v1 模块规则</div>
+    <p>构建器 external 化 <code>react</code>、<code>react/jsx-runtime</code>、<code>react/jsx-dev-runtime</code>、<code>keel/guest</code> 和 <code>host:*</code>。<code>keel/guest</code> 与 <code>host:*</code> 的 default、namespace、bare import 不能表达能力边界，v1 会拒绝；动态 import、<code>eval</code>、<code>Function</code> 和未登记的 runtime dependency 也不可用。通用 Keel 的 <code>react-native</code> shim 或 <code>keel/reconciler</code> 白名单不能替代这套更严格的 v1 构建规则。</p>
+  </div>
+
+  <h2 id="qs-structure">工程结构</h2>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">text · package payload 根目录</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>my-guest/
+├── package.json               # 固定依赖与构建脚本
+├── tsconfig.json
+├── front-package.toml         # 未签名 package manifest 模板
+├── src/
+│   ├── guest.tsx              # 入口组件
+│   └── keel.contract.ts       # Keel boundary contract
+└── workload/                  # 构建生成
+    ├── guest.js
+    └── capabilities.json</pre></div>
+
+  <p>构建前需要安装依赖：<code>keel.contract.ts</code> 从 <code>keel/contract</code> 导入，JSX 依赖 <code>react</code>。使用与 Actrium checkout 匹配的 <code>keel</code> 包（<code>file:</code> 依赖）和兼容的 React 版本：</p>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">json · package.json</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>{
+  "name": "my-guest",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "keel": "file:/path/to/actrium/packages/keel",
+    "react": "19.0.0"
+  }
+}</pre></div>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">bash</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>bun install</pre></div>
+
+  <p>构建 Guest bundle 和 Product v1 capability manifest：</p>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">bash</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>bun /path/to/actrium/packages/keel/src/cli/bin.ts build src/guest.tsx \
+  --outfile workload/guest.js \
+  --contract src/keel.contract.ts \
+  --v1-capability-manifest workload/capabilities.json \
+  --no-minify</pre></div>
+
+  <h2 id="qs-package">打包与验证</h2>
+  <p>下面是纯 UI 示例的 <code>front-package.toml</code>。<code>publisher</code> 必须与签名 key 绑定的 Publisher 一致；<code>size</code>、<code>sha256</code> 和 <code>key-id</code> 占位值由 packer 更新。使用 Service 或其他 Host 能力时，需要增加相应 dependency、contract 文件和 capability 声明。</p>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">toml · front-package.toml</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>format = "actr-package/2"
+
+[actor]
+publisher = "publisher.example"
+name = "my-guest"
+version = "0.1.0"
+
+[workload]
+profile = "keel.guest/1"
+entry = "workload/guest.js"
+
+[workload.keel]
+runtime = "js"
+guest-api = "keel.guest/1"
+capabilities = "workload/capabilities.json"
+
+[host]
+profile = "actr.host/1"
+api = "^1.0.0"
+required-capabilities = ["ui.render"]
+optional-capabilities = []
+
+[extensions.actrium]
+title = "My Guest"
+description = "A minimal Product v1 Guest"
+
+[signature]
+algorithm = "ed25519"
+key-id = "placeholder"
+
+[[files]]
+path = "workload/guest.js"
+role = "workload"
+media-type = "text/javascript"
+size = 0
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[files]]
+path = "workload/capabilities.json"
+role = "profile"
+media-type = "application/json"
+size = 0
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"</pre></div>
+
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">bash · 签名打包并验证</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>actr pkg pack \
+  --manifest-path front-package.toml \
+  --payload-root . \
+  --key /path/to/publisher-key.json \
+  --output dist/my-guest.actr
+
+actr pkg verify \
+  --package dist/my-guest.actr \
+  --pubkey /path/to/public-key.json</pre></div>
+  <p>不要用通用 ZIP 命令代替 packer。发布和装载参数由目标 Realm 或开发环境决定；完整 Front/Service 示例可参考 ACTR Hub 的 <code>echo</code>。Host 加载时不应出现 <code>component_not_allowed</code>、<code>unknown_capability</code> 或 <code>capability_mismatch</code>。</p>
+
+  <p><code>.actr</code> 使用 <code>actr-package/2</code>（不要与已停用的 v1 package 字段混用），ZIP entry 使用 STORE：</p>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">text · .actr 包内布局</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>my-guest.actr
+├── manifest.toml            # 必需：[[files]] 描述 path/role/media-type/size/sha256
+├── manifest.sig             # 必需：64 字节 Ed25519 签名
+├── manifest.lock.toml       # 可选：包含时必须有 role="lock"
+├── workload/
+│   ├── guest.js             # role=workload
+│   └── capabilities.json    # role=profile，受 package 签名保护
+└── proto/                   # 仅 Service 应用需要
+    └── service.proto        # Guest 与 Service 共用的业务接口</pre></div>
+
+  <div class="table-wrap"><table>
+    <tr><th>保留 Workload Profile</th><th>用途</th></tr>
+    <tr><td><code>actr.component/1</code></td><td>WebAssembly Component workload</td></tr>
+    <tr><td><code>actr.native/1</code></td><td>Native workload（如 cdylib Service）</td></tr>
+    <tr><td><code>actr.linked/1</code></td><td>Linked workload</td></tr>
+    <tr><td><code>keel.guest/1</code></td><td>Keel Guest（JS）</td></tr>
+  </table></div>
+</section>
+
+<!-- ========== 02 UI 开发 ========== -->
+<section class="doc-section" id="sec-ui">
+  <div class="sec-head">
+    <div class="sec-kicker">SECTION 02 · UI</div>
+    <h1 style="font-size:30px">UI 开发<span class="en" style="font-size:11px">COMPONENTS · HOOKS · STYLING</span></h1>
+  </div>
+
+  <p>Guest 写标准 React JSX，由自定义 <span class="term" data-tip="把 React 树的变化翻译成渲染操作（创建 / 更新 / 删除节点）的引擎">reconciler</span> 转成操作批次发给 Host，由 Host 渲染为原生组件树。<strong>Product v1 只允许 12 个协议组件</strong>；从 <code>keel/guest</code> 获取白名单外组件会在构建期报 <code>component_not_allowed</code>。</p>
+
+  <h2 id="ui-components">组件白名单（12 个）</h2>
+  <p>下表同时区分源码组件名与 manifest 名称。除 <code>Image</code> → <code>ImageAsset</code> 外，其余名称一致：</p>
+  <div class="comp-grid">
+    <div class="comp-card"><div class="cc-name">&lt;View&gt;</div><div class="cc-desc">容器，布局基础</div></div>
+    <div class="comp-card"><div class="cc-name">&lt;Text&gt;</div><div class="cc-desc">文本节点</div></div>
+    <div class="comp-card"><div class="cc-name">&lt;ScrollView&gt;</div><div class="cc-desc">滚动容器</div></div>
+    <div class="comp-card"><div class="cc-name">&lt;TextInput&gt;</div><div class="cc-desc">文本输入</div></div>
+    <div class="comp-card"><div class="cc-name">&lt;Button&gt;</div><div class="cc-desc">按钮</div></div>
+    <div class="comp-card"><div class="cc-name">&lt;FlatList&gt;</div><div class="cc-desc">高性能列表</div></div>
+    <div class="comp-card"><div class="cc-name">&lt;Image&gt;</div><div class="cc-desc">源码使用 Image；manifest 记录 ImageAsset</div></div>
+    <div class="comp-card"><div class="cc-name">&lt;Supramark&gt;</div><div class="cc-desc">Markdown 渲染（markdown / theme / paddingHorizontal）</div></div>
+    <div class="comp-card"><div class="cc-name">&lt;Switch&gt;</div><div class="cc-desc">开关</div></div>
+    <div class="comp-card"><div class="cc-name">&lt;Select&gt;</div><div class="cc-desc">下拉选择，原生菜单（options / value / onValueChange）</div></div>
+    <div class="comp-card"><div class="cc-name">&lt;Menu&gt;</div><div class="cc-desc">原生弹出菜单，按选项回调 onSelect</div></div>
+    <div class="comp-card"><div class="cc-name">&lt;Svg&gt;</div><div class="cc-desc">矢量图形，需宿主链接原生 SVG 渲染器</div></div>
+  </div>
+  <div class="callout warn">
+    <div class="co-title">白名单即安全边界</div>
+    <p>manifest 的 <code>components</code> 只能包含 <code>View</code>、<code>Text</code>、<code>ScrollView</code>、<code>TextInput</code>、<code>Button</code>、<code>FlatList</code>、<code>ImageAsset</code>、<code>Supramark</code>、<code>Switch</code>、<code>Select</code>、<code>Menu</code>、<code>Svg</code>。源码中不要导入 <code>ImageAsset</code>，应导入 <code>Image</code>。清单主要来自 named imports 和组件引用分析，不是对最终 JSX 是否实际渲染的扫描。剪贴板、文件导入、语音识别等需求走 <code>host:*</code> 能力，不占组件名额。</p>
+  </div>
+
+  <h2 id="ui-hooks">Hooks 与 SDK 工具</h2>
+  <div class="table-wrap"><table>
+    <tr><th>API</th><th>来源与签名</th><th>Product v1 说明</th></tr>
+    <tr><td>React hooks</td><td><code>react</code>：<code>useState</code> / <code>useEffect</code> / <code>useRef</code> 等</td><td>用于状态、生命周期和本地引用；setState 触发增量重渲染</td></tr>
+    <tr><td><code>useConfig</code></td><td><code>keel/guest</code>：<code>&lt;T&gt;() =&gt; config</code></td><td>读取当前配置，由初始配置和 <code>CONFIG_UPDATE</code> 驱动</td></tr>
+    <tr><td><code>StyleSheet</code></td><td><code>keel/guest</code></td><td>样式工具，不占用组件 capability</td></tr>
+    <tr><td>UTF-8 / Base64</td><td><code>createUtf8Encoder</code> / <code>createUtf8Decoder</code> / <code>encodeBase64</code> / <code>decodeBase64</code></td><td>Service 业务载荷编解码，避免依赖浏览器全局</td></tr>
+    <tr><td><code>nowMs</code></td><td><code>keel/guest</code>：<code>() =&gt; number</code></td><td>沙箱兼容计时</td></tr>
+  </table></div>
+  <p>其他通用 Keel Hook 不因出现在 SDK 导出列表中就自动进入 Product v1 白名单。业务推送使用固定 <code>host:service/&lt;event&gt;</code> 的 <code>on</code>，不要使用通用命名事件 Hook 代替。</p>
+
+  <div class="callout danger">
+    <div class="co-title">沙箱不是浏览器</div>
+    <p><code>TextEncoder</code>、<code>TextDecoder</code>、<code>performance</code>、<code>btoa</code>、<code>atob</code>、<code>Buffer</code>、<code>crypto</code> 等浏览器或 Node 全局不能作为 Guest 依赖。需要 UTF-8、Base64 或计时时，使用上表中的 <code>keel/guest</code> helper。</p>
+  </div>
+
+  <h2 id="ui-style">样式与限制</h2>
+  <ul>
+    <li>style 对象原样透传（guest-encoder 对 style 不做编码，直接随 props 传 Host）。</li>
+    <li>函数 props 会被注册为回调引用，序列化为 <code>{'{ __type: "function", __fnId }'}</code>；Host 触发事件时经 CALL_FUNCTION 消息回调 Guest。</li>
+    <li>文本、数组、层级深度受组件 schema 限制（超出上限会被拒绝）。</li>
+  </ul>
+
+  <details class="fold">
+    <summary>渲染操作类型一览（Operation Types）</summary>
+    <div class="fold-body">
+      <div class="table-wrap"><table>
+        <tr><th>操作</th><th>字段</th><th>说明</th></tr>
+        <tr><td><code>CREATE</code></td><td>id, type, props</td><td>创建虚拟节点</td></tr>
+        <tr><td><code>UPDATE</code></td><td>id, props, removedProps</td><td>更新属性（增量）</td></tr>
+        <tr><td><code>DELETE</code></td><td>id</td><td>删除节点及后代</td></tr>
+        <tr><td><code>APPEND</code></td><td>id, parentId, childId</td><td>追加子节点</td></tr>
+        <tr><td><code>INSERT</code></td><td>id, parentId, childId, index</td><td>按位置插入</td></tr>
+        <tr><td><code>REMOVE</code></td><td>id, parentId, childId</td><td>从父节点移除</td></tr>
+        <tr><td><code>REORDER</code></td><td>id, parentId, childIds</td><td>重排子节点</td></tr>
+        <tr><td><code>TEXT</code></td><td>id, text</td><td>更新文本（__TEXT__ 节点）</td></tr>
+      </table></div>
+      <p style="font-size:12.5px;color:var(--ink-2)">更新流程：setState → reconciler diff → 只有变化节点产生操作 → OperationCollector 在 commit 末尾 flush 为单个 OperationBatch → Receiver.applyBatch 增量应用到 nodeMap → 原生 UI 最小化更新。</p>
+    </div>
+  </details>
+</section>
+
+<!-- ========== 03 Host 能力调用 ========== -->
+<section class="doc-section" id="sec-hostapi">
+  <div class="sec-head">
+    <div class="sec-kicker">SECTION 03 · HOST CAPABILITIES</div>
+    <h1 style="font-size:30px">调用 Host 能力<span class="en">KEEL CONTRACT · RPC &amp; SUBSCRIPTION</span></h1>
+  </div>
+
+  <p>Guest 通过 <code>host:*</code> 的 named import 使用 Host 已实现的能力。<strong>Keel Contract</strong> 声明模块、方法和边界 schema；它不能让一个 Host 尚未实现的能力变得可用。第三方 Guest 不应自行发明 <code>host:analytics</code> 等模块名。</p>
+
+  <h2 id="cap-contract">统一示例：剪贴板</h2>
+  <p>下面三个 Tab 使用同一个真实模块。<code>parseInput</code> 是运行时校验；<code>rpc&lt;{ text: string }, void&gt;</code> 的泛型只提供 TypeScript 类型，不能替代它。</p>
+  <div class="tabs">
+    <input type="radio" name="tab-contract" id="tab-contract-1" class="tab-radio" checked>
+    <input type="radio" name="tab-contract" id="tab-contract-2" class="tab-radio">
+    <input type="radio" name="tab-contract" id="tab-contract-3" class="tab-radio">
+    <div class="tab-btns">
+      <label class="tab-btn" for="tab-contract-1">Guest 包内合约</label>
+      <label class="tab-btn" for="tab-contract-2">Host 维护者参考</label>
+      <label class="tab-btn" for="tab-contract-3">Guest 调用</label>
+    </div>
+    <div class="tab-panel" id="tp-contract-1">
+<div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · src/keel.contract.ts</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>import { defineKeelContract, rpc } from 'keel/contract';
+
+export const contract = defineKeelContract({
+  version: '1.0.0',
+  hostModules: {
+    'host:clipboard': {
+      writeText: rpc&lt;{ text: string }, void&gt;({
+        schema: {
+          parseInput: (value) =&gt; {
+            if (typeof value !== 'object' || value === null) {
+              throw new Error('clipboard.writeText input must be an object');
+            }
+            const text = (value as { text?: unknown }).text;
+            if (typeof text !== 'string') {
+              throw new Error('clipboard.writeText input.text must be a string');
+            }
+            return { text };
+          },
+        },
+      }),
+    },
+  },
+  guestExports: {},
+});</pre></div>
+    </div>
+    <div class="tab-panel" id="tp-contract-2">
+      <p>此页是 <strong>Actrium Host 维护者示意</strong>，不属于 Guest 应用代码。真实实现由 Actrium 注册，Guest 包不能注入 <code>nativeClipboard</code>。</p>
+<div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · Host 内部示意</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>import { implementHostModules } from 'keel/contract';
+
+export const hostModules = implementHostModules(contract, {
+  'host:clipboard': {
+    writeText: async ({ text }) =&gt; {
+      await nativeClipboard.write(text);
+    },
+  },
+});</pre></div>
+    </div>
+    <div class="tab-panel" id="tp-contract-3">
+<div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · guest</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>import { writeText } from 'host:clipboard';
+
+await writeText({ text: 'hello' });
+
+// front-package.toml 还需要声明：
+// required-capabilities = ["host:clipboard.write", "ui.render"]</pre></div>
+    </div>
+  </div>
+
+  <div class="callout info">
+    <div class="co-title">两层名称都要匹配</div>
+    <p>CLI 会对照 contract 的 <code>hostModules[moduleId][exportName]</code> 校验 <code>host:*</code> 导入；Host 还会把生成 manifest 与 package 的 <code>required-capabilities</code>、平台策略和会话授权交叉验证。contract 中存在某个名称，不等于 package 已获授权。</p>
+  </div>
+
+  <h2 id="cap-modules">当前可用的非 Service Host 模块</h2>
+  <div class="table-wrap"><table>
+    <tr><th>模块</th><th>方法</th><th>说明</th></tr>
+    <tr><td><code>host:clipboard</code></td><td><code>writeText</code></td><td>写剪贴板；用户授权</td></tr>
+    <tr><td><code>host:local-storage</code></td><td><code>getItem</code> / <code>setItem</code> / <code>removeItem</code></td><td>本地 KV；调用经 Capability Broker</td></tr>
+    <tr><td><code>host:speech</code></td><td><code>recognize</code> / <code>onInterimResult</code> / <code>stop</code> / <code>onStateChange</code></td><td><code>recognize</code> 需要用户授权；事件订阅和停止使用各自能力声明</td></tr>
+    <tr><td><code>host:tts</code></td><td><code>speak</code> / <code>stop</code></td><td>文本转语音；<code>speak</code> 需要用户授权，<code>stop</code> 使用各自能力声明</td></tr>
+    <tr><td><code>host:tab</code></td><td><code>setTitle</code></td><td>更新当前标签页标题（最长 256 UTF-8 字节）；无需用户授权</td></tr>
+    <tr><td><code>host:file-import</code></td><td><code>pick</code> / <code>openPreview</code> / <code>release</code></td><td>文件选择；<code>pick</code> 需要用户授权；<code>openPreview</code> / <code>release</code> 针对缓存附件，使用各自能力声明</td></tr>
+  </table></div>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · guest · 各能力调用写法</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>// 本地 KV
+import { getItem, setItem, removeItem } from 'host:local-storage';
+await setItem({ key: 'draft', value: '...' });
+const value = await getItem({ key: 'draft' });   // string | null
+await removeItem({ key: 'draft' });
+
+// 语音识别
+import { recognize, stop, onInterimResult, onStateChange } from 'host:speech';
+const offInterim = onInterimResult(({ text }) =&gt; { /* 中间结果 */ });
+const offState = onStateChange(({ state }) =&gt; { /* recording | finalizing */ });
+const { text } = await recognize({ locale: 'zh-CN', continuous: true });
+offInterim();
+offState();
+
+// 文件选择与缓存附件
+// files 的类型是 (FileImportFile | CachedFileImport)[]：
+//   FileImportFile    = { name, base64, thumbnailBase64? }        —— 默认分支，带原始字节
+//   CachedFileImport  = { fileId, name, size, thumbnailBase64?, canPreview? } —— cache: true 分支，不含原始字节
+// 即使传入 cache: true，返回类型仍是联合类型，使用前需要用 'fileId' in file 显式收窄：
+import { pick, openPreview, release } from 'host:file-import';
+const { files } = await pick({ source: 'files', accept: ['image/png'], multiple: false });
+const { files: cached } = await pick({ source: 'photos', cache: true });
+const file = cached[0];
+if (file &amp;&amp; 'fileId' in file) {
+  await openPreview({ fileId: file.fileId });  // 原生预览缓存附件
+  await release({ fileId: file.fileId });      // 不再需要时释放
+}
+
+// 文本转语音
+import { speak, stop as stopSpeaking } from 'host:tts';
+const { status } = await speak({ text: '你好，Actrium', locale: 'zh-CN' });  // finished | cancelled
+await stopSpeaking();
+
+// 更新标签页标题
+import { setTitle } from 'host:tab';
+await setTitle({ title: '新标题' });</pre></div>
+  <p>每个被使用的方法都需要对应的 package capability，例如 <code>host:local-storage.getItem</code>、<code>host:speech.recognize</code>、<code>host:tts.speak</code>、<code>host:tab.setTitle</code>、<code>host:file-import.pick</code>。订阅、停止、读取和预览是独立方法，不能只声明 <code>recognize</code> 或 <code>pick</code> 后假设其他方法也自动获批。</p>
+
+  <h2 id="cap-push">Service → Guest 固定事件推送</h2>
+  <p>Product v1 的业务推送使用固定事件模块，不把通用 <code>Engine.sendEvent</code> 或命名事件 Hook 当作公共 Guest API。事件 handler 收到 <code>{ event, payloadBase64 }</code>，并返回退订函数；在 React 中应把退订函数交给 <code>useEffect</code> 清理。</p>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · guest</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>import { useEffect } from 'react';
+import { on as onConversationEvent }
+  from 'host:service/lattice.v1.ConversationEvent';
+
+useEffect(() =&gt; {
+  return onConversationEvent(({ payloadBase64 }) =&gt; {
+    // 使用业务 proto 对应的 decoder 解码 payloadBase64。
+  });
+}, []);</pre></div>
+  <p>此用法还需要 <code>service.on</code> package capability。完整示例见 ACTR Hub <code>lattice</code>。</p>
+</section>
+
+<!-- ========== 04 业务调用 ========== -->
+<section class="doc-section" id="sec-service">
+  <div class="sec-head">
+    <div class="sec-kicker">SECTION 04 · BUSINESS RPC</div>
+    <h1 style="font-size:30px">固定路由 Service<span class="en">CALL · EVENT · ATTACHMENT</span></h1>
+  </div>
+
+  <p>业务 RPC 使用 <code>host:service/&lt;固定路由&gt;</code> 模块。斜杠只分隔模块前缀和完整业务路由；路由本身使用点分名称，例如 <code>echo.v1.EchoService.Echo</code>。包内 proto 定义业务 route 和消息结构，Keel contract 定义 Guest/Host 边界，两者不能互相替代。</p>
+  <div class="callout warn">
+    <div class="co-title">代码生成与手写适配</div>
+    <p><code>actr gen</code> 可复用 proto 解析和生成基础，但不能直接生成完整 Keel Guest 链路。当前示例通常还需要提供固定路由的 TypeScript 模块声明，以及业务消息的 Protobuf/Base64 编解码。可参考 ACTR Hub <code>echo/guest/echo-wire.ts</code> 和 <code>echo/guest/host-service.d.ts</code>。</p>
+  </div>
+
+  <h2 id="svc-contract">Guest 公共 API</h2>
+  <div class="table-wrap"><table>
+    <tr><th>导入形式</th><th>方法</th><th>输入 / 输出</th><th>说明</th></tr>
+    <tr><td><code>host:service/&lt;route&gt;</code></td><td><code>call</code></td><td><code>{ payloadBase64, timeoutMs? }</code> → <code>{ payloadBase64 }</code></td><td>固定 route 由 Host 注入；Guest 不传 route</td></tr>
+    <tr><td><code>host:service/&lt;event&gt;</code></td><td><code>on</code></td><td>handler 收 <code>{ event, payloadBase64 }</code> → 退订函数</td><td>只接收匹配的固定事件</td></tr>
+    <tr><td><code>host:service</code></td><td><code>uploadAttachment</code></td><td><code>{ filename, base64, type?, id? }</code> → <code>{ attachmentId }</code></td><td>原始字节分支：直接上传字节；固定上传传输；package 能力名是 <code>service.attachmentUpload</code></td></tr>
+    <tr><td><code>host:service</code></td><td><code>uploadAttachment</code></td><td><code>{ fileId, type?, id? }</code> → <code>{ attachmentId }</code></td><td>缓存分支：<code>fileId</code> 来自 <code>host:file-import</code> 的缓存附件，Host 读取缓存文件后上传，Guest 不经手字节；与原始字节分支是互斥的联合类型，二选一</td></tr>
+  </table></div>
+  <div class="callout danger">
+    <div class="co-title">裸 host:service 不提供动态业务调用</div>
+    <p>Product v1 不允许从裸 <code>host:service</code> 导入 <code>call</code>、<code>tell</code> 或 <code>on</code>；只有 <code>uploadAttachment</code> 使用这种固定传输导入。<code>tell</code> 当前未实现，不在本文可用 API 范围内。</p>
+  </div>
+
+  <h3>RPC 示例</h3>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · guest</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>import { call as echo } from 'host:service/echo.v1.EchoService.Echo';
+import { decodeEchoReply, encodeEchoRequest } from './echo-wire';
+
+const out = await echo({
+  payloadBase64: encodeEchoRequest('hello'),
+  timeoutMs: 8_000,
+});
+const reply = decodeEchoReply(out.payloadBase64);</pre></div>
+
+  <p>对应的固定路由类型声明：</p>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · host-service.d.ts</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>declare module 'host:service/echo.v1.EchoService.Echo' {
+  export function call(input: {
+    payloadBase64: string;
+    timeoutMs?: number;
+  }): Promise&lt;{ payloadBase64: string }&gt;;
+}</pre></div>
+
+  <h3>附件上传示例</h3>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · guest</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>import { uploadAttachment } from 'host:service';
+
+// 原始字节分支：filename/base64 必填
+const { attachmentId } = await uploadAttachment({
+  filename: 'report.pdf',
+  base64: fileBase64,
+  type: 'document',
+});
+
+// 缓存分支：直接上传 host:file-import 缓存的附件，无需读取字节
+import { pick } from 'host:file-import';
+const { files } = await pick({ source: 'photos', cache: true });
+const file = files[0];
+if (file &amp;&amp; 'fileId' in file) {
+  const { attachmentId: cachedId } = await uploadAttachment({
+    fileId: file.fileId,
+    type: 'image',
+  });
+}</pre></div>
+
+  <h3>超时</h3>
+  <p><code>timeoutMs</code> 默认 30 秒，全局上限 300 秒；应用 contract 可以进一步收紧。示例中的 8 秒、10 秒或 120 秒是具体应用选择，不是所有 Service 的统一超时。</p>
+
+  <h3>Package 声明</h3>
+  <p>业务 RPC、事件和附件分别需要 <code>service.call</code>、<code>service.on</code>、<code>service.attachmentUpload</code>。使用 Service 的 Front 还需要 <code>[dependencies.service]</code> 和双方共用的 proto contract 文件；只写生成 manifest 不会自动获得这些授权。</p>
+
+  <h2 id="svc-current">当前 Product v1 调用路径</h2>
+  <div class="pipeline">
+    <div class="pipe-step"><span class="ps-no">1</span><div class="ps-title">Linkage</div><div class="ps-sub">bundle 记录固定路由 named import</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">2</span><div class="ps-title">加载前校验</div><div class="ps-sub">bundle + v1 manifest + package 声明</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">3</span><div class="ps-title">调用授权</div><div class="ps-sub">authorize(service.call) + 注入 route</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">4</span><div class="ps-title">附着 Service</div><div class="ps-sub">原生 RealmService 或当前 Tab 的 serviceCallUrl</div></div>
+  </div>
+  <p><code>ACTR_CALL</code>、<code>HostHttpHandler</code> 和固定 <code>127.0.0.1:8391</code> 网关只描述 legacy Echo 兼容路径，不能作为新应用的架构或安全模型。</p>
+</section>
+
+<!-- ========== 05 能力声明 ========== -->
+<section class="doc-section" id="sec-manifest">
+  <div class="sec-head">
+    <div class="sec-kicker">SECTION 05 · CAPABILITY MANIFEST</div>
+    <h1 style="font-size:30px">能力声明 capability manifest<span class="en">WHAT YOUR GUEST REQUESTS</span></h1>
+  </div>
+
+  <p>Product v1 通常把运行时能力文件放在 <code>workload/capabilities.json</code>，实际路径由 <code>[workload.keel].capabilities</code> 指定。它列出 bundle 获取的 imports、Host 方法、固定 Service 路由和组件，并由外层 package 的摘要与签名保护。Host 在 Guest 加载前还会将它与 bundle linkage 和 package 声明交叉校验，不能只信这个 JSON。</p>
+
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">json · workload/capabilities.json 样例</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>{
+  "schemaVersion": 1,
+  "keelApi": "1.0",
+  "guestEntry": "workload/guest.js",
+  "imports": [
+    "host:clipboard",
+    "host:service",
+    "keel/guest",
+    "react",
+    "react/jsx-runtime"
+  ],
+  "hostModules": {
+    "service": {
+      "rpc": [
+        "notes.v1.NoteService.List",
+        "notes.v1.NoteService.Get",
+        "notes.v1.NoteService.Save"
+      ],
+      "events": ["notes.v1.changed"]
+    },
+    "clipboard": { "rpc": ["writeText"] }
+  },
+  "components": ["Button", "FlatList", "ImageAsset", "Text", "TextInput", "View"]
+}</pre></div>
+
+  <h2 id="mf-formats">不要混淆两个 CLI 选项</h2>
+  <div class="table-wrap"><table>
+    <tr><th>选项</th><th>用途</th><th>主要字段</th></tr>
+    <tr><td><code>--v1-capability-manifest</code></td><td><strong>Product v1 运行时 capability manifest</strong>，随包提交</td><td><code>schemaVersion</code> / <code>keelApi</code> / <code>guestEntry</code> / <code>imports</code> / <code>hostModules</code> / <code>components</code></td></tr>
+    <tr><td><code>--capability-manifest</code></td><td>通用 Keel 合约构建报告，不是上述 v1 运行时文件</td><td><code>contractVersion</code> / <code>hostCapabilities</code> / <code>guestExports</code> / <code>unschemed</code> 等</td></tr>
+  </table></div>
+
+  <h2 id="mf-flow">生成流程（四步）</h2>
+  <p>目标是把 Guest 静态取得的能力稳定转换为可校验清单，避免手写 manifest 与 bundle 不一致：</p>
+  <div class="pipeline">
+    <div class="pipe-step"><span class="ps-no">1</span><div class="ps-title">源码图分析</div><div class="ps-sub">收集 keel/guest 与 host:* named imports</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">2</span><div class="ps-title">契约与白名单</div><div class="ps-sub">校验模块、方法、固定 route 和组件</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">3</span><div class="ps-title">生成 v1 JSON</div><div class="ps-sub">去重排序 · 写六个规范字段</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">4</span><div class="ps-title">bundle 后复检</div><div class="ps-sub">重写 Host imports · 拒绝未登记依赖</div></div>
+  </div>
+  <p>当前 v1 manifest 不包含 <code>contract_digest</code> 字段。package 的文件摘要和签名由外层 packer 负责。</p>
+
+  <h3>源码形式 → 生成内容对照</h3>
+  <div class="table-wrap"><table>
+    <tr><th>源码形式</th><th>生成内容</th></tr>
+    <tr><td>React / <code>keel/guest</code> / <code>host:*</code> 的已登记 imports</td><td><code>imports</code></td></tr>
+    <tr><td><code>import { call as list } from 'host:service/notes.v1.NoteService.List'</code></td><td><code>hostModules.service.rpc</code> 中的固定路由</td></tr>
+    <tr><td><code>import { on as onChanged } from 'host:service/notes.v1.changed'</code></td><td><code>hostModules.service.events</code></td></tr>
+    <tr><td><code>import { writeText } from 'host:clipboard'</code></td><td><code>hostModules.clipboard.rpc</code></td></tr>
+    <tr><td>从 <code>keel/guest</code> 获取 <code>View</code>、<code>Button</code> 等组件</td><td><code>components</code>；<code>Image</code> 映射为 <code>ImageAsset</code></td></tr>
+  </table></div>
+  <p><code>components</code> 来自 named imports 和组件引用分析，不是对最终 JSX 是否实际渲染的扫描。未渲染但已获取的组件也可能进入清单。</p>
+
+  <div class="callout danger">
+    <div class="co-title">动态代码 fail-on-violation</div>
+    <p>route、模块 ID 和事件名必须静态确定。动态 import、<code>eval</code>、<code>Function</code>、非字面量 runtime dependency，以及裸 <code>host:service</code> 的动态 route 调用都会被拒绝：</p>
+<div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · 反例</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>const route = prefix + '.List';
+await import('host:service/' + route);  // 动态 import + 非固定模块 ID：拒绝</pre></div>
+    <p>SDK 封装应保留显式 named import 和固定模块映射，不能让生成器根据函数名或运行时字符串猜 capability。</p>
+  </div>
+
+  <h3>与 package manifest 的关系</h3>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">toml · 摘要</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>[workload.keel]
+runtime = "js"
+guest-api = "keel.guest/1"
+capabilities = "workload/capabilities.json"
+
+[host]
+profile = "actr.host/1"
+api = "^1.0.0"
+required-capabilities = [
+  "service.call",
+  "service.on",
+  "host:clipboard.write",
+  "ui.render",
+]
+
+[[files]]
+path = "workload/capabilities.json"
+role = "profile"
+media-type = "application/json"
+# size 与 sha256 由 packer 更新</pre></div>
+  <p>上面只演示与 JSON 示例对应的声明。实际项目按真实用量填写；使用附件上传时还需 <code>service.attachmentUpload</code>，使用 Service 时还需 dependency 和 proto contract 文件。</p>
+</section>
+
+<!-- ========== 06 安全与能力模型 ========== -->
+<section class="doc-section" id="sec-security">
+  <div class="sec-head">
+    <div class="sec-kicker">SECTION 06 · SECURITY MODEL</div>
+    <h1 style="font-size:30px">安全与能力模型<span class="en" style="font-size:11px">TWO-TIER CAPABILITIES · FAIL-CLOSED</span></h1>
+  </div>
+
+  <p>Actrium 的能力模型分四层。</p>
+
+  <h2 id="sec-four-layers">四层模型</h2>
+  <div class="table-wrap"><table>
+    <tr><th>层</th><th>回答的问题</th><th>实现依据</th></tr>
+    <tr><td><b>1. Front capability</b></td><td>哪些 Host 方法可调用（<code>service.call</code>、<code>host:*</code>）</td><td>能力定义表 + 有效集计算</td></tr>
+    <tr><td><b>2. Component whitelist</b></td><td>允许渲染哪些 Keel 组件</td><td>组件白名单（共 12 个）</td></tr>
+    <tr><td><b>3. Platform permission</b></td><td>OS 级授权（camera / microphone / location / notifications）</td><td><code>osPermission</code> 字段，调用期核对平台授权</td></tr>
+    <tr><td><b>4. Service capability</b></td><td>Workspace / network / actor / shell 等按实例授予</td><td>按实例计算有效集（declared ∩ supported ∩ policy ∩ session）</td></tr>
+  </table></div>
+
+  <h2 id="sec-two-tier">两层受众（audience）</h2>
+  <p>每个 Front capability 都有 <code>audience</code> 属性。这是「能力面向谁开放」的维度，与上面四层正交：</p>
+  <div class="table-wrap"><table>
+    <tr><th>受众</th><th>范围</th><th>门槛</th></tr>
+    <tr><td><code>third_party</code></td><td>绝大多数 Front capability</td><td>包内声明 + Host 支持 + 授权与 session 约束</td></tr>
+    <tr><td><code>system</code> <span class="badge system">SYSTEM</span></td><td>仅面向第一方系统能力</td><td>第一方签名验证 + 显式 Host policy</td></tr>
+  </table></div>
+  <div class="callout danger">
+    <div class="co-title">🚫 系统身份不能靠这些认定</div>
+    <p><code>systemAppType</code>、包放在系统目录、<code>publisher = "actrium"</code>、开发 key 签名——<strong>都不能</strong>用来认定系统 Guest。只有第一方签名验证通过 + 显式 Host policy 允许才行。</p>
+  </div>
+  <p><strong>可以申请 ≠ 免授权。</strong>第三方调 service 时，仍由 Service 按角色和业务权限决定能否执行；系统 Guest 也仍受用户、组织、平台和 session 约束。</p>
+
+  <h2 id="sec-effective">有效能力 = 六个条件的交集</h2>
+  <p>有效能力的精确计算规则：<code>effective = declared ∩ host-supported ∩ audience ∩ grant ∩ platform ∩ session</code>。session 要求 <code>state === 'active'</code> 且在 <code>allowedCapabilities</code> 内。</p>
+  <div class="cap-calc">
+    <div style="font-weight:700">交互演示 · 勾掉任意一项，能力立即失效</div>
+    <div class="cc-factors">
+      <div class="cap-factor on" data-factor><span class="cf-check">✓</span><span><span class="cf-name">declared 声明</span><span class="cf-desc">manifest / 包内声明要用</span></span></div>
+      <div class="cap-factor on" data-factor><span class="cf-check">✓</span><span><span class="cf-name">host-supported Host 支持</span><span class="cf-desc">Host 声明支持该方法</span></span></div>
+      <div class="cap-factor on" data-factor><span class="cf-check">✓</span><span><span class="cf-name">audience 受众匹配</span><span class="cf-desc">third_party / system 类别允许</span></span></div>
+      <div class="cap-factor on" data-factor><span class="cf-check">✓</span><span><span class="cf-name">grant 已授权</span><span class="cf-desc">requiresGrant ≠ none 时必须已授予</span></span></div>
+      <div class="cap-factor on" data-factor><span class="cf-check">✓</span><span><span class="cf-name">platform 平台权限</span><span class="cf-desc">camera / mic / location / notifications</span></span></div>
+      <div class="cap-factor on" data-factor><span class="cf-check">✓</span><span><span class="cf-name">session 有效会话</span><span class="cf-desc">state = active 且在 allowedCapabilities 内</span></span></div>
+    </div>
+    <div class="cc-result ok" id="capResult">✓ 能力生效：Guest 可以调用该能力</div>
+  </div>
+
+  <h2 id="sec-policy">能力属性</h2>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">text · 能力属性</span><button class="copy-btn" data-copy>复制</button></div>
+<pre>name            // 方法级能力名，如 host:clipboard.write
+audience        = 'third_party' | 'system'
+requiresGrant   = 'none' | 'user' | 'admin' | 'elevated'
+osPermission?   = 'camera' | 'microphone' | 'location' | 'notifications'
+requiresBroker  = boolean   // 调用期由 broker 消耗，不进有效集
+requiresSandbox = boolean   // 调用期由 sandbox 消耗，不进有效集</pre></div>
+
+  <h3>本文涉及的第三方 Front capabilities</h3>
+  <div class="table-wrap"><table>
+    <tr><th>能力</th><th>grant</th><th>备注</th></tr>
+    <tr><td><code>service.call</code> / <code>service.on</code> / <code>service.attachmentUpload</code></td><td>none</td><td>沙箱内调用</td></tr>
+    <tr><td><code>host:clipboard.write</code></td><td>user</td><td>剪贴板</td></tr>
+    <tr><td><code>host:local-storage.getItem/setItem/removeItem</code></td><td>none</td><td><b>requiresBroker</b></td></tr>
+    <tr><td><code>host:speech.recognize / onInterimResult / stop / onStateChange</code></td><td>user / none</td><td>录音进程内查系统权限</td></tr>
+    <tr><td><code>host:file-import.pick</code></td><td>user</td><td>文件选择</td></tr>
+  </table></div>
+  <p style="font-size:12.5px;color:var(--ink-2)">这些是本文主流程涉及的第三方能力，不代表 Host 内部能力定义表的全部条目。系统或内部能力不能由第三方 Guest 根据名称自行调用。</p>
+
+  <h2 id="sec-grant">授予与撤销</h2>
+  <div class="table-wrap"><table>
+    <tr><th>时机</th><th>行为</th></tr>
+    <tr><td>安装时</td><td>只展示 package 申请的 capability，<b>不授予</b>运行权限</td></tr>
+    <tr><td>创建实例时</td><td>授予 Service、Workspace 和长期后台能力，写入持久 grant</td></tr>
+    <tr><td>首次使用交互能力时</td><td>剪贴板、文件选择、语音识别等即时请求，可选「仅本次会话」</td></tr>
+    <tr><td>撤销时</td><td>Actr Host <b>必须立即失效</b>相关 capability handle，并结束仍在使用它的调用</td></tr>
+    <tr><td>管理员策略</td><td>可预先拒绝或约束 scope，但不能在 UI 中伪装成用户同意</td></tr>
+  </table></div>
+</section>
+
+<!-- ========== 07 通信协议（通用 Keel 内部参考） ========== -->
+<section class="doc-section" id="sec-protocol">
+  <div class="sec-head">
+    <div class="sec-kicker">SECTION 07 · PROTOCOL</div>
+    <h1 style="font-size:30px">通用 Keel 通信协议<span class="en" style="font-size:11px">INTERNAL REFERENCE · NOT A V1 API WHITELIST</span></h1>
+  </div>
+  <div class="callout warn">
+    <div class="co-title">内部协议不等于 Product v1 公共能力</div>
+    <p>本章面向 Host/Keel 维护者和调试人员，描述通用 Engine 消息。<code>HOST_EVENT</code>、<code>REF_METHOD_RESULT</code> 等消息存在，不代表对应的通用 Hook 可以通过 Product v1 构建。Guest 业务开发仍使用前述白名单组件、named imports 和固定 Service 事件。</p>
+  </div>
+  <p>底层通信层 Guest 开发者通常不直接触碰，但理解它有助于排查事件和回调问题。</p>
+
+  <h2 id="proto-channels">两条通道</h2>
+  <div class="table-wrap"><table>
+    <tr><th>通道</th><th>方向</th><th>频率</th><th>链路</th></tr>
+    <tr><td>render ops</td><td>Guest → Host</td><td>高</td><td>渲染批次（OperationBatch）→ Bridge 编码 → Host 应用批次增量更新</td></tr>
+    <tr><td>消息</td><td>Host → Guest</td><td>低</td><td>Engine 发送 → Bridge 编码 → 沙箱内消息分发</td></tr>
+  </table></div>
+  <p>编码格式为 <strong>KBS1 envelope</strong>：支持二进制字段（<code>Uint8Array</code> 原始段随行）与函数回调注册/调用；函数 props 编成 <code>{ __type:'function', __fnId }</code>，循环引用编成 <code>{ __type:'circular' }</code>，复杂类型（Date/RegExp/Map/Set/Error）序列化为 JSON 安全表示。</p>
+
+  <h2 id="proto-messages">Host → Guest 消息类型</h2>
+  <div class="table-wrap"><table>
+    <tr><th>消息</th><th>字段</th><th>说明</th></tr>
+    <tr><td><code>CALL_FUNCTION</code></td><td>fnId, args</td><td>调用已注册的 guest 回调（onPress 等）</td></tr>
+    <tr><td><code>HOST_EVENT</code></td><td>eventName, payload</td><td>通用 Keel 命名事件；不是 Product v1 Service 推送 API</td></tr>
+    <tr><td><code>CONFIG_UPDATE</code></td><td>config</td><td>更新 guest 配置</td></tr>
+    <tr><td><code>DESTROY</code></td><td>—</td><td>通知沙箱拆除</td></tr>
+    <tr><td><code>REF_METHOD_RESULT</code></td><td>refId, callId, result?, error?</td><td>通用 Keel RemoteRef 返回值；不表示 Product v1 开放对应 Hook</td></tr>
+    <tr><td><code>PROMISE_RESOLVE</code> / <code>PROMISE_REJECT</code></td><td>promiseId, value / error</td><td>解决 / 拒绝跨边界 promise</td></tr>
+  </table></div>
+
+  <h2 id="proto-callback">回调完整链路（onPress 为例）</h2>
+  <div class="pipeline">
+    <div class="pipe-step"><span class="ps-no">1</span><div class="ps-title">原生 onPress</div><div class="ps-sub">Host 组件事件触发</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">2</span><div class="ps-title">代理函数</div><div class="ps-sub">Bridge 解码出的闭包</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">3</span><div class="ps-title">CALL_FUNCTION</div><div class="ps-sub">invokeFunction(fnId, args)</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">4</span><div class="ps-title">Guest 执行</div><div class="ps-sub">按 fnId 找到原函数</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">5</span><div class="ps-title">重新渲染</div><div class="ps-sub">setState → 新操作批次</div></div>
+  </div>
+</section>
+
+<!-- ========== 08 调试与生命周期 ========== -->
+<section class="doc-section" id="sec-debug">
+  <div class="sec-head">
+    <div class="sec-kicker">SECTION 08 · DEBUGGING</div>
+    <h1 style="font-size:30px">调试与生命周期<span class="en" style="font-size:11px">LIFECYCLE · VISIBILITY · BACKPRESSURE</span></h1>
+  </div>
+
+  <h2 id="dbg-lifecycle">运行时注入顺序</h2>
+  <p><code>Engine.loadBundle</code> 的注入有严格次序，每一步依赖前一步建立的 globals：</p>
+  <div class="pipeline">
+    <div class="pipe-step"><span class="ps-no">1</span><div class="ps-title">Console</div><div class="ps-sub">__console_log/warn/error 等分立全局</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">2</span><div class="ps-title">Timer Polyfills</div><div class="ps-sub">setTimeout/Immediate、queueMicrotask</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">3</span><div class="ps-title">GUEST_BUNDLE_CODE</div><div class="ps-sub">React / KeelGuest / KeelReconciler globals</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">4</span><div class="ps-title">require()</div><div class="ps-sub">白名单模块加载器</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">5</span><div class="ps-title">Runtime API</div><div class="ps-sub">渲染批次 / 事件发送 / 消息处理…</div></div>
+    <div class="pipe-conn">→</div>
+    <div class="pipe-step"><span class="ps-no">6</span><div class="ps-title">User Bundle</div><div class="ps-sub">你的代码 eval + drain setImmediate</div></div>
+  </div>
+  <div class="callout tip">
+    <div class="co-title">💡 XPC ViewBridge 环境注意</div>
+    <p><code>setImmediate</code> 用同步回调队列 + 显式 drain 实现，不依赖 Host 的 <code>queueMicrotask</code>（在 XPC ViewBridge 上下文里 RCTTiming 被冻结，drain 太晚）。Console 方法分立注入是因为 JSC 沙箱无法经 RN bridge 传递带函数属性的对象。</p>
+  </div>
+
+  <h2 id="dbg-events">生命周期事件速查</h2>
+  <div class="table-wrap"><table>
+    <tr><th>事件 / 消息</th><th>方向</th><th>Guest 应做什么</th></tr>
+    <tr><td><code>CONFIG_UPDATE</code></td><td>Host → Guest</td><td>更新配置，触发依赖配置的组件重渲染</td></tr>
+    <tr><td><code>DESTROY</code></td><td>Host → Guest</td><td>清理定时器与订阅（沙箱即将拆除）</td></tr>
+  </table></div>
+
+  <details class="fold">
+    <summary>常见排查清单</summary>
+    <div class="fold-body">
+      <ul>
+        <li><b>UI 没出现</b>：组件是否来自 v1 白名单？入口组件是否默认导出？是否出现 <code>component_not_allowed</code>？</li>
+        <li><b>onPress 没回调</b>：函数 prop 是否已注册为回调？箭头函数每次渲染重建属正常，diff 会更新 fnId。</li>
+        <li><b>Service 事件没收到</b>：是否使用固定 <code>host:service/&lt;event&gt;</code> 的 <code>on</code>？package 是否声明 <code>service.on</code>？effect 清理是否提前退订？</li>
+        <li><b>Service 调用失败</b>：模块路由是否为点分完整名称？是否误传 <code>route</code>？生成 manifest 与 package 的 <code>service.call</code> 是否同时存在？</li>
+        <li><b>manifest 校验失败</b>：是否误把 <code>--capability-manifest</code> 的通用报告当成 <code>--v1-capability-manifest</code> 的运行时文件？</li>
+        <li><b>Host 侧想看 Guest 日志</b>：console 输出经 <code>__console_*</code> 全局桥接，查 Host 日志管道。</li>
+      </ul>
+    </div>
+  </details>
+
+  <h2 id="dbg-examples">已验证示例与引用边界</h2>
+  <div class="table-wrap"><table>
+    <tr><th>ACTR Hub 示例</th><th>推荐参考内容</th></tr>
+    <tr><td><code>echo</code></td><td>最小固定路由 RPC、v1 manifest、Front/Service 打包与验证</td></tr>
+    <tr><td><code>askaway</code></td><td>附件上传、文件导入、剪贴板</td></tr>
+    <tr><td><code>lattice</code></td><td>固定事件订阅、取消订阅、附件与多 RPC</td></tr>
+    <tr><td><code>qwen-chat</code></td><td>较长超时、实际 Protobuf 编解码和长请求处理</td></tr>
+  </table></div>
+  <p><code>notes-search</code> 当前使用 <code>--capability-manifest</code> 生成通用 Keel 报告，不作为本文 Product v1 manifest 和固定路由模型的主参考。引用任何示例时，都应核对其构建脚本和锁定的 Actrium revision。</p>
+</section>
+
+</main>
+</div><!-- /.page -->
+
+<script>
+/* ============================================================
+   交互逻辑：单章节导航 / 全文搜索 / 复制 / 选项卡 / 能力交集计算器
+   ============================================================ */
+(function () {
+  'use strict';
+
+  /* ---------- 章节切换：纯 CSS radio 驱动显示，JS 只同步面包屑 / hash ---------- */
+  var crumb = document.getElementById('crumb');
+
+  function scrollTopInstant() {
+    var html = document.documentElement;
+    var prev = html.style.scrollBehavior;
+    html.style.scrollBehavior = 'auto';
+    window.scrollTo(0, 0);
+    html.style.scrollBehavior = prev;
+  }
+
+  function syncChrome(id, updateHash) {
+    var target = null;
+    for (var i = 0; i < navItems.length; i++) {
+      if (navItems[i].id === id) target = navItems[i];
+    }
+    if (!target) return;
+    if (crumb) crumb.innerHTML = '文档 / <b>' + target.group + ' · ' + target.label + '</b>';
+    if (updateHash !== false && ('#' + id) !== location.hash) {
+      try { history.replaceState(null, '', '#' + id); } catch (e) { location.hash = id; }
+    }
+    scrollTopInstant();
+  }
+
+  function showSection(id, updateHash) {
+    var radio = document.getElementById('tab-' + id);
+    if (radio) radio.checked = true;
+    syncChrome(id, updateHash);
+  }
+
+  var navItems = [];
+  var navEls = document.querySelectorAll('.sidebar .nav-item');
+  for (var i = 0; i < navEls.length; i++) {
+    (function (a) {
+      var f = a.getAttribute('for') || '';
+      var id = f.indexOf('tab-') === 0 ? f.slice(4) : f;
+      var section = document.getElementById(id);
+      var label = a.getAttribute('data-label') || a.textContent;
+      var group = a.getAttribute('data-group') || '';
+      navItems.push({
+        el: a,
+        id: id,
+        label: label,
+        group: group,
+        searchText: (label + ' ' + group + ' ' + id + ' ' + (section ? section.textContent : '')).toLowerCase()
+      });
+    })(navEls[i]);
+  }
+
+  function keyboardActivate(el, activate) {
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
+    el.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        activate(el);
+      }
+    });
+  }
+
+  document.querySelectorAll('.nav-item').forEach(function (label) {
+    keyboardActivate(label, function (target) {
+      var id = (target.getAttribute('for') || '').replace(/^tab-/, '');
+      if (id) showSection(id);
+    });
+  });
+  document.querySelectorAll('.tab-btn').forEach(function (label) {
+    keyboardActivate(label, function (target) {
+      var radio = document.getElementById(target.getAttribute('for'));
+      if (radio) radio.checked = true;
+    });
+  });
+
+  // 用户点击 label 选中 radio 时，同步面包屑与 hash
+  var radioEls = document.querySelectorAll('.nav-radio');
+  for (var r = 0; r < radioEls.length; r++) {
+    radioEls[r].addEventListener('change', function () {
+      syncChrome(this.id.replace('tab-', ''), true);
+    });
+  }
+
+  // 初始 / hash 变化：支持章节锚点与章内小节锚点
+  function resolveHash() {
+    var h = decodeURIComponent(location.hash.slice(1));
+    if (h) {
+      var match = null;
+      for (var j = 0; j < navItems.length; j++) {
+        if (navItems[j].id === h) match = navItems[j];
+      }
+      if (match) { showSection(h, false); return; }
+      var el = document.getElementById(h);
+      if (el) {
+        var sec = el.parentNode;
+        while (sec && String(sec.className).indexOf('doc-section') === -1) sec = sec.parentNode;
+        if (sec) {
+          showSection(sec.id, false);
+          setTimeout(function () { el.scrollIntoView(); }, 40);
+          return;
+        }
+      }
+    }
+    showSection('sec-overview', false);
+  }
+  window.addEventListener('hashchange', resolveHash);
+  resolveHash();
+
+  /* ---------- 全文搜索：匹配导航元数据与对应章节正文 ---------- */
+  var searchInput = document.getElementById('searchInput');
+  var noResult = document.getElementById('noResult');
+  searchInput.addEventListener('input', function () {
+    var q = searchInput.value.trim().toLowerCase();
+    var visible = 0;
+    navItems.forEach(function (n) {
+      var hit = !q || n.searchText.indexOf(q) !== -1;
+      n.el.classList.toggle('hidden-by-search', !hit);
+      if (hit) visible++;
+    });
+    document.querySelectorAll('.sidebar .nav-group').forEach(function (group) {
+      var hasVisibleItem = !!group.querySelector('.nav-item:not(.hidden-by-search)');
+      group.classList.toggle('hidden-by-search', !hasVisibleItem);
+    });
+    noResult.style.display = visible ? 'none' : 'block';
+  });
+  // 回车跳到第一个匹配章节
+  searchInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      for (var k = 0; k < navItems.length; k++) {
+        if (navItems[k].el.className.indexOf('hidden-by-search') === -1) {
+          showSection(navItems[k].id);
+          break;
+        }
+      }
+    }
+  });
+
+  /* ---------- 复制按钮 ---------- */
+  document.querySelectorAll('.copy-btn[data-copy]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pre = btn.closest('.codeblock').querySelector('pre');
+      var text = pre ? pre.innerText : '';
+      var done = function () {
+        btn.classList.add('copied');
+        var old = btn.textContent;
+        btn.textContent = '已复制 ✓';
+        setTimeout(function () { btn.classList.remove('copied'); btn.textContent = old; }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+        done();
+      }
+    });
+  });
+
+
+  /* ---------- 能力交集计算器 ---------- */
+  var factors = document.querySelectorAll('.cap-factor');
+  var capResult = document.getElementById('capResult');
+  capResult.setAttribute('aria-live', 'polite');
+  function updateCapabilityResult() {
+    var onCount = document.querySelectorAll('.cap-factor.on').length;
+    if (onCount === factors.length) {
+      capResult.className = 'cc-result ok';
+      capResult.textContent = '✓ 能力生效：Guest 可以调用该能力';
+    } else {
+      capResult.className = 'cc-result fail';
+      var missing = [];
+      factors.forEach(function (x) {
+        if (!x.classList.contains('on')) missing.push(x.querySelector('.cf-name').textContent);
+      });
+      capResult.textContent = '✗ 能力失效：缺少 ' + missing.join('、');
+    }
+  }
+  factors.forEach(function (f) {
+    f.setAttribute('aria-pressed', f.classList.contains('on') ? 'true' : 'false');
+    keyboardActivate(f, function (target) { target.click(); });
+    f.addEventListener('click', function () {
+      f.classList.toggle('on');
+      f.setAttribute('aria-pressed', f.classList.contains('on') ? 'true' : 'false');
+      updateCapabilityResult();
+    });
+  });
+})();
+</script>
+</body>
+</html>
