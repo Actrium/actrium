@@ -2313,6 +2313,29 @@ async fn explicit_deferred_balances_outstanding_counter_on_deliver() {
     assert_eq!(inner.outstanding_replies.len(), 0);
 }
 
+#[tokio::test]
+async fn explicit_tell_ignores_the_wire_timeout() {
+    let (inner, _captured, _dir) = explicit_capture_harness().await;
+    let mut envelope = explicit_envelope("explicit-tell-timeout");
+    envelope.direction = Some(Direction::Tell as i32);
+    let reply_sink = crate::lifecycle::reply_deliver::ReplySink::Inproc {
+        response_tx: Arc::new(HostTransport::new()),
+        span: tracing::Span::none(),
+    };
+    let outcome = inner
+        .handle_incoming(envelope, None, Some(reply_sink), None)
+        .await;
+    assert!(matches!(outcome, IncomingOutcome::Deferred));
+    assert_eq!(inner.outstanding_replies.len(), 1);
+
+    let after_wire_timeout = std::time::Instant::now() + Duration::from_secs(10);
+    let expired = inner
+        .outstanding_replies
+        .sweep_expired(crate::lifecycle::dedup::INFLIGHT_TTL, after_wire_timeout)
+        .await;
+    assert!(expired.is_empty(), "a TELL must ignore timeout_ms");
+}
+
 /// The legacy `.Service.Method` alias must be normalized before reply-mode
 /// selection, not merely at the guest dispatch boundary. Otherwise a linked
 /// EXPLICIT route is admitted as RETURN and receives no ReplyDeliver.
@@ -3807,20 +3830,20 @@ async fn native_package_explicit_reply_releases_dispatch_for_final_chunk() {
 
     let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixture = crate_dir.join("tests/dynclib_actor_fixture");
+    let target_dir = crate_dir.join("../../target/core-hyper-tests-dynclib-actor-fixture");
     let suffix = std::env::consts::DLL_SUFFIX;
     let library = format!(
         "{}dynclib_actor_fixture{suffix}",
         std::env::consts::DLL_PREFIX,
     );
     let status = std::process::Command::new(env!("CARGO"))
-        .arg("build")
+        .args(["build", "--locked", "--target-dir"])
+        .arg(&target_dir)
         .current_dir(fixture)
         .status()
         .expect("start fixture build");
     assert!(status.success(), "native fixture must build");
-    let library = crate_dir
-        .join("../../target/core-hyper-tests-dynclib-actor-fixture/debug")
-        .join(library);
+    let library = target_dir.join("debug").join(library);
     let binary = std::fs::read(library).expect("read native fixture");
     let dir = tempfile::tempdir().unwrap();
     let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);

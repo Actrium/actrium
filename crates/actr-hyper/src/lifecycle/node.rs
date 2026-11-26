@@ -2599,9 +2599,9 @@ impl Inner {
                 Some(sink) => {
                     // RFC-0323 exposes an EXPLICIT reply deadline on the
                     // synchronous reply clock. Scoped Actor calls use the
-                    // remaining request budget. Otherwise, zero timeout means
-                    // the envelope has no reply deadline.
+                    // remaining request budget. TELL ignores timeout_ms.
                     let reply_deadline = match egress_deadline {
+                        _ if !expects_response => None,
                         Some(_) => scope.as_ref().map(|scope| {
                             crate::lifecycle::dedup::scoped_reply_deadline(scope.deadline())
                         }),

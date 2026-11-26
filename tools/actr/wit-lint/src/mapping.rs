@@ -413,6 +413,20 @@ pub fn default_mapping() -> Mapping {
                 op_const: "HOST_RESOLVE_DEPENDENCY",
                 op_value: 8,
             },
+            // The native completion payload carries either the response bytes
+            // or the structured error in its outcome oneof.
+            FunctionMapping {
+                wit_key: "host.reply-sync",
+                rust_payload: "HostCompleteReplyV1",
+                op_const: "HOST_COMPLETE_REPLY",
+                op_value: 10,
+            },
+            FunctionMapping {
+                wit_key: "host.reply-error-sync",
+                rust_payload: "HostCompleteReplyV1",
+                op_const: "HOST_COMPLETE_REPLY",
+                op_value: 10,
+            },
             // `workload.dispatch` is carried by GuestHandleV1. The host
             // synthesises an `AbiFrame { op: GUEST_HANDLE, payload:
             // GuestHandleV1 }` frame; the guest unwraps it. Context
@@ -476,6 +490,9 @@ pub fn default_mapping() -> Mapping {
             // Structured log sink — WASM only; DynClib has no WIT-mapped
             // counterpart (it routes logs through its own host ABI bridge).
             "host.log-message",
+            // Async imports on the Component Model dispatch boundary.
+            "host.reply",
+            "host.reply-error",
         ]
         .into_iter()
         .collect(),
@@ -486,6 +503,9 @@ pub fn default_mapping() -> Mapping {
             "AbiReply",
             "InvocationContextV1",
             "InitPayloadV1",
+            "GuestReplyContextV1",
+            "HostClaimReplyV1",
+            "HostReplyOutcomeV1",
             "DestV1",
             "AbiPayload",
             "code", // module of status codes
