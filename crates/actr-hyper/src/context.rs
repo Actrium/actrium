@@ -1099,9 +1099,11 @@ impl Context for RuntimeContext {
             "📊 Registering DataChunk callback for stream_id: {}",
             stream_id
         );
-        self.data_chunk_registry
-            .register(stream_id, Arc::new(callback));
-        Ok(())
+        self.data_chunk_registry.register_for_caller(
+            stream_id,
+            Arc::new(callback),
+            self.caller_id.as_ref(),
+        )
     }
 
     async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
@@ -1109,8 +1111,8 @@ impl Context for RuntimeContext {
             "🚫 Unregistering DataChunk callback for stream_id: {}",
             stream_id
         );
-        self.data_chunk_registry.unregister(stream_id);
-        Ok(())
+        self.data_chunk_registry
+            .unregister_for_caller(stream_id, self.caller_id.as_ref())
     }
 
     async fn send_data_chunk(
