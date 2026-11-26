@@ -1004,7 +1004,7 @@ async function loadWithGuestBridge(packageUrl, runtimeWasmUrl) {
   emitSwLog('info', 'guest_bridge_start', { packageUrl, runtimeWasmUrl });
 
   // ── 1. Load sw-host WASM + JS glue (unchanged from CM path) ──
-  const jsUrl = runtimeWasmUrl.replace(/_bg\.wasm$/, '.js');
+  const jsUrl = runtimeWasmUrl.replace(/^([^?#]*)_bg\.wasm(?=[?#]|$)/, '$1.js');
   const jsResp = await fetch(jsUrl, { cache: 'no-store' });
   if (!jsResp.ok) {
     throw new Error('[SW] Failed to fetch runtime JS glue: ' + jsResp.status);

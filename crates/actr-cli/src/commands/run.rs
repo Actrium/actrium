@@ -990,7 +990,14 @@ impl RunCommand {
             .unwrap_or_else(|| format!("/packages/{}", package_filename));
         let runtime_wasm_url = web
             .and_then(|w| w.runtime_wasm_url.clone())
-            .unwrap_or_else(|| "/packages/actr_sw_host_bg.wasm".to_string());
+            .unwrap_or_else(|| {
+                use sha2::{Digest as _, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(crate::web_assets::RUNTIME_WASM);
+                hasher.update(crate::web_assets::RUNTIME_JS);
+                let digest = hasher.finalize();
+                format!("/packages/actr_sw_host_bg.wasm?v={digest:x}")
+            });
 
         // Browser verification cannot read host files. Resolve every static
         // `pubkey_file` here and send only inline base64 keys; the SW tries all

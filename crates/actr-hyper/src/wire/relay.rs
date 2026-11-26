@@ -548,7 +548,15 @@ impl RelayClient {
             .and_then(|header| header.to_str().ok())
         {
             Some(ACTOR_CHANNEL_SUBPROTOCOL) if actor_identity.is_some() => actor_identity,
-            Some(SUBPROTOCOL) => None,
+            Some(SUBPROTOCOL) => {
+                if actor_identity.is_some() {
+                    tracing::warn!(
+                        required_subprotocol = ACTOR_CHANNEL_SUBPROTOCOL,
+                        "Relay does not support verified Actor channels; Attach requires upgrading the Relay and session peers"
+                    );
+                }
+                None
+            }
             _ => {
                 return Err(NetworkError::ConnectionError(
                     "Relay subprotocol not negotiated".into(),

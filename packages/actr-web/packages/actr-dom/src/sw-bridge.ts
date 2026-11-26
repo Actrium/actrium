@@ -136,32 +136,33 @@ export class ServiceWorkerBridge {
   ): Promise<void> {
     //  Service Worker
     if ('serviceWorker' in navigator) {
-      const registration = await navigator.serviceWorker.register(serviceWorkerUrl, {
+      const workerUrl = new URL(serviceWorkerUrl, location.href);
+      const runtimeWasmUrl = runtimeConfig?.runtime_wasm_url;
+      if (typeof runtimeWasmUrl === 'string') {
+        const version = new URL(runtimeWasmUrl, location.href).searchParams.get('v');
+        if (version) workerUrl.searchParams.set('runtime', version);
+      }
+      const registration = await navigator.serviceWorker.register(workerUrl.href, {
         updateViaCache: 'none',
       });
       await registration.update();
 
-      //  Service Worker
-      await navigator.serviceWorker.ready;
-
-      // Wait for the controller to be set (may not be immediate after fresh registration).
-      // The SW calls clients.claim() on activate, which triggers 'controllerchange'.
-      if (!navigator.serviceWorker.controller) {
-        await new Promise<void>((resolve) => {
-          const onControllerChange = () => {
-            navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
-            resolve();
-          };
-          navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
-          // Safety timeout: if controller never arrives, proceed with registration.active
-          setTimeout(onControllerChange, 3000);
-        });
-      }
-
-      const target = navigator.serviceWorker.controller ?? registration.active;
-      if (!target) {
-        throw new Error('Service Worker active target not available');
-      }
+      const expected = registration.installing ?? registration.waiting ?? registration.active;
+      const target = await new Promise<ServiceWorker>((resolve, reject) => {
+        const onControllerChange = () => {
+          const controller = navigator.serviceWorker.controller;
+          if (!controller || controller !== expected || controller.scriptURL !== workerUrl.href) return;
+          clearTimeout(timeout);
+          navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+          resolve(controller);
+        };
+        const timeout = setTimeout(() => {
+          navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+          reject(new Error('Updated Service Worker did not take control'));
+        }, 30_000);
+        navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+        onControllerChange();
+      });
       this.swTarget = target;
 
       navigator.serviceWorker.addEventListener('message', (event) => {

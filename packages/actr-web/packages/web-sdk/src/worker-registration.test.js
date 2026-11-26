@@ -8,7 +8,7 @@ const config = {
   signaling_url: 'wss://provider.example/signaling',
   client_actr_type: 'apps.example/echo@1.0.0',
   package_url: '/echo.actr',
-  runtime_wasm_url: '/actr_sw_host_bg.wasm',
+  runtime_wasm_url: '/actr_sw_host_bg.wasm?v=runtime-revision',
   trust: [],
 };
 const imported = (keyId) => ({
@@ -70,7 +70,7 @@ function worker(sourceUrl, register, restoredKeyId = 'key-a') {
       close() {}
     },
     fetch: vi.fn(async (url) => {
-      if (url === '/actr_sw_host.js') {
+      if (url === '/actr_sw_host.js?v=runtime-revision') {
         return { ok: true, text: async () => 'let wasm_bindgen = self.fixtureWasm;' };
       }
       if (url === '/echo.actr') return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) };

@@ -323,18 +323,27 @@
                 this.clientId = 'client_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
             }
             async initialize(swUrl, runtimeConfig) {
-                const reg = await navigator.serviceWorker.register(swUrl, { updateViaCache: 'none' });
+                const workerUrl = new URL(swUrl, location.href);
+                const version = new URL(runtimeConfig.runtime_wasm_url, location.href).searchParams.get('v');
+                if (version) workerUrl.searchParams.set('runtime', version);
+                const reg = await navigator.serviceWorker.register(workerUrl.href, { updateViaCache: 'none' });
                 await reg.update();
-                await navigator.serviceWorker.ready;
-                if (!navigator.serviceWorker.controller) {
-                    await new Promise(r => {
-                        const h = () => { navigator.serviceWorker.removeEventListener('controllerchange', h); r(); };
-                        navigator.serviceWorker.addEventListener('controllerchange', h);
-                        setTimeout(h, 3000);
-                    });
-                }
-                const target = navigator.serviceWorker.controller ?? reg.active;
-                if (!target) throw new Error('SW target not available');
+                const expected = reg.installing ?? reg.waiting ?? reg.active;
+                const target = await new Promise((resolve, reject) => {
+                    const ready = () => {
+                        const controller = navigator.serviceWorker.controller;
+                        if (!controller || controller !== expected || controller.scriptURL !== workerUrl.href) return;
+                        clearTimeout(timer);
+                        navigator.serviceWorker.removeEventListener('controllerchange', ready);
+                        resolve(controller);
+                    };
+                    const timer = setTimeout(() => {
+                        navigator.serviceWorker.removeEventListener('controllerchange', ready);
+                        reject(new Error('Updated Service Worker did not take control'));
+                    }, 30000);
+                    navigator.serviceWorker.addEventListener('controllerchange', ready);
+                    ready();
+                });
                 this.swTarget = target;
                 const ch = new MessageChannel();
                 this.swPort = ch.port1;

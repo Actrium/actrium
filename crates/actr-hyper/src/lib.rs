@@ -1684,6 +1684,18 @@ impl Node<Attached> {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Node<Registered> {
+    /// Request Actor channel certificates for Relay independently of the
+    /// built-in Actrium service. Custom guards and registries can require a
+    /// verified peer context for the traffic they protect.
+    pub fn with_actor_channel_authentication(mut self) -> Self {
+        self.attachment
+            .as_mut()
+            .expect("Node<Registered> without attachment")
+            .node
+            .actor_channel_authentication = true;
+        self
+    }
+
     /// Install or replace the inbound delivery guard before startup.
     pub fn with_incoming_guard(mut self, guard: Arc<dyn crate::lifecycle::IncomingGuard>) -> Self {
         self.attachment
