@@ -852,14 +852,17 @@ offInterim();
 offState();
 
 // 文件选择与缓存附件
+// files 的类型是 (FileImportFile | CachedFileImport)[]：
+//   FileImportFile    = { name, base64, thumbnailBase64? }        —— 默认分支，带原始字节
+//   CachedFileImport  = { fileId, name, size, thumbnailBase64?, canPreview? } —— cache: true 分支，不含原始字节
+// 即使传入 cache: true，返回类型仍是联合类型，使用前需要用 'fileId' in file 显式收窄：
 import { pick, openPreview, release } from 'host:file-import';
 const { files } = await pick({ source: 'files', accept: ['image/png'], multiple: false });
-// files: { name: string, base64: string }[]
-// cache: true 时返回 { fileId, name, size, thumbnailBase64?, canPreview? }[]，不含原始字节：
 const { files: cached } = await pick({ source: 'photos', cache: true });
-if (cached[0]) {
-  await openPreview({ fileId: cached[0].fileId });  // 原生预览缓存附件
-  await release({ fileId: cached[0].fileId });      // 不再需要时释放
+const file = cached[0];
+if (file &amp;&amp; 'fileId' in file) {
+  await openPreview({ fileId: file.fileId });  // 原生预览缓存附件
+  await release({ fileId: file.fileId });      // 不再需要时释放
 }
 
 // 文本转语音
@@ -905,7 +908,8 @@ useEffect(() =&gt; {
     <tr><th>导入形式</th><th>方法</th><th>输入 / 输出</th><th>说明</th></tr>
     <tr><td><code>host:service/&lt;route&gt;</code></td><td><code>call</code></td><td><code>{ payloadBase64, timeoutMs? }</code> → <code>{ payloadBase64 }</code></td><td>固定 route 由 Host 注入；Guest 不传 route</td></tr>
     <tr><td><code>host:service/&lt;event&gt;</code></td><td><code>on</code></td><td>handler 收 <code>{ event, payloadBase64 }</code> → 退订函数</td><td>只接收匹配的固定事件</td></tr>
-    <tr><td><code>host:service</code></td><td><code>uploadAttachment</code></td><td><code>{ filename, base64, type?, id? }</code> → <code>{ attachmentId }</code></td><td>固定上传传输；package 能力名是 <code>service.attachmentUpload</code></td></tr>
+    <tr><td><code>host:service</code></td><td><code>uploadAttachment</code></td><td><code>{ filename, base64, type?, id? }</code> → <code>{ attachmentId }</code></td><td>原始字节分支：直接上传字节；固定上传传输；package 能力名是 <code>service.attachmentUpload</code></td></tr>
+    <tr><td><code>host:service</code></td><td><code>uploadAttachment</code></td><td><code>{ fileId, type?, id? }</code> → <code>{ attachmentId }</code></td><td>缓存分支：<code>fileId</code> 来自 <code>host:file-import</code> 的缓存附件，Host 读取缓存文件后上传，Guest 不经手字节；与原始字节分支是互斥的联合类型，二选一</td></tr>
   </table></div>
   <div class="callout danger">
     <div class="co-title">裸 host:service 不提供动态业务调用</div>
@@ -936,11 +940,23 @@ const reply = decodeEchoReply(out.payloadBase64);</pre></div>
   <div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · guest</span><button class="copy-btn" data-copy>复制</button></div>
 <pre>import { uploadAttachment } from 'host:service';
 
+// 原始字节分支：filename/base64 必填
 const { attachmentId } = await uploadAttachment({
   filename: 'report.pdf',
   base64: fileBase64,
   type: 'document',
-});</pre></div>
+});
+
+// 缓存分支：直接上传 host:file-import 缓存的附件，无需读取字节
+import { pick } from 'host:file-import';
+const { files } = await pick({ source: 'photos', cache: true });
+const file = files[0];
+if (file &amp;&amp; 'fileId' in file) {
+  const { attachmentId: cachedId } = await uploadAttachment({
+    fileId: file.fileId,
+    type: 'image',
+  });
+}</pre></div>
 
   <h3>超时</h3>
   <p><code>timeoutMs</code> 默认 30 秒，全局上限 300 秒；应用 contract 可以进一步收紧。示例中的 8 秒、10 秒或 120 秒是具体应用选择，不是所有 Service 的统一超时。</p>
