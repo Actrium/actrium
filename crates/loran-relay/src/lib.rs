@@ -20,8 +20,8 @@ use axum::{
 use futures_util::StreamExt;
 pub use loran_relay_protocol::RelayLimits;
 use loran_relay_protocol::{
-    ClientControl, MAX_CONTROL_BYTES, MAX_METADATA_BYTES, SUBPROTOCOL, valid_endpoint,
-    valid_identifier,
+    ACTOR_CHANNEL_SUBPROTOCOL, ClientControl, MAX_CONTROL_BYTES, MAX_METADATA_BYTES, SUBPROTOCOL,
+    valid_endpoint, valid_identifier,
 };
 use registry::{Peer, Registry};
 use std::{
@@ -169,6 +169,9 @@ impl Relay {
     }
 
     async fn serve(self: Arc<Self>, mut socket: WebSocket, _slot: OwnedSemaphorePermit) {
+        let actor_channel = socket
+            .protocol()
+            .is_some_and(|protocol| protocol == ACTOR_CHANNEL_SUBPROTOCOL);
         let deadline = Duration::from_secs(self.limits.authentication_timeout_secs);
         let authenticate = async {
             let Some(Ok(Message::Text(text))) = socket.next().await else {
@@ -217,6 +220,7 @@ impl Relay {
         let key = (principal.namespace.clone(), principal.endpoint.clone());
         let session = self.registry.lock().unwrap().register(Peer {
             principal,
+            actor_channel,
             session: 0,
             tx,
             budget,
@@ -381,7 +385,7 @@ async fn upgrade(
     if relay.shutdown.is_cancelled() {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
-    ws.protocols([SUBPROTOCOL])
+    ws.protocols([ACTOR_CHANNEL_SUBPROTOCOL, SUBPROTOCOL])
         .max_frame_size(relay.limits.max_frame_bytes)
         .max_message_size(relay.limits.max_frame_bytes)
         .on_upgrade(move |socket| relay.serve(socket, slot))

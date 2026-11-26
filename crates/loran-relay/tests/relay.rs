@@ -3,7 +3,8 @@ use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use loran_relay::{AuthError, Authenticator, Principal, Relay, RelayLimits};
 use loran_relay_protocol::{
-    ClientControl, CloseReason, ErrorCode, SUBPROTOCOL, ServerControl, decode_data, encode_data,
+    ACTOR_CHANNEL_SUBPROTOCOL, ClientControl, CloseReason, ErrorCode, SUBPROTOCOL, ServerControl,
+    decode_data, encode_data,
 };
 use std::{
     collections::HashSet,
@@ -76,16 +77,38 @@ impl Server {
         }
     }
     async fn socket(&self) -> Socket {
+        self.socket_with_actor_channel(false).await
+    }
+
+    async fn socket_with_actor_channel(&self, actor_channel: bool) -> Socket {
         let mut request = self.url.as_str().into_client_request().unwrap();
+        let (protocols, selected) = if actor_channel {
+            (
+                format!("{ACTOR_CHANNEL_SUBPROTOCOL}, {SUBPROTOCOL}"),
+                ACTOR_CHANNEL_SUBPROTOCOL,
+            )
+        } else {
+            (SUBPROTOCOL.to_owned(), SUBPROTOCOL)
+        };
         request
             .headers_mut()
-            .insert("Sec-WebSocket-Protocol", SUBPROTOCOL.parse().unwrap());
+            .insert("Sec-WebSocket-Protocol", protocols.parse().unwrap());
         let (socket, response) = connect_async(request).await.unwrap();
-        assert_eq!(response.headers()["sec-websocket-protocol"], SUBPROTOCOL);
+        assert_eq!(response.headers()["sec-websocket-protocol"], selected);
         socket
     }
     async fn login(&self, endpoint: &str, namespace: &str) -> Socket {
-        let mut socket = self.socket().await;
+        self.login_with_actor_channel(endpoint, namespace, false)
+            .await
+    }
+
+    async fn login_with_actor_channel(
+        &self,
+        endpoint: &str,
+        namespace: &str,
+        actor_channel: bool,
+    ) -> Socket {
+        let mut socket = self.socket_with_actor_channel(actor_channel).await;
         control(
             &mut socket,
             ClientControl::Hello {
@@ -172,6 +195,15 @@ async fn read(socket: &mut Socket) -> ServerControl {
     serde_json::from_str(&text).unwrap()
 }
 async fn open(a: &mut Socket, b: &mut Socket, peer: &str) -> u64 {
+    open_with_actor_channel(a, b, peer, false).await
+}
+
+async fn open_with_actor_channel(
+    a: &mut Socket,
+    b: &mut Socket,
+    peer: &str,
+    expected: bool,
+) -> u64 {
     control(
         a,
         ClientControl::Connect {
@@ -180,15 +212,36 @@ async fn open(a: &mut Socket, b: &mut Socket, peer: &str) -> u64 {
         },
     )
     .await;
-    let ServerControl::Incoming { channel, .. } = read(b).await else {
+    let ServerControl::Incoming {
+        channel,
+        actor_channel,
+        ..
+    } = read(b).await
+    else {
         panic!("expected incoming");
     };
+    assert_eq!(actor_channel, expected);
     control(b, ClientControl::Accept { channel }).await;
     assert!(
-        matches!(read(a).await, ServerControl::Connected { channel: id, request: Some(10), .. } if id == channel)
+        matches!(read(a).await, ServerControl::Connected { channel: id, request: Some(10), actor_channel, .. } if id == channel && actor_channel == expected)
     );
-    assert!(matches!(read(b).await, ServerControl::Connected { channel: id, .. } if id == channel));
+    assert!(
+        matches!(read(b).await, ServerControl::Connected { channel: id, actor_channel, .. } if id == channel && actor_channel == expected)
+    );
     channel
+}
+
+#[tokio::test]
+async fn actor_channel_requires_both_peers_to_negotiate_the_extension() {
+    let relay = Server::new(RelayLimits::default()).await;
+    let mut first = relay.login_with_actor_channel("first", "realm", true).await;
+    let mut legacy = relay.login("legacy", "realm").await;
+    let mut second = relay
+        .login_with_actor_channel("second", "realm", true)
+        .await;
+
+    open_with_actor_channel(&mut legacy, &mut first, "first", false).await;
+    open_with_actor_channel(&mut first, &mut second, "second", true).await;
 }
 
 #[tokio::test]
@@ -276,6 +329,7 @@ async fn readiness_is_peer_acknowledged_and_data_is_bidirectional() {
         channel,
         peer,
         metadata,
+        ..
     } = read(&mut b).await
     else {
         panic!();

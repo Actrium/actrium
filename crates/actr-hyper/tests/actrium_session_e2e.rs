@@ -1,5 +1,4 @@
-//! Actrium v1 session e2e: two real nodes, a mock relay minting Actor channel
-//! certificates, verified-channel Attach, and a session-signed business call.
+//! Actrium v1 sessions over a mock Relay with native Fronts and a Service.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
@@ -10,7 +9,8 @@ use actr_hyper::actrium::ActriumAttachParams;
 use actr_hyper::test_support::TestSignalingServer;
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
 use actr_protocol::{
-    ActrId, ActrType, DataChunk, PayloadType, RpcEnvelope, RpcRequest, prost::Message as _,
+    ActrError, ActrId, ActrType, DataChunk, PayloadType, RpcEnvelope, RpcRequest,
+    prost::Message as _,
 };
 use actrium_runtime::{
     AttachmentPolicy, InMemorySessionService, ProgramRelease, ServiceConfig, ServicePolicies,
@@ -359,7 +359,11 @@ async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (Act
     (actr, service_actor_id)
 }
 
-async fn start_front_node(server: &TestSignalingServer, dir: &TempDir) -> ActrRef {
+async fn start_front_node(
+    server: &TestSignalingServer,
+    dir: &TempDir,
+    install_sessions: bool,
+) -> ActrRef {
     let front_type = front_type();
     let hyper = Hyper::new(HyperConfig::new(
         dir.path(),
@@ -375,6 +379,9 @@ async fn start_front_node(server: &TestSignalingServer, dir: &TempDir) -> ActrRe
         .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
         .await
         .unwrap();
+    if !install_sessions {
+        return registered.start().await.unwrap();
+    }
     let front_actor_id = registered.actor_id();
 
     let policies = ServicePolicies {
@@ -414,16 +421,36 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
 
     let service_dir = TempDir::new().unwrap();
     let front_dir = TempDir::new().unwrap();
+    let ordinary_front_dir = TempDir::new().unwrap();
     let (service, service_actor_id) = start_service_node(&server, &service_dir).await;
-    let front = start_front_node(&server, &front_dir).await;
+    let front = start_front_node(&server, &front_dir, true).await;
+    let ordinary_front = start_front_node(&server, &ordinary_front_dir, false).await;
 
     tokio::time::timeout(Duration::from_secs(30), async {
-        while server.relay_connection_count() != 2 {
+        while server.relay_connection_count() != 3 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("both nodes authenticate their relay sockets");
+    .expect("all nodes authenticate their relay sockets");
+
+    let ordinary_result = ordinary_front
+        .app_context()
+        .await
+        .call_raw(
+            &Dest::Peer(service_actor_id.clone()),
+            "echo".into(),
+            PayloadType::RpcReliable,
+            Bytes::from_static(b"ordinary call"),
+            15_000,
+        )
+        .await;
+    assert!(
+        matches!(ordinary_result, Err(ActrError::PermissionDenied(_))),
+        "a mixed-mode relay reaches the Service guard: {ordinary_result:?}"
+    );
+    ordinary_front.shutdown();
+    ordinary_front.wait_for_shutdown().await;
 
     // The peer handshake may still be in flight; Attach retries until the
     // verified Actor channel exists on both ends.
@@ -443,6 +470,15 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     })
     .await
     .expect("Attach succeeds within 20s");
+
+    let mut incompatible = attach_params();
+    incompatible.package_digest = vec![9; 32];
+    let incompatible_result = front.attach_actrium(&service_actor_id, incompatible).await;
+    assert!(
+        matches!(incompatible_result, Err(ActrError::PermissionDenied(message))
+            if message.contains("PackageDigestMismatch")),
+        "Attach rejects a mismatched signed Service package digest"
+    );
 
     let payload = b"hello over the verified session".to_vec();
     let response = tokio::time::timeout(

@@ -16,8 +16,6 @@ use tracing::info;
 
 const DETACHED_READY_TIMEOUT: Duration = Duration::from_secs(10);
 const DETACHED_READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
-// Keep this in step with the macOS Realm Front's Attach switch.
-const ACTRIUM_ATTACH_ENABLED: bool = false;
 
 /// Default filename for the runtime config file (`actr.toml`).
 const DEFAULT_RUNTIME_CONFIG: &str = "actr.toml";
@@ -361,8 +359,8 @@ impl RunCommand {
         })
     }
 
-    /// Install the Actrium v1 Attach server on a packaged Service host when
-    /// Attach is enabled and the runtime config has an `[actrium]` section.
+    /// Install the Actrium v1 Attach server on a packaged Service host when the
+    /// runtime config has an `[actrium]` section.
     ///
     /// v1 compatibility is exact: the Service accepts Attach from one Front
     /// package. The configured Front archive is verified with the same trust
@@ -378,7 +376,7 @@ impl RunCommand {
         service_package_digest: &[u8],
         trust: Arc<dyn actr_hyper::TrustProvider>,
     ) -> Result<actr_hyper::Node<actr_hyper::Registered>> {
-        let Some(actrium) = config.actrium.as_ref().filter(|_| ACTRIUM_ATTACH_ENABLED) else {
+        let Some(actrium) = config.actrium.as_ref() else {
             return Ok(node);
         };
 

@@ -288,6 +288,14 @@ impl Fixture {
     }
 
     async fn connected(&self, request: Option<u64>) -> NetworkResult<()> {
+        self.connected_with_actor_channel(request, false).await
+    }
+
+    async fn connected_with_actor_channel(
+        &self,
+        request: Option<u64>,
+        actor_channel: bool,
+    ) -> NetworkResult<()> {
         self.client
             .handle_control(
                 ServerControl::Connected {
@@ -295,6 +303,7 @@ impl Fixture {
                     request,
                     peer: self.remote.to_string_repr(),
                     metadata: String::new(),
+                    actor_channel,
                 },
                 &self.transport,
             )
@@ -394,6 +403,7 @@ async fn connected_response_cannot_replace_the_requested_peer() {
                 request: Some(request),
                 peer: other.to_string_repr(),
                 metadata: String::new(),
+                actor_channel: false,
             },
             &fixture.transport,
         )
@@ -460,6 +470,7 @@ async fn closing_unverified_channel_interrupts_its_waiting_sink() {
             42,
             fixture.remote.to_string_repr(),
             &fixture.transport,
+            false,
             true,
         )
         .await
@@ -599,7 +610,10 @@ async fn actrium_front_channel_publishes_strict_verified_peer_context() {
         fixture.now,
     )));
     let (request, dial) = fixture.start_dial(fixture.remote.clone()).await;
-    fixture.connected(Some(request)).await.unwrap();
+    fixture
+        .connected_with_actor_channel(Some(request), true)
+        .await
+        .unwrap();
 
     // An Actor Front initiates immediately. Its raw connection remains strict
     // and unusable until both Actor proofs and Noise confirmation complete.
@@ -763,13 +777,17 @@ async fn actrium_service_channel_waits_for_front_proof_and_confirmation() {
                 channel: 42,
                 peer: fixture.remote.to_string_repr(),
                 metadata: String::new(),
+                actor_channel: true,
             },
             &fixture.transport,
         )
         .await
         .unwrap();
     let _accept = fixture.next_message().await;
-    fixture.connected(None).await.unwrap();
+    fixture
+        .connected_with_actor_channel(None, true)
+        .await
+        .unwrap();
     let entry = fixture.client.channels.read().await[&42].clone();
     assert!(entry.actrium);
 
@@ -857,6 +875,7 @@ async fn reused_ready_channel_completes_the_pending_dial() {
                 channel: 42,
                 peer: fixture.remote.to_string_repr(),
                 metadata: String::new(),
+                actor_channel: false,
             },
             &fixture.transport,
         )
@@ -926,6 +945,7 @@ async fn reconnect_replaces_an_accepted_channel_while_its_sink_is_closing() {
                 request: Some(request),
                 peer: fixture.remote.to_string_repr(),
                 metadata: String::new(),
+                actor_channel: false,
             },
             &fixture.transport,
         )
@@ -999,6 +1019,7 @@ async fn stale_handshake_retry_keeps_the_original_pending_dial() {
                 request: Some(request),
                 peer: fixture.remote.to_string_repr(),
                 metadata: String::new(),
+                actor_channel: false,
             },
             &fixture.transport,
         )
@@ -1068,6 +1089,7 @@ async fn closing_a_relay_wire_preserves_a_concurrent_replacement() {
             43,
             fixture.remote.to_string_repr(),
             &fixture.transport,
+            false,
             true,
         )
         .await
@@ -1111,6 +1133,7 @@ async fn cancelled_request_does_not_break_an_existing_incoming_channel() {
                 channel: 42,
                 peer: fixture.remote.to_string_repr(),
                 metadata: String::new(),
+                actor_channel: false,
             },
             &fixture.transport,
         )
