@@ -273,4 +273,70 @@ struct CompactTabLayoutTests {
         #expect(overflowing[active] == 100)
         #expect(overflowing[inactive] == 50)
     }
+
+    @Test func tabsStopAtTheirIconWidthAndLetTheStripOverflow() {
+        let active = UUID()
+        let inactive = UUID()
+        let inputs = [
+            ToolbarAdaptiveTabWidthInput(
+                id: active,
+                preferredWidth: CompactToolbarLayout.activeTabPreferredWidth,
+                minimumWidth: CompactToolbarLayout.activeTabCompressedMinWidth
+            ),
+            ToolbarAdaptiveTabWidthInput(
+                id: inactive,
+                preferredWidth: CompactToolbarLayout.inactiveTabMinWidth,
+                minimumWidth: CompactToolbarLayout.inactiveTabCompressedMinWidth
+            ),
+        ]
+
+        // Squeezed, but both still above their floors: the sum lands exactly
+        // on the room available, so nothing overlaps and nothing overflows.
+        let squeezed = toolbarAdaptiveTabWidths(inputs: inputs, availableWidth: 280)
+        #expect(squeezed[active]! > CompactToolbarLayout.activeTabCompressedMinWidth)
+        #expect(squeezed[inactive]! > CompactToolbarLayout.inactiveTabCompressedMinWidth)
+        #expect(abs(squeezed.values.reduce(0, +) - 280) < 0.001)
+
+        // Impossible: both sit on their floor and the content is wider than
+        // the viewport, which is the overflow the strip scrolls.
+        let overflowing = toolbarAdaptiveTabWidths(inputs: inputs, availableWidth: 40)
+        #expect(overflowing[active] == CompactToolbarLayout.activeTabCompressedMinWidth)
+        #expect(overflowing[inactive] == CompactToolbarLayout.inactiveTabCompressedMinWidth)
+        #expect(overflowing.values.reduce(0, +) > 40)
+    }
+
+    @Test func aTabShedsItsTitleBeforeItShedsItsSlot() {
+        // The floor is the icon and its tightened padding, so the narrowest
+        // Tab still shows which site it holds.
+        #expect(
+            CompactToolbarLayout.inactiveTabCompressedMinWidth
+                == 16 + CompactToolbarLayout.iconOnlyTabHorizontalPadding * 2
+        )
+        // The floor is inside the icon-only band, so a Tab at its floor never
+        // renders a title too clipped to read.
+        #expect(
+            CompactToolbarLayout.inactiveTabCompressedMinWidth
+                <= CompactToolbarLayout.inactiveTabIconOnlyMaxWidth
+        )
+    }
+
+    @Test func groupHeadersCompressAlongsideTabs() {
+        let group = UUID()
+        let tab = UUID()
+        let inputs = [
+            ToolbarAdaptiveTabWidthInput(id: group, preferredWidth: 176, minimumWidth: 35),
+            ToolbarAdaptiveTabWidthInput(id: tab, preferredWidth: 230, minimumWidth: 210),
+        ]
+
+        let roomy = toolbarAdaptiveTabWidths(inputs: inputs, availableWidth: 500)
+        #expect(roomy[group] == 176)
+        #expect(roomy[tab] == 230)
+
+        let tight = toolbarAdaptiveTabWidths(inputs: inputs, availableWidth: 300)
+        #expect(tight[group]! < 176)
+        #expect(tight[group]! > 35)
+        #expect(tight[tab]! < 230)
+        #expect(tight[tab]! >= 210)
+        #expect(abs(tight.values.reduce(0, +) - 300) < 0.001)
+    }
 }

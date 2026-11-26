@@ -114,12 +114,23 @@ enum CompactToolbarLayout {
     static let compactTrafficLightReserve: CGFloat = 78
     static let fullScreenLeadingReserve: CGFloat = 4
     static let inactiveTabMinWidth: CGFloat = 88
-    static let inactiveTabCompressedMinWidth: CGFloat = 68
+    /// The narrowest a Tab may be squeezed to: its icon plus the tightened
+    /// side padding. Every Tab keeps this much, so two Tabs can never occupy
+    /// the same slot and the strip overflows instead.
+    static let inactiveTabCompressedMinWidth: CGFloat = 28
+    /// At or below this width a Tab shows its icon alone. Below it there is
+    /// room for the icon, its gaps, the side padding and only a few
+    /// characters of title, which reads as noise rather than a name.
+    static let inactiveTabIconOnlyMaxWidth: CGFloat = 68
+    /// Side padding around a Tab that shows its icon alone.
+    static let iconOnlyTabHorizontalPadding: CGFloat = 6
     /// No Tab grows past this, however much horizontal room the strip has.
     static let tabMaxWidth: CGFloat = 230
     static let inactiveTabMaxWidth: CGFloat = tabMaxWidth
     static let activeTabMinWidth: CGFloat = 230
-    static let activeTabCompressedMinWidth: CGFloat = 220
+    /// The current Tab also carries the address field, so it keeps a floor
+    /// wide enough to stay usable instead of shrinking to an icon.
+    static let activeTabCompressedMinWidth: CGFloat = 210
     static let activeTabMaxWidth: CGFloat = tabMaxWidth
     static let activeTabPreferredWidth: CGFloat = tabMaxWidth
 
@@ -764,7 +775,7 @@ struct MainWindowTabsView: View {
     private var tabStrip: some View {
         GeometryReader { geo in
             let sections = tabSections
-            let tabWidths = adaptiveTabWidths(
+            let widths = adaptiveWidths(
                 for: sections,
                 viewportWidth: geo.size.width
             )
@@ -778,14 +789,14 @@ struct MainWindowTabsView: View {
                                     groupedTabs(
                                         group,
                                         tabs: section.tabs,
-                                        tabWidths: tabWidths
+                                        widths: widths
                                     )
                                 } else {
                                     HStack(spacing: 0) {
                                         ForEach(section.tabs) { tab in
                                             renderedTab(
                                                 tab,
-                                                width: tabWidths[tab.id]
+                                                width: widths[tab.id]
                                                     ?? preferredTabWidth(for: tab)
                                             )
                                         }
@@ -810,7 +821,7 @@ struct MainWindowTabsView: View {
                 }
 
                 movingTabForeground
-                movingGroupForeground(tabWidths: tabWidths)
+                movingGroupForeground(widths: widths)
             }
             .onAppear { interaction.updateTabStripWidth(geo.size.width) }
             .onChange(of: geo.size.width) { _, width in
@@ -967,16 +978,9 @@ struct MainWindowTabsView: View {
     }
 
     private func groupLabelWidth(_ group: TabGroup) -> CGFloat {
-        // The frame below subtracts the reserved trailing separation, so the
-        // width has to add it back or the last character gets clipped.
-        let separation = group.isCollapsed
-            ? 0 : CompactToolbarLayout.tabSeparationWidth
-        let memberCount = viewModel.tabs.filter { $0.groupId == group.id }.count
-        let countWidth = CGFloat(max(1, String(max(memberCount, 0)).count)) * 6
-
         // Unnamed header: chevron (16) + spacing (3) + count + padding (10).
         guard !group.name.isEmpty else {
-            return 29 + countWidth + separation
+            return groupLabelFloorWidth(group)
         }
 
         // Named header: chevron (16) + spacing (3) + name + spacing (5) +
@@ -985,7 +989,25 @@ struct MainWindowTabsView: View {
         let nameWidth = (groupDisplayName(group) as NSString).size(withAttributes: [
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold)
         ]).width
-        return min(176, max(82, 34 + ceil(nameWidth) + countWidth + separation + 2))
+        return min(176, max(82, 34 + ceil(nameWidth) + groupCountWidth(group) + groupSeparation(group) + 2))
+    }
+
+    /// The narrowest a header may become. The chevron and the member count
+    /// still identify the group, so compression drops the name first and
+    /// stops here.
+    private func groupLabelFloorWidth(_ group: TabGroup) -> CGFloat {
+        // The frame below subtracts the reserved trailing separation, so the
+        // width has to add it back or the last character gets clipped.
+        29 + groupCountWidth(group) + groupSeparation(group)
+    }
+
+    private func groupCountWidth(_ group: TabGroup) -> CGFloat {
+        let memberCount = viewModel.tabs.filter { $0.groupId == group.id }.count
+        return CGFloat(max(1, String(max(memberCount, 0)).count)) * 6
+    }
+
+    private func groupSeparation(_ group: TabGroup) -> CGFloat {
+        group.isCollapsed ? 0 : CompactToolbarLayout.tabSeparationWidth
     }
 
     private func tabStripWidth(in toolbarWidth: CGFloat) -> CGFloat {
@@ -1031,34 +1053,42 @@ struct MainWindowTabsView: View {
         )
     }
 
-    private func adaptiveTabWidths(
+    /// Compresses Tabs and Group headers in one pass, because they share the
+    /// strip's width. Each surface keeps its own floor, so the strip narrows
+    /// every surface before it lets any of them collide, and overflows the
+    /// viewport only once every surface already sits on that floor.
+    private func adaptiveWidths(
         for sections: [ToolbarTabSection],
         viewportWidth: CGFloat
     ) -> [UUID: CGFloat] {
-        let visibleTabs = sections.flatMap { section in
-            section.group?.isCollapsed == true ? [] : section.tabs
-        }
-        let groupHeaderWidth = sections.reduce(CGFloat.zero) { result, section in
-            result + (section.group.map(groupLabelWidth) ?? 0)
-        }
-        let availableTabWidth = max(
-            0,
-            viewportWidth
-                - groupHeaderWidth
-                - CompactToolbarLayout.tabStripContentPadding * 2
-        )
-        let inputs = visibleTabs.map { tab in
-            ToolbarAdaptiveTabWidthInput(
-                id: tab.id,
-                preferredWidth: preferredTabWidth(for: tab),
-                minimumWidth: viewModel.currentTabId == tab.id
-                    ? CompactToolbarLayout.activeTabCompressedMinWidth
-                    : CompactToolbarLayout.inactiveTabCompressedMinWidth
-            )
+        let inputs = sections.flatMap { section -> [ToolbarAdaptiveTabWidthInput] in
+            let groupInput = section.group.map { group in
+                ToolbarAdaptiveTabWidthInput(
+                    id: group.id,
+                    preferredWidth: groupLabelWidth(group),
+                    minimumWidth: groupLabelFloorWidth(group)
+                )
+            }
+            guard section.group?.isCollapsed != true else {
+                return groupInput.map { [$0] } ?? []
+            }
+            let tabInputs = section.tabs.map { tab in
+                ToolbarAdaptiveTabWidthInput(
+                    id: tab.id,
+                    preferredWidth: preferredTabWidth(for: tab),
+                    minimumWidth: viewModel.currentTabId == tab.id
+                        ? CompactToolbarLayout.activeTabCompressedMinWidth
+                        : CompactToolbarLayout.inactiveTabCompressedMinWidth
+                )
+            }
+            return (groupInput.map { [$0] } ?? []) + tabInputs
         }
         return toolbarAdaptiveTabWidths(
             inputs: inputs,
-            availableWidth: availableTabWidth
+            availableWidth: max(
+                0,
+                viewportWidth - CompactToolbarLayout.tabStripContentPadding * 2
+            )
         )
     }
 
@@ -1072,7 +1102,7 @@ struct MainWindowTabsView: View {
             if isMoving {
                 Color.clear
             } else {
-                tabLabel(tab)
+                tabLabel(tab, width: width)
                     .frame(width: width)
                     // The Safari-style focus ring deliberately extends past
                     // the Tab surface, so it must be drawn after the content
@@ -1125,7 +1155,7 @@ struct MainWindowTabsView: View {
                 tabShape(for: tab)
                     .fill(AppColors.windowChromeActiveTabPlateColor)
 
-                tabLabel(tab, showsGlassReflection: false)
+                tabLabel(tab, width: frame.width, showsGlassReflection: false)
                     .frame(width: frame.width, height: frame.height)
             }
             .frame(width: frame.width, height: frame.height)
@@ -1149,20 +1179,24 @@ struct MainWindowTabsView: View {
     /// The original subtree remains as a transparent layout placeholder until
     /// its new model position has been laid out.
     @ViewBuilder
-    private func movingGroupForeground(tabWidths: [UUID: CGFloat]) -> some View {
+    private func movingGroupForeground(widths: [UUID: CGFloat]) -> some View {
         if let groupID = interaction.movingGroupID,
            let group = viewModel.tabGroups.first(where: { $0.id == groupID }),
            let frame = interaction.movingGroupFrame(for: groupID) {
             let tabs = viewModel.tabs.filter { $0.groupId == groupID }
 
             HStack(spacing: 0) {
-                groupHeader(group, tabCount: tabs.count)
+                groupHeader(
+                    group,
+                    tabCount: tabs.count,
+                    width: widths[group.id] ?? groupLabelWidth(group)
+                )
 
                 if !group.isCollapsed {
                     HStack(spacing: 0) {
                         ForEach(tabs) { tab in
-                            let width = tabWidths[tab.id] ?? preferredTabWidth(for: tab)
-                            tabLabel(tab, showsGlassReflection: false)
+                            let width = widths[tab.id] ?? preferredTabWidth(for: tab)
+                            tabLabel(tab, width: width, showsGlassReflection: false)
                                 .frame(width: width, height: 32)
                                 .overlay {
                                     layeredTabBoundary(for: tab, isVisible: true)
@@ -1245,11 +1279,15 @@ struct MainWindowTabsView: View {
     private func groupedTabs(
         _ group: TabGroup,
         tabs: [Tab],
-        tabWidths: [UUID: CGFloat]
+        widths: [UUID: CGFloat]
     ) -> some View {
         let isMoving = interaction.isMovingGroup(group.id)
         let content = HStack(spacing: 0) {
-            groupHeader(group, tabCount: tabs.count)
+            groupHeader(
+                group,
+                tabCount: tabs.count,
+                width: widths[group.id] ?? groupLabelWidth(group)
+            )
                 .background {
                     GeometryReader { proxy in
                         Color.clear.preference(
@@ -1268,7 +1306,7 @@ struct MainWindowTabsView: View {
                     ForEach(tabs) { tab in
                         renderedTab(
                             tab,
-                            width: tabWidths[tab.id] ?? preferredTabWidth(for: tab)
+                            width: widths[tab.id] ?? preferredTabWidth(for: tab)
                         )
                     }
                 }
@@ -1334,7 +1372,11 @@ struct MainWindowTabsView: View {
         }
     }
 
-    private func groupHeader(_ group: TabGroup, tabCount: Int) -> some View {
+    private func groupHeader(
+        _ group: TabGroup,
+        tabCount: Int,
+        width: CGFloat
+    ) -> some View {
         let trailingSeparation = group.isCollapsed
             ? 0 : CompactToolbarLayout.tabSeparationWidth
         // Custom names show at most 10 characters; the rest is elided.
@@ -1387,7 +1429,7 @@ struct MainWindowTabsView: View {
         // Leading alignment pins the chevron in place whether the group is
         // expanded or collapsed.
         .frame(
-            width: groupLabelWidth(group) - trailingSeparation,
+            width: max(0, width - trailingSeparation),
             height: 30,
             alignment: .leading
         )
@@ -1509,11 +1551,12 @@ struct MainWindowTabsView: View {
     @ViewBuilder
     private func tabLabel(
         _ tab: Tab,
+        width: CGFloat,
         showsGlassReflection: Bool = true
     ) -> some View {
         switch interactionState(for: tab) {
         case .inactive:
-            inactiveTab(tab)
+            inactiveTab(tab, width: width)
                 .transition(.identity)
         case .active:
             activeTab(tab, showsGlassReflection: showsGlassReflection)
@@ -1522,7 +1565,7 @@ struct MainWindowTabsView: View {
             addressEditingTab(tab)
                 .transition(.identity)
         case .draggingInactive:
-            inactiveTab(tab)
+            inactiveTab(tab, width: width)
                 .transition(.identity)
         case .draggingActive:
             activeTab(tab, showsGlassReflection: showsGlassReflection)
@@ -1530,17 +1573,27 @@ struct MainWindowTabsView: View {
         }
     }
 
-    private func inactiveTab(_ tab: Tab) -> some View {
-        HStack(spacing: 7) {
+    /// An inactive Tab gives up its title before it gives up its slot: once
+    /// the assigned width can no longer hold a readable name, the icon stands
+    /// alone and centres itself in the tightened padding.
+    private func inactiveTab(_ tab: Tab, width: CGFloat) -> some View {
+        let showsTitle = width > CompactToolbarLayout.inactiveTabIconOnlyMaxWidth
+
+        return HStack(spacing: showsTitle ? 7 : 0) {
             tabIdentityIcon(for: tab)
 
-            Text(tab.title.isEmpty ? "New Tab" : tab.title)
-                .font(.system(size: 12.5))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if showsTitle {
+                Text(tab.title.isEmpty ? "New Tab" : tab.title)
+                    .font(.system(size: 12.5))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .padding(.horizontal, 10)
+        .padding(
+            .horizontal,
+            showsTitle ? 10 : CompactToolbarLayout.iconOnlyTabHorizontalPadding
+        )
         .frame(height: 32)
         .background {
             tabSurface(for: tab, isActive: false)
@@ -1551,6 +1604,7 @@ struct MainWindowTabsView: View {
             viewModel.switchToTab(id: tab.id)
         }
         .contextMenu { tabContextMenu(for: tab) }
+        .help(tab.title.isEmpty ? "New Tab" : tab.title)
         .accessibilityLabel(tab.title.isEmpty ? "New Tab" : tab.title)
     }
 
