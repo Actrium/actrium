@@ -2560,27 +2560,31 @@ impl Inner {
         let reply_mode = if let Some(handle) = &self.linked_handle {
             handle.reply_mode_for_route(&envelope.route_key)
         } else {
-            #[cfg(feature = "dynclib-engine")]
-            let native_mode = match &self.native_reply_modes {
-                Some(modes) => match modes.for_route(&envelope.route_key).await {
-                    Ok(mode) => Some(mode),
-                    Err(error) => {
-                        self.dedup_state
-                            .lock()
-                            .await
-                            .complete(&dedup_key, Err(error.clone()));
-                        return ready_continuation(Err(error));
-                    }
-                },
-                None => None,
-            };
-            #[cfg(not(feature = "dynclib-engine"))]
-            let native_mode = None;
-            native_mode.unwrap_or(if self.package_uses_explicit_reply_boundary {
+            let fallback = if self.package_uses_explicit_reply_boundary {
                 actr_protocol::ReplyMode::Explicit
             } else {
                 actr_protocol::ReplyMode::Return
-            })
+            };
+            #[cfg(feature = "dynclib-engine")]
+            {
+                match &self.native_reply_modes {
+                    Some(modes) => match modes.for_route(&envelope.route_key).await {
+                        Ok(mode) => mode,
+                        Err(error) => {
+                            self.dedup_state
+                                .lock()
+                                .await
+                                .complete(&dedup_key, Err(error.clone()));
+                            return ready_continuation(Err(error));
+                        }
+                    },
+                    None => fallback,
+                }
+            }
+            #[cfg(not(feature = "dynclib-engine"))]
+            {
+                fallback
+            }
         };
         let expects_response = Inner::dispatch_expects_response(envelope.direction).unwrap_or(true);
 
