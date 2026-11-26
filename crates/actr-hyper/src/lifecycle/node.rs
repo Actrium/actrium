@@ -2543,12 +2543,22 @@ impl Inner {
                 )));
             }
         };
-        let ctx = self.make_runtime_context(
-            actor_id,
-            caller_id, // caller_id from transport layer (MessageRecord.from)
-            &envelope.request_id,
-            &credential_state.credential().await,
-        );
+        let reply_stream_channel = peer_context.clone().filter(|_| {
+            self.actrium_peer.is_some()
+                && envelope.direction == Some(Direction::Request as i32)
+                && envelope
+                    .metadata
+                    .iter()
+                    .any(|entry| entry.key == crate::actrium::metadata::SESSION_ID)
+        });
+        let ctx = self
+            .make_runtime_context(
+                actor_id,
+                caller_id, // caller_id from transport layer (MessageRecord.from)
+                &envelope.request_id,
+                &credential_state.credential().await,
+            )
+            .with_reply_stream_channel(reply_stream_channel);
         // Inherit the claimed request scope (if any) so nested `call_raw` from
         // the guest derives child scopes under the same root deadline/token.
         let mut ctx = match scope.clone() {

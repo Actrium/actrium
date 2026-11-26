@@ -40,6 +40,18 @@ export type ServiceEvent = {
   payloadBase64: string;
 };
 
+export type ServiceStreamInput = { streamId: string };
+export type ServiceStreamChunk = ServiceStreamInput & { sequence: string; payloadBase64: string };
+export type ServiceStreamSendInput = ServiceStreamChunk & { route: string };
+const maxServiceStreamPayload = 7 * 1024 * 1024;
+
+function parseServiceStreamInput(value: unknown): ServiceStreamInput {
+  const input = asObject(value, 'Service DataStream');
+  const streamId = requireString(input.streamId, 'Service DataStream ID');
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(streamId)) throw new Error('Invalid Service DataStream ID.');
+  return { streamId };
+}
+
 /**
  * Fixed transport upload exposed on `host:service`. Unlike `call`/`tell`/
  * `on`, the Guest cannot name a route here: the Host owns the whole
@@ -219,15 +231,15 @@ function parseTTSSpeakInput(value: unknown): TTSSpeakInput {
   return locale === undefined ? { text, voice } : { text, locale, voice };
 }
 
-const BASE64_PATTERN =
-  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+const NON_BASE64_CHARACTER = /[^A-Za-z0-9+/]/;
 
 /** Upper bound so a Guest cannot overflow the host setTimeout clamp. */
 const MAX_SERVICE_TIMEOUT_MS = 300_000;
 
 function requireBase64(value: unknown, label: string): string {
   const text = requireString(value, label, true);
-  if (!BASE64_PATTERN.test(text)) {
+  const padding = text.endsWith('==') ? 2 : Number(text.endsWith('='));
+  if (text.length % 4 !== 0 || NON_BASE64_CHARACTER.test(text.slice(0, text.length - padding))) {
     throw new Error(
       `${label} must be standard base64 (RFC 4648, padded)`
     );
@@ -476,6 +488,41 @@ export const contract = defineKeelContract({
                 'service.uploadAttachment output.attachmentId'
               ),
             };
+          },
+        },
+      }),
+    },
+    'host:service-stream': {
+      register: rpc<ServiceStreamInput, void>({ schema: { parseInput: parseServiceStreamInput } }),
+      unregister: rpc<ServiceStreamInput, void>({ schema: { parseInput: parseServiceStreamInput } }),
+      send: rpc<ServiceStreamSendInput, void>({
+        schema: {
+          parseInput: (value) => {
+            const { streamId } = parseServiceStreamInput(value);
+            const input = asObject(value, 'Service DataStream send');
+            const route = requireString(input.route, 'Service DataStream route');
+            const sequence = requireString(input.sequence, 'Service DataStream sequence');
+            if (!/^[1-9][0-9]{0,19}$/.test(sequence) || BigInt(sequence) > 18446744073709551615n) {
+              throw new Error('Invalid outbound Service DataStream sequence.');
+            }
+            const payloadBase64 = requireString(input.payloadBase64, 'Service DataStream payload');
+            if (!payloadBase64 || payloadBase64.length > Math.ceil(maxServiceStreamPayload / 3) * 4) {
+              throw new Error('Invalid outbound Service DataStream payload size.');
+            }
+            return { route, streamId, sequence, payloadBase64: requireBase64(payloadBase64, 'Service DataStream payload') };
+          },
+        },
+      }),
+      onChunk: subscription<ServiceStreamChunk>({
+        schema: {
+          parseEvent: (value) => {
+            const { streamId } = parseServiceStreamInput(value);
+            const chunk = asObject(value, 'Service DataStream chunk');
+            const sequence = requireString(chunk.sequence, 'Service DataStream sequence');
+            if (!/^(0|[1-9][0-9]{0,19})$/.test(sequence) || BigInt(sequence) > 18446744073709551615n) {
+              throw new Error('Invalid Service DataStream sequence.');
+            }
+            return { streamId, sequence, payloadBase64: requireBase64(chunk.payloadBase64, 'Service DataStream payload') };
           },
         },
       }),

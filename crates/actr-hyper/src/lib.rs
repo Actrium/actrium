@@ -1171,6 +1171,7 @@ pub struct FrontEventRouter {
 struct FrontEventRouterInner {
     events: std::collections::HashSet<String>,
     service: std::sync::Mutex<Option<actr_protocol::ActrId>>,
+    streams: std::sync::Mutex<std::collections::HashMap<String, actr_protocol::ActrId>>,
     listener: std::sync::Arc<dyn FrontEventListener>,
 }
 
@@ -1184,6 +1185,7 @@ impl FrontEventRouter {
             inner: std::sync::Arc::new(FrontEventRouterInner {
                 events: events.into_iter().collect(),
                 service: std::sync::Mutex::new(None),
+                streams: std::sync::Mutex::new(std::collections::HashMap::new()),
                 listener,
             }),
         }
@@ -1205,6 +1207,48 @@ impl FrontEventRouter {
         caller: Option<&actr_protocol::ActrId>,
     ) -> bool {
         self.accept(envelope, caller).is_some()
+    }
+
+    /// Bind a locally registered Front stream to its discovered Service peer.
+    #[doc(hidden)]
+    pub fn register_stream(
+        &self,
+        stream_id: String,
+        service: actr_protocol::ActrId,
+    ) -> actr_protocol::ActorResult<()> {
+        use std::collections::hash_map::Entry;
+        let mut streams = self
+            .inner
+            .streams
+            .lock()
+            .expect("Front stream lock poisoned");
+        match streams.entry(stream_id) {
+            Entry::Vacant(entry) => {
+                entry.insert(service);
+                Ok(())
+            }
+            Entry::Occupied(_) => Err(actr_protocol::ActrError::InvalidArgument(
+                "The Front stream ID is already registered".into(),
+            )),
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn unregister_stream(&self, stream_id: &str) {
+        self.inner
+            .streams
+            .lock()
+            .expect("Front stream lock poisoned")
+            .remove(stream_id);
+    }
+
+    fn admits_stream(&self, stream_id: &str, peer: &actr_protocol::ActrId) -> bool {
+        self.inner
+            .streams
+            .lock()
+            .expect("Front stream lock poisoned")
+            .get(stream_id)
+            == Some(peer)
     }
 
     fn accept(

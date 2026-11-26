@@ -79,6 +79,22 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     requiresSandbox: true,
     implemented: true,
   },
+  'host:service-stream.register': {
+    name: 'host:service-stream.register', audience: 'third_party', requiresGrant: 'none',
+    requiresBroker: false, requiresSandbox: true, implemented: true,
+  },
+  'host:service-stream.unregister': {
+    name: 'host:service-stream.unregister', audience: 'third_party', requiresGrant: 'none',
+    requiresBroker: false, requiresSandbox: true, implemented: true,
+  },
+  'host:service-stream.onChunk': {
+    name: 'host:service-stream.onChunk', audience: 'third_party', requiresGrant: 'none',
+    requiresBroker: false, requiresSandbox: true, implemented: true,
+  },
+  'host:service-stream.send': {
+    name: 'host:service-stream.send', audience: 'third_party', requiresGrant: 'none',
+    requiresBroker: false, requiresSandbox: true, implemented: true,
+  },
   'host:assets.read': {
     name: 'host:assets.read',
     audience: 'third_party',

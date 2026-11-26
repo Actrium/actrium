@@ -882,7 +882,31 @@ impl ActrRefWrapper {
 
     /// Unregister a DataChunk callback for a stream ID.
     pub async fn unregister_stream(&self, stream_id: String) -> ActrResult<()> {
+        if let Some(router) = &self.front_event_router {
+            router.unregister_stream(&stream_id);
+        }
         self.inner.unregister_stream(&stream_id).await?;
+        Ok(())
+    }
+
+    /// Register a Front DataStream for a single verified Service peer.
+    pub async fn register_service_stream(
+        &self,
+        stream_id: String,
+        service: ActrId,
+        callback: Box<dyn crate::context::DataChunkCallback>,
+    ) -> ActrResult<()> {
+        let router =
+            self.front_event_router
+                .as_ref()
+                .ok_or_else(|| ActrError::InvalidArgument {
+                    msg: "This actor was not created as a Front".into(),
+                })?;
+        router.register_stream(stream_id.clone(), service.into())?;
+        if let Err(error) = self.register_stream(stream_id.clone(), callback).await {
+            router.unregister_stream(&stream_id);
+            return Err(error);
+        }
         Ok(())
     }
 

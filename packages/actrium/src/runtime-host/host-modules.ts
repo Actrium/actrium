@@ -10,6 +10,7 @@ import type {
   FileImportPickOutput,
   ServiceCallInput,
   ServiceEvent,
+  ServiceStreamSendInput,
   ServiceTellInput,
   ServiceUploadAttachmentInput,
   ServiceUploadAttachmentOutput,
@@ -21,6 +22,7 @@ import type {
 import type { FrontCapability } from './capabilities';
 import type { LocalStorageCall } from './local-storage';
 import type { ServiceEventSource } from './service-events';
+import type { NativeServiceStreams } from './service-streams';
 import type { AttachmentUploadManager } from './attachment-upload';
 import type { GuestTTS } from './guest-tts';
 
@@ -49,6 +51,7 @@ export type HostModules = HostModulesImplementation<ActriumContract>;
 /** Methods with a real Host implementation, excluding throwing placeholders. */
 export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
   'host:service': new Set(['call', 'on', 'uploadAttachment']),
+  'host:service-stream': new Set(['register', 'unregister', 'onChunk', 'send']),
   'host:clipboard': new Set(['writeText']),
   'host:tab': new Set(['setTitle']),
   'host:local-storage': new Set(['getItem', 'setItem', 'removeItem']),
@@ -94,6 +97,8 @@ export function createHostModules(options: {
   hasServiceOnCapability: boolean;
   callActor: ActorCall;
   serviceEventSource?: ServiceEventSource;
+  serviceStreams?: NativeServiceStreams;
+  sendServiceStreamChunk?: (input: ServiceStreamSendInput) => Promise<void>;
   authorizeCapability: (capability: FrontCapability) => Promise<void>;
   onCapabilityRevoked?: (
     capability: FrontCapability,
@@ -244,6 +249,22 @@ export function createHostModules(options: {
         }
         return options.attachmentUploader.upload(input);
       },
+    },
+    'host:service-stream': {
+      register: async ({ streamId }) => {
+        await options.authorizeCapability('host:service-stream.register');
+        if (!options.serviceStreams) throw new Error('The native Service DataStream bridge is unavailable.');
+        await options.serviceStreams.register(streamId);
+      },
+      unregister: async ({ streamId }) => {
+        options.serviceStreams?.unregister(streamId);
+      },
+      send: async (input) => {
+        await options.authorizeCapability('host:service-stream.send');
+        if (!options.sendServiceStreamChunk) throw new Error('Service DataStream sending is unavailable.');
+        await options.sendServiceStreamChunk(input);
+      },
+      onChunk: (handler) => options.serviceStreams?.subscribe(handler) ?? (() => {}),
     },
     'host:assets': {
       read: async () => {

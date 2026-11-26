@@ -55,6 +55,30 @@ test('an undefined fileId preserves the legacy Base64 upload', () => {
   expect(parse?.({ ...legacy, fileId: undefined })).toEqual(parse?.(legacy));
 });
 
+test('Service DataStream validates the stream ID and preserves the full sequence', () => {
+  const streams = contract.hostModules['host:service-stream'];
+  const outbound = { route: 'example.Service.BeginUpload', streamId: 'upload-1', sequence: '1', payloadBase64: 'YQ==' };
+  expect(streams.send.schema?.parseInput?.(outbound)).toEqual(outbound);
+  expect(() => streams.send.schema?.parseInput?.({ ...outbound, sequence: '0' })).toThrow();
+  expect(streams.register.schema?.parseInput?.({ streamId: 'reply-abc_123' }))
+    .toEqual({ streamId: 'reply-abc_123' });
+  expect(() => streams.unregister.schema?.parseInput?.({ streamId: 'bad stream' })).toThrow();
+  const chunk = { streamId: 'reply-abc_123', sequence: '18446744073709551615', payloadBase64: 'AAEC' };
+  expect(streams.onChunk.schema?.parseEvent?.(chunk)).toEqual(chunk);
+  expect(() => streams.onChunk.schema?.parseEvent?.({ ...chunk, sequence: '18446744073709551616' }))
+    .toThrow();
+});
+
+test('Service DataStream accepts a full file-sized chunk and rejects invalid Base64', () => {
+  const parse = contract.hostModules['host:service-stream'].send.schema!.parseInput!;
+  const chunk = {
+    route: 'example.Service.BeginUpload', streamId: 'upload-1', sequence: '1',
+    payloadBase64: Buffer.alloc(7 * 1024 * 1024, 255).toString('base64'),
+  };
+  expect(parse(chunk).payloadBase64).toBe(chunk.payloadBase64);
+  expect(() => parse({ ...chunk, payloadBase64: 'abc\n' })).toThrow();
+});
+
 describe('host:service contract', () => {
   test('call accepts a valid request and keeps the route opaque', () => {
     const parsed = call.schema?.parseInput?.({

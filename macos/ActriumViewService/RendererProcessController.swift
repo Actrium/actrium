@@ -407,7 +407,9 @@ final class RendererProcessController {
             return
         }
         do {
-            let data = try JSONEncoder().encode(call)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .withoutEscapingSlashes
+            let data = try encoder.encode(call)
             try controller.connection.sendHostEvent(
                 name: RealmServiceCall.requestEvent,
                 userInfoJSON: String(decoding: data, as: UTF8.self),

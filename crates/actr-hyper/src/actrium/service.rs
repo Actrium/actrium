@@ -991,6 +991,13 @@ impl IncomingGuard for ActriumServiceGuard {
             .ok_or_else(missing_verified_channel)?;
         let channel = verified_channel(context)?;
         let transport_stream_id = request.chunk.stream_id.clone();
+        if request.sender == &context.peer_actor_id
+            && self.front_events.as_ref().is_some_and(|router| {
+                router.admits_stream(&transport_stream_id, &context.peer_actor_id)
+            })
+        {
+            return Ok(());
+        }
         let business = chunk_request(request.chunk, request.metadata())?;
         if let Some((session, prepare_request_id, stream_id)) = self
             .shared

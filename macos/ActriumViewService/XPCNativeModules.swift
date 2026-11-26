@@ -47,12 +47,17 @@ final class RealmService: RCTEventEmitter {
     static func emit(_ event: RealmServiceEvent, tabId: String) {
         DispatchQueue.main.async {
             guard let instance, instance.hasListeners else { return }
-            instance.sendEvent(withName: "realmServiceEvent", body: [
+            var body = [
                 "tabId": tabId,
                 "subscriptionId": event.subscriptionId.uuidString,
                 "event": event.event,
                 "payloadBase64": event.payload.base64EncodedString(),
-            ])
+            ]
+            if let sequence = event.sequence {
+                body["streamId"] = event.event
+                body["sequence"] = String(sequence)
+            }
+            instance.sendEvent(withName: "realmServiceEvent", body: body)
         }
     }
 
@@ -71,6 +76,30 @@ final class RealmService: RCTEventEmitter {
             return
         }
         let call = RealmServiceCall(id: UUID(), route: route, payload: payload, timeoutMs: timeoutMs.intValue)
+        submit(tabId, call: call, resolve: resolve, reject: reject)
+    }
+
+    @objc(sendServiceStreamChunk:route:streamId:sequence:payloadBase64:resolver:rejecter:)
+    func sendServiceStreamChunk(
+        _ tabId: String, route: String, streamId: String, sequence: String, payloadBase64: String,
+        resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock
+    ) {
+        let maxBase64Bytes = (RealmServiceCall.maxStreamChunkBytes + 2) / 3 * 4
+        guard let sequence = UInt64(sequence), sequence > 0,
+              payloadBase64.utf8.count <= maxBase64Bytes,
+              let payload = Data(base64Encoded: payloadBase64) else {
+            reject("invalid_service_stream_chunk", "Invalid Service DataStream send arguments.", nil)
+            return
+        }
+        let chunk = RealmServiceCall.StreamChunk(id: streamId, sequence: sequence)
+        let call = RealmServiceCall(id: UUID(), route: route, payload: payload, timeoutMs: 10_000, streamChunk: chunk)
+        submit(tabId, call: call, resolve: { _ in resolve(nil) }, reject: reject)
+    }
+
+    private func submit(
+        _ tabId: String, call: RealmServiceCall,
+        resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
+    ) {
         DispatchQueue.main.async {
             RendererProcessController.callRealmService(tabId: tabId, call: call) { response in
                 if let payload = response.payload {
@@ -102,6 +131,26 @@ final class RealmService: RCTEventEmitter {
             return
         }
         let subscription = RealmServiceEventSubscription(id: UUID(), events: events)
+        subscribe(tabId: tabId, subscription: subscription, resolve: resolve, reject: reject)
+    }
+
+    @objc(subscribeServiceStream:streamId:resolver:rejecter:)
+    func subscribeServiceStream(
+        _ tabId: String,
+        streamId: String,
+        resolver resolve: @escaping RCTPromiseResolveBlock,
+        rejecter reject: @escaping RCTPromiseRejectBlock
+    ) {
+        subscribe(tabId: tabId, subscription: RealmServiceEventSubscription(id: UUID(), streamId: streamId),
+                  resolve: resolve, reject: reject)
+    }
+
+    private func subscribe(
+        tabId: String,
+        subscription: RealmServiceEventSubscription,
+        resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
         DispatchQueue.main.async {
             RendererProcessController.subscribeRealmServiceEvents(
                 tabId: tabId, subscription: subscription

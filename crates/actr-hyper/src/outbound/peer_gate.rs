@@ -14,8 +14,8 @@ use crate::transport::correlation::PendingRequestsMap;
 use crate::transport::correlation::{CompleteOutcome, RpcCorrelation};
 use crate::transport::{
     DeliveryProgress, DeliveryProgressCell, Dest, DestTransportRef, PayloadTypeExt,
-    PeerSendAttempt, PeerTransport, RpcDeadline, SentTransportSlot, WireIdentity,
-    new_delivery_progress_cell, observed_delivery_progress,
+    PeerSendAttempt, PeerTransport, RpcDeadline, SentTransportSlot, VerifiedPeerContext,
+    WireIdentity, new_delivery_progress_cell, observed_delivery_progress,
 };
 use actr_framework::Bytes;
 use actr_framework::MediaSample;
@@ -1895,6 +1895,50 @@ impl PeerGate {
         deadline: RpcDeadline,
         operation_id: &str,
     ) -> ActorResult<()> {
+        self.send_data_chunk_routed_until(
+            target,
+            payload_type,
+            stream_id,
+            data,
+            deadline,
+            operation_id,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn send_verified_reply_chunk_until(
+        &self,
+        channel: &VerifiedPeerContext,
+        payload_type: PayloadType,
+        stream_id: &str,
+        data: Bytes,
+        deadline: RpcDeadline,
+        operation_id: &str,
+    ) -> ActorResult<()> {
+        self.send_data_chunk_routed_until(
+            &channel.peer_actor_id,
+            payload_type,
+            stream_id,
+            data,
+            deadline,
+            operation_id,
+            Some(channel),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn send_data_chunk_routed_until(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        stream_id: &str,
+        data: Bytes,
+        deadline: RpcDeadline,
+        operation_id: &str,
+        reply_channel: Option<&VerifiedPeerContext>,
+    ) -> ActorResult<()> {
         tracing::debug!(
             "PeerGate::send_data_chunk to {:?}, stream_id={}, payload_type={:?}, size={} bytes",
             target,
@@ -1932,6 +1976,20 @@ impl PeerGate {
             crate::timer::ids::OUTBOUND_DATA_CHUNK_DEADLINE,
             deadline.instant(),
             async {
+                if let Some(channel) = reply_channel {
+                    self.current_send_admission()?;
+                    deadline.ensure_min_remaining(MIN_ONE_SHOT_SEND_SLICE)?;
+                    return self
+                        .transport_manager
+                        .send_verified_reply_chunk(channel, payload_type, data, &progress_cell)
+                        .await
+                        .map_err(|error| match observed_delivery_progress(&progress_cell) {
+                            Some(DeliveryProgress::Unknown) => {
+                                Self::delivery_uncertain_error(Some(operation_id), error)
+                            }
+                            _ => error.into(),
+                        });
+                }
                 let admission = self
                     .wait_until_route_ready(target, &dest, payload_type, deadline, data.len())
                     .await?;
@@ -1950,11 +2008,12 @@ impl PeerGate {
                     Some(&progress_cell),
                 )
                 .await
+                .map(|_| ())
             },
         )
         .await
         {
-            Ok(Ok(_identity)) => Ok(()),
+            Ok(Ok(())) => Ok(()),
             Ok(Err(e)) => {
                 if let ActrError::DeliveryUncertain { cause, .. } = &e {
                     self.emit_data_chunk_uncertain_hook(operation_id, cause);

@@ -12,8 +12,11 @@ use super::Dest; // Re-exported from actr-framework
 use super::dest_transport::DestTransport;
 use super::error::{NetworkError, NetworkResult};
 use super::handover::HandoverBook;
-use super::lane::{DeliveryProgress, DeliveryProgressCell};
+use super::lane::{
+    DeliveryProgress, DeliveryProgressCell, mark_delivery_write_in_flight, record_delivery_progress,
+};
 use super::route_table::PayloadTypeExt;
+use super::secure_channel::VerifiedPeerContext;
 use super::wire_handle::{WireHandle, WireIdentity};
 use super::wire_pool::ReadySet;
 use actr_protocol::{ActrId, PayloadType};
@@ -872,6 +875,37 @@ impl PeerTransport {
                 proven_pre_send,
             },
         }
+    }
+
+    pub(crate) async fn send_verified_reply_chunk(
+        &self,
+        channel: &VerifiedPeerContext,
+        payload_type: PayloadType,
+        data: bytes::Bytes,
+        progress: &DeliveryProgressCell,
+    ) -> NetworkResult<()> {
+        // Inbound Relay connections can be live before the destination pool adopts them.
+        let dest = Dest::Peer(channel.peer_actor_id.clone());
+        let unavailable = || {
+            NetworkError::SecureChannelNotReady(
+                "The verified request channel for the reply stream is no longer available".into(),
+            )
+        };
+        let wire = self
+            .conn_factory
+            .existing_connections(&dest)
+            .await?
+            .into_iter()
+            .find(|wire| wire.verified_peer_context().as_deref() == Some(channel))
+            .ok_or_else(unavailable)?;
+        let lane = wire.get_lane(payload_type).await?;
+        if wire.verified_peer_context().as_deref() != Some(channel) {
+            return Err(unavailable());
+        }
+        mark_delivery_write_in_flight(progress);
+        let attempt = lane.send_with_progress(data).await;
+        record_delivery_progress(progress, attempt.progress);
+        attempt.result
     }
 
     /// Return a committed destination transport, or materialize one around a
