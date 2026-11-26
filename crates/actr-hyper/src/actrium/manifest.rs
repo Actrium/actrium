@@ -165,8 +165,19 @@ pub fn front_session_metadata(
             "hostModules.service must declare an RPC route or event",
         ));
     }
+    let upload_permitted = front_manifest
+        .host
+        .required_capabilities
+        .iter()
+        .any(|capability| {
+            matches!(
+                capability.as_str(),
+                "service.attachmentUpload" | "host:service.uploadAttachment"
+            )
+        });
     let routes: BTreeMap<String, BTreeSet<String>> = route_names
         .into_iter()
+        .filter(|route| route.as_str() != ATTACHMENT_UPLOAD_TRANSPORT || upload_permitted)
         .map(|route| {
             (
                 route.clone(),
