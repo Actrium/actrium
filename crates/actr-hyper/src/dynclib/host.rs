@@ -88,6 +88,19 @@ impl DynclibReplyModes {
                 "native reply-mode lookup failed".into(),
             ));
         }
+        #[cfg(test)]
+        if route == "test.reply-mode-lookup-delay" {
+            tokio::task::spawn_blocking(|| {
+                std::thread::sleep(std::time::Duration::from_millis(200))
+            })
+            .await
+            .expect("delay native reply-mode lookup");
+            TEST_LOOKUP_RELEASE_TICKS.store(
+                actr_framework::ReplyDeadline::now().native_ticks(),
+                Ordering::SeqCst,
+            );
+            return Ok(ReplyMode::Explicit);
+        }
         let library = self.library.upgrade().ok_or_else(|| {
             ActrError::Unavailable("native workload library is no longer available".into())
         })?;
@@ -144,8 +157,16 @@ fn reply_registry() -> &'static Mutex<HashMap<u64, Weak<NativeReply>>> {
 static TEST_DEADLINE_TICKS: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
+static TEST_LOOKUP_RELEASE_TICKS: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
 pub(crate) fn test_deadline_ticks() -> u64 {
     TEST_DEADLINE_TICKS.load(Ordering::SeqCst)
+}
+
+#[cfg(test)]
+pub(crate) fn test_lookup_release_ticks() -> u64 {
+    TEST_LOOKUP_RELEASE_TICKS.load(Ordering::SeqCst)
 }
 
 struct ReplyRegistration {

@@ -2266,6 +2266,11 @@ impl Inner {
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
         scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingContinuation {
+        let arrival_reply_deadline = if Self::envelope_is_tell(&envelope) {
+            None
+        } else {
+            crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms)
+        };
         let caller_id = caller.map(|(id, _)| id);
         if peer_context
             .as_ref()
@@ -2551,6 +2556,15 @@ impl Inner {
             None => ctx,
         };
 
+        let expects_response = Inner::dispatch_expects_response(envelope.direction).unwrap_or(true);
+        let reply_deadline = match egress_deadline {
+            _ if !expects_response => None,
+            Some(_) => scope
+                .as_ref()
+                .map(|scope| crate::lifecycle::dedup::scoped_reply_deadline(scope.deadline())),
+            None => arrival_reply_deadline,
+        };
+
         // RFC-0323: query the route's ReplyMode. Linked Rust dispatchers carry
         // the generated route match. Foreign linked workloads and Component
         // Model packages use an explicit host delivery boundary: generated
@@ -2586,8 +2600,6 @@ impl Inner {
                 fallback
             }
         };
-        let expects_response = Inner::dispatch_expects_response(envelope.direction).unwrap_or(true);
-
         // For EXPLICIT routes, build the `ReplyDeliver`, stash it on the
         // context (the generated dispatch arm reads it via `ctx.reply_deliver()`),
         // and keep a pump-side clone so the continuation can route handler-Err
@@ -2610,18 +2622,6 @@ impl Inner {
             if reply_mode == actr_protocol::ReplyMode::Explicit {
                 match reply_sink {
                     Some(sink) => {
-                        // RFC-0323 exposes an EXPLICIT reply deadline on the
-                        // synchronous reply clock. Scoped Actor calls use the
-                        // remaining request budget. TELL ignores timeout_ms.
-                        let reply_deadline = match egress_deadline {
-                            _ if !expects_response => None,
-                            Some(_) => scope.as_ref().map(|scope| {
-                                crate::lifecycle::dedup::scoped_reply_deadline(scope.deadline())
-                            }),
-                            None => {
-                                crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms)
-                            }
-                        };
                         let rtc_route: RtcResponseRoute = self.rtc_manager.clone();
                         let attempt_id = self.outstanding_replies.allocate_attempt_id();
                         explicit_attempt_id = Some(attempt_id);

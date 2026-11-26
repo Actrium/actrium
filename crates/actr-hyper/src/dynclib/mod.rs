@@ -13,4 +13,4 @@ pub use host::DynclibHost;
 pub(crate) use host::active_bridge_count;
 pub(crate) use host::{DynClibWorkload, DynclibReplyModes};
 #[cfg(test)]
-pub(crate) use host::{active_reply_count, test_deadline_ticks};
+pub(crate) use host::{active_reply_count, test_deadline_ticks, test_lookup_release_ticks};

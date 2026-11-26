@@ -3989,6 +3989,48 @@ async fn native_package_explicit_reply_releases_dispatch_for_final_chunk() {
         ));
     }
 
+    let lookup_delay = RpcEnvelope {
+        request_id: "native-lookup-delay".into(),
+        route_key: "test.reply-mode-lookup-delay".into(),
+        direction: Some(Direction::Request as i32),
+        timeout_ms: 50,
+        ..Default::default()
+    };
+    let delayed_dispatch = inner
+        .admit_incoming(
+            lookup_delay,
+            None,
+            Some(ReplySink::Inproc {
+                response_tx: responses.clone(),
+                span: tracing::Span::none(),
+            }),
+            None,
+        )
+        .await;
+    let expired = inner
+        .outstanding_replies
+        .sweep_expired(
+            crate::lifecycle::dedup::INFLIGHT_TTL,
+            actr_framework::ReplyDeadline::from_native_ticks(
+                crate::dynclib::test_lookup_release_ticks(),
+            ),
+        )
+        .await;
+    assert_eq!(
+        expired.len(),
+        1,
+        "native lookup time must count against the reply deadline"
+    );
+    inner
+        .dedup_state
+        .lock()
+        .await
+        .expire_inflight_explicit(&expired);
+    drop(delayed_dispatch);
+    let timeout = receive().await;
+    assert_eq!(timeout.request_id, "native-lookup-delay");
+    assert!(timeout.error.is_some());
+
     let delayed = RpcEnvelope {
         request_id: "native-delayed-deadline".into(),
         route_key: "upload.Upload.FinishUpload".into(),
