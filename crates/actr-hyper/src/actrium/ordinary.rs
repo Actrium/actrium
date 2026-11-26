@@ -17,6 +17,69 @@ pub(crate) struct OrdinaryServiceGuard {
     uploads_allowed: bool,
 }
 
+impl OrdinaryServiceGuard {
+    pub(crate) fn new(metadata: FrontSessionMetadata, peer_types: PeerTypes) -> Self {
+        let uploads_allowed = metadata.routes.contains_key(ATTACHMENT_UPLOAD_TRANSPORT);
+        let mut routes: BTreeSet<_> = metadata.routes.into_keys().collect();
+        routes.remove(ATTACHMENT_UPLOAD_TRANSPORT);
+        routes.remove(ATTACHMENT_PREPARE_ROUTE);
+        if uploads_allowed {
+            routes.insert(ATTACHMENT_PREPARE_ROUTE.to_owned());
+        }
+        Self {
+            peer_types,
+            front_type: metadata.front_actor_type,
+            routes,
+            uploads_allowed,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl IncomingGuard for OrdinaryServiceGuard {
+    async fn check(&self, request: IncomingDispatchRequest<'_>) -> Result<(), IncomingGuardError> {
+        if request.envelope.direction == Some(Direction::Response as i32) {
+            return Ok(());
+        }
+        let caller_type = request.caller.and_then(|(_, actor_type)| actor_type);
+        if caller_type != Some(&self.front_type)
+            || !self.routes.contains(&request.envelope.route_key)
+        {
+            return Err(IncomingGuardError::new(
+                IncomingGuardErrorCode::PermissionDenied,
+                "Service policy does not grant this caller the requested route",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn authenticate_response(
+        &self,
+        _response: &mut RpcEnvelope,
+    ) -> Result<(), IncomingGuardError> {
+        Ok(())
+    }
+
+    async fn check_stream(
+        &self,
+        request: IncomingStreamChunk<'_>,
+    ) -> Result<(), IncomingGuardError> {
+        if !self.uploads_allowed
+            || self.peer_types.get(request.sender).as_ref() != Some(&self.front_type)
+        {
+            return Err(IncomingGuardError::new(
+                IncomingGuardErrorCode::PermissionDenied,
+                "Service policy does not grant this caller attachment uploads",
+            ));
+        }
+        Ok(())
+    }
+
+    fn binds_streams_to_caller(&self) -> bool {
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,68 +221,5 @@ mod tests {
             vec![("one".into(), first), ("two".into(), second)]
         );
         registry.shutdown().await;
-    }
-}
-
-impl OrdinaryServiceGuard {
-    pub(crate) fn new(metadata: FrontSessionMetadata, peer_types: PeerTypes) -> Self {
-        let uploads_allowed = metadata.routes.contains_key(ATTACHMENT_UPLOAD_TRANSPORT);
-        let mut routes: BTreeSet<_> = metadata.routes.into_keys().collect();
-        routes.remove(ATTACHMENT_UPLOAD_TRANSPORT);
-        routes.remove(ATTACHMENT_PREPARE_ROUTE);
-        if uploads_allowed {
-            routes.insert(ATTACHMENT_PREPARE_ROUTE.to_owned());
-        }
-        Self {
-            peer_types,
-            front_type: metadata.front_actor_type,
-            routes,
-            uploads_allowed,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl IncomingGuard for OrdinaryServiceGuard {
-    async fn check(&self, request: IncomingDispatchRequest<'_>) -> Result<(), IncomingGuardError> {
-        if request.envelope.direction == Some(Direction::Response as i32) {
-            return Ok(());
-        }
-        let caller_type = request.caller.and_then(|(_, actor_type)| actor_type);
-        if caller_type != Some(&self.front_type)
-            || !self.routes.contains(&request.envelope.route_key)
-        {
-            return Err(IncomingGuardError::new(
-                IncomingGuardErrorCode::PermissionDenied,
-                "Service policy does not grant this caller the requested route",
-            ));
-        }
-        Ok(())
-    }
-
-    async fn authenticate_response(
-        &self,
-        _response: &mut RpcEnvelope,
-    ) -> Result<(), IncomingGuardError> {
-        Ok(())
-    }
-
-    async fn check_stream(
-        &self,
-        request: IncomingStreamChunk<'_>,
-    ) -> Result<(), IncomingGuardError> {
-        if !self.uploads_allowed
-            || self.peer_types.get(request.sender).as_ref() != Some(&self.front_type)
-        {
-            return Err(IncomingGuardError::new(
-                IncomingGuardErrorCode::PermissionDenied,
-                "Service policy does not grant this caller attachment uploads",
-            ));
-        }
-        Ok(())
-    }
-
-    fn binds_streams_to_caller(&self) -> bool {
-        true
     }
 }
