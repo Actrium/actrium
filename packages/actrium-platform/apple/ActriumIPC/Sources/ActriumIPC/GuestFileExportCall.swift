@@ -4,7 +4,7 @@ public struct GuestFileExportCall: Codable, Sendable {
     public static let capability = "host:file-export.save"
     public static let requestEvent = "com.actrium.fileExport.request"
     public static let responseEvent = "com.actrium.fileExport.response"
-    public static let timeoutSeconds = 300
+    public static let dialogTimeoutSeconds = 300
     public static let maxBytes = 7 * 1024 * 1024
     public static let maxBase64Bytes = ((maxBytes + 2) / 3) * 4
 

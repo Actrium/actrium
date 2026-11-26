@@ -50,7 +50,7 @@ final class RendererFileExport {
         pending[tabId] = Pending(
             id: requestID, reloadKey: call.reloadKey, window: window, authorizedWindow: authorizedWindow, panel: panel
         )
-        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(GuestFileExportCall.timeoutSeconds)) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(GuestFileExportCall.dialogTimeoutSeconds)) { [weak self] in
             guard let self, self.pending[tabId]?.id == requestID else { return }
             self.cancel(tabId: tabId)
         }
