@@ -1280,6 +1280,31 @@ async fn bounded_json_with_status<T: serde::de::DeserializeOwned>(
     serde_json::from_slice(&bytes).map_err(|_| None)
 }
 
+/// Enrollment failures name the stage and the Issuer's HTTP status. Reporting
+/// only "Relay channel closed" hides deployment mismatches such as an Issuer
+/// that predates Actor channel enrollment. The request body carries the renewal
+/// token and the Actor credential, so neither it nor the response body is ever
+/// included here.
+fn enrollment_failed(status: Option<u16>, actor_enrollment: bool) -> NetworkError {
+    let reason = match status {
+        Some(status) => {
+            let status = reqwest::StatusCode::from_u16(status)
+                .map(|code| code.to_string())
+                .unwrap_or_else(|_| status.to_string());
+            format!("Issuer returned HTTP {status}")
+        }
+        None => "Issuer request failed or returned an invalid response".to_owned(),
+    };
+    // A 400 arrives before authentication, so it usually means the Issuer does
+    // not understand the enrollment schema rather than bad credentials.
+    let hint = if actor_enrollment && status == Some(400) {
+        "; check that the Issuer supports Actor channel enrollment"
+    } else {
+        ""
+    };
+    NetworkError::ConnectionError(format!("Relay identity enrollment failed: {reason}{hint}"))
+}
+
 impl RelayClient {
     async fn certified_identity(
         &self,
@@ -1407,7 +1432,14 @@ impl RelayClient {
                     self.heal_actor_key_binding(&actor).await?;
                     continue;
                 }
-                Err(_) => return Err(closed()),
+                Err(status) => {
+                    let error = enrollment_failed(status, actor_material.is_some());
+                    // Surfaced at warn because the reconnect loop otherwise
+                    // logs only a debug-level generic closure, leaving an
+                    // Issuer schema or credential mismatch undiagnosable.
+                    tracing::warn!(error = %error, "Relay identity enrollment unsuccessful");
+                    return Err(error);
+                }
             };
             let actor_certificate = issued.actor_certificate.clone();
             let identity = Arc::new(

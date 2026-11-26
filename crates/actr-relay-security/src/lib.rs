@@ -58,7 +58,12 @@ pub struct IdentityRequest {
     /// A commitment to a private relay admission secret, not the secret itself.
     pub admission_commitment: [u8; 32],
     /// Optional Actor channel enrollment. Legacy relay-only clients omit it.
-    #[serde(default)]
+    ///
+    /// Absence must be encoded as an absent key, never as `"actor": null`:
+    /// Issuers deployed before Actor channels reject the unknown key outright
+    /// (`deny_unknown_fields`), which would otherwise break even relay-only
+    /// enrollment against them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor: Option<actor::ActorChannelEnrollment>,
 }
 
@@ -131,7 +136,9 @@ pub struct IssuedIdentity {
     pub certificate: Certificate,
     pub issuer: IssuerKey,
     /// Present only when the enrollment requested an Actor channel certificate.
-    #[serde(default)]
+    /// Omitted when absent so pre-Actor-channel clients, which also deny
+    /// unknown fields, can still parse a legacy enrollment response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor_certificate: Option<actor::ActorChannelCertificate>,
 }
 
