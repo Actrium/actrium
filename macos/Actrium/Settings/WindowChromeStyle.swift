@@ -90,7 +90,8 @@ enum WindowChromeStyle: String, CaseIterable, Identifiable {
         }
     }
 
-    /// A layered tab needs an opaque estimate of the live tinted material.
+    /// A lifted tab needs an opaque estimate of the live tinted material, so
+    /// its seam never lets the surface underneath show through.
     var layeredTabSeparationColor: NSColor {
         let base = NSColor(calibratedWhite: AppColors.usesDarkAppearance ? 0.16 : 0.94, alpha: 1)
         guard let tint = tintColor.usingColorSpace(.deviceRGB),
