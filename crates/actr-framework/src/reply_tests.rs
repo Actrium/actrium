@@ -176,6 +176,26 @@ fn deadline_is_stored_and_returned() {
     reply.send(Ok(Resp { msg: "done".into() }));
 }
 
+#[cfg(target_vendor = "apple")]
+#[test]
+fn native_deadline_uses_the_darwin_uptime_clock() {
+    fn uptime() -> u64 {
+        let mut ts = std::mem::MaybeUninit::<libc::timespec>::uninit();
+        // SAFETY: the pointer references writable timespec storage.
+        assert_eq!(
+            unsafe { libc::clock_gettime(libc::CLOCK_UPTIME_RAW, ts.as_mut_ptr()) },
+            0
+        );
+        // SAFETY: clock_gettime succeeded and initialized ts.
+        let ts = unsafe { ts.assume_init() };
+        (ts.tv_sec as u64) * 1_000_000_000 + ts.tv_nsec as u64
+    }
+    let before = uptime();
+    let deadline = ReplyDeadline::now().native_ticks();
+    let after = uptime();
+    assert!((before..=after).contains(&deadline));
+}
+
 #[test]
 fn tell_variant_send_completes_without_response() {
     let cap = CapturingDeliver::new();

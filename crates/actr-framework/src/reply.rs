@@ -87,11 +87,12 @@ impl ReplyDeadline {
         #[cfg(all(unix, not(target_arch = "wasm32")))]
         {
             let mut ts = std::mem::MaybeUninit::<libc::timespec>::uninit();
+            #[cfg(target_vendor = "apple")]
+            let clock = libc::CLOCK_UPTIME_RAW;
+            #[cfg(not(target_vendor = "apple"))]
+            let clock = libc::CLOCK_MONOTONIC;
             // SAFETY: ts points to writable timespec storage.
-            assert_eq!(
-                unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, ts.as_mut_ptr()) },
-                0
-            );
+            assert_eq!(unsafe { libc::clock_gettime(clock, ts.as_mut_ptr()) }, 0);
             // SAFETY: clock_gettime succeeded and initialized ts.
             let ts = unsafe { ts.assume_init() };
             Self {
