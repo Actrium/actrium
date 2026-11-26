@@ -1,8 +1,8 @@
 //! Tests for the `Reply<T>` handle (RFC-0323) — idempotent completer, Drop
 //! fallback, and the TELL empty-variant.
 
+use crate::ReplyDeadline;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use actr_protocol::ActrError;
 use prost::Message as ProstMessage;
@@ -41,7 +41,7 @@ struct Resp {
 fn make_reply(deliver: Arc<dyn Deliver>, emit_response: bool) -> Reply<Resp> {
     Reply::new(
         "req-1".to_string(),
-        Some(Instant::now()),
+        Some(ReplyDeadline::now()),
         deliver,
         emit_response,
     )
@@ -169,11 +169,31 @@ fn send_completes_the_completer_exactly_once() {
 #[test]
 fn deadline_is_stored_and_returned() {
     let cap = CapturingDeliver::new();
-    let dl = Instant::now();
+    let dl = ReplyDeadline::now();
     let reply = Reply::new("req-dl".to_string(), Some(dl), cap, true);
     assert_eq!(reply.deadline(), Some(dl));
     assert_eq!(reply.request_id(), "req-dl");
     reply.send(Ok(Resp { msg: "done".into() }));
+}
+
+#[cfg(target_vendor = "apple")]
+#[test]
+fn native_deadline_uses_the_darwin_uptime_clock() {
+    fn uptime() -> u64 {
+        let mut ts = std::mem::MaybeUninit::<libc::timespec>::uninit();
+        // SAFETY: the pointer references writable timespec storage.
+        assert_eq!(
+            unsafe { libc::clock_gettime(libc::CLOCK_UPTIME_RAW, ts.as_mut_ptr()) },
+            0
+        );
+        // SAFETY: clock_gettime succeeded and initialized ts.
+        let ts = unsafe { ts.assume_init() };
+        (ts.tv_sec as u64) * 1_000_000_000 + ts.tv_nsec as u64
+    }
+    let before = uptime();
+    let deadline = ReplyDeadline::now().native_ticks();
+    let after = uptime();
+    assert!((before..=after).contains(&deadline));
 }
 
 #[test]

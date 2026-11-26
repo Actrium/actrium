@@ -82,5 +82,11 @@ serde-wasm-bindgen = { version = "0.6", optional = true }
 # explicit.
 actr-web-abi = { path = "../../packages/actr-web/crates/actr-web-abi", version = "0.10.7", optional = true }
 
+[target.'cfg(all(unix, not(target_arch = "wasm32")))'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_System_Performance"] }
+
 [dev-dependencies]
 tokio.workspace = true

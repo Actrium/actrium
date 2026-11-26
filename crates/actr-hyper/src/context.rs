@@ -224,6 +224,14 @@ impl RuntimeContext {
         self.reply_claimed = Some(reply_claimed);
     }
 
+    pub(crate) fn without_explicit_reply(mut self) -> Self {
+        self.reply_deliver = None;
+        self.reply_deadline = None;
+        self.reply_claimed = None;
+        self.expects_response = true;
+        self
+    }
+
     /// Mark this inbound invocation as intentionally deferred. This is used
     /// by foreign generated EXPLICIT dispatchers before user code receives a
     /// movable reply handle.
@@ -235,7 +243,7 @@ impl RuntimeContext {
         true
     }
 
-    #[cfg(feature = "wasm-engine")]
+    #[cfg(any(feature = "wasm-engine", feature = "dynclib-engine"))]
     pub(crate) fn reply_claimed_marker(&self) -> Option<Arc<AtomicBool>> {
         self.reply_claimed.clone()
     }

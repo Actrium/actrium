@@ -515,6 +515,26 @@ macro_rules! entry {
                 $crate::guest::dynclib_abi::code::SUCCESS
             }
 
+            /// Look up the generated reply mode without accessing an actor instance.
+            ///
+            /// # Safety
+            /// The host must supply a readable route key buffer for the call.
+            #[unsafe(no_mangle)]
+            pub unsafe extern "C" fn actr_reply_mode_v1(route: *const u8, len: usize) -> i32 {
+                use $crate::MessageDispatcher;
+                use actr_protocol::ReplyMode;
+
+                if route.is_null() {
+                    return ReplyMode::Return as i32;
+                }
+                let route = unsafe { ::std::slice::from_raw_parts(route, len) };
+                let Ok(route) = ::std::str::from_utf8(route) else {
+                    return ReplyMode::Return as i32;
+                };
+                type Dispatcher = <$workload_type as $crate::Workload>::Dispatcher;
+                Dispatcher::reply_mode_for_route(route) as i32
+            }
+
             /// Handle one runtime ABI frame.
             #[unsafe(no_mangle)]
             pub unsafe extern "C" fn actr_handle(
@@ -864,6 +884,7 @@ macro_rules! entry {
                 };
 
                 let bridge_token = handle.bridge_token;
+                let explicit_reply = handle.reply.is_some();
                 let ctx = match unsafe {
                     $crate::guest::dynclib::context::DynclibContext::from_invocation(
                         vtable,
@@ -871,7 +892,10 @@ macro_rules! entry {
                         bridge_token,
                     )
                 } {
-                    Ok(c) => c,
+                    Ok(c) => match c.with_reply(handle.reply) {
+                        Ok(c) => c,
+                        Err(_) => return $crate::guest::dynclib_abi::code::HANDLE_FAILED,
+                    },
                     Err(_) => return $crate::guest::dynclib_abi::code::HANDLE_FAILED,
                 };
 
@@ -899,6 +923,16 @@ macro_rules! entry {
                         Ok(bytes) => bytes,
                         Err(code) => return code,
                     },
+                    Err(err) if explicit_reply => {
+                        let reply = match $crate::guest::dynclib_abi::actr_error_reply(err) {
+                            Ok(reply) => reply,
+                            Err(code) => return code,
+                        };
+                        match $crate::guest::dynclib_abi::encode_message(&reply) {
+                            Ok(bytes) => bytes,
+                            Err(code) => return code,
+                        }
+                    }
                     Err(err) => match $crate::guest::dynclib_abi::error_reply(
                         $crate::guest::dynclib_abi::code::HANDLE_FAILED,
                         err.to_string().into_bytes(),

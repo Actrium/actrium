@@ -1,13 +1,17 @@
 //! Dynclib guest-side `Context` implementation backed by the compressed ABI.
 
 use crate::guest::dynclib_abi::{
-    self as abi, AbiPayload, AbiReply, GuestDataChunkV1, HostCallRawV1, HostCallV1, HostDiscoverV1,
-    HostRegisterStreamV1, HostResolveDependencyV1, HostSendDataChunkV1, HostTellV1,
+    self as abi, AbiPayload, AbiReply, GuestDataChunkV1, GuestReplyContextV1, HostCallRawV1,
+    HostCallV1, HostClaimReplyV1, HostCompleteReplyV1, HostDiscoverV1, HostRegisterStreamV1,
+    HostReplyOutcomeV1, HostResolveDependencyV1, HostSendDataChunkV1, HostTellV1,
     HostUnregisterStreamV1, InvocationContextV1, abi_error_to_actr, dest_to_v1,
     reply_to_actr_error,
 };
 use crate::guest::vtable::HostVTable;
-use crate::{Context, Dest, LogLevel, MaybeSendBoxFuture, MaybeSendSync, MediaSample};
+use crate::{
+    Context, Deliver, Dest, LogLevel, MaybeSendBoxFuture, MaybeSendSync, MediaSample,
+    ReplyDeadline, ReplyOutcome,
+};
 use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, DataChunk, PayloadType};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -24,6 +28,39 @@ pub struct DynclibContext {
     self_id: ActrId,
     caller_id: Option<ActrId>,
     request_id: String,
+    reply: Option<DynclibReplyContext>,
+}
+
+#[derive(Clone)]
+struct DynclibReplyContext {
+    expects_response: bool,
+    deadline: Option<ReplyDeadline>,
+    token: u64,
+}
+
+struct DynclibReplyDeliver {
+    vtable: *const HostVTable,
+    token: u64,
+}
+
+unsafe impl Send for DynclibReplyDeliver {}
+unsafe impl Sync for DynclibReplyDeliver {}
+
+impl Deliver for DynclibReplyDeliver {
+    fn deliver(&self, outcome: ReplyOutcome) {
+        let outcome = match outcome.result {
+            Ok(bytes) => HostReplyOutcomeV1::Response(bytes.to_vec()),
+            Err(error) => HostReplyOutcomeV1::Error(error.into()),
+        };
+        let payload = HostCompleteReplyV1 {
+            outcome: Some(outcome),
+        };
+        let Ok(frame) = payload.to_frame() else {
+            return;
+        };
+        // Expired capabilities are retired by the host, so late replies are no-ops.
+        let _ = DynclibContext::invoke_with_token(self.vtable, frame, self.token);
+    }
 }
 
 unsafe impl Send for DynclibContext {}
@@ -92,7 +129,22 @@ impl DynclibContext {
             self_id: ctx.self_id,
             caller_id: ctx.caller_id,
             request_id: ctx.request_id,
+            reply: None,
         })
+    }
+
+    #[doc(hidden)]
+    pub fn with_reply(mut self, reply: Option<GuestReplyContextV1>) -> Result<Self, ActrError> {
+        if let Some(reply) = reply {
+            self.reply = Some(DynclibReplyContext {
+                expects_response: reply.expects_response,
+                deadline: reply
+                    .deadline_ticks_ns
+                    .map(ReplyDeadline::from_native_ticks),
+                token: reply.token,
+            });
+        }
+        Ok(self)
     }
 
     fn vt(&self) -> &HostVTable {
@@ -100,14 +152,39 @@ impl DynclibContext {
     }
 
     fn invoke_frame(&self, frame: abi::AbiFrame) -> Result<AbiReply, ActrError> {
+        let token =
+            crate::guest::dynclib::runtime::active_bridge_token().unwrap_or(self.bridge_token);
+        Self::invoke_with_token(self.vtable, frame, token)
+    }
+
+    fn invoke_reply(&self, payload: &impl AbiPayload) -> Result<(), ActrError> {
+        let frame = payload.to_frame().map_err(abi_error_to_actr)?;
+        // A reply belongs to its original RPC, even when sent inside a later
+        // RPC or DataStream callback with a different active bridge token.
+        let reply = Self::invoke_with_token(
+            self.vtable,
+            frame,
+            self.reply
+                .as_ref()
+                .ok_or_else(|| ActrError::Internal("reply capability missing".into()))?
+                .token,
+        )?;
+        if reply.status != abi::code::SUCCESS {
+            return Err(reply_to_actr_error(reply));
+        }
+        Ok(())
+    }
+
+    fn invoke_with_token(
+        vtable: *const HostVTable,
+        frame: abi::AbiFrame,
+        bridge_token: u64,
+    ) -> Result<AbiReply, ActrError> {
         let frame_bytes = abi::encode_message(&frame).map_err(abi_error_to_actr)?;
         let mut reply_ptr: *mut u8 = std::ptr::null_mut();
         let mut reply_len: usize = 0;
-
-        let bridge_token =
-            crate::guest::dynclib::runtime::active_bridge_token().unwrap_or(self.bridge_token);
         let code = unsafe {
-            (self.vt().invoke)(
+            ((*vtable).invoke)(
                 bridge_token,
                 frame_bytes.as_ptr(),
                 frame_bytes.len(),
@@ -124,7 +201,7 @@ impl DynclibContext {
             Vec::new()
         } else {
             let data = unsafe { std::slice::from_raw_parts(reply_ptr, reply_len).to_vec() };
-            unsafe { (self.vt().free_host_buf)(reply_ptr, reply_len) };
+            unsafe { ((*vtable).free_host_buf)(reply_ptr, reply_len) };
             data
         };
 
@@ -150,6 +227,7 @@ impl Clone for DynclibContext {
             self_id: self.self_id.clone(),
             caller_id: self.caller_id.clone(),
             request_id: self.request_id.clone(),
+            reply: self.reply.clone(),
         }
     }
 }
@@ -174,6 +252,28 @@ impl Context for DynclibContext {
 
     fn request_id(&self) -> &str {
         &self.request_id
+    }
+
+    fn reply_deliver(&self) -> Option<Arc<dyn Deliver>> {
+        let reply = self.reply.as_ref()?;
+        Some(Arc::new(DynclibReplyDeliver {
+            vtable: self.vtable,
+            token: reply.token,
+        }))
+    }
+
+    fn claim_reply(&self) -> bool {
+        self.reply.is_some() && self.invoke_reply(&HostClaimReplyV1 {}).is_ok()
+    }
+
+    fn reply_deadline(&self) -> Option<ReplyDeadline> {
+        self.reply.as_ref()?.deadline
+    }
+
+    fn expects_response(&self) -> bool {
+        self.reply
+            .as_ref()
+            .is_none_or(|reply| reply.expects_response)
     }
 
     /// Override the default `Context::log` to route the record across the FFI

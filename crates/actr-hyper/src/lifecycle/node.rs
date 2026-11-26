@@ -1138,9 +1138,11 @@ pub(crate) struct Inner {
     /// workloads report `Explicit` for the FFI delivery boundary, while
     /// Component Model packages use the same host-side mode because their
     /// generated dispatchers call the WIT `reply` import for both RETURN and
-    /// EXPLICIT routes. DynClib remains on the legacy RETURN boundary until
-    /// its ABI grows an equivalent reply operation.
+    /// EXPLICIT routes.
     pub(crate) linked_handle: Option<Arc<dyn crate::workload::LinkedWorkloadHandle>>,
+
+    #[cfg(feature = "dynclib-engine")]
+    native_reply_modes: Option<crate::dynclib::DynclibReplyModes>,
 
     /// Component packages opt into the explicit reply boundary only when the
     /// compiled component imports `actr:workload/host@0.6.0`. V2 components
@@ -1437,7 +1439,7 @@ async fn host_operation_handler(
 
         HostOperation::RegisterStream(req) => {
             let stream_id = req.stream_id;
-            let callback_ctx = ctx.clone();
+            let callback_ctx = ctx.clone().without_explicit_reply();
             let callback_workload_dispatch = workload_dispatch.clone();
             match ctx
                 .register_stream(stream_id, move |chunk: DataChunk, sender| {
@@ -2264,6 +2266,11 @@ impl Inner {
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
         scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingContinuation {
+        let arrival_reply_deadline = if Self::envelope_is_tell(&envelope) {
+            None
+        } else {
+            crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms)
+        };
         let caller_id = caller.map(|(id, _)| id);
         if peer_context
             .as_ref()
@@ -2549,25 +2556,50 @@ impl Inner {
             None => ctx,
         };
 
+        let expects_response = Inner::dispatch_expects_response(envelope.direction).unwrap_or(true);
+        let reply_deadline = match egress_deadline {
+            _ if !expects_response => None,
+            Some(_) => scope
+                .as_ref()
+                .map(|scope| crate::lifecycle::dedup::scoped_reply_deadline(scope.deadline())),
+            None => arrival_reply_deadline,
+        };
+
         // RFC-0323: query the route's ReplyMode. Linked Rust dispatchers carry
         // the generated route match. Foreign linked workloads and Component
         // Model packages use an explicit host delivery boundary: generated
         // RETURN routes submit their encoded return value through `reply_raw`,
         // while generated EXPLICIT routes own delivery through `Reply<T>`.
         // This keeps the runtime from maintaining a second proto route table.
-        let reply_mode = self
-            .linked_handle
-            .as_ref()
-            .map(|h| h.reply_mode_for_route(&envelope.route_key))
-            .unwrap_or_else(|| {
-                if self.package_uses_explicit_reply_boundary {
-                    actr_protocol::ReplyMode::Explicit
-                } else {
-                    actr_protocol::ReplyMode::Return
+        let reply_mode = if let Some(handle) = &self.linked_handle {
+            handle.reply_mode_for_route(&envelope.route_key)
+        } else {
+            let fallback = if self.package_uses_explicit_reply_boundary {
+                actr_protocol::ReplyMode::Explicit
+            } else {
+                actr_protocol::ReplyMode::Return
+            };
+            #[cfg(feature = "dynclib-engine")]
+            {
+                match &self.native_reply_modes {
+                    Some(modes) => match modes.for_route(&envelope.route_key).await {
+                        Ok(mode) => mode,
+                        Err(error) => {
+                            self.dedup_state
+                                .lock()
+                                .await
+                                .complete(&dedup_key, Err(error.clone()));
+                            return ready_continuation(Err(error));
+                        }
+                    },
+                    None => fallback,
                 }
-            });
-        let expects_response = Inner::dispatch_expects_response(envelope.direction).unwrap_or(true);
-
+            }
+            #[cfg(not(feature = "dynclib-engine"))]
+            {
+                fallback
+            }
+        };
         // For EXPLICIT routes, build the `ReplyDeliver`, stash it on the
         // context (the generated dispatch arm reads it via `ctx.reply_deliver()`),
         // and keep a pump-side clone so the continuation can route handler-Err
@@ -2586,76 +2618,73 @@ impl Inner {
             _ => None,
         };
         let mut explicit_attempt_id = None;
-        let explicit_deliver: Option<crate::lifecycle::reply_deliver::ReplyDeliver> = if reply_mode
-            == actr_protocol::ReplyMode::Explicit
-        {
-            match reply_sink {
-                Some(sink) => {
-                    // RFC-0323 exposes an EXPLICIT reply deadline on the
-                    // synchronous reply clock. Scoped Actor calls use the
-                    // remaining request budget. Otherwise, zero timeout means
-                    // the envelope has no reply deadline.
-                    let reply_deadline = match egress_deadline {
-                        Some(_) => scope.as_ref().map(|scope| {
-                            crate::lifecycle::dedup::scoped_reply_deadline(scope.deadline())
-                        }),
-                        None => crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms),
-                    };
-                    let rtc_route: RtcResponseRoute = self.rtc_manager.clone();
-                    let attempt_id = self.outstanding_replies.allocate_attempt_id();
-                    explicit_attempt_id = Some(attempt_id);
-                    let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
-                        self.websocket_gate.clone(),
-                        rtc_route,
-                        self.dedup_state.clone(),
-                        self.outstanding_replies.clone(),
-                        attempt_id,
-                        dedup_key.clone(),
-                        envelope.traceparent.clone(),
-                        envelope.tracestate.clone(),
-                        self.incoming_guard.clone(),
-                        envelope.metadata.clone(),
-                        sink,
-                        expects_response,
-                        scope.clone(),
-                    );
-                    // Start every admission unclaimed. Component dispatchers
-                    // return a reserved deferred marker only after selecting
-                    // an EXPLICIT route; ordinary zero-byte return payloads
-                    // must still use the normal return-byte fallback.
-                    let reply_claimed =
-                        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-                    // Register the exact deliver for this admission. The
-                    // TTL sweep uses its first-write-wins gate, and all
-                    // asynchronous completion uses the attempt ID so an
-                    // old same-ID reply cannot release or complete a retry.
-                    self.outstanding_replies
-                        .register_with_deliver(
-                            dedup_key.clone(),
+        let explicit_deliver: Option<Arc<crate::lifecycle::reply_deliver::ReplyDeliver>> =
+            if reply_mode == actr_protocol::ReplyMode::Explicit {
+                match reply_sink {
+                    Some(sink) => {
+                        let rtc_route: RtcResponseRoute = self.rtc_manager.clone();
+                        let attempt_id = self.outstanding_replies.allocate_attempt_id();
+                        explicit_attempt_id = Some(attempt_id);
+                        let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
+                            self.websocket_gate.clone(),
+                            rtc_route,
+                            self.dedup_state.clone(),
+                            self.outstanding_replies.clone(),
                             attempt_id,
-                            deliver.clone(),
+                            dedup_key.clone(),
+                            envelope.traceparent.clone(),
+                            envelope.tracestate.clone(),
+                            self.incoming_guard.clone(),
+                            envelope.metadata.clone(),
+                            sink,
+                            expects_response,
+                            scope.clone(),
+                        );
+                        let deliver = Arc::new(deliver);
+                        // Start every admission unclaimed. Component dispatchers
+                        // return a reserved deferred marker only after selecting
+                        // an EXPLICIT route; ordinary zero-byte return payloads
+                        // must still use the normal return-byte fallback.
+                        let reply_claimed =
+                            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        // Register the exact deliver for this admission. The
+                        // TTL sweep uses its first-write-wins gate, and all
+                        // asynchronous completion uses the attempt ID so an
+                        // old same-ID reply cannot release or complete a retry.
+                        self.outstanding_replies
+                            .register_with_deliver(
+                                dedup_key.clone(),
+                                attempt_id,
+                                deliver.clone(),
+                                reply_deadline,
+                            )
+                            .await;
+                        // Pump-side clone: lets `wrap_outcome` route a
+                        // handler-Err through the same first-write-wins
+                        // `deliver` as a spawned `Reply::send` / `Drop`.
+                        let pump_deliver = deliver.clone();
+                        ctx.set_explicit_reply(
+                            deliver,
+                            expects_response,
                             reply_deadline,
-                        )
-                        .await;
-                    // Pump-side clone: lets `wrap_outcome` route a
-                    // handler-Err through the same first-write-wins
-                    // `deliver` as a spawned `Reply::send` / `Drop`.
-                    let pump_deliver = deliver.clone();
-                    ctx.set_explicit_reply(
-                        std::sync::Arc::new(deliver),
-                        expects_response,
-                        reply_deadline,
-                        reply_claimed,
-                    );
-                    Some(pump_deliver)
+                            reply_claimed,
+                        );
+                        Some(pump_deliver)
+                    }
+                    None => None,
                 }
-                None => None,
-            }
-        } else {
-            None
-        };
+            } else {
+                None
+            };
 
         // 2. Dispatch
+        #[cfg(feature = "dynclib-engine")]
+        let ctx_for_executor = if self.native_reply_modes.is_some() {
+            ctx.clone().without_explicit_reply()
+        } else {
+            ctx.clone()
+        };
+        #[cfg(not(feature = "dynclib-engine"))]
         let ctx_for_executor = ctx.clone();
         let call_executor = lifecycle_host_abi(ctx_for_executor, self.workload_dispatch.clone());
 
@@ -2999,10 +3028,8 @@ impl Inner {
         }
 
         // Retain a clone of the linked handle so the pump can query
-        // `reply_mode_for_route` before dispatch (RFC-0323). Only the `Linked`
-        // variant carries a host-callable dispatcher; Component Model guests
-        // use the explicit host boundary selected above, while DynClib keeps
-        // its legacy RETURN boundary.
+        // `reply_mode_for_route` before dispatch (RFC-0323). Native guests
+        // that expose a generated lookup also select a mode per route.
         let linked_handle = match &workload {
             crate::workload::Workload::Linked(handle) => Some(handle.clone()),
             #[cfg(feature = "wasm-engine")]
@@ -3011,6 +3038,11 @@ impl Inner {
             crate::workload::Workload::DynClib(_) => None,
         };
 
+        #[cfg(feature = "dynclib-engine")]
+        let native_reply_modes = match &workload {
+            crate::workload::Workload::DynClib(workload) => workload.reply_modes(),
+            _ => None,
+        };
         let package_uses_explicit_reply_boundary = workload.uses_explicit_reply_boundary();
 
         let runner_mode = if scheduler_on {
@@ -3093,6 +3125,8 @@ impl Inner {
             actrium_peer: None,
             workload_dispatch: Arc::new(workload_dispatch),
             linked_handle,
+            #[cfg(feature = "dynclib-engine")]
+            native_reply_modes,
             package_uses_explicit_reply_boundary,
             dispatch_scheduler,
             conflict_keys,

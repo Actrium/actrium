@@ -13,12 +13,14 @@ dependencies = [
  "bytes",
  "futures-util",
  "js-sys",
+ "libc",
  "prost",
  "serde-wasm-bindgen",
  "tracing",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "windows-sys",
  "wit-bindgen",
 ]
 

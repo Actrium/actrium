@@ -622,6 +622,39 @@ async fn register_and_unregister_stream_roundtrip() {
     );
 }
 
+#[tokio::test]
+async fn registered_stream_does_not_retain_explicit_reply() {
+    struct ReplySink;
+    impl actr_framework::Deliver for ReplySink {
+        fn deliver(&self, _: actr_framework::ReplyOutcome) {}
+    }
+
+    let (mut ctx, wl) = harness().await;
+    let reply: Arc<dyn actr_framework::Deliver> = Arc::new(ReplySink);
+    let weak = Arc::downgrade(&reply);
+    ctx.set_explicit_reply(
+        reply.clone(),
+        true,
+        None,
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    );
+    let result = host_operation_handler(
+        ctx.clone(),
+        weak_runner(&wl),
+        HostOperation::RegisterStream(HostRegisterStreamV1 {
+            stream_id: "reply-retention".into(),
+        }),
+    )
+    .await;
+    assert!(matches!(result, HostOperationResult::Done));
+    drop(ctx);
+    drop(reply);
+    assert!(
+        weak.upgrade().is_none(),
+        "a parked stream callback must not retain the reply sink"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn node_teardown_releases_registered_stream_callback_cycle() {
     let (ctx, wl) = harness().await;
@@ -2313,6 +2346,29 @@ async fn explicit_deferred_balances_outstanding_counter_on_deliver() {
     assert_eq!(inner.outstanding_replies.len(), 0);
 }
 
+#[tokio::test]
+async fn explicit_tell_ignores_the_wire_timeout() {
+    let (inner, _captured, _dir) = explicit_capture_harness().await;
+    let mut envelope = explicit_envelope("explicit-tell-timeout");
+    envelope.direction = Some(Direction::Tell as i32);
+    let reply_sink = crate::lifecycle::reply_deliver::ReplySink::Inproc {
+        response_tx: Arc::new(HostTransport::new()),
+        span: tracing::Span::none(),
+    };
+    let outcome = inner
+        .handle_incoming(envelope, None, Some(reply_sink), None)
+        .await;
+    assert!(matches!(outcome, IncomingOutcome::Deferred));
+    assert_eq!(inner.outstanding_replies.len(), 1);
+
+    let after_wire_timeout = actr_framework::ReplyDeadline::now() + Duration::from_secs(10);
+    let expired = inner
+        .outstanding_replies
+        .sweep_expired(crate::lifecycle::dedup::INFLIGHT_TTL, after_wire_timeout)
+        .await;
+    assert!(expired.is_empty(), "a TELL must ignore timeout_ms");
+}
+
 /// The legacy `.Service.Method` alias must be normalized before reply-mode
 /// selection, not merely at the guest dispatch boundary. Otherwise a linked
 /// EXPLICIT route is admitted as RETURN and receives no ReplyDeliver.
@@ -3777,4 +3833,448 @@ fn session_route_matcher_is_exact() {
     ] {
         assert_eq!(actrium_session_v1_method(route), None, "route: {route}");
     }
+}
+
+/// Build the real generated-dispatch fixture, load it from a signed native
+/// package, and exercise admission, the actor runner and the response lane.
+#[cfg(all(feature = "dynclib-engine", feature = "test-utils"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_package_explicit_reply_releases_dispatch_for_final_chunk() {
+    use crate::lifecycle::reply_deliver::ReplySink;
+    use actr_pack::{ActorPackOptions, ActorPackageManifest};
+    use actr_protocol::DataChunk;
+    use futures_util::FutureExt;
+    use std::collections::BTreeMap;
+    use std::path::Path;
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct FinishUploadRequest {
+        #[prost(string, tag = "1")]
+        stream_id: String,
+        #[prost(string, tag = "2")]
+        mode: String,
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct FinishUploadResponse {
+        #[prost(string, tag = "1")]
+        file_id: String,
+    }
+
+    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fixture = crate_dir.join("tests/dynclib_actor_fixture");
+    let target_dir = crate_dir.join("../../target/core-hyper-tests-dynclib-actor-fixture");
+    let suffix = std::env::consts::DLL_SUFFIX;
+    let library = format!(
+        "{}dynclib_actor_fixture{suffix}",
+        std::env::consts::DLL_PREFIX,
+    );
+    let status = std::process::Command::new(env!("CARGO"))
+        .args(["build", "--locked", "--target-dir"])
+        .arg(&target_dir)
+        .current_dir(fixture)
+        .status()
+        .expect("start fixture build");
+    assert!(status.success(), "native fixture must build");
+    let library = target_dir.join("debug").join(library);
+    let binary = std::fs::read(library).expect("read native fixture");
+    let dir = tempfile::tempdir().unwrap();
+    let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+    let trust = crate::StaticTrust::new(signing_key.verifying_key().to_bytes()).unwrap();
+    let hyper = crate::Hyper::new(crate::HyperConfig::new(dir.path(), Arc::new(trust)))
+        .await
+        .unwrap();
+    let mut manifest = ActorPackageManifest::from_toml(include_str!(
+        "../../../actr-pack/tests/fixtures/registration-v2.toml"
+    ))
+    .unwrap();
+    manifest.workload.profile = "actr.native/1".into();
+    manifest.workload.entry = format!("bin/upload{suffix}");
+    manifest.files[0].path = manifest.workload.entry.clone();
+    manifest.files[0].media_type = "application/octet-stream".into();
+    let package = crate::WorkloadPackage::new(
+        actr_pack::pack_actor_package(&ActorPackOptions {
+            payloads: BTreeMap::from([(manifest.workload.entry.clone(), binary)]),
+            manifest,
+            signing_key,
+        })
+        .unwrap(),
+    );
+    let loaded = hyper.load_workload_package(&package).await.unwrap();
+    let config = dedup_test_config(&dir);
+    let actor_id = ActrId {
+        realm: config.realm.clone(),
+        serial_number: 1,
+    };
+    let mut inner = Inner::build(
+        config,
+        loaded.workload,
+        Some(loaded.verified.manifest),
+        None,
+        None,
+        100,
+        Duration::from_secs(60),
+        crate::config::DispatchConcurrency::default(),
+        None,
+        false,
+    )
+    .await
+    .unwrap();
+    inner.actor_id = Some(actor_id.clone());
+    inner.credential_state = Some(CredentialState::new(AIdCredential::default(), None, None));
+
+    let responses = Arc::new(HostTransport::new());
+    let dispatch = |request_id: &str, stream_id: &str, mode: &str, direction: Direction| {
+        let envelope = RpcEnvelope {
+            request_id: request_id.into(),
+            route_key: "upload.Upload.FinishUpload".into(),
+            payload: Some(
+                FinishUploadRequest {
+                    stream_id: stream_id.into(),
+                    mode: mode.into(),
+                }
+                .encode_to_vec()
+                .into(),
+            ),
+            direction: Some(direction as i32),
+            timeout_ms: if direction == Direction::Tell {
+                0
+            } else {
+                10_000
+            },
+            ..Default::default()
+        };
+        inner.handle_incoming(
+            envelope,
+            None,
+            Some(ReplySink::Inproc {
+                response_tx: responses.clone(),
+                span: tracing::Span::none(),
+            }),
+            None,
+        )
+    };
+    let receive = || async {
+        tokio::time::timeout(Duration::from_secs(5), responses.recv_reliable_raw())
+            .await
+            .expect("host should respond")
+            .expect("response lane should remain open")
+    };
+
+    let failed_lookup = RpcEnvelope {
+        request_id: "native-lookup-failure".into(),
+        route_key: "test.reply-mode-lookup-failure".into(),
+        direction: Some(Direction::Request as i32),
+        timeout_ms: 10_000,
+        ..Default::default()
+    };
+    for _ in 0..2 {
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(1),
+            inner.handle_incoming(
+                failed_lookup.clone(),
+                None,
+                Some(ReplySink::Inproc {
+                    response_tx: responses.clone(),
+                    span: tracing::Span::none(),
+                }),
+                None,
+            ),
+        )
+        .await
+        .expect("lookup failure must not leave the request in flight");
+        assert!(matches!(
+            outcome,
+            IncomingOutcome::Replied(Err(ActrError::Unavailable(_)))
+        ));
+    }
+
+    let lookup_delay = RpcEnvelope {
+        request_id: "native-lookup-delay".into(),
+        route_key: "test.reply-mode-lookup-delay".into(),
+        direction: Some(Direction::Request as i32),
+        timeout_ms: 50,
+        ..Default::default()
+    };
+    let delayed_dispatch = inner
+        .admit_incoming(
+            lookup_delay,
+            None,
+            Some(ReplySink::Inproc {
+                response_tx: responses.clone(),
+                span: tracing::Span::none(),
+            }),
+            None,
+        )
+        .await;
+    let expired = inner
+        .outstanding_replies
+        .sweep_expired(
+            crate::lifecycle::dedup::INFLIGHT_TTL,
+            actr_framework::ReplyDeadline::from_native_ticks(
+                crate::dynclib::test_lookup_release_ticks(),
+            ),
+        )
+        .await;
+    assert_eq!(
+        expired.len(),
+        1,
+        "native lookup time must count against the reply deadline"
+    );
+    inner
+        .dedup_state
+        .lock()
+        .await
+        .expire_inflight_explicit(&expired);
+    drop(delayed_dispatch);
+    let timeout = receive().await;
+    assert_eq!(timeout.request_id, "native-lookup-delay");
+    assert!(timeout.error.is_some());
+
+    let delayed = RpcEnvelope {
+        request_id: "native-delayed-deadline".into(),
+        route_key: "upload.Upload.FinishUpload".into(),
+        payload: Some(
+            FinishUploadRequest {
+                stream_id: String::new(),
+                mode: "expired-deadline".into(),
+            }
+            .encode_to_vec()
+            .into(),
+        ),
+        direction: Some(Direction::Request as i32),
+        timeout_ms: 50,
+        ..Default::default()
+    };
+    assert!(matches!(
+        inner
+            .handle_incoming(
+                delayed,
+                None,
+                Some(ReplySink::Inproc {
+                    response_tx: responses.clone(),
+                    span: tracing::Span::none(),
+                }),
+                None
+            )
+            .await,
+        IncomingOutcome::Deferred
+    ));
+    let response = receive().await;
+    assert_eq!(response.request_id, "native-delayed-deadline");
+    assert_eq!(
+        FinishUploadResponse::decode(response.payload.unwrap())
+            .unwrap()
+            .file_id,
+        crate::dynclib::test_deadline_ticks().to_string()
+    );
+
+    let callbacks_before = inner.data_chunk_registry.callback_len();
+    let swept = RpcEnvelope {
+        request_id: "native-swept-before-entry".into(),
+        route_key: "upload.Upload.FinishUpload".into(),
+        payload: Some(
+            FinishUploadRequest {
+                stream_id: "swept-before-entry".into(),
+                mode: "expired-before-entry".into(),
+            }
+            .encode_to_vec()
+            .into(),
+        ),
+        direction: Some(Direction::Request as i32),
+        timeout_ms: 50,
+        ..Default::default()
+    };
+    let dispatch_swept = inner
+        .admit_incoming(
+            swept,
+            None,
+            Some(ReplySink::Inproc {
+                response_tx: responses.clone(),
+                span: tracing::Span::none(),
+            }),
+            None,
+        )
+        .await;
+    let expired = inner
+        .outstanding_replies
+        .sweep_expired(
+            crate::lifecycle::dedup::INFLIGHT_TTL,
+            actr_framework::ReplyDeadline::now() + Duration::from_secs(1),
+        )
+        .await;
+    assert_eq!(expired.len(), 1);
+    inner
+        .dedup_state
+        .lock()
+        .await
+        .expire_inflight_explicit(&expired);
+    let outcome = dispatch_swept.await;
+    assert!(matches!(outcome, IncomingOutcome::Deferred));
+    let response = receive().await;
+    assert_eq!(response.request_id, "native-swept-before-entry");
+    assert!(response.error.is_some());
+    assert_eq!(
+        inner.data_chunk_registry.callback_len(),
+        callbacks_before + 1,
+        "the admitted guest handler must run after its reply capability expires"
+    );
+    inner.data_chunk_registry.unregister("swept-before-entry");
+
+    for (id, mode) in [
+        ("deferred-upload", "background"),
+        ("callback-upload", "callback"),
+    ] {
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            dispatch(id, id, mode, Direction::Request),
+        )
+        .await
+        .expect("handler must release its dispatch slot before the final chunk");
+        assert!(matches!(outcome, IncomingOutcome::Deferred));
+        assert_eq!(inner.outstanding_replies.len(), 1);
+        assert!(responses.recv_reliable_raw().now_or_never().is_none());
+
+        inner
+            .data_chunk_registry
+            .dispatch(
+                DataChunk {
+                    stream_id: id.into(),
+                    sequence: 1,
+                    payload: FrameworkBytes::from_static(b"file-from-final-chunk"),
+                    metadata: vec![],
+                    timestamp_ms: None,
+                },
+                actor_id.clone(),
+                PayloadType::StreamReliable,
+            )
+            .await;
+
+        let response = receive().await;
+        assert_eq!(response.direction, Some(Direction::Response as i32));
+        assert_eq!(response.request_id, id);
+        assert!(response.error.is_none());
+        assert_eq!(
+            FinishUploadResponse::decode(response.payload.unwrap())
+                .unwrap()
+                .file_id,
+            "file-from-final-chunk"
+        );
+    }
+
+    assert!(matches!(
+        dispatch("inline-upload", "", "inline", Direction::Request).await,
+        IncomingOutcome::Deferred
+    ));
+    let response = receive().await;
+    assert_eq!(response.request_id, "inline-upload");
+    assert_eq!(
+        FinishUploadResponse::decode(response.payload.unwrap())
+            .unwrap()
+            .file_id,
+        "inline-with-deadline"
+    );
+
+    for (mode, expected) in [
+        ("drop", "reply dropped without response"),
+        ("error", "bad upload"),
+    ] {
+        assert!(matches!(
+            dispatch(mode, "", mode, Direction::Request).await,
+            IncomingOutcome::Deferred
+        ));
+        let response = receive().await;
+        assert_eq!(response.request_id, mode);
+        assert!(response.error.unwrap().message.contains(expected));
+    }
+
+    assert!(matches!(
+        dispatch("tell-upload", "", "inline", Direction::Tell).await,
+        IncomingOutcome::Deferred
+    ));
+
+    let empty_return = inner
+        .handle_incoming(
+            RpcEnvelope {
+                request_id: "empty-return".into(),
+                route_key: "upload.Upload.Status".into(),
+                direction: Some(Direction::Request as i32),
+                timeout_ms: 10_000,
+                ..Default::default()
+            },
+            None,
+            Some(ReplySink::Inproc {
+                response_tx: responses.clone(),
+                span: tracing::Span::none(),
+            }),
+            None,
+        )
+        .await;
+    assert!(matches!(empty_return, IncomingOutcome::Replied(Ok(bytes)) if bytes.is_empty()));
+
+    assert!(matches!(
+        dispatch("retry-upload", "old-stream", "callback", Direction::Request).await,
+        IncomingOutcome::Deferred
+    ));
+    assert_eq!(crate::dynclib::active_reply_count("retry-upload"), 1);
+    let expired = inner
+        .outstanding_replies
+        .sweep_expired(
+            crate::lifecycle::dedup::INFLIGHT_TTL,
+            actr_framework::ReplyDeadline::now() + Duration::from_secs(15),
+        )
+        .await;
+    inner
+        .dedup_state
+        .lock()
+        .await
+        .expire_inflight_explicit(&expired);
+    assert_eq!(expired.len(), 1);
+    assert_eq!(
+        crate::dynclib::active_reply_count("retry-upload"),
+        0,
+        "expiry must retire the old reply while its stream callback remains registered"
+    );
+    let timeout = receive().await;
+    assert_eq!(timeout.request_id, "retry-upload");
+    assert!(timeout.error.is_some());
+
+    assert!(matches!(
+        dispatch("retry-upload", "new-stream", "callback", Direction::Request).await,
+        IncomingOutcome::Deferred
+    ));
+    for (stream_id, file_id) in [("old-stream", b"stale"), ("new-stream", b"fresh")] {
+        inner
+            .data_chunk_registry
+            .invoke_for_test(
+                DataChunk {
+                    stream_id: stream_id.into(),
+                    sequence: 1,
+                    payload: FrameworkBytes::from_static(file_id),
+                    metadata: vec![],
+                    timestamp_ms: None,
+                },
+                actor_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    let response = receive().await;
+    assert_eq!(response.request_id, "retry-upload");
+    assert_eq!(
+        FinishUploadResponse::decode(response.payload.unwrap())
+            .unwrap()
+            .file_id,
+        "fresh"
+    );
+
+    inner.data_chunk_registry.shutdown().await;
+    inner.workload_dispatch.shutdown().await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), responses.recv_reliable_raw())
+            .await
+            .is_err(),
+        "each explicit call must emit exactly one response and TELL must emit none"
+    );
 }

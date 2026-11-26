@@ -63,16 +63,127 @@
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+#[cfg(not(any(all(unix, not(target_arch = "wasm32")), windows)))]
 use std::time::Instant;
 
 use actr_protocol::{ActorResult, ActrError};
 use bytes::Bytes;
 
 /// Caller deadline for an EXPLICIT reply (RFC-0323): arrival time plus
-/// `envelope.timeout_ms`. An alias for `std::time::Instant` so downstream
-/// crates (hyper) can reference the deadline type without spelling
-/// `std::time::Instant` in files audited by the timer-facade drift test.
-pub type ReplyDeadline = Instant;
+/// `envelope.timeout_ms`, represented on the native system's monotonic clock.
+/// Compare it with [`ReplyDeadline::now`] or use
+/// [`ReplyDeadline::saturating_duration_since`] to obtain the remaining time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ReplyDeadline {
+    #[cfg(any(all(unix, not(target_arch = "wasm32")), windows))]
+    ticks_ns: u64,
+    #[cfg(not(any(all(unix, not(target_arch = "wasm32")), windows)))]
+    instant: Instant,
+}
+
+impl ReplyDeadline {
+    pub fn now() -> Self {
+        #[cfg(all(unix, not(target_arch = "wasm32")))]
+        {
+            let mut ts = std::mem::MaybeUninit::<libc::timespec>::uninit();
+            #[cfg(target_vendor = "apple")]
+            let clock = libc::CLOCK_UPTIME_RAW;
+            #[cfg(not(target_vendor = "apple"))]
+            let clock = libc::CLOCK_MONOTONIC;
+            // SAFETY: ts points to writable timespec storage.
+            assert_eq!(unsafe { libc::clock_gettime(clock, ts.as_mut_ptr()) }, 0);
+            // SAFETY: clock_gettime succeeded and initialized ts.
+            let ts = unsafe { ts.assume_init() };
+            Self {
+                ticks_ns: (ts.tv_sec as u64)
+                    .saturating_mul(1_000_000_000)
+                    .saturating_add(ts.tv_nsec as u64),
+            }
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::System::Performance::{
+                QueryPerformanceCounter, QueryPerformanceFrequency,
+            };
+            let mut counter = 0i64;
+            let mut frequency = 0i64;
+            // SAFETY: both pointers refer to writable i64 values.
+            assert_ne!(unsafe { QueryPerformanceCounter(&mut counter) }, 0);
+            assert_ne!(unsafe { QueryPerformanceFrequency(&mut frequency) }, 0);
+            Self {
+                ticks_ns: ((counter as u128 * 1_000_000_000) / frequency as u128)
+                    .min(u64::MAX as u128) as u64,
+            }
+        }
+        #[cfg(not(any(all(unix, not(target_arch = "wasm32")), windows)))]
+        {
+            Self {
+                instant: Instant::now(),
+            }
+        }
+    }
+
+    pub fn checked_add(self, duration: Duration) -> Option<Self> {
+        #[cfg(any(all(unix, not(target_arch = "wasm32")), windows))]
+        {
+            Some(Self {
+                ticks_ns: self
+                    .ticks_ns
+                    .checked_add(u64::try_from(duration.as_nanos()).ok()?)?,
+            })
+        }
+        #[cfg(not(any(all(unix, not(target_arch = "wasm32")), windows)))]
+        {
+            Some(Self {
+                instant: self.instant.checked_add(duration)?,
+            })
+        }
+    }
+
+    pub fn saturating_duration_since(self, earlier: Self) -> Duration {
+        #[cfg(any(all(unix, not(target_arch = "wasm32")), windows))]
+        {
+            Duration::from_nanos(self.ticks_ns.saturating_sub(earlier.ticks_ns))
+        }
+        #[cfg(not(any(all(unix, not(target_arch = "wasm32")), windows)))]
+        {
+            self.instant.saturating_duration_since(earlier.instant)
+        }
+    }
+
+    #[doc(hidden)]
+    #[cfg(any(all(unix, not(target_arch = "wasm32")), windows))]
+    pub fn native_ticks(self) -> u64 {
+        self.ticks_ns
+    }
+
+    #[doc(hidden)]
+    #[cfg(any(all(unix, not(target_arch = "wasm32")), windows))]
+    pub fn from_native_ticks(ticks_ns: u64) -> Self {
+        Self { ticks_ns }
+    }
+
+    #[doc(hidden)]
+    #[cfg(not(any(all(unix, not(target_arch = "wasm32")), windows)))]
+    pub fn from_native_ticks(_ticks_ns: u64) -> Self {
+        unreachable!("native reply deadlines require a native monotonic clock")
+    }
+}
+
+impl std::ops::Add<Duration> for ReplyDeadline {
+    type Output = Self;
+    fn add(self, rhs: Duration) -> Self {
+        #[cfg(any(all(unix, not(target_arch = "wasm32")), windows))]
+        {
+            self.checked_add(rhs).unwrap_or(Self { ticks_ns: u64::MAX })
+        }
+        #[cfg(not(any(all(unix, not(target_arch = "wasm32")), windows)))]
+        {
+            self.checked_add(rhs).expect("reply deadline overflow")
+        }
+    }
+}
 
 /// What the runtime does with a completed reply: send the RESPONSE envelope and
 /// complete the in-flight dedup entry. The runtime supplies an implementation;
@@ -83,6 +194,10 @@ pub type ReplyDeadline = Instant;
 /// completes dedup with empty bytes but emits no RESPONSE).
 pub trait Deliver: Send + Sync + 'static {
     fn deliver(&self, outcome: ReplyOutcome);
+
+    /// Register cleanup for resources owned by an explicit reply capability.
+    #[doc(hidden)]
+    fn on_retire(&self, _cleanup: Box<dyn FnOnce() + Send>) {}
 
     /// Deliver a timeout without completing the dedup entry as a normal
     /// response. Implementations with a first-write-wins timeout path may
@@ -177,7 +292,7 @@ impl Completer {
 /// task boundaries and live in a waiter map.
 pub struct Reply<T> {
     request_id: String,
-    deadline: Option<Instant>,
+    deadline: Option<ReplyDeadline>,
     completer: Arc<Completer>,
     /// Whether completing this handle should emit a RESPONSE envelope on the
     /// wire. `true` for normal EXPLICIT calls; `false` for the TELL
@@ -216,7 +331,7 @@ impl<T: prost::Message> Reply<T> {
     ///   empty-variant.
     pub fn new(
         request_id: String,
-        deadline: Option<Instant>,
+        deadline: Option<ReplyDeadline>,
         deliver: Arc<dyn Deliver>,
         emit_response: bool,
     ) -> Self {
@@ -253,7 +368,7 @@ impl<T: prost::Message> Reply<T> {
     /// This is an *upper bound* on the caller's real deadline (it excludes
     /// in-transit time); sending after it is still valid, the caller just
     /// discards the orphan RESPONSE.
-    pub fn deadline(&self) -> Option<Instant> {
+    pub fn deadline(&self) -> Option<ReplyDeadline> {
         self.deadline
     }
 
