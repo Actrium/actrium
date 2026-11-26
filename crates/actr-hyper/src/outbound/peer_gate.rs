@@ -1468,6 +1468,40 @@ impl PeerGate {
             .await
     }
 
+    pub(crate) async fn prepare_rpc_peer(
+        &self,
+        target: &ActrId,
+        deadline: RpcDeadline,
+    ) -> ActorResult<()> {
+        let dest = Self::actr_id_to_dest(target);
+        crate::timer::timeout_at(
+            crate::timer::ids::PEER_RPC_CHANNEL_DEADLINE,
+            deadline.instant(),
+            async {
+                let admission = self
+                    .wait_until_route_ready(target, &dest, PayloadType::RpcReliable, deadline, 0)
+                    .await?;
+                let transport = match self.tighten_with_current_projection(admission)? {
+                    SendAdmission::Normal => {
+                        self.transport_manager
+                            .get_or_create_transport(&dest)
+                            .await?
+                    }
+                    SendAdmission::ExistingOnly => self
+                        .transport_manager
+                        .get_or_materialize_existing_transport(&dest)
+                        .await?
+                        .ok_or_else(|| {
+                            ActrError::Unavailable("Peer transport is unavailable".into())
+                        })?,
+                };
+                transport.wait_for_rpc_lane().await.map_err(ActrError::from)
+            },
+        )
+        .await
+        .map_err(|_| ActrError::TimedOut)?
+    }
+
     /// Send a request under an absolute deadline created by the API entry
     /// point.  Preflight, pending registration, serialization, transport
     /// selection/retry, and response waiting all share this one budget.

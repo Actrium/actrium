@@ -123,7 +123,8 @@ impl RunCommand {
         };
 
         // 1. Resolve package path from the runtime config.
-        let package_path = self.resolve_package_path(&config_path).await?;
+        let mut raw_config = actr_config::RuntimeRawConfig::from_file(&config_path)?;
+        let package_path = self.resolve_package_path(&config_path, &raw_config)?;
         info!("📦 Loading package: {}", package_path.display());
 
         // 2. Load package bytes
@@ -144,7 +145,14 @@ impl RunCommand {
         let package_info = self.build_package_info(&manifest);
 
         // 4. Load runtime configuration
-        let mut config = actr_config::ConfigParser::from_runtime_file(&config_path, package_info)?;
+        let authorization = raw_config.service_authorization.take();
+        let mut config =
+            actr_config::ConfigParser::parse_runtime(raw_config, &config_path, package_info)?;
+        if authorization.is_some() && config.actrium.is_some() {
+            return Err(ActrCliError::command_error(
+                "Configure either [service_authorization] or [actrium]",
+            ));
+        }
         if config.actrium.is_some() && !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
             return Err(ActrCliError::command_error(
                 "[actrium] requires verified Attach, which is disabled in this build",
@@ -172,6 +180,18 @@ impl RunCommand {
 
         // 7. Initialize Hyper
         let trust = self.build_trust_provider(&config, &package_path).await?;
+        let ordinary_policy = match authorization {
+            Some(authorization) => Some(
+                Self::verified_front_metadata(
+                    &resolve_against(&config.config_dir, &authorization.front_package),
+                    &manifest,
+                    &service_package_digest,
+                    &trust,
+                )
+                .await?,
+            ),
+            None => None,
+        };
         let hyper = self.init_hyper(&config, &hyper_dir, trust.clone()).await?;
         info!("✅ Hyper initialized");
 
@@ -201,15 +221,18 @@ impl RunCommand {
         })?;
         info!("✅ Issuer registration successful");
 
-        let registered = self
-            .install_actrium_service(
+        let registered = if let Some(policy) = ordinary_policy {
+            registered.with_ordinary_service_authorization(policy)
+        } else {
+            self.install_actrium_service(
                 registered,
                 &config,
                 &manifest,
                 &service_package_digest,
                 trust,
             )
-            .await?;
+            .await?
+        };
 
         let actr_ref = registered
             .start()
@@ -252,16 +275,15 @@ impl RunCommand {
         Ok(())
     }
 
-    async fn resolve_package_path(&self, config_path: &Path) -> Result<PathBuf> {
-        // Load runtime config to get the packaged workload path.
-        let config_content = tokio::fs::read_to_string(config_path).await?;
-        let raw_config: actr_config::RuntimeRawConfig = toml::from_str(&config_content)
-            .map_err(|e| ActrCliError::command_error(format!("Failed to parse config: {}", e)))?;
-
-        if let Some(package_config) = raw_config.package {
-            if let Some(path) = package_config.path {
+    fn resolve_package_path(
+        &self,
+        config_path: &Path,
+        raw_config: &actr_config::RuntimeRawConfig,
+    ) -> Result<PathBuf> {
+        if let Some(package_config) = &raw_config.package {
+            if let Some(path) = &package_config.path {
                 let base = config_path.parent().unwrap_or(Path::new("."));
-                return Ok(resolve_against(base, &path));
+                return Ok(resolve_against(base, path));
             }
         }
 
@@ -364,31 +386,16 @@ impl RunCommand {
         })
     }
 
-    /// Install the Actrium v1 Attach server on a packaged Service host when the
-    /// runtime config has an `[actrium]` section.
-    ///
-    /// v1 compatibility is exact: the Service accepts Attach from one Front
-    /// package. The configured Front archive is verified with the same trust
-    /// chain as the Service package, and its Guest digest, routes, Service
-    /// protocol fingerprint and Actor type become the Attach requirements.
-    /// Without `[actrium]`, the node behaves exactly as before and accepts no
-    /// Actrium sessions.
-    async fn install_actrium_service(
-        &self,
-        node: actr_hyper::Node<actr_hyper::Registered>,
-        config: &actr_config::RuntimeConfig,
+    async fn verified_front_metadata(
+        front_package: &Path,
         service_manifest: &actr_pack::RuntimePackageManifest,
         service_package_digest: &[u8],
-        trust: Arc<dyn actr_hyper::TrustProvider>,
-    ) -> Result<actr_hyper::Node<actr_hyper::Registered>> {
-        let Some(actrium) = config.actrium.as_ref() else {
-            return Ok(node);
-        };
-
-        let front_bytes = tokio::fs::read(&actrium.front_package).await.map_err(|e| {
+        trust: &Arc<dyn actr_hyper::TrustProvider>,
+    ) -> Result<actr_hyper::actrium::FrontSessionMetadata> {
+        let front_bytes = tokio::fs::read(front_package).await.map_err(|e| {
             ActrCliError::command_error(format!(
                 "Failed to read Actrium Front package {}: {}",
-                actrium.front_package.display(),
+                front_package.display(),
                 e
             ))
         })?;
@@ -403,15 +410,34 @@ impl RunCommand {
                 "The Actrium Front package must use the v2 actor package format".to_string(),
             ));
         };
-        let metadata = actr_hyper::actrium::front_session_metadata(
+        actr_hyper::actrium::front_session_metadata(
             &front_bytes,
             &front_manifest,
             &service_manifest.actor_type(),
             service_package_digest,
         )
-        .map_err(|e| {
-            ActrCliError::command_error(format!("Failed to derive Attach metadata: {e}"))
-        })?;
+        .map_err(|e| ActrCliError::command_error(format!("Failed to derive Front metadata: {e}")))
+    }
+
+    /// Install verified Attach using the configured signed Front package.
+    async fn install_actrium_service(
+        &self,
+        node: actr_hyper::Node<actr_hyper::Registered>,
+        config: &actr_config::RuntimeConfig,
+        service_manifest: &actr_pack::RuntimePackageManifest,
+        service_package_digest: &[u8],
+        trust: Arc<dyn actr_hyper::TrustProvider>,
+    ) -> Result<actr_hyper::Node<actr_hyper::Registered>> {
+        let Some(actrium) = config.actrium.as_ref() else {
+            return Ok(node);
+        };
+        let metadata = Self::verified_front_metadata(
+            &actrium.front_package,
+            service_manifest,
+            service_package_digest,
+            &trust,
+        )
+        .await?;
         let signing_key = node.actrium_actor_signing_key().map_err(|e| {
             ActrCliError::command_error(format!("Failed to load the node Actor key: {e}"))
         })?;
@@ -775,6 +801,11 @@ impl RunCommand {
         let config_content = tokio::fs::read_to_string(&config_path).await?;
         let raw_config: actr_config::RuntimeRawConfig = toml::from_str(&config_content)
             .map_err(|e| ActrCliError::command_error(format!("Failed to parse config: {}", e)))?;
+        if raw_config.service_authorization.is_some() {
+            return Err(ActrCliError::command_error(
+                "[service_authorization] requires a native packaged Service",
+            ));
+        }
 
         let config_dir = config_path.parent().unwrap_or(Path::new(".")).to_path_buf();
 

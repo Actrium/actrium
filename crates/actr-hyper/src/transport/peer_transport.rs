@@ -881,7 +881,7 @@ impl PeerTransport {
     /// builder to establish a new physical connection. A short-lived flight
     /// serializes the materialization with normal creation and close paths.
     /// Existing-only callers never wait on somebody else's flight.
-    async fn get_or_materialize_existing_transport(
+    pub(crate) async fn get_or_materialize_existing_transport(
         &self,
         dest: &Dest,
     ) -> NetworkResult<Option<Arc<DestTransport>>> {

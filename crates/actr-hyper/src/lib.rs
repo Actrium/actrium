@@ -1686,6 +1686,23 @@ impl Node<Attached> {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Node<Registered> {
+    /// Enforce the verified Front package's route and upload grants on an
+    /// ordinary Service. This does not install an Attach registry or lease.
+    pub fn with_ordinary_service_authorization(
+        self,
+        metadata: crate::actrium::FrontSessionMetadata,
+    ) -> Self {
+        let attachment = self
+            .attachment
+            .as_ref()
+            .expect("Node<Registered> without attachment");
+        let guard = crate::actrium::ordinary::OrdinaryServiceGuard::new(
+            metadata,
+            attachment.node.peer_types.clone(),
+        );
+        self.with_incoming_guard(Arc::new(guard))
+    }
+
     /// Install or replace the inbound delivery guard before startup.
     pub fn with_incoming_guard(mut self, guard: Arc<dyn crate::lifecycle::IncomingGuard>) -> Self {
         self.attachment

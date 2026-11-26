@@ -424,6 +424,16 @@ impl RuntimeContext {
             .await
     }
 
+    pub(crate) async fn prepare_peer_rpc(&self, peer: &ActrId, timeout_ms: i64) -> ActorResult<()> {
+        let deadline = crate::transport::RpcDeadline::from_timeout_ms(timeout_ms)?;
+        self.ensure_session_ready_until(crate::timer::ids::RUNTIME_CALL_PREFLIGHT, deadline)
+            .await?;
+        let Gate::Peer(gate) = self.select_gate(&Dest::Peer(peer.clone()))? else {
+            return Err(ActrError::Unavailable("Peer gate is unavailable".into()));
+        };
+        gate.prepare_rpc_peer(peer, deadline).await
+    }
+
     pub(crate) async fn call_raw_with_deadline(
         &self,
         target: &Dest,

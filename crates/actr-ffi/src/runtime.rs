@@ -716,6 +716,14 @@ impl ActrRefWrapper {
             .map_err(ActrError::from)
     }
 
+    /// Prepare a reliable RPC channel without invoking a business operation.
+    pub async fn prepare_peer_rpc(&self, target: ActrId, timeout_ms: i64) -> ActrResult<()> {
+        self.inner
+            .prepare_peer_rpc(&target.into(), timeout_ms)
+            .await
+            .map_err(ActrError::from)
+    }
+
     /// Trigger shutdown.
     pub fn shutdown(&self) {
         self.inner.shutdown();

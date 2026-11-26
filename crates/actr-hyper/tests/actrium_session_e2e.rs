@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use actr_framework::{Bytes, Context, Dest, MessageDispatcher, Workload};
-use actr_hyper::actrium::ActriumAttachParams;
+use actr_hyper::actrium::{ActriumAttachParams, FrontSessionMetadata};
 use actr_hyper::test_support::TestSignalingServer;
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
 use actr_protocol::{
@@ -400,8 +400,19 @@ async fn two_fronts_use_the_same_service_over_ordinary_relay() {
     let service_dir = TempDir::new().unwrap();
     let first_dir = TempDir::new().unwrap();
     let second_dir = TempDir::new().unwrap();
+    let params = attach_params();
     let service = register_node(&server, &service_dir, service_type())
         .await
+        .with_ordinary_service_authorization(FrontSessionMetadata {
+            service_type: service_type(),
+            front_actor_type: front_type(),
+            package_digest: params.package_digest,
+            guest_digest: params.guest_digest,
+            protocol_fingerprint: params.protocol_fingerprint,
+            runtime: params.runtime,
+            program_capabilities: BTreeSet::from([READ.to_owned()]),
+            routes: BTreeMap::from([("echo".to_owned(), BTreeSet::from([READ.to_owned()]))]),
+        })
         .start()
         .await
         .unwrap();
@@ -424,7 +435,15 @@ async fn two_fronts_use_the_same_service_over_ordinary_relay() {
     .await
     .expect("all three nodes connect to Relay");
 
-    let target = Dest::Peer(service.actor_id());
+    let service_id = service.actor_id();
+    first.prepare_peer_rpc(&service_id, 15_000).await.unwrap();
+    let unknown = ActrId {
+        serial_number: service_id.serial_number + 10_000,
+        ..service_id.clone()
+    };
+    assert!(first.prepare_peer_rpc(&unknown, 500).await.is_err());
+
+    let target = Dest::Peer(service_id);
     let first_context = first.app_context().await;
     let second_context = second.app_context().await;
     let first_payload = Bytes::from_static(b"first");
@@ -447,6 +466,21 @@ async fn two_fronts_use_the_same_service_over_ordinary_relay() {
     );
     assert_eq!(first_reply.unwrap(), first_payload);
     assert_eq!(second_reply.unwrap(), second_payload);
+
+    let denied = first_context
+        .call_raw(
+            &target,
+            PREPARE_ATTACHMENT_ROUTE.into(),
+            PayloadType::RpcReliable,
+            Bytes::from(PrepareAttachmentRequest::default().encode_to_vec()),
+            15_000,
+        )
+        .await;
+    assert!(matches!(
+        denied,
+        Err(actr_protocol::ActrError::PermissionDenied(message))
+            if message.contains("Service policy does not grant this caller the requested route")
+    ));
 
     for node in [first, second, service] {
         node.shutdown();

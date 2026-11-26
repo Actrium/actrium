@@ -1445,6 +1445,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         if Self.actriumAttachEnabled {
             session = try await reference.attachActrium(service: target, params: attachParams)
         } else {
+            try await reference.preparePeerRpc(target: target, timeoutMs: 5_000)
             session = nil
         }
         return RuntimeConnection(reference: reference, session: session, target: target)

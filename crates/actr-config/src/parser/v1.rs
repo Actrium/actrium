@@ -110,6 +110,11 @@ impl ParserV1 {
         raw: RuntimeRawConfig,
         package: PackageInfo,
     ) -> Result<RuntimeConfig> {
+        if raw.service_authorization.is_some() {
+            return Err(ConfigError::InvalidConfig(
+                "[service_authorization] must be installed by the packaged Service host".into(),
+            ));
+        }
         // Validate required runtime fields
         let signaling_url_str = raw
             .signaling
