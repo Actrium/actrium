@@ -53,7 +53,6 @@ pub mod op {
     pub const HOST_RESOLVE_DEPENDENCY: u32 = 8;
     pub const HOST_CLAIM_REPLY: u32 = 9;
     pub const HOST_COMPLETE_REPLY: u32 = 10;
-    pub const HOST_REPLY_DEADLINE: u32 = 11;
     pub const GUEST_HANDLE: u32 = 101;
     pub const GUEST_DATA_CHUNK: u32 = 102;
     pub const GUEST_LIFECYCLE: u32 = 103;
@@ -347,19 +346,12 @@ pub struct GuestReplyContextV1 {
     pub expects_response: bool,
     #[prost(uint64, tag = "2")]
     pub token: u64,
+    #[prost(uint64, optional, tag = "3")]
+    pub deadline_ticks_ns: Option<u64>,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct HostClaimReplyV1 {}
-
-#[derive(Clone, PartialEq, prost::Message)]
-pub struct HostReplyDeadlineV1 {}
-
-#[derive(Clone, PartialEq, prost::Message)]
-pub struct HostReplyDeadlineResultV1 {
-    #[prost(sint64, optional, tag = "1")]
-    pub remaining_ns: Option<i64>,
-}
 
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct HostCompleteReplyV1 {
@@ -697,11 +689,6 @@ impl AbiPayload for HostClaimReplyV1 {
 impl AbiPayload for HostCompleteReplyV1 {
     const ABI_VERSION: u32 = version::V1;
     const OP: u32 = op::HOST_COMPLETE_REPLY;
-}
-
-impl AbiPayload for HostReplyDeadlineV1 {
-    const ABI_VERSION: u32 = version::V1;
-    const OP: u32 = op::HOST_REPLY_DEADLINE;
 }
 
 impl AbiPayload for GuestHandleV1 {

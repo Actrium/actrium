@@ -29,8 +29,7 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use actr_framework::guest::dynclib_abi::{
     self as guest_abi, AbiPayload, AbiReply, GuestReplyContextV1, HostClaimReplyV1,
-    HostCompleteReplyV1, HostReplyDeadlineResultV1, HostReplyDeadlineV1, HostReplyOutcomeV1,
-    InitPayloadV1,
+    HostCompleteReplyV1, HostReplyOutcomeV1, InitPayloadV1,
 };
 use actr_framework::{Context as _, Deliver, ReplyOutcome};
 use libloading::Library;
@@ -82,14 +81,31 @@ pub(crate) struct DynclibReplyModes {
 }
 
 impl DynclibReplyModes {
-    pub(crate) fn for_route(&self, route: &str) -> ReplyMode {
-        let Some(_library) = self.library.upgrade() else {
-            return ReplyMode::Return;
-        };
-        // SAFETY: the library is mapped for this call and the route is
-        // readable for its duration. This export never accesses actor state.
-        let mode = unsafe { (self.lookup)(route.as_ptr(), route.len()) };
-        ReplyMode::try_from(mode).unwrap_or(ReplyMode::Return)
+    pub(crate) async fn for_route(&self, route: &str) -> Result<ReplyMode, ActrError> {
+        let library = self.library.upgrade().ok_or_else(|| {
+            ActrError::Unavailable("native workload library is no longer available".into())
+        })?;
+        let route = route.to_owned();
+        let lookup = self.lookup;
+        let mode = tokio::task::spawn_blocking(move || {
+            let _library = library;
+            let thread = std::thread::Builder::new()
+                .name("actr-native-reply-mode".into())
+                .spawn(move || {
+                    // SAFETY: the join owner keeps the library mapped until
+                    // the guest thread and its TLS destructors have exited.
+                    unsafe { lookup(route.as_ptr(), route.len()) }
+                })
+                .map_err(|error| {
+                    ActrError::Internal(format!("start native reply-mode lookup: {error}"))
+                })?;
+            thread
+                .join()
+                .map_err(|_| ActrError::Internal("native reply-mode thread panicked".into()))
+        })
+        .await
+        .map_err(|error| ActrError::Internal(format!("join native reply-mode task: {error}")))??;
+        Ok(ReplyMode::try_from(mode).unwrap_or(ReplyMode::Return))
     }
 }
 
@@ -115,6 +131,14 @@ struct NativeReply {
 fn reply_registry() -> &'static Mutex<HashMap<u64, Weak<NativeReply>>> {
     static REGISTRY: OnceLock<Mutex<HashMap<u64, Weak<NativeReply>>>> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(test)]
+static TEST_DEADLINE_TICKS: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+pub(crate) fn test_deadline_ticks() -> u64 {
+    TEST_DEADLINE_TICKS.load(Ordering::SeqCst)
 }
 
 struct ReplyRegistration {
@@ -301,21 +325,6 @@ fn reply_operation(token: u64, frame: guest_abi::AbiFrame) -> Result<HostOperati
         .and_then(|registry| registry.get(&token).and_then(Weak::upgrade))
         .ok_or(guest_abi::code::UNSUPPORTED_OP)?;
 
-    if frame.op == guest_abi::op::HOST_REPLY_DEADLINE {
-        HostReplyDeadlineV1::decode_payload(&frame.payload)?;
-        let now = actr_framework::ReplyDeadline::now();
-        let remaining_ns = reply.deadline.map(|deadline| {
-            if deadline >= now {
-                i64::try_from(deadline.duration_since(now).as_nanos()).unwrap_or(i64::MAX)
-            } else {
-                -i64::try_from(now.duration_since(deadline).as_nanos()).unwrap_or(i64::MAX)
-            }
-        });
-        return Ok(HostOperationResult::Bytes(guest_abi::encode_message(
-            &HostReplyDeadlineResultV1 { remaining_ns },
-        )?));
-    }
-
     if frame.op == guest_abi::op::HOST_CLAIM_REPLY {
         HostClaimReplyV1::decode_payload(&frame.payload)?;
         return reply
@@ -368,12 +377,12 @@ unsafe extern "C" fn vtable_invoke(
     };
 
     let result = match frame.op {
-        guest_abi::op::HOST_CLAIM_REPLY
-        | guest_abi::op::HOST_COMPLETE_REPLY
-        | guest_abi::op::HOST_REPLY_DEADLINE => match reply_operation(token, frame) {
-            Ok(result) => result,
-            Err(code) => HostOperationResult::AbiError(code),
-        },
+        guest_abi::op::HOST_CLAIM_REPLY | guest_abi::op::HOST_COMPLETE_REPLY => {
+            match reply_operation(token, frame) {
+                Ok(result) => result,
+                Err(code) => HostOperationResult::AbiError(code),
+            }
+        }
         _ => match decode_host_operation(frame) {
             Ok(pending) => trampoline_execute(token, pending),
             Err(code) => return code,
@@ -832,7 +841,20 @@ impl DynclibInstance {
         let reply_context = reply.as_ref().map(|(reply, _)| GuestReplyContextV1 {
             expects_response: reply.expects_response,
             token: bridge.token,
+            deadline_ticks_ns: reply
+                .deadline
+                .map(actr_framework::ReplyDeadline::native_ticks),
         });
+        #[cfg(test)]
+        if delay_entry {
+            TEST_DEADLINE_TICKS.store(
+                reply_context
+                    .as_ref()
+                    .and_then(|reply| reply.deadline_ticks_ns)
+                    .unwrap(),
+                Ordering::SeqCst,
+            );
+        }
         if let Some((reply, deliver)) = &reply {
             let token = bridge.token;
             reply_registry()

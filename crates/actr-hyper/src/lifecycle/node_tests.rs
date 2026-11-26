@@ -2361,7 +2361,7 @@ async fn explicit_tell_ignores_the_wire_timeout() {
     assert!(matches!(outcome, IncomingOutcome::Deferred));
     assert_eq!(inner.outstanding_replies.len(), 1);
 
-    let after_wire_timeout = std::time::Instant::now() + Duration::from_secs(10);
+    let after_wire_timeout = actr_framework::ReplyDeadline::now() + Duration::from_secs(10);
     let expired = inner
         .outstanding_replies
         .sweep_expired(crate::lifecycle::dedup::INFLIGHT_TTL, after_wire_timeout)
@@ -3996,7 +3996,7 @@ async fn native_package_explicit_reply_releases_dispatch_for_final_chunk() {
         FinishUploadResponse::decode(response.payload.unwrap())
             .unwrap()
             .file_id,
-        "true"
+        crate::dynclib::test_deadline_ticks().to_string()
     );
 
     for (id, mode) in [
@@ -4099,7 +4099,7 @@ async fn native_package_explicit_reply_releases_dispatch_for_final_chunk() {
         .outstanding_replies
         .sweep_expired(
             crate::lifecycle::dedup::INFLIGHT_TTL,
-            std::time::Instant::now() + Duration::from_secs(15),
+            actr_framework::ReplyDeadline::now() + Duration::from_secs(15),
         )
         .await;
     inner

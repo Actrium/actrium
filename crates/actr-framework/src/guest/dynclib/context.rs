@@ -3,9 +3,9 @@
 use crate::guest::dynclib_abi::{
     self as abi, AbiPayload, AbiReply, GuestDataChunkV1, GuestReplyContextV1, HostCallRawV1,
     HostCallV1, HostClaimReplyV1, HostCompleteReplyV1, HostDiscoverV1, HostRegisterStreamV1,
-    HostReplyDeadlineResultV1, HostReplyDeadlineV1, HostReplyOutcomeV1, HostResolveDependencyV1,
-    HostSendDataChunkV1, HostTellV1, HostUnregisterStreamV1, InvocationContextV1,
-    abi_error_to_actr, dest_to_v1, reply_to_actr_error,
+    HostReplyOutcomeV1, HostResolveDependencyV1, HostSendDataChunkV1, HostTellV1,
+    HostUnregisterStreamV1, InvocationContextV1, abi_error_to_actr, dest_to_v1,
+    reply_to_actr_error,
 };
 use crate::guest::vtable::HostVTable;
 use crate::{
@@ -136,29 +136,11 @@ impl DynclibContext {
     #[doc(hidden)]
     pub fn with_reply(mut self, reply: Option<GuestReplyContextV1>) -> Result<Self, ActrError> {
         if let Some(reply) = reply {
-            // Sample before entering the host so crossing the ABI cannot extend the deadline.
-            let sampled = ReplyDeadline::now();
-            let frame = HostReplyDeadlineV1 {}
-                .to_frame()
-                .map_err(abi_error_to_actr)?;
-            let result = Self::invoke_with_token(self.vtable, frame, reply.token)?;
-            if result.status != abi::code::SUCCESS {
-                return Err(reply_to_actr_error(result));
-            }
-            let budget = abi::decode_message::<HostReplyDeadlineResultV1>(&result.payload)
-                .map_err(abi_error_to_actr)?;
-            let deadline = budget.remaining_ns.map(|nanos| {
-                let duration = std::time::Duration::from_nanos(nanos.unsigned_abs());
-                if nanos >= 0 {
-                    sampled.checked_add(duration)
-                } else {
-                    sampled.checked_sub(duration)
-                }
-                .unwrap_or(sampled)
-            });
             self.reply = Some(DynclibReplyContext {
                 expects_response: reply.expects_response,
-                deadline,
+                deadline: reply
+                    .deadline_ticks_ns
+                    .map(ReplyDeadline::from_native_ticks),
                 token: reply.token,
             });
         }

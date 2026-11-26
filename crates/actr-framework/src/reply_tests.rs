@@ -1,8 +1,8 @@
 //! Tests for the `Reply<T>` handle (RFC-0323) — idempotent completer, Drop
 //! fallback, and the TELL empty-variant.
 
+use crate::ReplyDeadline;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use actr_protocol::ActrError;
 use prost::Message as ProstMessage;
@@ -41,7 +41,7 @@ struct Resp {
 fn make_reply(deliver: Arc<dyn Deliver>, emit_response: bool) -> Reply<Resp> {
     Reply::new(
         "req-1".to_string(),
-        Some(Instant::now()),
+        Some(ReplyDeadline::now()),
         deliver,
         emit_response,
     )
@@ -169,7 +169,7 @@ fn send_completes_the_completer_exactly_once() {
 #[test]
 fn deadline_is_stored_and_returned() {
     let cap = CapturingDeliver::new();
-    let dl = Instant::now();
+    let dl = ReplyDeadline::now();
     let reply = Reply::new("req-dl".to_string(), Some(dl), cap, true);
     assert_eq!(reply.deadline(), Some(dl));
     assert_eq!(reply.request_id(), "req-dl");

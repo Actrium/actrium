@@ -2557,21 +2557,25 @@ impl Inner {
         // RETURN routes submit their encoded return value through `reply_raw`,
         // while generated EXPLICIT routes own delivery through `Reply<T>`.
         // This keeps the runtime from maintaining a second proto route table.
-        let reply_mode = self
-            .linked_handle
-            .as_ref()
-            .map(|h| h.reply_mode_for_route(&envelope.route_key))
-            .unwrap_or_else(|| {
-                #[cfg(feature = "dynclib-engine")]
-                if let Some(modes) = &self.native_reply_modes {
-                    return modes.for_route(&envelope.route_key);
-                }
-                if self.package_uses_explicit_reply_boundary {
-                    actr_protocol::ReplyMode::Explicit
-                } else {
-                    actr_protocol::ReplyMode::Return
-                }
-            });
+        let reply_mode = if let Some(handle) = &self.linked_handle {
+            handle.reply_mode_for_route(&envelope.route_key)
+        } else {
+            #[cfg(feature = "dynclib-engine")]
+            let native_mode = match &self.native_reply_modes {
+                Some(modes) => match modes.for_route(&envelope.route_key).await {
+                    Ok(mode) => Some(mode),
+                    Err(error) => return ready_continuation(Err(error)),
+                },
+                None => None,
+            };
+            #[cfg(not(feature = "dynclib-engine"))]
+            let native_mode = None;
+            native_mode.unwrap_or(if self.package_uses_explicit_reply_boundary {
+                actr_protocol::ReplyMode::Explicit
+            } else {
+                actr_protocol::ReplyMode::Return
+            })
+        };
         let expects_response = Inner::dispatch_expects_response(envelope.direction).unwrap_or(true);
 
         // For EXPLICIT routes, build the `ReplyDeliver`, stash it on the

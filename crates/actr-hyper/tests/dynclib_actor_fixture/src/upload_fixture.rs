@@ -24,11 +24,10 @@ impl dispatcher::ActrDispatchHandler for Upload {
     ) -> ActorResult<()> {
         match request.mode.as_str() {
             "expired-deadline" => {
-                let expired = reply
-                    .deadline()
-                    .is_some_and(|deadline| deadline <= std::time::Instant::now());
+                let deadline = reply.deadline().unwrap();
+                assert!(deadline <= actr_framework::ReplyDeadline::now());
                 reply.send(Ok(upload::FinishUploadResponse {
-                    file_id: expired.to_string(),
+                    file_id: deadline.native_ticks().to_string(),
                 }));
                 return Ok(());
             }

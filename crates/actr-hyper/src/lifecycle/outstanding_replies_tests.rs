@@ -34,7 +34,7 @@ async fn sweep_evicts_aged_and_releases_counter() {
     assert_eq!(r.len(), 1);
 
     let ttl = Duration::from_secs(60);
-    let future = std::time::Instant::now() + ttl + Duration::from_secs(1);
+    let future = ReplyDeadline::now() + ttl + Duration::from_secs(1);
     r.sweep(ttl, future).await;
     assert_eq!(r.len(), 0);
 }
@@ -44,7 +44,7 @@ async fn sweep_keeps_unaged_entries() {
     let r = OutstandingReplies::new();
     r.register("req-live").await;
     let ttl = Duration::from_secs(60);
-    r.sweep(ttl, std::time::Instant::now()).await;
+    r.sweep(ttl, ReplyDeadline::now()).await;
     assert_eq!(r.len(), 1);
 }
 
@@ -57,7 +57,7 @@ async fn sweep_expired_evicts_unclaimed_entries() {
     r.register("req-unclaimed").await;
 
     let ttl = Duration::from_secs(60);
-    let future = std::time::Instant::now() + ttl + Duration::from_secs(1);
+    let future = ReplyDeadline::now() + ttl + Duration::from_secs(1);
     assert_eq!(
         r.sweep_expired(ttl, future).await,
         vec![super::DedupKey::test_request("req-unclaimed")]

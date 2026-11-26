@@ -22,7 +22,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use actr_framework::ReplyDeadline;
 
 use tokio::sync::Mutex;
 
@@ -33,8 +35,8 @@ pub(crate) type ReplyAttemptId = u64;
 
 struct OutstandingEntry {
     dedup_key: DedupKey,
-    admitted_at: Instant,
-    deadline: Option<Instant>,
+    admitted_at: ReplyDeadline,
+    deadline: Option<ReplyDeadline>,
     /// The exact reply writer for this admission. Keeping it here lets the
     /// TTL sweep race the handler's Reply::send through the same
     /// first-write-wins gate instead of manufacturing a second completion
@@ -75,7 +77,7 @@ impl OutstandingReplies {
             attempt_id,
             OutstandingEntry {
                 dedup_key: DedupKey::test_request(request_id),
-                admitted_at: Instant::now(),
+                admitted_at: ReplyDeadline::now(),
                 deadline: None,
                 deliver: None,
             },
@@ -89,13 +91,13 @@ impl OutstandingReplies {
         dedup_key: DedupKey,
         attempt_id: ReplyAttemptId,
         deliver: Arc<ReplyDeliver>,
-        deadline: Option<Instant>,
+        deadline: Option<ReplyDeadline>,
     ) {
         self.entries.lock().await.insert(
             attempt_id,
             OutstandingEntry {
                 dedup_key,
-                admitted_at: Instant::now(),
+                admitted_at: ReplyDeadline::now(),
                 deadline,
                 deliver: Some(deliver),
             },
@@ -139,11 +141,11 @@ impl OutstandingReplies {
     /// uses [`sweep_expired`] so the registered `ReplyDeliver` owns the
     /// first-write-wins decision.
     #[cfg(test)]
-    pub(crate) async fn sweep(&self, ttl: Duration, now: Instant) {
+    pub(crate) async fn sweep(&self, ttl: Duration, now: ReplyDeadline) {
         let n = {
             let mut entries = self.entries.lock().await;
             let before = entries.len();
-            entries.retain(|_, entry| now.duration_since(entry.admitted_at) < ttl);
+            entries.retain(|_, entry| now.saturating_duration_since(entry.admitted_at) < ttl);
             before - entries.len()
         };
         if n != 0 {
@@ -158,7 +160,7 @@ impl OutstandingReplies {
     /// reply already won remain registered until that delivery task completes;
     /// only an entry whose deliver successfully wins the timeout race is
     /// removed and returned for the dedup-side InFlight eviction.
-    pub(crate) async fn sweep_expired(&self, ttl: Duration, now: Instant) -> Vec<DedupKey> {
+    pub(crate) async fn sweep_expired(&self, ttl: Duration, now: ReplyDeadline) -> Vec<DedupKey> {
         let mut expired_ids = Vec::new();
         let mut remove = Vec::new();
         {
@@ -196,7 +198,7 @@ impl OutstandingReplies {
 
     /// Clock-reading form of [`sweep_expired`] for the background sweep task.
     pub(crate) async fn sweep_expired_now(&self, ttl: Duration) -> Vec<DedupKey> {
-        self.sweep_expired(ttl, Instant::now()).await
+        self.sweep_expired(ttl, ReplyDeadline::now()).await
     }
 }
 

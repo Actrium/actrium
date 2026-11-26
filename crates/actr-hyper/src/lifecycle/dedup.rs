@@ -41,19 +41,22 @@ pub(crate) const DEDUP_TTL: Duration = Duration::from_secs(30);
 /// in non-exempt callers (`node.rs`): this deadline is a caller-side wall-clock
 /// bound surfaced via `Reply::deadline()`, not a `tokio::time`-awaited
 /// deadline, so the wall clock is the correct clock to read it on.
-pub(crate) fn caller_reply_deadline(timeout_ms: i64) -> Option<Instant> {
-    (timeout_ms > 0).then(|| Instant::now() + Duration::from_millis(timeout_ms as u64))
+pub(crate) fn caller_reply_deadline(timeout_ms: i64) -> Option<actr_framework::ReplyDeadline> {
+    (timeout_ms > 0)
+        .then(|| actr_framework::ReplyDeadline::now() + Duration::from_millis(timeout_ms as u64))
 }
 
 /// Project the remaining scope budget onto the synchronous reply clock.
-pub(crate) fn scoped_reply_deadline(deadline: tokio::time::Instant) -> Instant {
-    let now = Instant::now();
+pub(crate) fn scoped_reply_deadline(
+    deadline: tokio::time::Instant,
+) -> actr_framework::ReplyDeadline {
+    let now = actr_framework::ReplyDeadline::now();
     now + deadline.saturating_duration_since(tokio::time::Instant::now())
 }
 
 #[cfg(feature = "wasm-engine")]
-pub(crate) fn remaining_reply_budget(deadline: Instant) -> Duration {
-    deadline.saturating_duration_since(Instant::now())
+pub(crate) fn remaining_reply_budget(deadline: actr_framework::ReplyDeadline) -> Duration {
+    deadline.saturating_duration_since(actr_framework::ReplyDeadline::now())
 }
 
 /// Default TTL for *in-flight* dedup entries (RFC-0323 §5/§7). Independent of

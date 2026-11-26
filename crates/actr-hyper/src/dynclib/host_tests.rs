@@ -61,6 +61,94 @@ fn load_non_library_file_errors() {
 static FALLBACK_RELEASE: AtomicBool = AtomicBool::new(false);
 static FALLBACK_FINISHED: AtomicBool = AtomicBool::new(false);
 
+static REPLY_LOOKUP_TLS_DROPPED: AtomicBool = AtomicBool::new(false);
+
+struct ReplyLookupTls;
+impl Drop for ReplyLookupTls {
+    fn drop(&mut self) {
+        REPLY_LOOKUP_TLS_DROPPED.store(true, Ordering::SeqCst);
+    }
+}
+
+std::thread_local! {
+    static REPLY_LOOKUP_TLS: ReplyLookupTls = const { ReplyLookupTls };
+}
+
+unsafe extern "C" fn reply_mode_with_tls(_route: *const u8, _len: usize) -> i32 {
+    REPLY_LOOKUP_TLS.with(|_| {});
+    ReplyMode::Explicit as i32
+}
+
+#[tokio::test]
+async fn reply_mode_lookup_waits_for_guest_thread_tls_destructors() {
+    REPLY_LOOKUP_TLS_DROPPED.store(false, Ordering::SeqCst);
+    let library = current_process_library();
+    let modes = DynclibReplyModes {
+        library: Arc::downgrade(&library),
+        lookup: reply_mode_with_tls,
+    };
+    assert_eq!(
+        modes.for_route("test.route").await.unwrap(),
+        ReplyMode::Explicit
+    );
+    assert!(REPLY_LOOKUP_TLS_DROPPED.load(Ordering::SeqCst));
+}
+
+static LOOKUP_BARRIER: (std::sync::Mutex<(bool, bool)>, std::sync::Condvar) = (
+    std::sync::Mutex::new((false, false)),
+    std::sync::Condvar::new(),
+);
+
+unsafe extern "C" fn blocking_reply_mode(_route: *const u8, _len: usize) -> i32 {
+    let (lock, wake) = &LOOKUP_BARRIER;
+    let mut state = lock.lock().unwrap();
+    state.0 = true;
+    wake.notify_all();
+    while !state.1 {
+        state = wake.wait(state).unwrap();
+    }
+    ReplyMode::Return as i32
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelling_lookup_keeps_library_mapped_until_guest_thread_exits() {
+    *LOOKUP_BARRIER.0.lock().unwrap() = (false, false);
+    let library = current_process_library();
+    let weak = Arc::downgrade(&library);
+    let modes = DynclibReplyModes {
+        library: weak.clone(),
+        lookup: blocking_reply_mode,
+    };
+    let task = tokio::spawn(async move { modes.for_route("test.route").await });
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !LOOKUP_BARRIER.0.lock().unwrap().0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    task.abort();
+    let _ = task.await;
+    drop(library);
+    let retained = weak.upgrade().is_some();
+    {
+        let mut state = LOOKUP_BARRIER.0.lock().unwrap();
+        state.1 = true;
+        LOOKUP_BARRIER.1.notify_all();
+    }
+    assert!(
+        retained,
+        "the join worker must retain the library after cancellation"
+    );
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while weak.upgrade().is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
 unsafe extern "C" fn slow_successful_shutdown() -> i32 {
     while !FALLBACK_RELEASE.load(Ordering::Acquire) {
         std::thread::sleep(Duration::from_millis(10));
