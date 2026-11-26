@@ -382,6 +382,9 @@ fn read_public_key(path: &std::path::Path) -> [u8; 32] {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn counterapp_front_attaches_to_the_real_service_package() {
+    if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+        return;
+    }
     let (Some(front_path), Some(service_path), Some(key_path)) = (
         std::env::var_os("COUNTERAPP_FRONT"),
         std::env::var_os("COUNTERAPP_SERVICE"),

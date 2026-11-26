@@ -491,6 +491,9 @@ async fn two_fronts_use_the_same_service_over_ordinary_relay() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn attach_and_session_signed_business_call_over_verified_relay() {
+    if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+        return;
+    }
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer()
@@ -513,20 +516,6 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     })
     .await
     .expect("both nodes authenticate their relay sockets");
-
-    if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
-        assert!(matches!(
-            front.attach_actrium(&service_actor_id, attach_params()).await,
-            Err(actr_protocol::ActrError::PermissionDenied(message))
-                if message.contains("no verified Actor channel")
-        ));
-        service.shutdown();
-        service.wait_for_shutdown().await;
-        front.shutdown();
-        front.wait_for_shutdown().await;
-        server.shutdown().await;
-        return;
-    }
 
     // The peer handshake may still be in flight; Attach retries until the
     // verified Actor channel exists on both ends.

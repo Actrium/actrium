@@ -3300,6 +3300,13 @@ impl Inner {
     }
 
     async fn start_inner(mut self) -> ActorResult<ActrRef> {
+        if self.actrium_peer.is_some() && !crate::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+            return Err(ActrError::InvalidArgument(
+                "Actrium sessions require Actor channel authentication, which is disabled in this build"
+                    .to_string(),
+            ));
+        }
+
         tracing::info!("🚀 Starting ActrNode");
         tracing::info!("Actr Rust version: {}", env!("CARGO_PKG_VERSION"));
 

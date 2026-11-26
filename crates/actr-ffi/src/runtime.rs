@@ -1245,6 +1245,15 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
         node.clone()
             .with_actrium_service(config, ActriumServicePolicies::allow_all())
             .expect("an event-only peer accepts an empty deny-all RPC table");
+        if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+            assert!(matches!(
+                node.start().await,
+                Err(ActrError::InvalidArgument { msg })
+                    if msg.contains("Actor channel authentication")
+            ));
+            server.shutdown().await;
+            return;
+        }
         let actr_ref = node
             .start()
             .await
@@ -1286,6 +1295,15 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
         node.clone()
             .with_actrium_service(config, ActriumServicePolicies::allow_all())
             .expect("the same node accepts a corrected config");
+        if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+            assert!(matches!(
+                node.start().await,
+                Err(ActrError::InvalidArgument { msg })
+                    if msg.contains("Actor channel authentication")
+            ));
+            server.shutdown().await;
+            return;
+        }
         let actr_ref = node
             .start()
             .await
