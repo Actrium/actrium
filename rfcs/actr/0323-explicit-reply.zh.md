@@ -3,6 +3,7 @@
 - 状态（Status）：已接受（Accepted）
 - 日期（Date）：2026-07-08
 - 修订（Revised）：2026-08-24（#603 补齐跨语言 Reply、WIT 0.6 与统一 TTL 兜底）
+- Revised: 2026-11-26 (native replies share an absolute monotonic deadline)
 - RFC PR：[Actrium/actr#289](https://github.com/Actrium/actr/pull/289)
 - 跟踪议题（Tracking issue）：[Actrium/actr#323](https://github.com/Actrium/actr/issues/323)
 - 替代 RFC（Superseded by）：无
@@ -90,7 +91,7 @@ impl<T: prost::Message> Reply<T> {
     /// Returns the caller's deadline: arrival time plus timeout_ms.
     /// Sending after the deadline remains valid; the caller discards the
     /// resulting orphan response.
-    pub fn deadline(&self) -> Option<Instant>;
+    pub fn deadline(&self) -> Option<ReplyDeadline>;
 
     pub fn request_id(&self) -> &str;
 }
@@ -107,6 +108,8 @@ impl<T: prost::Message> Reply<T> {
 **句柄携带的上下文**：`request_id`、回程路由（inproc lane 或 peer gate）、`traceparent/tracestate`（延迟回复仍接续原调用链）、deadline、dedup 完成器。
 
 **deadline 语义**：`deadline()` = arrival + timeout_ms，是**调用方真实 deadline 的上界**（不含请求在途传输时间 / transit time，真实 deadline 更早）；TELL 请求返回 None。回复走与今日内联回复相同的回程：main 上所有 RESPONSE 均固定走 RpcReliable lane、按 request_id 关联，与请求进入的 lane（RpcReliable vs RpcSignal）无关；延迟回复不改变这一行为。若未来需要回复保留请求 lane，属新增行为，须另行提案并改造各 send_response 路径。与 #257（typed `Context::call` 的可配置 timeout）对齐：#257 落地后，此 timeout_ms 应取其配置值。
+
+`ReplyDeadline` uses a monotonic clock and preserves the same absolute deadline across a native host and guest. Compare it with `ReplyDeadline::now()` and use `saturating_duration_since` to compute a remaining duration. This changes the Rust source API for `Reply::deadline`, `Reply::new`, and custom `Context::reply_deadline` implementations that previously used `std::time::Instant`.
 
 ### 4. 消息泵契约（随本 RFC 一并成文，独立于新特性生效）
 
