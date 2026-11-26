@@ -84,6 +84,10 @@ pub type ReplyDeadline = Instant;
 pub trait Deliver: Send + Sync + 'static {
     fn deliver(&self, outcome: ReplyOutcome);
 
+    /// Register cleanup for resources owned by an explicit reply capability.
+    #[doc(hidden)]
+    fn on_retire(&self, _cleanup: Box<dyn FnOnce() + Send>) {}
+
     /// Deliver a timeout without completing the dedup entry as a normal
     /// response. Implementations with a first-write-wins timeout path may
     /// override this; simple test sinks can use the normal delivery behavior.

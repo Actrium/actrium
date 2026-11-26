@@ -3,9 +3,9 @@
 use crate::guest::dynclib_abi::{
     self as abi, AbiPayload, AbiReply, GuestDataChunkV1, GuestReplyContextV1, HostCallRawV1,
     HostCallV1, HostClaimReplyV1, HostCompleteReplyV1, HostDiscoverV1, HostRegisterStreamV1,
-    HostReplyOutcomeV1, HostResolveDependencyV1, HostSendDataChunkV1, HostTellV1,
-    HostUnregisterStreamV1, InvocationContextV1, abi_error_to_actr, dest_to_v1,
-    reply_to_actr_error,
+    HostReplyDeadlineResultV1, HostReplyDeadlineV1, HostReplyOutcomeV1, HostResolveDependencyV1,
+    HostSendDataChunkV1, HostTellV1, HostUnregisterStreamV1, InvocationContextV1,
+    abi_error_to_actr, dest_to_v1, reply_to_actr_error,
 };
 use crate::guest::vtable::HostVTable;
 use crate::{
@@ -35,9 +35,16 @@ pub struct DynclibContext {
 struct DynclibReplyContext {
     expects_response: bool,
     deadline: Option<ReplyDeadline>,
+    token: u64,
 }
 
-struct DynclibReplyDeliver(DynclibContext);
+struct DynclibReplyDeliver {
+    vtable: *const HostVTable,
+    token: u64,
+}
+
+unsafe impl Send for DynclibReplyDeliver {}
+unsafe impl Sync for DynclibReplyDeliver {}
 
 impl Deliver for DynclibReplyDeliver {
     fn deliver(&self, outcome: ReplyOutcome) {
@@ -48,12 +55,11 @@ impl Deliver for DynclibReplyDeliver {
         let payload = HostCompleteReplyV1 {
             outcome: Some(outcome),
         };
-        if let Err(error) = self.0.invoke_reply(&payload) {
-            self.0.log(
-                LogLevel::Warn,
-                &format!("native reply submission failed: {error}"),
-            );
-        }
+        let Ok(frame) = payload.to_frame() else {
+            return;
+        };
+        // Expired capabilities are retired by the host, so late replies are no-ops.
+        let _ = DynclibContext::invoke_with_token(self.vtable, frame, self.token);
     }
 }
 
@@ -128,14 +134,35 @@ impl DynclibContext {
     }
 
     #[doc(hidden)]
-    pub fn with_reply(mut self, reply: Option<GuestReplyContextV1>) -> Self {
-        self.reply = reply.map(|reply| DynclibReplyContext {
-            expects_response: reply.expects_response,
-            deadline: reply.remaining_budget_ns.and_then(|budget| {
-                ReplyDeadline::now().checked_add(std::time::Duration::from_nanos(budget))
-            }),
-        });
-        self
+    pub fn with_reply(mut self, reply: Option<GuestReplyContextV1>) -> Result<Self, ActrError> {
+        if let Some(reply) = reply {
+            // Sample before entering the host so crossing the ABI cannot extend the deadline.
+            let sampled = ReplyDeadline::now();
+            let frame = HostReplyDeadlineV1 {}
+                .to_frame()
+                .map_err(abi_error_to_actr)?;
+            let result = Self::invoke_with_token(self.vtable, frame, reply.token)?;
+            if result.status != abi::code::SUCCESS {
+                return Err(reply_to_actr_error(result));
+            }
+            let budget = abi::decode_message::<HostReplyDeadlineResultV1>(&result.payload)
+                .map_err(abi_error_to_actr)?;
+            let deadline = budget.remaining_ns.map(|nanos| {
+                let duration = std::time::Duration::from_nanos(nanos.unsigned_abs());
+                if nanos >= 0 {
+                    sampled.checked_add(duration)
+                } else {
+                    sampled.checked_sub(duration)
+                }
+                .unwrap_or(sampled)
+            });
+            self.reply = Some(DynclibReplyContext {
+                expects_response: reply.expects_response,
+                deadline,
+                token: reply.token,
+            });
+        }
+        Ok(self)
     }
 
     fn vt(&self) -> &HostVTable {
@@ -145,14 +172,21 @@ impl DynclibContext {
     fn invoke_frame(&self, frame: abi::AbiFrame) -> Result<AbiReply, ActrError> {
         let token =
             crate::guest::dynclib::runtime::active_bridge_token().unwrap_or(self.bridge_token);
-        self.invoke_with_token(frame, token)
+        Self::invoke_with_token(self.vtable, frame, token)
     }
 
     fn invoke_reply(&self, payload: &impl AbiPayload) -> Result<(), ActrError> {
         let frame = payload.to_frame().map_err(abi_error_to_actr)?;
         // A reply belongs to its original RPC, even when sent inside a later
         // RPC or DataStream callback with a different active bridge token.
-        let reply = self.invoke_with_token(frame, self.bridge_token)?;
+        let reply = Self::invoke_with_token(
+            self.vtable,
+            frame,
+            self.reply
+                .as_ref()
+                .ok_or_else(|| ActrError::Internal("reply capability missing".into()))?
+                .token,
+        )?;
         if reply.status != abi::code::SUCCESS {
             return Err(reply_to_actr_error(reply));
         }
@@ -160,7 +194,7 @@ impl DynclibContext {
     }
 
     fn invoke_with_token(
-        &self,
+        vtable: *const HostVTable,
         frame: abi::AbiFrame,
         bridge_token: u64,
     ) -> Result<AbiReply, ActrError> {
@@ -168,7 +202,7 @@ impl DynclibContext {
         let mut reply_ptr: *mut u8 = std::ptr::null_mut();
         let mut reply_len: usize = 0;
         let code = unsafe {
-            (self.vt().invoke)(
+            ((*vtable).invoke)(
                 bridge_token,
                 frame_bytes.as_ptr(),
                 frame_bytes.len(),
@@ -185,7 +219,7 @@ impl DynclibContext {
             Vec::new()
         } else {
             let data = unsafe { std::slice::from_raw_parts(reply_ptr, reply_len).to_vec() };
-            unsafe { (self.vt().free_host_buf)(reply_ptr, reply_len) };
+            unsafe { ((*vtable).free_host_buf)(reply_ptr, reply_len) };
             data
         };
 
@@ -239,11 +273,11 @@ impl Context for DynclibContext {
     }
 
     fn reply_deliver(&self) -> Option<Arc<dyn Deliver>> {
-        self.reply.as_ref()?;
-        let context = self.clone();
-        context
-            .retained
-            .then(|| Arc::new(DynclibReplyDeliver(context)) as Arc<dyn Deliver>)
+        let reply = self.reply.as_ref()?;
+        Some(Arc::new(DynclibReplyDeliver {
+            vtable: self.vtable,
+            token: reply.token,
+        }))
     }
 
     fn claim_reply(&self) -> bool {

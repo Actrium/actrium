@@ -20,6 +20,7 @@
 //!   leaving RETURN in-flight entries untouched.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -38,7 +39,7 @@ struct OutstandingEntry {
     /// TTL sweep race the handler's Reply::send through the same
     /// first-write-wins gate instead of manufacturing a second completion
     /// path.
-    deliver: Option<ReplyDeliver>,
+    deliver: Option<Arc<ReplyDeliver>>,
 }
 
 pub(crate) struct OutstandingReplies {
@@ -87,7 +88,7 @@ impl OutstandingReplies {
         &self,
         dedup_key: DedupKey,
         attempt_id: ReplyAttemptId,
-        deliver: ReplyDeliver,
+        deliver: Arc<ReplyDeliver>,
         deadline: Option<Instant>,
     ) {
         self.entries.lock().await.insert(
@@ -173,7 +174,12 @@ impl OutstandingReplies {
                     .as_ref()
                     .map(|deliver| deliver.try_deliver_timeout())
                     .unwrap_or(true);
-                if timeout_won || entry.deliver.as_ref().is_some_and(ReplyDeliver::is_pending) {
+                if timeout_won
+                    || entry
+                        .deliver
+                        .as_ref()
+                        .is_some_and(|deliver| deliver.is_pending())
+                {
                     remove.push(*attempt_id);
                     expired_ids.push(entry.dedup_key.clone());
                 }

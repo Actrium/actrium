@@ -892,7 +892,10 @@ macro_rules! entry {
                         bridge_token,
                     )
                 } {
-                    Ok(c) => c.with_reply(handle.reply),
+                    Ok(c) => match c.with_reply(handle.reply) {
+                        Ok(c) => c,
+                        Err(_) => return $crate::guest::dynclib_abi::code::HANDLE_FAILED,
+                    },
                     Err(_) => return $crate::guest::dynclib_abi::code::HANDLE_FAILED,
                 };
 

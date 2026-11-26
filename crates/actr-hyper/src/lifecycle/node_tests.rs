@@ -622,6 +622,39 @@ async fn register_and_unregister_stream_roundtrip() {
     );
 }
 
+#[tokio::test]
+async fn registered_stream_does_not_retain_explicit_reply() {
+    struct ReplySink;
+    impl actr_framework::Deliver for ReplySink {
+        fn deliver(&self, _: actr_framework::ReplyOutcome) {}
+    }
+
+    let (mut ctx, wl) = harness().await;
+    let reply: Arc<dyn actr_framework::Deliver> = Arc::new(ReplySink);
+    let weak = Arc::downgrade(&reply);
+    ctx.set_explicit_reply(
+        reply.clone(),
+        true,
+        None,
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    );
+    let result = host_operation_handler(
+        ctx.clone(),
+        weak_runner(&wl),
+        HostOperation::RegisterStream(HostRegisterStreamV1 {
+            stream_id: "reply-retention".into(),
+        }),
+    )
+    .await;
+    assert!(matches!(result, HostOperationResult::Done));
+    drop(ctx);
+    drop(reply);
+    assert!(
+        weak.upgrade().is_none(),
+        "a parked stream callback must not retain the reply sink"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn node_teardown_releases_registered_stream_callback_cycle() {
     let (ctx, wl) = harness().await;
@@ -3928,6 +3961,44 @@ async fn native_package_explicit_reply_releases_dispatch_for_final_chunk() {
             .expect("response lane should remain open")
     };
 
+    let delayed = RpcEnvelope {
+        request_id: "native-delayed-deadline".into(),
+        route_key: "upload.Upload.FinishUpload".into(),
+        payload: Some(
+            FinishUploadRequest {
+                stream_id: String::new(),
+                mode: "expired-deadline".into(),
+            }
+            .encode_to_vec()
+            .into(),
+        ),
+        direction: Some(Direction::Request as i32),
+        timeout_ms: 50,
+        ..Default::default()
+    };
+    assert!(matches!(
+        inner
+            .handle_incoming(
+                delayed,
+                None,
+                Some(ReplySink::Inproc {
+                    response_tx: responses.clone(),
+                    span: tracing::Span::none(),
+                }),
+                None
+            )
+            .await,
+        IncomingOutcome::Deferred
+    ));
+    let response = receive().await;
+    assert_eq!(response.request_id, "native-delayed-deadline");
+    assert_eq!(
+        FinishUploadResponse::decode(response.payload.unwrap())
+            .unwrap()
+            .file_id,
+        "true"
+    );
+
     for (id, mode) in [
         ("deferred-upload", "background"),
         ("callback-upload", "callback"),
@@ -4023,6 +4094,7 @@ async fn native_package_explicit_reply_releases_dispatch_for_final_chunk() {
         dispatch("retry-upload", "old-stream", "callback", Direction::Request).await,
         IncomingOutcome::Deferred
     ));
+    assert_eq!(crate::dynclib::active_reply_count("retry-upload"), 1);
     let expired = inner
         .outstanding_replies
         .sweep_expired(
@@ -4036,6 +4108,11 @@ async fn native_package_explicit_reply_releases_dispatch_for_final_chunk() {
         .await
         .expire_inflight_explicit(&expired);
     assert_eq!(expired.len(), 1);
+    assert_eq!(
+        crate::dynclib::active_reply_count("retry-upload"),
+        0,
+        "expiry must retire the old reply while its stream callback remains registered"
+    );
     let timeout = receive().await;
     assert_eq!(timeout.request_id, "retry-upload");
     assert!(timeout.error.is_some());

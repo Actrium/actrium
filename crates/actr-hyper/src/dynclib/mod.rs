@@ -11,4 +11,6 @@ pub use error::DynclibError;
 pub use host::DynclibHost;
 #[cfg(any(test, feature = "test-utils"))]
 pub(crate) use host::active_bridge_count;
+#[cfg(test)]
+pub(crate) use host::active_reply_count;
 pub(crate) use host::{DynClibWorkload, DynclibReplyModes};

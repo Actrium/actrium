@@ -1439,7 +1439,7 @@ async fn host_operation_handler(
 
         HostOperation::RegisterStream(req) => {
             let stream_id = req.stream_id;
-            let callback_ctx = ctx.clone();
+            let callback_ctx = ctx.clone().without_explicit_reply();
             let callback_workload_dispatch = workload_dispatch.clone();
             match ctx
                 .register_stream(stream_id, move |chunk: DataChunk, sender| {
@@ -2592,76 +2592,85 @@ impl Inner {
             _ => None,
         };
         let mut explicit_attempt_id = None;
-        let explicit_deliver: Option<crate::lifecycle::reply_deliver::ReplyDeliver> = if reply_mode
-            == actr_protocol::ReplyMode::Explicit
-        {
-            match reply_sink {
-                Some(sink) => {
-                    // RFC-0323 exposes an EXPLICIT reply deadline on the
-                    // synchronous reply clock. Scoped Actor calls use the
-                    // remaining request budget. TELL ignores timeout_ms.
-                    let reply_deadline = match egress_deadline {
-                        _ if !expects_response => None,
-                        Some(_) => scope.as_ref().map(|scope| {
-                            crate::lifecycle::dedup::scoped_reply_deadline(scope.deadline())
-                        }),
-                        None => crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms),
-                    };
-                    let rtc_route: RtcResponseRoute = self.rtc_manager.clone();
-                    let attempt_id = self.outstanding_replies.allocate_attempt_id();
-                    explicit_attempt_id = Some(attempt_id);
-                    let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
-                        self.websocket_gate.clone(),
-                        rtc_route,
-                        self.dedup_state.clone(),
-                        self.outstanding_replies.clone(),
-                        attempt_id,
-                        dedup_key.clone(),
-                        envelope.traceparent.clone(),
-                        envelope.tracestate.clone(),
-                        self.incoming_guard.clone(),
-                        envelope.metadata.clone(),
-                        sink,
-                        expects_response,
-                        scope.clone(),
-                    );
-                    // Start every admission unclaimed. Component dispatchers
-                    // return a reserved deferred marker only after selecting
-                    // an EXPLICIT route; ordinary zero-byte return payloads
-                    // must still use the normal return-byte fallback.
-                    let reply_claimed =
-                        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-                    // Register the exact deliver for this admission. The
-                    // TTL sweep uses its first-write-wins gate, and all
-                    // asynchronous completion uses the attempt ID so an
-                    // old same-ID reply cannot release or complete a retry.
-                    self.outstanding_replies
-                        .register_with_deliver(
-                            dedup_key.clone(),
+        let explicit_deliver: Option<Arc<crate::lifecycle::reply_deliver::ReplyDeliver>> =
+            if reply_mode == actr_protocol::ReplyMode::Explicit {
+                match reply_sink {
+                    Some(sink) => {
+                        // RFC-0323 exposes an EXPLICIT reply deadline on the
+                        // synchronous reply clock. Scoped Actor calls use the
+                        // remaining request budget. TELL ignores timeout_ms.
+                        let reply_deadline = match egress_deadline {
+                            _ if !expects_response => None,
+                            Some(_) => scope.as_ref().map(|scope| {
+                                crate::lifecycle::dedup::scoped_reply_deadline(scope.deadline())
+                            }),
+                            None => {
+                                crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms)
+                            }
+                        };
+                        let rtc_route: RtcResponseRoute = self.rtc_manager.clone();
+                        let attempt_id = self.outstanding_replies.allocate_attempt_id();
+                        explicit_attempt_id = Some(attempt_id);
+                        let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
+                            self.websocket_gate.clone(),
+                            rtc_route,
+                            self.dedup_state.clone(),
+                            self.outstanding_replies.clone(),
                             attempt_id,
-                            deliver.clone(),
+                            dedup_key.clone(),
+                            envelope.traceparent.clone(),
+                            envelope.tracestate.clone(),
+                            self.incoming_guard.clone(),
+                            envelope.metadata.clone(),
+                            sink,
+                            expects_response,
+                            scope.clone(),
+                        );
+                        let deliver = Arc::new(deliver);
+                        // Start every admission unclaimed. Component dispatchers
+                        // return a reserved deferred marker only after selecting
+                        // an EXPLICIT route; ordinary zero-byte return payloads
+                        // must still use the normal return-byte fallback.
+                        let reply_claimed =
+                            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        // Register the exact deliver for this admission. The
+                        // TTL sweep uses its first-write-wins gate, and all
+                        // asynchronous completion uses the attempt ID so an
+                        // old same-ID reply cannot release or complete a retry.
+                        self.outstanding_replies
+                            .register_with_deliver(
+                                dedup_key.clone(),
+                                attempt_id,
+                                deliver.clone(),
+                                reply_deadline,
+                            )
+                            .await;
+                        // Pump-side clone: lets `wrap_outcome` route a
+                        // handler-Err through the same first-write-wins
+                        // `deliver` as a spawned `Reply::send` / `Drop`.
+                        let pump_deliver = deliver.clone();
+                        ctx.set_explicit_reply(
+                            deliver,
+                            expects_response,
                             reply_deadline,
-                        )
-                        .await;
-                    // Pump-side clone: lets `wrap_outcome` route a
-                    // handler-Err through the same first-write-wins
-                    // `deliver` as a spawned `Reply::send` / `Drop`.
-                    let pump_deliver = deliver.clone();
-                    ctx.set_explicit_reply(
-                        std::sync::Arc::new(deliver),
-                        expects_response,
-                        reply_deadline,
-                        reply_claimed,
-                    );
-                    Some(pump_deliver)
+                            reply_claimed,
+                        );
+                        Some(pump_deliver)
+                    }
+                    None => None,
                 }
-                None => None,
-            }
-        } else {
-            None
-        };
+            } else {
+                None
+            };
 
         // 2. Dispatch
+        #[cfg(feature = "dynclib-engine")]
+        let ctx_for_executor = if self.native_reply_modes.is_some() {
+            ctx.clone().without_explicit_reply()
+        } else {
+            ctx.clone()
+        };
+        #[cfg(not(feature = "dynclib-engine"))]
         let ctx_for_executor = ctx.clone();
         let call_executor = lifecycle_host_abi(ctx_for_executor, self.workload_dispatch.clone());
 

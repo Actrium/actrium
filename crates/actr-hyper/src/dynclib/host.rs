@@ -29,7 +29,8 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use actr_framework::guest::dynclib_abi::{
     self as guest_abi, AbiPayload, AbiReply, GuestReplyContextV1, HostClaimReplyV1,
-    HostCompleteReplyV1, HostReplyOutcomeV1, InitPayloadV1,
+    HostCompleteReplyV1, HostReplyDeadlineResultV1, HostReplyDeadlineV1, HostReplyOutcomeV1,
+    InitPayloadV1,
 };
 use actr_framework::{Context as _, Deliver, ReplyOutcome};
 use libloading::Library;
@@ -100,14 +101,44 @@ struct BridgeEntry {
     executor: HostAbiFn,
     runtime: tokio::runtime::Handle,
     retain_count: usize,
-    reply: Option<Arc<NativeReply>>,
 }
 
 struct NativeReply {
-    deliver: Arc<dyn Deliver>,
+    deliver: Weak<dyn Deliver>,
     claimed: Arc<AtomicBool>,
     request_id: String,
     expects_response: bool,
+    deadline: Option<actr_framework::ReplyDeadline>,
+    runtime: tokio::runtime::Handle,
+}
+
+fn reply_registry() -> &'static Mutex<HashMap<u64, Weak<NativeReply>>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<u64, Weak<NativeReply>>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+struct ReplyRegistration {
+    token: u64,
+    _reply: Arc<NativeReply>,
+}
+
+impl Drop for ReplyRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut registry) = reply_registry().lock() {
+            registry.remove(&self.token);
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn active_reply_count(request_id: &str) -> usize {
+    reply_registry()
+        .lock()
+        .unwrap()
+        .values()
+        .filter_map(Weak::upgrade)
+        .filter(|reply| reply.request_id == request_id)
+        .count()
 }
 
 fn bridge_registry() -> &'static Mutex<HashMap<u64, BridgeEntry>> {
@@ -115,11 +146,7 @@ fn bridge_registry() -> &'static Mutex<HashMap<u64, BridgeEntry>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn register_bridge(
-    executor: &HostAbiFn,
-    runtime: tokio::runtime::Handle,
-    reply: Option<Arc<NativeReply>>,
-) -> u64 {
+fn register_bridge(executor: &HostAbiFn, runtime: tokio::runtime::Handle) -> u64 {
     static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
     let token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
     bridge_registry()
@@ -131,7 +158,6 @@ fn register_bridge(
                 executor: executor.clone(),
                 runtime,
                 retain_count: 1,
-                reply,
             },
         );
     token
@@ -171,12 +197,8 @@ struct BridgeRegistration {
 
 impl BridgeRegistration {
     fn new(executor: &HostAbiFn) -> Self {
-        Self::with_reply(executor, None)
-    }
-
-    fn with_reply(executor: &HostAbiFn, reply: Option<Arc<NativeReply>>) -> Self {
         Self {
-            token: register_bridge(executor, tokio::runtime::Handle::current(), reply),
+            token: register_bridge(executor, tokio::runtime::Handle::current()),
         }
     }
 }
@@ -269,25 +291,37 @@ unsafe extern "C" fn vtable_release_context(token: u64) {
 
 /// Reply submission runs on the guest thread without waiting for any host
 /// task. The host's Deliver schedules the actual transport and dedup work.
-fn reply_operation(token: u64, frame: guest_abi::AbiFrame) -> Result<(), i32> {
+fn reply_operation(token: u64, frame: guest_abi::AbiFrame) -> Result<HostOperationResult, i32> {
     if frame.abi_version != guest_abi::version::V1 {
         return Err(guest_abi::code::PROTOCOL_ERROR);
     }
-    let (reply, runtime) = bridge_registry()
+    let reply = reply_registry()
         .lock()
         .ok()
-        .and_then(|registry| {
-            let entry = registry.get(&token)?;
-            Some((entry.reply.clone()?, entry.runtime.clone()))
-        })
+        .and_then(|registry| registry.get(&token).and_then(Weak::upgrade))
         .ok_or(guest_abi::code::UNSUPPORTED_OP)?;
+
+    if frame.op == guest_abi::op::HOST_REPLY_DEADLINE {
+        HostReplyDeadlineV1::decode_payload(&frame.payload)?;
+        let now = actr_framework::ReplyDeadline::now();
+        let remaining_ns = reply.deadline.map(|deadline| {
+            if deadline >= now {
+                i64::try_from(deadline.duration_since(now).as_nanos()).unwrap_or(i64::MAX)
+            } else {
+                -i64::try_from(now.duration_since(deadline).as_nanos()).unwrap_or(i64::MAX)
+            }
+        });
+        return Ok(HostOperationResult::Bytes(guest_abi::encode_message(
+            &HostReplyDeadlineResultV1 { remaining_ns },
+        )?));
+    }
 
     if frame.op == guest_abi::op::HOST_CLAIM_REPLY {
         HostClaimReplyV1::decode_payload(&frame.payload)?;
         return reply
             .claimed
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .map(|_| ())
+            .map(|_| HostOperationResult::Done)
             .map_err(|_| guest_abi::code::PROTOCOL_ERROR);
     }
     if !reply.claimed.load(Ordering::Acquire) {
@@ -303,13 +337,17 @@ fn reply_operation(token: u64, frame: guest_abi::AbiFrame) -> Result<(), i32> {
 
     // Deliver uses the current runtime when available. Select the host runtime
     // explicitly, including calls made inside a guest runtime or a destructor.
-    let _entered = runtime.enter();
-    reply.deliver.deliver(ReplyOutcome {
+    let _entered = reply.runtime.enter();
+    let deliver = reply
+        .deliver
+        .upgrade()
+        .ok_or(guest_abi::code::UNSUPPORTED_OP)?;
+    deliver.deliver(ReplyOutcome {
         request_id: reply.request_id.clone(),
         result,
         emit_response: reply.expects_response,
     });
-    Ok(())
+    Ok(HostOperationResult::Done)
 }
 
 unsafe extern "C" fn vtable_invoke(
@@ -330,12 +368,12 @@ unsafe extern "C" fn vtable_invoke(
     };
 
     let result = match frame.op {
-        guest_abi::op::HOST_CLAIM_REPLY | guest_abi::op::HOST_COMPLETE_REPLY => {
-            match reply_operation(token, frame) {
-                Ok(()) => HostOperationResult::Done,
-                Err(code) => HostOperationResult::AbiError(code),
-            }
-        }
+        guest_abi::op::HOST_CLAIM_REPLY
+        | guest_abi::op::HOST_COMPLETE_REPLY
+        | guest_abi::op::HOST_REPLY_DEADLINE => match reply_operation(token, frame) {
+            Ok(result) => result,
+            Err(code) => HostOperationResult::AbiError(code),
+        },
         _ => match decode_host_operation(frame) {
             Ok(pending) => trampoline_execute(token, pending),
             Err(code) => return code,
@@ -776,22 +814,37 @@ impl DynclibInstance {
         call_executor: &HostAbiFn,
         runtime_ctx: Option<&RuntimeContext>,
     ) -> DynclibResult<Vec<u8>> {
+        #[cfg(test)]
+        let delay_entry = ctx.request_id == "native-delayed-deadline";
         let reply = runtime_ctx.and_then(|ctx| {
-            Some(Arc::new(NativeReply {
-                deliver: ctx.reply_deliver()?,
+            let deliver = ctx.reply_deliver()?;
+            let reply = Arc::new(NativeReply {
+                deliver: Arc::downgrade(&deliver),
                 claimed: ctx.reply_claimed_marker()?,
                 request_id: ctx.request_id().to_owned(),
                 expects_response: ctx.expects_response(),
-            }))
+                deadline: ctx.reply_deadline(),
+                runtime: tokio::runtime::Handle::current(),
+            });
+            Some((reply, deliver))
         });
-        let reply_context = reply.as_ref().map(|reply| GuestReplyContextV1 {
+        let bridge = BridgeRegistration::new(call_executor);
+        let reply_context = reply.as_ref().map(|(reply, _)| GuestReplyContextV1 {
             expects_response: reply.expects_response,
-            remaining_budget_ns: runtime_ctx
-                .and_then(|ctx| ctx.reply_deadline())
-                .map(crate::lifecycle::dedup::remaining_reply_budget)
-                .map(|budget| u64::try_from(budget.as_nanos()).unwrap_or(u64::MAX)),
+            token: bridge.token,
         });
-        let bridge = BridgeRegistration::with_reply(call_executor, reply.clone());
+        if let Some((reply, deliver)) = &reply {
+            let token = bridge.token;
+            reply_registry()
+                .lock()
+                .expect("dynclib reply registry poisoned")
+                .insert(token, Arc::downgrade(reply));
+            let registration = ReplyRegistration {
+                token,
+                _reply: reply.clone(),
+            };
+            deliver.on_retire(Box::new(move || drop(registration)));
+        }
         let request_owned =
             encode_guest_handle_request(request_bytes, ctx, bridge.token, reply_context).map_err(
                 |code| {
@@ -800,8 +853,12 @@ impl DynclibInstance {
                     ))
                 },
             )?;
+        #[cfg(test)]
+        if delay_entry {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
         let response = self.handle_encoded_request(request_owned).await?;
-        if reply.is_some_and(|reply| !reply.claimed.load(Ordering::Acquire)) {
+        if reply.is_some_and(|(reply, _)| !reply.claimed.load(Ordering::Acquire)) {
             return Err(DynclibError::ProtocolError(
                 "native explicit dispatch completed without claiming its reply".into(),
             ));

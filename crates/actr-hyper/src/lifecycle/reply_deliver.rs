@@ -84,6 +84,7 @@ pub(crate) struct ReplyDeliver {
     /// and the `Reply::Drop` fallback — with the TTL sweep.
     state: Arc<AtomicU8>,
     delivered: Arc<AtomicBool>,
+    retire: Arc<std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>>,
 }
 
 // `ReplySink` is not `Clone` (it carries a `tracing::Span` which is Clone, but
@@ -156,6 +157,7 @@ impl ReplyDeliver {
                 sink: sink_clone,
                 state,
                 delivered: delivered.clone(),
+                retire: Arc::new(std::sync::Mutex::new(None)),
             },
             delivered,
         )
@@ -227,6 +229,10 @@ impl ReplyDeliver {
             .or_else(|| self.shared.runtime_handle.clone());
         match handle {
             Some(handle) => {
+                let cleanup = self.retire.lock().unwrap_or_else(|e| e.into_inner()).take();
+                if let Some(cleanup) = cleanup {
+                    cleanup();
+                }
                 let me = self.clone();
                 handle.spawn(async move {
                     me.deliver_async(outcome, complete_dedup).await;
@@ -331,6 +337,16 @@ impl ReplyDeliver {
 }
 
 impl Deliver for ReplyDeliver {
+    fn on_retire(&self, cleanup: Box<dyn FnOnce() + Send>) {
+        let mut slot = self.retire.lock().unwrap_or_else(|e| e.into_inner());
+        if self.state.load(Ordering::Acquire) == DELIVER_PENDING {
+            *slot = Some(cleanup);
+        } else {
+            drop(slot);
+            cleanup();
+        }
+    }
+
     fn deliver(&self, outcome: ReplyOutcome) {
         // RFC-0323 §5 first-write-wins: the first caller to reach `deliver`
         // (the pump's EXPLICIT-Err path, a spawned `Reply::send`, or the

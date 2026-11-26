@@ -23,6 +23,15 @@ impl dispatcher::ActrDispatchHandler for Upload {
         reply: Reply<upload::FinishUploadResponse>,
     ) -> ActorResult<()> {
         match request.mode.as_str() {
+            "expired-deadline" => {
+                let expired = reply
+                    .deadline()
+                    .is_some_and(|deadline| deadline <= std::time::Instant::now());
+                reply.send(Ok(upload::FinishUploadResponse {
+                    file_id: expired.to_string(),
+                }));
+                return Ok(());
+            }
             "inline" => {
                 let file_id = reply_deadline_marker(&reply);
                 reply.send(Ok(upload::FinishUploadResponse { file_id }));
