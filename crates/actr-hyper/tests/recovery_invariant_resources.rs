@@ -68,6 +68,14 @@ impl TestWire {
 
 #[async_trait]
 impl WireHandle for TestWire {
+    fn secure_channel_state(&self) -> actr_hyper::transport::SecureChannelState {
+        actr_hyper::transport::SecureChannelState::Verified
+    }
+
+    fn verified_peer_context(&self) -> Option<Arc<actr_hyper::transport::VerifiedPeerContext>> {
+        Some(actr_hyper::test_support::verified_peer_context_for_test())
+    }
+
     fn connection_type(&self) -> ConnType {
         ConnType::WebSocket
     }

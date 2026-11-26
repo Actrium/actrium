@@ -482,6 +482,8 @@ struct DataChannelEvent {
 struct FastPathPayload {
     #[serde(rename = "streamId")]
     stream_id: String,
+    #[serde(rename = "connectionId")]
+    connection_id: Option<String>,
     data: Vec<u8>,
 }
 
@@ -4364,69 +4366,83 @@ pub async fn register_datachannel_port(
     peer_id: String,
     connection_id: String,
     port: MessagePort,
+    local_sdp: String,
+    remote_sdp: String,
 ) -> Result<(), JsValue> {
-    log::info!(
-        "[SW] register_datachannel_port: client_id={} peer_id={}",
-        client_id,
-        peer_id
-    );
-
-    let ctx = CLIENTS.with(|cell| cell.borrow().get(&client_id).map(Rc::clone));
-
-    let Some(ctx) = ctx else {
-        log::error!(
-            "[SW] register_datachannel_port: client not found client_id={}",
-            client_id
-        );
-        return Err(JsValue::from_str("Client not registered"));
+    let peer_id = relay_peer_identity(client_id.clone(), peer_id).await?;
+    let ctx = CLIENTS
+        .with(|cell| cell.borrow().get(&client_id).map(Rc::clone))
+        .ok_or_else(|| JsValue::from_str("Client not registered"))?;
+    let verified = match relay_security::authenticate_rtc(
+        &ctx,
+        &peer_id,
+        &port,
+        &local_sdp,
+        &remote_sdp,
+    )
+    .await
+    {
+        Ok(context) => context,
+        Err(error) => {
+            let _ = port.post_message(&JsValue::NULL);
+            port.close();
+            return Err(error);
+        }
     };
-
-    // Create the `WebRtcConnection` and attach the `MessagePort`.
-    let mut rtc_conn = crate::transport::WebRtcConnection::new(peer_id.clone());
-    rtc_conn.set_connection_id(connection_id);
-    rtc_conn.set_network_path(ctx.rtc_paths.borrow().get(&peer_id).copied().flatten());
-    rtc_conn.set_datachannel_port(port);
-
-    let wire_handle = crate::transport::WireHandle::WebRTC(rtc_conn);
+    let expiry = verified.expires_at;
     let dest = actr_web_common::Dest::Peer(peer_id.clone());
-
-    // Inject it into the corresponding `WirePool` owned by `PeerTransport`.
-    // If the `DestTransport` does not exist yet, an empty one is created automatically.
-    ctx.transport_manager
-        .inject_connection(&dest, wire_handle)
+    let transport = ctx
+        .transport_manager
+        .get_or_create_transport(&dest)
         .await
-        .map_err(|e| {
-            JsValue::from_str(&format!(
-                "Failed to inject connection for peer {}: {}",
-                peer_id, e
-            ))
-        })?;
-
-    log::info!(
-        "[SW] register_datachannel_port: injected WebRTC connection for peer_id={}",
-        peer_id
-    );
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let runtime = ctx.runtime.lock().await;
+    if runtime.peer_connection_ids.get(&peer_id) != Some(&connection_id) {
+        let _ = port.post_message(&JsValue::NULL);
+        port.close();
+        return Err(JsValue::from_str(
+            "WebRTC Actor channel was retired during authentication",
+        ));
+    }
+    port.post_message(&JsValue::from_f64(expiry as f64 * 1000.0))?;
+    let mut wire = crate::transport::WebRtcConnection::new(peer_id.clone());
+    wire.set_connection_id(connection_id);
+    wire.set_network_path(ctx.rtc_paths.borrow().get(&peer_id).copied().flatten());
+    wire.set_verified_port(port, verified);
+    transport
+        .wire_pool()
+        .adopt_verified_rtc(wire)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
     Ok(())
 }
 
 #[wasm_bindgen]
 pub fn handle_dom_fast_path(client_id: String, payload: JsValue) -> Result<(), JsValue> {
     let data: FastPathPayload = serde_wasm_bindgen::from_value(payload)?;
-    let runtime = CLIENTS.with(|cell| {
-        cell.borrow()
-            .get(&client_id)
-            .map(|ctx| Rc::clone(&ctx.runtime))
-    });
-    if let Some(runtime) = runtime {
+    let ctx = CLIENTS.with(|cell| cell.borrow().get(&client_id).map(Rc::clone));
+    if let (Some(ctx), Some(connection_id)) = (ctx, data.connection_id.as_ref().cloned()) {
         wasm_bindgen_futures::spawn_local(async move {
-            let mut rt = runtime.lock().await;
-            let _ = rt.handle_fast_path(data);
+            let (peer, _) = parse_peer_and_channel(&data.stream_id);
+            let dest = actr_web_common::Dest::Peer(peer.clone());
+            let Some(transport) = ctx.transport_manager.existing_transport(&dest) else {
+                return;
+            };
+            let wire = transport
+                .wire_pool()
+                .get_connection(actr_web_common::ConnType::WebRTC)
+                .await;
+            let mut runtime = ctx.runtime.lock().await;
+            if runtime.peer_connection_ids.get(&peer) == Some(&connection_id)
+                && wire
+                    .as_ref()
+                    .and_then(|wire| wire.as_webrtc())
+                    .is_some_and(|wire| {
+                        wire.connection_id() == Some(&connection_id) && wire.is_connected()
+                    })
+            {
+                let _ = runtime.handle_fast_path(data);
+            }
         });
-    } else {
-        log::warn!(
-            "[SW] handle_dom_fast_path: client not found client_id={}",
-            client_id
-        );
     }
     Ok(())
 }
@@ -4447,8 +4463,7 @@ fn request_relay_peer(client_id: &str, peer: &ActrId) {
 
 /// Await mailbox admission before releasing the JS relay receive budget.
 /// Responses and streams retain the existing fast dispatch path.
-#[wasm_bindgen]
-pub async fn handle_relay_data(client_id: String, payload: JsValue) -> Result<(), JsValue> {
+async fn handle_relay_data(client_id: String, payload: JsValue) -> Result<(), JsValue> {
     let payload: FastPathPayload = serde_wasm_bindgen::from_value(payload)?;
     let ctx = CLIENTS
         .with(|cell| cell.borrow().get(&client_id).map(Rc::clone))

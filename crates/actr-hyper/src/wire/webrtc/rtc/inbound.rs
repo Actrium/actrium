@@ -23,6 +23,7 @@ pub(crate) struct InboundMessage {
     pub(crate) generation: u64,
     pub(crate) lane: LaneKind,
     pub(crate) payload: bytes::Bytes,
+    pub(crate) peer_context: Option<Arc<crate::transport::VerifiedPeerContext>>,
 }
 
 /// The business inbound sink. Called on a lane pump task (not the Controller),
@@ -153,6 +154,7 @@ mod tests {
             generation: 1,
             lane: LaneKind::RpcReliable,
             payload: bytes::Bytes::from(vec![0; bytes]),
+            peer_context: None,
         }
     }
 

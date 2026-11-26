@@ -4,10 +4,9 @@ use crate::lifecycle::{node::PeerTypes, session_state::SessionSnapshot};
 use crate::transport::correlation::RpcCorrelation;
 use actr_relay_security::{
     ACTOR_CHANNEL_AUDIENCE, ActorChannelCertificate, ActorChannelClaims, ActorIdentityKey,
-    CERTIFICATE_DOMAIN, Certificate, IdentityClaims, IssuedIdentity, signing_bytes,
 };
 use actr_runtime_mailbox::{Mailbox, MailboxStats, MessagePriority, MessageRecord, StorageResult};
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::SigningKey;
 use uuid::Uuid;
 
 struct EmptyMailbox;
@@ -37,14 +36,23 @@ async fn unavailable_platform_signer_never_sends_relay_identity_request() {
         "provider.example".into(),
         Arc::new(UnavailableSigner),
     );
+    let root = tempfile::tempdir().unwrap();
+    let mut snapshot = fixture.client.session.snapshot().await;
+    snapshot.credential.claims = actr_protocol::IdentityClaims {
+        realm: fixture.local.realm.clone(),
+        actor_type: ActrType::from_string_repr("example/Client@1.0.0").unwrap(),
+        ..Default::default()
+    }
+    .encode_to_vec()
+    .into();
     let client = RelayClient::new(
         "ws://unused".into(),
         server.url(),
         Some(key),
-        fixture.client.session.clone(),
+        SessionState::new(snapshot),
         fixture.client.gate.clone(),
         fixture.shutdown.clone(),
-        None,
+        Some(root.path().to_path_buf()),
         None,
         None,
     );
@@ -82,36 +90,6 @@ impl Mailbox for EmptyMailbox {
             queued_by_priority: Default::default(),
         })
     }
-}
-
-fn identity(endpoint: &str, now: u64) -> LocalIdentity {
-    let key = IdentityKey::generate().unwrap();
-    let signer = SigningKey::from_bytes(&[7; 32]);
-    let claims = serde_json::to_vec(&IdentityClaims {
-        domain: CERTIFICATE_DOMAIN.into(),
-        endpoint: endpoint.into(),
-        actor_type: "example/Client@1.0.0".into(),
-        client_key: "fixture".into(),
-        public_key: key.public,
-        admission_commitment: key.admission_commitment(),
-        expires_at: now + 120,
-    })
-    .unwrap();
-    let signature = signer.sign(&signing_bytes(&claims)).to_bytes().to_vec();
-    let issued = IssuedIdentity {
-        certificate: Certificate {
-            key_id: 1,
-            claims,
-            signature,
-        },
-        issuer: IssuerKey {
-            key_id: 1,
-            public_key: *signer.verifying_key().as_bytes(),
-            expires_at: now + 600,
-        },
-        actor_certificate: None,
-    };
-    key.certify(issued, endpoint, now).unwrap()
 }
 
 fn actor_identity(actor_id: &ActrId, actor_type: &str, now: u64) -> ActorChannelIdentity {
@@ -165,7 +143,7 @@ struct Fixture {
     captured: mpsc::UnboundedReceiver<Message>,
     local: ActrId,
     remote: ActrId,
-    remote_identity: LocalIdentity,
+    remote_identity: ActorChannelIdentity,
     issuer: IssuerKey,
     now: u64,
     shutdown: CancellationToken,
@@ -180,9 +158,9 @@ impl Fixture {
         let now = now_secs();
         let local = ActrId::from_string_repr("2.test@example.com").unwrap();
         let remote = ActrId::from_string_repr("1.test@example.com").unwrap();
-        let local_identity = identity(&local.to_string_repr(), now);
-        let remote_identity = identity(&remote.to_string_repr(), now);
-        let issuer = local_identity.issued.issuer.clone();
+        let local_identity = actor_identity(&local, "example/Client@1.0.0", now);
+        let remote_identity = actor_identity(&remote, "example/Client@1.0.0", now);
+        let issuer = local_identity.issuer().clone();
         let gate = Arc::new(WebSocketGate::new_relay(
             Arc::new(RpcCorrelation::new()),
             Arc::new(DataChunkRegistry::new()),
@@ -229,8 +207,7 @@ impl Fixture {
             pending_closes: Arc::new(std::sync::Mutex::new(HashSet::new())),
             encryption_budget: Arc::new(Semaphore::new(QUEUE_BYTES)),
             cancel: shutdown.child_token(),
-            identity: Arc::new(local_identity),
-            actor_identity: None,
+            actor_identity: Arc::new(local_identity),
         };
         client.status.send_replace(Status::Ready(transport.clone()));
         Self {
@@ -306,42 +283,53 @@ impl Fixture {
     }
 
     async fn handshake_on(&mut self, channel: u64) -> SecureSession {
-        let budget = Arc::new(Semaphore::new(QUEUE_BYTES));
-        let mut remote = SecureSession::new(
-            &self.remote_identity,
-            &self.local.to_string_repr(),
-            channel,
-            self.now,
-        )
-        .unwrap();
-        let first = remote.start().unwrap().unwrap();
-        self.client
-            .receive_secure(channel, Bytes::from(first), &self.transport, &budget)
-            .await
-            .unwrap();
-        let second = self.next_binary_on(channel).await;
-        let third = remote
-            .receive(&second, Some(&self.issuer), self.now)
-            .unwrap()
-            .outbound
-            .pop()
-            .unwrap();
-        self.client
-            .receive_secure(channel, Bytes::from(third), &self.transport, &budget)
-            .await
-            .unwrap();
-        let fourth = self.next_binary_on(channel).await;
-        let fifth = remote
-            .receive(&fourth, None, self.now)
-            .unwrap()
-            .outbound
-            .pop()
-            .unwrap();
-        self.client
-            .receive_secure(channel, Bytes::from(fifth), &self.transport, &budget)
-            .await
-            .unwrap();
+        let (remote, records, budget) = self.handshake_before_confirmation(channel).await;
+        for record in records {
+            self.client
+                .receive_secure(channel, Bytes::from(record), &self.transport, &budget)
+                .await
+                .unwrap();
+        }
         remote
+    }
+
+    async fn handshake_before_confirmation(
+        &mut self,
+        channel: u64,
+    ) -> (SecureSession, Vec<Vec<u8>>, Arc<Semaphore>) {
+        let budget = Arc::new(Semaphore::new(QUEUE_BYTES));
+        let incoming = self.client.channels.read().await[&channel]
+            .pending_request
+            .lock()
+            .await
+            .is_none()
+            && self.captured.is_empty();
+        let local = self.local.to_string_repr();
+        let channel_id = channel.to_string();
+        let mut remote = if incoming {
+            ActorChannelSession::new_front(&self.remote_identity, &local, &channel_id, self.now)
+        } else {
+            ActorChannelSession::new_service(&self.remote_identity, &local, &channel_id, self.now)
+        }
+        .unwrap()
+        .into_inner();
+        let mut outbound = remote.start().unwrap().into_iter().collect::<Vec<_>>();
+        loop {
+            for record in outbound.drain(..) {
+                self.client
+                    .receive_secure(channel, Bytes::from(record), &self.transport, &budget)
+                    .await
+                    .unwrap();
+            }
+            let frame = self.next_binary_on(channel).await;
+            let received = remote
+                .receive(&frame, Some(&self.issuer), self.now)
+                .unwrap();
+            outbound = received.outbound;
+            if received.became_ready {
+                return (remote, outbound, budget);
+            }
+        }
     }
 }
 
@@ -495,45 +483,31 @@ async fn closing_unverified_channel_interrupts_its_waiting_sink() {
 #[tokio::test]
 async fn shutdown_interrupts_handshake_waiting_for_ingress_mailbox() {
     let mut fixture = Fixture::new_with_mailbox(false).await;
+    fixture
+        .client
+        .install(
+            42,
+            fixture.remote.to_string_repr(),
+            &fixture.transport,
+            false,
+        )
+        .await
+        .unwrap();
     fixture.connected(None).await.unwrap();
-    let budget = Arc::new(Semaphore::new(QUEUE_BYTES));
-    let mut remote = SecureSession::new(
-        &fixture.remote_identity,
-        &fixture.local.to_string_repr(),
-        42,
-        fixture.now,
-    )
-    .unwrap();
-    let first = remote.start().unwrap().unwrap();
-    fixture
-        .client
-        .receive_secure(42, Bytes::from(first), &fixture.transport, &budget)
-        .await
-        .unwrap();
-    let second = fixture.next_binary().await;
-    let third = remote
-        .receive(&second, Some(&fixture.issuer), fixture.now)
-        .unwrap()
-        .outbound
-        .pop()
-        .unwrap();
-    fixture
-        .client
-        .receive_secure(42, Bytes::from(third), &fixture.transport, &budget)
-        .await
-        .unwrap();
-    let fourth = fixture.next_binary().await;
-    let fifth = remote
-        .receive(&fourth, None, fixture.now)
-        .unwrap()
-        .outbound
-        .pop()
-        .unwrap();
+    let (_remote, mut records, budget) = fixture.handshake_before_confirmation(42).await;
+    let confirmation = records.pop().expect("fixture should be initiator");
+    for record in records {
+        fixture
+            .client
+            .receive_secure(42, Bytes::from(record), &fixture.transport, &budget)
+            .await
+            .unwrap();
+    }
     let client = fixture.client.clone();
     let transport = fixture.transport.clone();
     let receiving = tokio::spawn(async move {
         client
-            .receive_secure(42, Bytes::from(fifth), &transport, &budget)
+            .receive_secure(42, Bytes::from(confirmation), &transport, &budget)
             .await
     });
     let entry = fixture.client.channels.read().await[&42].clone();
@@ -593,11 +567,11 @@ async fn matching_outbound_peer_completes_handshake_and_carries_data() {
 async fn actrium_front_channel_publishes_strict_verified_peer_context() {
     let mut fixture = Fixture::new().await;
     let remote_identity = actor_identity(&fixture.remote, "example/Service@1.0.0", fixture.now);
-    fixture.transport.actor_identity = Some(Arc::new(actor_identity(
+    fixture.transport.actor_identity = Arc::new(actor_identity(
         &fixture.local,
         "example/Front@1.0.0",
         fixture.now,
-    )));
+    ));
     let (request, dial) = fixture.start_dial(fixture.remote.clone()).await;
     fixture.connected(Some(request)).await.unwrap();
 
@@ -605,7 +579,6 @@ async fn actrium_front_channel_publishes_strict_verified_peer_context() {
     // and unusable until both Actor proofs and Noise confirmation complete.
     let first = fixture.next_binary().await;
     let entry = fixture.client.channels.read().await[&42].clone();
-    assert!(entry.actrium);
     assert_eq!(
         entry.conn.secure_channel_state(),
         SecureChannelState::Handshaking
@@ -727,7 +700,14 @@ async fn actrium_front_channel_publishes_strict_verified_peer_context() {
         .unwrap()
         .clone();
     assert!(
-        actrium_peer_context(fixture.local.clone(), fixture.remote.clone(), 43, exported,).is_err(),
+        verified_peer_context(
+            fixture.local.clone(),
+            fixture.remote.clone(),
+            "43",
+            43,
+            exported,
+        )
+        .is_err(),
         "a verified context cannot be rebound to another channel generation"
     );
 
@@ -751,11 +731,11 @@ async fn actrium_front_channel_publishes_strict_verified_peer_context() {
 async fn actrium_service_channel_waits_for_front_proof_and_confirmation() {
     let mut fixture = Fixture::new().await;
     let remote_identity = actor_identity(&fixture.remote, "example/Front@1.0.0", fixture.now);
-    fixture.transport.actor_identity = Some(Arc::new(actor_identity(
+    fixture.transport.actor_identity = Arc::new(actor_identity(
         &fixture.local,
         "example/Service@1.0.0",
         fixture.now,
-    )));
+    ));
     fixture
         .client
         .handle_control(
@@ -771,7 +751,6 @@ async fn actrium_service_channel_waits_for_front_proof_and_confirmation() {
     let _accept = fixture.next_message().await;
     fixture.connected(None).await.unwrap();
     let entry = fixture.client.channels.read().await[&42].clone();
-    assert!(entry.actrium);
 
     let mut remote = ActorChannelSession::new_front(
         &remote_identity,
@@ -962,6 +941,7 @@ async fn stale_handshake_retry_keeps_the_original_pending_dial() {
     let mut fixture = Fixture::new().await;
     let (request, dial) = fixture.start_dial(fixture.remote.clone()).await;
     fixture.connected(Some(request)).await.unwrap();
+    let _initial_handshake = fixture.next_binary().await;
     let connection = fixture.client.channels.read().await[&42].conn.clone();
     let sink = connection.sink();
     let sink_guard = sink.lock().await;

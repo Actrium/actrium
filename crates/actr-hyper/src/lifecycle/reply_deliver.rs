@@ -26,7 +26,7 @@ use crate::lifecycle::dedup::{DedupKey, DedupState};
 use crate::lifecycle::incoming_guard::IncomingGuard;
 use crate::lifecycle::outstanding_replies::{OutstandingReplies, ReplyAttemptId};
 use crate::request_scope::RequestScope;
-use crate::transport::HostTransport;
+use crate::transport::{HostTransport, VerifiedPeerContext};
 
 const DELIVER_PENDING: u8 = 0;
 const DELIVERED: u8 = 1;
@@ -65,6 +65,7 @@ struct ReplyShared {
     tracestate: Option<String>,
     incoming_guard: Option<Arc<dyn IncomingGuard>>,
     metadata: Vec<actr_protocol::MetadataEntry>,
+    reply_channel: Option<Arc<VerifiedPeerContext>>,
     emit_response: bool,
     scope: Option<Arc<RequestScope>>,
     /// Runtime captured at admission so a movable Reply can be completed
@@ -114,6 +115,7 @@ impl ReplyDeliver {
         tracestate: Option<String>,
         incoming_guard: Option<Arc<dyn IncomingGuard>>,
         metadata: Vec<actr_protocol::MetadataEntry>,
+        reply_channel: Option<Arc<VerifiedPeerContext>>,
         sink: ReplySink,
         emit_response: bool,
         scope: Option<Arc<RequestScope>>,
@@ -152,6 +154,7 @@ impl ReplyDeliver {
                     tracestate,
                     incoming_guard,
                     metadata,
+                    reply_channel,
                     emit_response,
                     scope,
                     runtime_handle,
@@ -314,6 +317,7 @@ impl ReplyDeliver {
                 self.shared.tracestate.clone(),
                 self.shared.incoming_guard.clone(),
                 self.shared.metadata.clone(),
+                self.shared.reply_channel.clone(),
                 emit_response,
                 result,
                 self.sink.span.clone(),

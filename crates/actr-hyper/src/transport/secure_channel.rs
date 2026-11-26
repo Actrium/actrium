@@ -1,23 +1,7 @@
 //! Secure-channel state, cell, and data-lane gate.
 //!
-//! See RFC-0563 (`rfcs/0563-secure-actor-channels.md`). Phase 2 introduces the
-//! honest state machine, the physical-session-owned [`SecureCell`], and the
-//! [`SecureDataLane`] decorator that gates actual `send`/`recv`. No real
-//! handshake is performed yet (phase 3+, blocked on RFC #573's `AIdCredential`
-//! prerequisite); the only sendable-but-unverified state is the honestly-labeled
-//! [`SecureChannelState::LegacyBypass`], documented for phase-3 removal.
-//!
-//! The secure state is owned by the *physical* `WireHandle` impl
-//! (`WebRtcConnection` / `WebSocketConnection` / `ClientWebSocketHandle`), not a
-//! transient decorator above `WireHandle`. This means re-wrapping the same
-//! underlying connection cannot lose or duplicate authenticated state, and a
-//! single `SecureDataLane` wrap at lane-creation gates both the inbound
-//! reader's `recv()` and the outbound `send()` through one epoch.
-//!
-//! TODO(phase3): WebRTC media RTP (tracks managed via `add_media_track` /
-//! `remove_media_track`) currently sends outside this gate — there is no direct
-//! RTP send API path today, but once one exists it must be gated on the same
-//! session `SecureCell`.
+//! Application I/O is gated on the verified identity of the physical session.
+//! Lanes acquired under a previous security epoch are invalidated on rotation.
 
 use super::error::{NetworkError, NetworkResult};
 #[cfg(test)]
@@ -60,10 +44,6 @@ pub struct VerifiedPeerContext {
 
 /// Secure-channel state for a physical `WireHandle` session. See RFC-0563 §1.
 ///
-/// Phase 2 only ever constructs [`SecureChannelState::LegacyBypass`]; the
-/// remaining variants exist so phase 3+ can drive the real state machine
-/// (`New → Handshaking → Verified`, rekey, terminal) without touching the seam
-/// again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SecureChannelState {
     /// Pre-handshake. Not sendable.
@@ -78,10 +58,6 @@ pub enum SecureChannelState {
     Closed,
     /// Auth/transport failed. Terminal, not sendable.
     Failed,
-    /// Transport-only compat bypass: transport ready, NO crypto verification.
-    /// Sendable in phase 2 only; phase 3 removes it from the sendable set once
-    /// `AIdCredential` (RFC #573) lands.
-    LegacyBypass,
 }
 
 impl SecureChannelState {
@@ -93,7 +69,6 @@ impl SecureChannelState {
             Self::Rekeying => 3,
             Self::Closed => 4,
             Self::Failed => 5,
-            Self::LegacyBypass => 6,
         }
     }
 
@@ -104,18 +79,15 @@ impl SecureChannelState {
             2 => Self::Verified,
             3 => Self::Rekeying,
             4 => Self::Closed,
-            5 => Self::Failed,
-            _ => Self::LegacyBypass,
+            _ => Self::Failed,
         }
     }
 
     /// The authoritative sendability predicate (RFC-0563, aligned with #504):
     /// `Sendable = transport ready + mutual authentication + key confirmation`.
     ///
-    /// Phase 2 admits `LegacyBypass` (transport ready, no auth) so runtime
-    /// behavior is preserved honestly; phase 3 narrows this to `Verified` only.
     pub const fn is_sendable(self) -> bool {
-        matches!(self, Self::Verified | Self::LegacyBypass)
+        matches!(self, Self::Verified)
     }
 
     /// Whether this state is terminal (no further transitions possible).
@@ -129,9 +101,6 @@ impl SecureChannelState {
     /// Whether a transition `from → to` is legal. See RFC-0563 §1 state machine.
     ///
     /// Terminal states (`Closed`, `Failed`) admit no outgoing transitions.
-    /// `LegacyBypass` may upgrade to `New` (phase 3 handshake start) or go
-    /// terminal; it may not jump to `Verified` (that would assert verification
-    /// that never happened).
     const fn is_legal_transition(from: Self, to: Self) -> bool {
         use SecureChannelState as S;
         matches!(
@@ -148,9 +117,6 @@ impl SecureChannelState {
                 | (S::Rekeying, S::Verified)
                 | (S::Rekeying, S::Closed)
                 | (S::Rekeying, S::Failed)
-                | (S::LegacyBypass, S::New)
-                | (S::LegacyBypass, S::Closed)
-                | (S::LegacyBypass, S::Failed)
         )
     }
 }
@@ -176,46 +142,25 @@ pub(crate) struct SecureCell {
     state: Arc<AtomicU8>,
     secure_epoch: Arc<AtomicU64>,
     changed: Arc<tokio::sync::Notify>,
-    /// Actrium strict cells require this context and `Verified` for every I/O.
-    /// Legacy cells retain their pre-Actrium compatibility behavior while their
-    /// handshake lacks the full binding above.
-    verified_only: bool,
     verified_peer: Arc<RwLock<Option<Arc<VerifiedPeerContext>>>>,
 }
 
 impl SecureCell {
     pub(crate) fn new(initial: SecureChannelState) -> Self {
-        Self::with_policy(initial, false)
-    }
-
-    /// Start an Actrium strict cell. No application I/O is possible until
-    /// [`Self::publish_verified`] installs a complete peer context.
-    pub(crate) fn new_actrium(initial: SecureChannelState) -> Self {
-        assert_ne!(
-            initial,
-            SecureChannelState::Verified,
-            "use new_actrium_verified to publish an authenticated context"
-        );
-        Self::with_policy(initial, true)
-    }
-
-    /// Construct an already-verified strict session. The context is installed
-    /// before the externally visible cell (and its `Verified` state) exists.
-    #[cfg(test)]
-    pub(crate) fn new_actrium_verified(context: VerifiedPeerContext) -> Self {
-        let cell = Self::with_policy(SecureChannelState::Handshaking, true);
-        assert!(cell.publish_verified(SecureChannelState::Handshaking, context));
-        cell
-    }
-
-    fn with_policy(initial: SecureChannelState, verified_only: bool) -> Self {
+        assert_ne!(initial, SecureChannelState::Verified);
         Self {
             state: Arc::new(AtomicU8::new(initial.as_u8())),
             secure_epoch: Arc::new(AtomicU64::new(0)),
             changed: Arc::new(tokio::sync::Notify::new()),
-            verified_only,
             verified_peer: Arc::new(RwLock::new(None)),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_verified(context: VerifiedPeerContext) -> Self {
+        let cell = Self::new(SecureChannelState::Handshaking);
+        assert!(cell.publish_verified(SecureChannelState::Handshaking, context));
+        cell
     }
 
     /// Current secure-channel state (Acquire — pairs with transition Release).
@@ -230,30 +175,34 @@ impl SecureCell {
 
     /// Immutable verified identity and binding for this channel generation.
     pub(crate) fn verified_peer(&self) -> Option<Arc<VerifiedPeerContext>> {
-        self.verified_peer
+        let context = self
+            .verified_peer
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        context
+            .as_ref()
+            .filter(|peer| {
+                self.state() == SecureChannelState::Verified
+                    && peer.peer_credential_expires_at_epoch_secs > now
+            })
+            .cloned()
     }
 
     /// Publish a complete context before the `Verified` state becomes visible.
     ///
     /// The context write lock serializes rekey publication. If the state CAS
     /// loses to a concurrent terminal transition, the previous context/state is
-    /// retained and no readiness notification is emitted. Strict cells cannot
-    /// reach `Verified` through `set_state_validated`.
+    /// retained and no readiness notification is emitted.
     pub(crate) fn publish_verified(
         &self,
         from: SecureChannelState,
         context: VerifiedPeerContext,
     ) -> bool {
-        if !self.verified_only
-            || !matches!(
-                from,
-                SecureChannelState::Handshaking | SecureChannelState::Rekeying
-            )
-            || !SecureChannelState::is_legal_transition(from, SecureChannelState::Verified)
-        {
+        if !SecureChannelState::is_legal_transition(from, SecureChannelState::Verified) {
             return false;
         }
 
@@ -282,10 +231,7 @@ impl SecureCell {
     }
 
     pub(crate) fn is_io_sendable(&self) -> bool {
-        if !self.verified_only {
-            return self.state().is_sendable();
-        }
-        self.state() == SecureChannelState::Verified && self.verified_peer().is_some()
+        self.verified_peer().is_some()
     }
 
     /// Validated compare-and-set: applies `to` only if the current state is
@@ -297,8 +243,7 @@ impl SecureCell {
         from: SecureChannelState,
         to: SecureChannelState,
     ) -> bool {
-        if !SecureChannelState::is_legal_transition(from, to)
-            || (self.verified_only && to == SecureChannelState::Verified)
+        if !SecureChannelState::is_legal_transition(from, to) || to == SecureChannelState::Verified
         {
             return false;
         }
@@ -321,13 +266,13 @@ impl SecureCell {
     /// that was observed before the transition (so callers can log it). Still
     /// validates legality: a terminal state is a no-op.
     pub(crate) fn drive_terminal(&self, to: SecureChannelState) -> SecureChannelState {
-        let current = self.state();
-        if !SecureCell::set_state_validated(self, current, to) {
-            // `current` is already terminal, or `current → to` is illegal
-            // (e.g. `Closed → Failed`); leave state untouched.
-            return current;
+        debug_assert!(to.is_terminal());
+        loop {
+            let current = self.state();
+            if current.is_terminal() || self.set_state_validated(current, to) {
+                return current;
+            }
         }
-        current
     }
 
     /// Wait for physical-session retirement without treating a rekey as death.
@@ -494,39 +439,40 @@ impl DataLane for SecureDataLane {
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
+pub(crate) fn test_context(channel_generation: u64) -> VerifiedPeerContext {
+    VerifiedPeerContext {
+        local_actor_id: ActrId {
+            realm: "local@example.com".into(),
+            serial_number: 1,
+        },
+        peer_actor_id: ActrId {
+            realm: "peer@example.com".into(),
+            serial_number: 2,
+        },
+        peer_actor_type: ActrType {
+            publisher: "acme".into(),
+            name: "front".into(),
+            version: "1.0.0".into(),
+        },
+        peer_member: "member-1".into(),
+        peer_client_key: "client-1".into(),
+        peer_role: "opaque-verified-role".into(),
+        peer_actor_public_key: vec![7; 32],
+        channel_id: "channel-1".into(),
+        channel_generation,
+        transcript_digest: vec![8; 32],
+        local_runtime_instance_id: "runtime-local".into(),
+        peer_runtime_instance_id: "runtime-peer".into(),
+        peer_credential_expires_at_epoch_secs: 4_000_000_000,
+        current_policy_binding: vec![9; 32],
+        current_state_binding: vec![10; 32],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn verified_context(channel_generation: u64) -> VerifiedPeerContext {
-        VerifiedPeerContext {
-            local_actor_id: ActrId {
-                realm: "local@example.com".into(),
-                serial_number: 1,
-            },
-            peer_actor_id: ActrId {
-                realm: "peer@example.com".into(),
-                serial_number: 2,
-            },
-            peer_actor_type: ActrType {
-                publisher: "acme".into(),
-                name: "front".into(),
-                version: "1.0.0".into(),
-            },
-            peer_member: "member-1".into(),
-            peer_client_key: "client-1".into(),
-            peer_role: "opaque-verified-role".into(),
-            peer_actor_public_key: vec![7; 32],
-            channel_id: "channel-1".into(),
-            channel_generation,
-            transcript_digest: vec![8; 32],
-            local_runtime_instance_id: "runtime-local".into(),
-            peer_runtime_instance_id: "runtime-peer".into(),
-            peer_credential_expires_at_epoch_secs: 4_000_000_000,
-            current_policy_binding: vec![9; 32],
-            current_state_binding: vec![10; 32],
-        }
-    }
 
     /// Inner lane whose send fails after an ambiguous partial write.
     #[derive(Debug)]
@@ -552,7 +498,7 @@ mod tests {
 
     #[tokio::test]
     async fn secure_lane_preserves_inner_uncertain_progress() {
-        let cell = SecureCell::new_actrium_verified(verified_context(1));
+        let cell = SecureCell::new_verified(test_context(1));
         let lane = SecureDataLane::new(Arc::new(AmbiguousInnerLane), cell);
 
         let attempt = lane
@@ -590,7 +536,7 @@ mod tests {
 
     #[tokio::test]
     async fn actrium_cell_allows_io_only_after_context_and_verified_publication() {
-        let cell = SecureCell::new_actrium(SecureChannelState::Handshaking);
+        let cell = SecureCell::new(SecureChannelState::Handshaking);
         let lane = SecureDataLane::new(Arc::new(AmbiguousInnerLane), cell.clone());
 
         let before = lane
@@ -614,7 +560,7 @@ mod tests {
             ),
             "strict cells cannot publish Verified without a context"
         );
-        let context = verified_context(7);
+        let context = test_context(7);
         assert!(cell.publish_verified(SecureChannelState::Handshaking, context.clone()));
         assert_eq!(cell.verified_peer().as_deref(), Some(&context));
 
@@ -636,16 +582,8 @@ mod tests {
     }
 
     #[test]
-    fn actrium_cell_never_treats_legacy_bypass_as_io_ready() {
-        let cell = SecureCell::new_actrium(SecureChannelState::LegacyBypass);
-        assert!(!cell.is_io_sendable());
-        assert_eq!(cell.state(), SecureChannelState::LegacyBypass);
-        assert!(cell.verified_peer().is_none());
-    }
-
-    #[test]
     fn actrium_rekey_requires_a_new_generation_context() {
-        let cell = SecureCell::new_actrium_verified(verified_context(1));
+        let cell = SecureCell::new_verified(test_context(1));
         assert!(
             cell.set_state_validated(SecureChannelState::Verified, SecureChannelState::Rekeying,)
         );
@@ -655,7 +593,7 @@ mod tests {
             "rekey cannot silently reuse generation 1"
         );
 
-        let generation_two = verified_context(2);
+        let generation_two = test_context(2);
         assert!(cell.publish_verified(SecureChannelState::Rekeying, generation_two.clone()));
         assert_eq!(cell.verified_peer().as_deref(), Some(&generation_two));
         assert!(cell.is_io_sendable());
@@ -663,9 +601,9 @@ mod tests {
 
     #[test]
     fn failed_verified_publication_preserves_previous_context_and_state() {
-        let cell = SecureCell::new_actrium_verified(verified_context(3));
+        let cell = SecureCell::new_verified(test_context(3));
         let before = cell.verified_peer();
-        assert!(!cell.publish_verified(SecureChannelState::Verified, verified_context(4)));
+        assert!(!cell.publish_verified(SecureChannelState::Verified, test_context(4)));
         assert_eq!(cell.state(), SecureChannelState::Verified);
         assert_eq!(cell.verified_peer(), before);
         assert_eq!(cell.epoch(), 1);

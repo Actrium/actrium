@@ -415,7 +415,6 @@ async fn counterapp_front_attaches_to_the_real_service_package() {
     );
 
     let mut server = TestSignalingServer::start_with_relay().await.unwrap();
-    server.enable_actor_certificates();
     // Only the verified Actor channel may carry data.
     server.pause_forwarding();
 

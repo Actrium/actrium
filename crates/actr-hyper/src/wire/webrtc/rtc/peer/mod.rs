@@ -33,3 +33,5 @@ mod t1_controller_tests;
 #[cfg(test)]
 #[path = "send_tests.rs"]
 mod send_tests;
+
+pub(crate) mod authentication;

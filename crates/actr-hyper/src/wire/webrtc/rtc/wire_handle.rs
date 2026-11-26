@@ -103,7 +103,9 @@ impl WireHandle for RtcWireHandle {
             .lock()
             .unwrap()
             .as_ref()
-            .is_some_and(|handle| handle.snapshot().sendable)
+            .is_some_and(|handle| {
+                handle.snapshot().sendable && handle.secure_cell().is_io_sendable()
+            })
         {
             tracing::debug!(
                 peer = %self.peer_id.to_string_repr(),
@@ -159,7 +161,7 @@ impl WireHandle for RtcWireHandle {
                     }
                     if snapshot.sendable
                         && snapshot.transport_epoch == attempt_epoch
-                        && handle.secure_state().is_sendable()
+                        && handle.secure_cell().is_io_sendable()
                     {
                         return Ok(());
                     }
@@ -232,7 +234,7 @@ impl WireHandle for RtcWireHandle {
         let guard = self.controller.lock().unwrap();
         guard
             .as_ref()
-            .is_some_and(|h| h.snapshot().sendable && h.secure_state().is_sendable())
+            .is_some_and(|h| h.snapshot().sendable && h.secure_cell().is_io_sendable())
     }
 
     async fn close(&self) -> NetworkResult<()> {
@@ -268,8 +270,9 @@ impl WireHandle for RtcWireHandle {
             )));
         }
 
-        let secure = handle.secure_cell();
-        let lane: Arc<dyn DataLane> = Arc::new(RtcDataLane::new(handle, lane));
+        let generation = snapshot.pc_generation;
+        let secure = handle.secure_cell_for(generation);
+        let lane: Arc<dyn DataLane> = Arc::new(RtcDataLane::new(handle, lane, generation));
         Ok(Arc::new(SecureDataLane::new(lane, secure)))
     }
 
@@ -298,14 +301,29 @@ impl WireHandle for RtcWireHandle {
         })
     }
 
+    fn verified_peer_context(&self) -> Option<Arc<crate::transport::VerifiedPeerContext>> {
+        self.controller
+            .lock()
+            .unwrap()
+            .as_ref()?
+            .secure_cell()
+            .verified_peer()
+    }
+
     fn secure_channel_state(&self) -> SecureChannelState {
         self.controller
             .lock()
             .unwrap()
             .as_ref()
-            .map_or(SecureChannelState::LegacyBypass, |handle| {
-                handle.secure_state()
-            })
+            .map_or(SecureChannelState::New, |handle| handle.secure_state())
+    }
+
+    fn is_transport_terminal(&self) -> bool {
+        self.controller
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_none_or(RtcPeerControllerHandle::is_transport_terminal)
     }
 
     fn secure_epoch(&self) -> u64 {

@@ -3,7 +3,7 @@
 //! Provides a single access interface for wire implementations such as
 //! WebSocket and WebRTC.
 
-use super::lane::DataLane;
+use super::lane::{DataLane, RtcPortState};
 use super::websocket_connection::WebSocketConnection;
 use actr_web_common::{ConnType, PayloadType, WebError, WebResult};
 use dashmap::DashMap;
@@ -27,7 +27,7 @@ pub struct WebRtcConnection {
     datachannel_port: Option<Arc<web_sys::MessagePort>>,
 
     /// Connection state.
-    connected: Arc<parking_lot::Mutex<bool>>,
+    actor_channel: Arc<RtcPortState>,
 
     /// DataLane cache keyed by `PayloadType` to avoid rebuilding lanes.
     lane_cache: Arc<DashMap<PayloadType, DataLane>>,
@@ -41,7 +41,7 @@ impl WebRtcConnection {
             peer_id,
             connection_id: None,
             datachannel_port: None,
-            connected: Arc::new(parking_lot::Mutex::new(false)),
+            actor_channel: Arc::new(RtcPortState::default()),
             lane_cache: Arc::new(DashMap::new()),
             relayed: Arc::new(Mutex::new(None)),
         }
@@ -55,32 +55,69 @@ impl WebRtcConnection {
         self.connection_id.as_deref()
     }
 
-    /// Set the DataChannel `MessagePort` after DOM-side creation completes.
-    pub fn set_datachannel_port(&mut self, port: web_sys::MessagePort) {
+    /// Install only a port authenticated on this physical DataChannel.
+    pub(crate) fn set_verified_port(
+        &mut self,
+        port: web_sys::MessagePort,
+        context: actr_relay_security::VerifiedActorChannel,
+    ) {
         self.datachannel_port = Some(Arc::new(port));
-        *self.connected.lock() = true;
-        log::info!(
-            "[WebRtcConnection] DataChannel port set for: {}",
-            self.peer_id
+        *self.actor_channel.verified.lock() = Some(context);
+        self.set_reachable(true);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_verified_port_for_test(&mut self, port: web_sys::MessagePort) {
+        use actr_relay_security::{ActorChannelClaims, VerifiedActorChannel};
+        self.set_verified_port(
+            port,
+            VerifiedActorChannel {
+                channel_id: "test-channel".into(),
+                transcript_digest: [1; 32],
+                peer_claims: ActorChannelClaims {
+                    realm: "test@example.com".into(),
+                    actor_id: self.peer_id.clone(),
+                    actor_type: "test/Peer@1.0.0".into(),
+                    member: "member".into(),
+                    client_key: "client".into(),
+                    role: "editor".into(),
+                    actor_public_key: [2; 32],
+                    noise_public_key: [3; 32],
+                    actor_credential_digest: [4; 32],
+                    policy_digest: [5; 32],
+                    actor_state_digest: [6; 32],
+                    issuer: "test@example.com".into(),
+                    provider: "test".into(),
+                    audience: actr_relay_security::ACTOR_CHANNEL_AUDIENCE.into(),
+                    expires_at: u64::MAX,
+                    runtime_instance_id: "peer-runtime".into(),
+                },
+                peer_actor_public_key: [2; 32],
+                local_runtime_instance_id: "local-runtime".into(),
+                peer_runtime_instance_id: "peer-runtime".into(),
+                expires_at: u64::MAX,
+            },
         );
     }
 
-    /// Connect the handle.
     pub async fn connect(&self) -> WebResult<()> {
-        // The DOM side creates the WebRTC connection. The SW only waits for it.
-        // If a port already exists, the connection is considered ready.
-        if self.datachannel_port.is_some() {
+        if self.is_connected() {
             Ok(())
         } else {
             Err(WebError::Transport(
-                "WebRTC connection not ready (waiting for DOM)".to_string(),
+                "WebRTC Actor channel is unverified".into(),
             ))
         }
     }
 
-    /// Check whether the connection is ready.
     pub fn is_connected(&self) -> bool {
-        *self.connected.lock()
+        self.actor_channel.is_sendable()
+    }
+
+    pub(crate) fn set_reachable(&self, reachable: bool) {
+        self.actor_channel
+            .reachable
+            .store(reachable, std::sync::atomic::Ordering::Release);
     }
 
     /// Get or create a cached `DataLane`.
@@ -126,6 +163,7 @@ impl WebRtcConnection {
             payload_type,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: None,
+            actor_channel: Some(self.actor_channel.clone()),
         };
 
         // 4. Cache the lane.
@@ -140,11 +178,17 @@ impl WebRtcConnection {
         Ok(lane)
     }
 
-    /// Close the connection.
-    pub async fn close(&self) -> WebResult<()> {
-        *self.connected.lock() = false;
+    pub(crate) fn revoke_verified_port(&self) {
+        self.actor_channel.verified.lock().take();
+        self.set_reachable(false);
+        if let Some(port) = &self.datachannel_port {
+            port.close();
+        }
         self.lane_cache.clear();
-        log::info!("[WebRtcConnection] Closed: {}", self.peer_id);
+    }
+
+    pub async fn close(&self) -> WebResult<()> {
+        self.revoke_verified_port();
         Ok(())
     }
 
@@ -231,7 +275,7 @@ impl WireHandle {
                 Arc::ptr_eq(&left.connected, &right.connected)
             }
             (Self::WebRTC(left), Self::WebRTC(right)) => {
-                Arc::ptr_eq(&left.connected, &right.connected)
+                Arc::ptr_eq(&left.actor_channel, &right.actor_channel)
             }
             (Self::WebSocket(left), Self::WebSocket(right)) => left.same_connection(right),
             _ => false,
@@ -380,8 +424,7 @@ mod tests {
         let conn = WebRtcConnection::new("peer-test".to_string());
         assert!(!conn.is_connected());
 
-        let connected = conn.connected.lock();
-        assert!(!*connected);
+        assert!(conn.actor_channel.verified.lock().is_none());
     }
 
     #[wasm_bindgen_test]
@@ -394,7 +437,7 @@ mod tests {
         if let Err(e) = result {
             match e {
                 WebError::Transport(msg) => {
-                    assert!(msg.contains("not ready"));
+                    assert!(msg.contains("unverified"));
                 }
                 _ => panic!("Expected Transport error"),
             }
@@ -416,7 +459,7 @@ mod tests {
         let conn2 = conn1.clone();
 
         assert_eq!(conn1.peer_id(), conn2.peer_id());
-        assert!(Arc::ptr_eq(&conn1.connected, &conn2.connected));
+        assert!(Arc::ptr_eq(&conn1.actor_channel, &conn2.actor_channel));
     }
 
     #[test]
