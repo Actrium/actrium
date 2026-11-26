@@ -258,6 +258,15 @@ impl WirePool {
                     }),
                 };
                 pending.fetch_sub(1, Ordering::Relaxed);
+                let result = result.and_then(|()| {
+                    if connection.is_verified() {
+                        Ok(())
+                    } else {
+                        Err(NetworkError::SecureChannelNotReady(
+                            "Wire connected without a verified Actor channel".into(),
+                        ))
+                    }
+                });
 
                 match result {
                     Ok(_) => {
@@ -313,9 +322,7 @@ impl WirePool {
                         // `Handshaking → Verified`, rekey, terminal) and
                         // re-broadcast so a sender parked on `watch_ready()` is
                         // woken when a previously-unverified wire becomes
-                        // sendable (RFC-0563 review point 2). Inert in phase 2
-                        // (state stays `LegacyBypass`); phase 3 drives real
-                        // transitions via `SecureCell::set_state_validated`.
+                        // sendable (RFC-0563 review point 2).
                         {
                             let conn = Arc::clone(&connection);
                             let connections = Arc::clone(&connections);
@@ -324,15 +331,9 @@ impl WirePool {
                             tokio::spawn(async move {
                                 let mut epoch = initial_epoch;
                                 loop {
-                                    // Check terminal BEFORE waiting: a wire
-                                    // that reached `Closed`/`Failed` before
-                                    // this task armed (or in a previous
-                                    // iteration) admits no further
-                                    // transitions, so parking on
-                                    // `await_secure_state_change` would never
-                                    // return. Re-broadcast so the ready set
-                                    // reflects the removal, then exit.
-                                    if conn.secure_channel_state().is_terminal() {
+                                    // A retired WebRTC channel can be followed
+                                    // by a fresh channel on the same wire.
+                                    if conn.is_transport_terminal() {
                                         Self::broadcast_ready_connections(&connections, &ready_tx)
                                             .await;
                                         return;
@@ -481,7 +482,7 @@ impl WirePool {
 
         for conn_type in ConnType::ALL {
             if let Some(WireStatus::Ready(conn)) = &conns[conn_type.as_index()] {
-                if conn.secure_channel_state().is_sendable() {
+                if conn.is_verified() {
                     ready_set.insert(conn_type);
                 }
             }
@@ -517,9 +518,7 @@ impl WirePool {
         let conns = self.connections.read().await;
 
         match &conns[conn_type.as_index()] {
-            Some(WireStatus::Ready(conn)) if conn.secure_channel_state().is_sendable() => {
-                Some(Arc::clone(conn))
-            }
+            Some(WireStatus::Ready(conn)) if conn.is_verified() => Some(Arc::clone(conn)),
             _ => None,
         }
     }
@@ -537,7 +536,7 @@ impl WirePool {
     /// Adopt a recovered physical connection without racing an in-flight
     /// dial. A live slot keeps its owner; only absent or terminal slots change.
     pub(crate) async fn adopt_ready(&self, connection: Arc<dyn WireHandle>) {
-        if !connection.is_connected() || !connection.secure_channel_state().is_sendable() {
+        if !connection.is_connected() || !connection.is_verified() {
             return;
         }
         let index = connection.connection_type().as_index();
@@ -549,7 +548,7 @@ impl WirePool {
             match &slots[index] {
                 Some(WireStatus::Connecting(_)) => return,
                 Some(WireStatus::Ready(current))
-                    if current.is_connected() && current.secure_channel_state().is_sendable() =>
+                    if current.is_connected() && current.is_verified() =>
                 {
                     return;
                 }
@@ -564,7 +563,7 @@ impl WirePool {
         let shutdown = self.shutdown.clone();
         tokio::spawn(async move {
             loop {
-                if connection.secure_channel_state().is_terminal() {
+                if connection.is_transport_terminal() {
                     Self::broadcast_ready_connections(&connections, &ready_tx).await;
                     return;
                 }
@@ -585,7 +584,7 @@ impl WirePool {
         conn_types
             .iter()
             .any(|conn_type| match &conns[conn_type.as_index()] {
-                Some(WireStatus::Ready(conn)) => !conn.secure_channel_state().is_terminal(),
+                Some(WireStatus::Ready(conn)) => !conn.is_transport_terminal(),
                 Some(WireStatus::Connecting(_)) => true,
                 _ => false,
             })

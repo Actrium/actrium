@@ -1116,6 +1116,16 @@ async fn peer_gate_uncertain_send_reaches_on_error_through_installed_hook() {
 
     #[async_trait::async_trait]
     impl WireHandle for UncertainWire {
+        fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+            crate::transport::SecureChannelState::Verified
+        }
+        fn verified_peer_context(
+            &self,
+        ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+            Some(std::sync::Arc::new(
+                crate::transport::secure_channel::test_context(1),
+            ))
+        }
         fn connection_type(&self) -> ConnType {
             ConnType::WebSocket
         }

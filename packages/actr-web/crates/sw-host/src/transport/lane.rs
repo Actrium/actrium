@@ -20,6 +20,24 @@ use web_sys::{MessagePort, WebSocket};
 /// Transport-layer operation result in the Service Worker runtime.
 pub type LaneResult<T> = WebResult<T>;
 
+/// Shared admission for a physical RTC port and every lane acquired from it.
+#[derive(Default)]
+pub struct RtcPortState {
+    pub(crate) verified: Mutex<Option<actr_relay_security::VerifiedActorChannel>>,
+    pub(crate) reachable: std::sync::atomic::AtomicBool,
+}
+
+impl RtcPortState {
+    pub(crate) fn is_sendable(&self) -> bool {
+        self.reachable.load(std::sync::atomic::Ordering::Acquire)
+            && self
+                .verified
+                .lock()
+                .as_ref()
+                .is_some_and(|context| context.is_valid_at((js_sys::Date::now() / 1000.0) as u64))
+    }
+}
+
 /// Notifies the WirePool when a port fails.
 ///
 /// If sending on a `MessagePort` fails, the notifier marks the associated
@@ -79,6 +97,7 @@ pub enum DataLane {
         payload_type: PayloadType,
         rx: Arc<Mutex<mpsc::UnboundedReceiver<Bytes>>>,
         failure_notifier: Option<PortFailureNotifier>,
+        actor_channel: Option<Arc<RtcPortState>>,
     },
 }
 
@@ -125,8 +144,17 @@ impl DataLane {
                 port,
                 payload_type,
                 failure_notifier,
+                actor_channel,
                 ..
             } => {
+                if actor_channel
+                    .as_ref()
+                    .is_some_and(|channel| !channel.is_sendable())
+                {
+                    return Err(WebError::Transport(
+                        "WebRTC Actor channel is unverified".into(),
+                    ));
+                }
                 // Build the message with zero-copy helper functions.
                 let header = construct_message_header(*payload_type as u8, data.len());
                 let msg = construct_message_zero_copy(&header, &data);
@@ -184,8 +212,17 @@ impl DataLane {
                 port,
                 payload_type,
                 failure_notifier,
+                actor_channel,
                 ..
             } => {
+                if actor_channel
+                    .as_ref()
+                    .is_some_and(|channel| !channel.is_sendable())
+                {
+                    return Err(WebError::Transport(
+                        "WebRTC Actor channel is unverified".into(),
+                    ));
+                }
                 // Build the message with zero-copy helper functions.
                 let header = construct_message_header(*payload_type as u8, data.len());
                 let msg = construct_message_zero_copy(&header, &data);
@@ -427,6 +464,7 @@ mod tests {
             payload_type: PayloadType::StreamReliable,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: None,
+            actor_channel: None,
         };
 
         assert_eq!(lane.payload_type(), PayloadType::StreamReliable);
@@ -496,6 +534,7 @@ mod tests {
             payload_type: PayloadType::MediaRtp,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: None,
+            actor_channel: None,
         };
 
         let lane2 = lane1.clone();
@@ -546,6 +585,7 @@ mod tests {
             payload_type: PayloadType::StreamLatencyFirst,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: None,
+            actor_channel: None,
         };
 
         let debug_str = format!("{:?}", lane);
@@ -573,6 +613,7 @@ mod tests {
             payload_type: PayloadType::MediaRtp,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: Some(notifier),
+            actor_channel: None,
         };
 
         match lane {
@@ -598,6 +639,7 @@ mod tests {
             payload_type: PayloadType::RpcReliable,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: None,
+            actor_channel: None,
         };
 
         match lane {
@@ -646,6 +688,7 @@ mod tests {
             payload_type: PayloadType::MediaRtp,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: None,
+            actor_channel: None,
         };
 
         match lane {
@@ -702,6 +745,7 @@ mod tests {
                 payload_type: pt,
                 rx: Arc::new(Mutex::new(rx)),
                 failure_notifier: None,
+                actor_channel: None,
             };
 
             assert_eq!(lane.payload_type(), pt);

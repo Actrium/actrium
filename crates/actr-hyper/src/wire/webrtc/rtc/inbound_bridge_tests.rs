@@ -44,6 +44,7 @@ fn route_rpc(
         generation,
         lane,
         payload: bytes::Bytes::from(envelope.encode_to_vec()),
+        peer_context: None,
     })
 }
 
@@ -60,6 +61,7 @@ fn route_chunk(router: &InboundRouter, stream_id: &str, sequence: u64, lane: Lan
         generation: 1,
         lane,
         payload: bytes::Bytes::from(chunk.encode_to_vec()),
+        peer_context: None,
     })
 }
 

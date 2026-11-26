@@ -537,7 +537,7 @@ async fn websocket_retirement_cancels_an_inflight_write_without_replay() {
 
     let submitted = Arc::new(tokio::sync::Notify::new());
     let sink = Arc::new(Mutex::new(Some(StuckSink(submitted.clone()))));
-    let session = SecureCell::new(SecureChannelState::LegacyBypass);
+    let session = SecureCell::new(SecureChannelState::New);
     let lane = WebSocketDataLane::new(sink.clone(), PayloadType::RpcReliable, mpsc::channel(1).1)
         .with_session(session.clone());
     let send =
@@ -585,7 +585,7 @@ async fn websocket_retirement_before_writer_lock_is_proven_not_attempted() {
 
     let writes = Arc::new(AtomicUsize::new(0));
     let sink = Arc::new(Mutex::new(Some(CountingSink(writes.clone()))));
-    let session = SecureCell::new(SecureChannelState::LegacyBypass);
+    let session = SecureCell::new(SecureChannelState::New);
     let lane = WebSocketDataLane::new(sink.clone(), PayloadType::RpcReliable, mpsc::channel(1).1)
         .with_session(session.clone());
     let held = sink.lock().await;

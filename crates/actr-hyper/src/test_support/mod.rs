@@ -1606,3 +1606,7 @@ pub mod concurrency;
 pub fn dynclib_active_bridge_count() -> usize {
     crate::dynclib::active_bridge_count()
 }
+/// Authenticated context for mock wires whose scenarios do not run a handshake.
+pub fn verified_peer_context_for_test() -> Arc<crate::transport::VerifiedPeerContext> {
+    Arc::new(crate::transport::secure_channel::test_context(1))
+}

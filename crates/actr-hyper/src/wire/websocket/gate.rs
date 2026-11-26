@@ -160,6 +160,13 @@ impl WebSocketGate {
         if !self.relay_mode {
             return Err(ActrError::Internal("Relay ingress not configured".into()));
         }
+        if conn.secure_cell().verified_peer().is_none_or(|context| {
+            context.peer_actor_id != peer || context.peer_actor_type != actor_type
+        }) {
+            return Err(ActrError::Unavailable(
+                "Relay peer channel is unverified".into(),
+            ));
+        }
         let mailbox = loop {
             let notified = self.mailbox_ready.notified();
             tokio::pin!(notified);
@@ -200,7 +207,7 @@ impl WebSocketGate {
             peer,
             (
                 sink,
-                SecureCell::new(crate::transport::SecureChannelState::Verified),
+                SecureCell::new_verified(crate::transport::secure_channel::test_context(1)),
             ),
         );
     }
@@ -711,7 +718,10 @@ impl WebSocketGate {
                                 if secure.epoch() != observed_epoch {
                                     continue;
                                 }
-                                let peer_context = secure.verified_peer();
+                                let Some(peer_context) = secure.verified_peer() else {
+                                    continue;
+                                };
+                                let peer_context = Some(peer_context);
                                 if secure.epoch() != observed_epoch {
                                     continue;
                                 }

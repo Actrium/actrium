@@ -88,8 +88,7 @@ impl PeerRuntime {
         }
     }
 
-    /// Connect to the peer and return the verified channel view. Legacy wires
-    /// never produce a context, so Attach cannot silently downgrade.
+    /// Connect to the peer and return its verified channel context.
     async fn verified_context(&self, service: &ActrId) -> ActorResult<Arc<VerifiedPeerContext>> {
         let transport = self
             .transport
@@ -156,16 +155,26 @@ impl ActriumPeerSession {
         &self,
         method: &str,
         request: &Req,
+        channel: &VerifiedPeerContext,
     ) -> ActorResult<Resp> {
         let payload = serde_json::to_vec(request)
             .map_err(|error| ActrError::Internal(format!("session encoding failed: {error}")))?;
-        let response = self.session_rpc_bytes(method, payload).await?;
+        let response = self.session_rpc_bytes(method, payload, channel).await?;
         serde_json::from_slice(&response)
             .map_err(|error| ActrError::Internal(format!("invalid session response: {error}")))
     }
 
-    async fn session_rpc_bytes(&self, method: &str, payload: Vec<u8>) -> ActorResult<Bytes> {
-        let envelope = Self::envelope(method, payload)?;
+    async fn session_rpc_bytes(
+        &self,
+        method: &str,
+        payload: Vec<u8>,
+        channel: &VerifiedPeerContext,
+    ) -> ActorResult<Bytes> {
+        let mut envelope = Self::envelope(method, payload)?;
+        envelope.metadata.push(MetadataEntry {
+            key: metadata::CHANNEL_ID.into(),
+            value: channel.channel_id.clone(),
+        });
         let deadline = RpcDeadline::from_timeout_ms(envelope.timeout_ms)?;
         self.runtime
             .gate
@@ -284,15 +293,18 @@ impl ActriumPeerSession {
                 let Some(session) = weak.upgrade() else {
                     break;
                 };
-                let request = {
+                let (request, channel) = {
                     let state = session.state.lock().await;
-                    HeartbeatRequest {
-                        session_id: state.session_id.clone(),
-                        lease_epoch: state.lease_epoch,
-                    }
+                    (
+                        HeartbeatRequest {
+                            session_id: state.session_id.clone(),
+                            lease_epoch: state.lease_epoch,
+                        },
+                        state.channel.clone(),
+                    )
                 };
                 match session
-                    .session_rpc::<_, HeartbeatOutcome>("Heartbeat", &request)
+                    .session_rpc::<_, HeartbeatOutcome>("Heartbeat", &request, &channel)
                     .await
                 {
                     Ok(outcome) => {
@@ -622,7 +634,7 @@ impl ActriumPeerSession {
             session_proof: Vec::new(),
         };
         request.session_proof = resume_proof(previous.secret.as_bytes(), &request);
-        let response: AttachResponse = self.session_rpc("Resume", &request).await?;
+        let response: AttachResponse = self.session_rpc("Resume", &request, &channel).await?;
         let secret = self.verify_response(&response, &resume_digest(&request), &channel)?;
         *self.state.lock().await = SessionState {
             session_id: response.session_id.clone(),
@@ -656,7 +668,7 @@ impl ActriumPeerSession {
             .to_bytes()
             .to_vec();
         let response: AttachResponse = self
-            .session_rpc("Takeover", &TakeoverPayload { takeover, attach })
+            .session_rpc("Takeover", &TakeoverPayload { takeover, attach }, &channel)
             .await?;
         let secret = self.verify_response(&response, &request_digest, &channel)?;
         *self.state.lock().await = SessionState {
@@ -681,16 +693,19 @@ impl ActriumPeerSession {
 
     /// Release the lease immediately and stop the heartbeat.
     pub async fn detach(&self) -> ActorResult<()> {
-        let request = {
+        let (request, channel) = {
             let state = self.state.lock().await;
-            DetachRequest {
-                session_id: state.session_id.clone(),
-                lease_epoch: state.lease_epoch,
-            }
+            (
+                DetachRequest {
+                    session_id: state.session_id.clone(),
+                    lease_epoch: state.lease_epoch,
+                },
+                state.channel.clone(),
+            )
         };
         let payload = serde_json::to_vec(&request)
             .map_err(|error| ActrError::Internal(format!("session encoding failed: {error}")))?;
-        self.session_rpc_bytes("Detach", payload).await?;
+        self.session_rpc_bytes("Detach", payload, &channel).await?;
         self.state.lock().await.recovery_required = true;
         if let Some(handle) = self.heartbeat.lock().await.take() {
             handle.abort();
@@ -761,7 +776,7 @@ impl ActrRef {
         });
         let mut attach = session.attach_request(&channel);
         sign_attach_request(&mut attach, &session.actor_signing_key);
-        let response: AttachResponse = session.session_rpc("Attach", &attach).await?;
+        let response: AttachResponse = session.session_rpc("Attach", &attach, &channel).await?;
         let secret =
             session.verify_response(&response, &attach_request_digest(&attach), &channel)?;
         *session.state.lock().await = SessionState {

@@ -38,6 +38,7 @@ use crate::wire::webrtc::rtc::status::LaneKind;
 pub(crate) struct RtcDataLane {
     handle: RtcPeerControllerHandle,
     lane: LaneKind,
+    generation: u64,
     /// Whether this lane should use non-blocking `try_send` (latency-first) or
     /// blocking `send` (reliable lanes).
     non_blocking: bool,
@@ -52,11 +53,12 @@ impl std::fmt::Debug for RtcDataLane {
 }
 
 impl RtcDataLane {
-    pub(crate) fn new(handle: RtcPeerControllerHandle, lane: LaneKind) -> Self {
+    pub(crate) fn new(handle: RtcPeerControllerHandle, lane: LaneKind, generation: u64) -> Self {
         let non_blocking = lane == LaneKind::StreamLatencyFirst;
         Self {
             handle,
             lane,
+            generation,
             non_blocking,
         }
     }
@@ -90,11 +92,10 @@ impl DataLane for RtcDataLane {
     }
 
     async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
-        let result = if self.non_blocking {
-            self.handle.send_with_progress(self.lane, data, true).await
-        } else {
-            self.handle.send_with_progress(self.lane, data, false).await
-        };
+        let result = self
+            .handle
+            .send_with_progress(self.lane, self.generation, data, self.non_blocking)
+            .await;
         let progress = result.progress;
         let proven_pre_send = result.proven_pre_send;
         match result.result {
@@ -125,7 +126,8 @@ impl DataLane for RtcDataLane {
     }
 
     fn is_healthy(&self) -> bool {
-        self.handle.subscribe().borrow().sendable
+        let snapshot = self.handle.snapshot();
+        snapshot.sendable && snapshot.pc_generation == self.generation
     }
 }
 

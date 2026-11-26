@@ -1379,7 +1379,9 @@ self.addEventListener('message', async (event) => {
           const dcPeerId = message.payload.peerId;
           const dcConnectionId = message.payload.connectionId;
           if (dcPort && dcPeerId && dcConnectionId) {
-            await wasm_bindgen.register_datachannel_port(clientId, dcPeerId, dcConnectionId, dcPort);
+            await wasm_bindgen.register_datachannel_port(
+              clientId, dcPeerId, dcConnectionId, dcPort, message.payload.localSdp, message.payload.remoteSdp,
+            );
           } else {
             console.warn('[SW] register_datachannel_port: missing port, peerId, or connectionId');
           }

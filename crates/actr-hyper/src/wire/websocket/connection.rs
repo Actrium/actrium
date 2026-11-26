@@ -103,7 +103,7 @@ pub(crate) struct WebSocketConnection {
 
     /// Secure-channel state owned by this physical WebSocket session (RFC-0563).
     /// Production relay sessions enter `Verified` only after mutual Noise
-    /// authentication and key confirmation; legacy bypass is test-only.
+    /// authentication and key confirmation.
     secure: SecureCell,
 
     /// Shared by connection clones; cancellation also interrupts a full lane.
@@ -122,7 +122,7 @@ impl WebSocketConnection {
             router: Arc::new(RwLock::new([None, None, None, None, None])),
             lane_cache: Arc::new(RwLock::new([None, None, None, None, None])),
             connected: Arc::new(AtomicBool::new(false)),
-            secure: SecureCell::new(SecureChannelState::LegacyBypass),
+            secure: SecureCell::new(SecureChannelState::New),
             teardown: Arc::new(CancelOnDrop(CancellationToken::new())),
             relay_write_cancel: None,
         }
@@ -137,7 +137,12 @@ impl WebSocketConnection {
         + Send
         + 'static,
     ) -> Self {
-        Self::from_parts_with_state(sink, stream, SecureChannelState::LegacyBypass, None)
+        Self::from_parts_with_secure_cell(
+            sink,
+            stream,
+            SecureCell::new_verified(crate::transport::secure_channel::test_context(1)),
+            None,
+        )
     }
 
     pub(crate) fn from_encrypted_parts(
@@ -147,57 +152,17 @@ impl WebSocketConnection {
         + 'static,
         write_cancel: CancellationToken,
     ) -> Self {
-        Self::from_parts_with_state(
-            sink,
-            stream,
-            SecureChannelState::Handshaking,
-            Some(write_cancel),
-        )
-    }
-
-    /// Install an Actrium Actor channel without publishing application I/O.
-    /// Only `publish_actrium_verified` can make this strict cell sendable.
-    pub(crate) fn from_actrium_encrypted_parts(
-        sink: crate::transport::lane::WsWrite,
-        stream: impl Stream<Item = Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
-        + Send
-        + 'static,
-        write_cancel: CancellationToken,
-    ) -> Self {
         Self::from_parts_with_secure_cell(
             sink,
             stream,
-            SecureCell::new_actrium(SecureChannelState::Handshaking),
+            SecureCell::new(SecureChannelState::Handshaking),
             Some(write_cancel),
         )
     }
 
-    pub(crate) fn mark_relay_verified(&self) -> bool {
-        self.secure.set_state_validated(
-            SecureChannelState::Handshaking,
-            SecureChannelState::Verified,
-        )
-    }
-
-    pub(crate) fn publish_actrium_verified(&self, context: VerifiedPeerContext) -> bool {
+    pub(crate) fn publish_verified(&self, context: VerifiedPeerContext) -> bool {
         self.secure
             .publish_verified(SecureChannelState::Handshaking, context)
-    }
-
-    fn from_parts_with_state(
-        sink: crate::transport::lane::WsWrite,
-        stream: impl Stream<Item = Result<WsMessage, tokio_tungstenite::tungstenite::Error>>
-        + Send
-        + 'static,
-        initial: SecureChannelState,
-        relay_write_cancel: Option<CancellationToken>,
-    ) -> Self {
-        Self::from_parts_with_secure_cell(
-            sink,
-            stream,
-            SecureCell::new(initial),
-            relay_write_cancel,
-        )
     }
 
     fn from_parts_with_secure_cell(

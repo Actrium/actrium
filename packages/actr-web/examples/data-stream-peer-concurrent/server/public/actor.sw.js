@@ -130,7 +130,7 @@ self.addEventListener('message', (event) => {
                     break;
                 case 'register_datachannel_port':
                     if (message.payload?.port && message.payload?.peerId) {
-                        await wasm_bindgen.register_datachannel_port(clientId, message.payload.peerId, message.payload.connectionId, message.payload.port);
+                        await wasm_bindgen.register_datachannel_port(clientId, message.payload.peerId, message.payload.connectionId, message.payload.port, message.payload.localSdp, message.payload.remoteSdp);
                     }
                     break;
                 default:

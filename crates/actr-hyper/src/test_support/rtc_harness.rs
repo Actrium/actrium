@@ -523,6 +523,25 @@ impl TestRtcControl {
             })
     }
 
+    async fn wait_verified_channel(&self, peer: &ActrId, timeout: Duration) {
+        let handle = self
+            .manager
+            .get_controller(peer)
+            .await
+            .expect("peer controller");
+        tokio::time::timeout(timeout, async {
+            loop {
+                let epoch = handle.secure_epoch();
+                if handle.secure_cell().is_io_sendable() {
+                    return;
+                }
+                handle.await_secure_state_change(epoch).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("peer {peer} did not authenticate within {timeout:?}"));
+    }
+
     /// Await a snapshot satisfying a test predicate. The latest snapshot is
     /// evaluated immediately, so late subscribers do not miss a transition.
     pub async fn wait_state<F>(
@@ -1595,7 +1614,12 @@ impl TestHarness {
             }
         })));
         let (signaling_tx, signaling_rx) = mpsc::channel(128);
-        let manager = RtcConnectionManager::with_inbound(factory, signaling_tx, router);
+        let manager = RtcConnectionManager::with_inbound(factory, signaling_tx, router)
+            .with_actor_channel_identity(
+                crate::wire::webrtc::rtc::peer::authentication::ActorChannelCredentials::fixture(
+                    &id,
+                ),
+            );
         let manager = if self.rtc_matrix_instrumentation {
             let local_id = id.clone();
             let handler_evidence = self.evidence.clone();
@@ -1852,6 +1876,10 @@ impl TestHarness {
         self.peer(from).rtc.wait_sendable(&target, timeout).await;
         let source = self.peer(from).id.clone();
         self.peer(to).rtc.wait_sendable(&source, timeout).await;
+        tokio::join!(
+            self.peer(from).rtc.wait_verified_channel(&target, timeout),
+            self.peer(to).rtc.wait_verified_channel(&source, timeout),
+        );
     }
 
     /// Wait until the production signaling handler has completed the

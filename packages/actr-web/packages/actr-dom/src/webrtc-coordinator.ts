@@ -18,6 +18,17 @@ export interface PeerConnectionInfo {
   connection: RTCPeerConnection;
   dataChannels: Map<number, RTCDataChannel>;
   state: RTCPeerConnectionState;
+  receivedActorAuthFrames?: number;
+  actorChannelExpiry?: number;
+  actorChannelTimer?: ReturnType<typeof setTimeout>;
+  dtlsBinding?: { local: string; remote: string };
+  pendingActorFrames?: PendingActorFrame[];
+}
+
+interface PendingActorFrame {
+  channelId: number;
+  channel: RTCDataChannel;
+  frame: Uint8Array;
 }
 
 interface PendingPortFrame {
@@ -35,6 +46,9 @@ interface FragmentEntry {
  * WebRTC coordinator (DOM side).
  */
 export class WebRtcCoordinator {
+  private static readonly ACTOR_AUTH_PREFIX = new TextEncoder().encode('ACTR\0\0\0\0');
+  private static readonly MAX_ACTOR_AUTH_FRAMES = 8;
+  private static readonly MAX_PENDING_ACTOR_FRAMES = 8;
   private static readonly FRAGMENT_HEADER_SIZE = 8;
   private static readonly DC_MAX_MESSAGE_SIZE = 65535;
   private static readonly DC_MAX_PAYLOAD_SIZE =
@@ -136,16 +150,18 @@ export class WebRtcCoordinator {
     peer: PeerConnectionInfo | undefined,
     channel: RTCDataChannel | undefined
   ): boolean {
-    return !!(
-      peer &&
-      channel &&
-      channel.readyState === 'open' &&
-      peer.state === 'connected' &&
-      peer.connection.connectionState === 'connected'
-    );
+    return !!(peer && channel?.readyState === 'open' &&
+      peer.connection.currentLocalDescription && peer.connection.currentRemoteDescription);
+
   }
 
   private dropRpcPort(peerId: string): void {
+    const peer = this.peers.get(peerId);
+    if (peer) {
+      peer.actorChannelExpiry = undefined;
+      peer.pendingActorFrames = undefined;
+      if (peer.actorChannelTimer !== undefined) clearTimeout(peer.actorChannelTimer);
+    }
     const port = this.rpcPorts.get(peerId);
     if (!port) {
       return;
@@ -211,6 +227,10 @@ export class WebRtcCoordinator {
 
     connection.ondatachannel = (event) => {
       const channel = event.channel;
+      if (this.peers.get(peerId)?.connection !== connection) {
+        channel.close();
+        return;
+      }
       const laneId = this.labelToLaneId.get(channel.label);
       if (laneId === undefined) {
         console.warn(`[WebRTC] Unknown DataChannel label: ${channel.label}`);
@@ -256,7 +276,7 @@ export class WebRtcCoordinator {
         connection.connectionState === 'closed'
       ) {
         this.stopPathObservation(peerId);
-        this.dropRpcPort(peerId);
+        if (connection.connectionState !== 'disconnected') this.dropRpcPort(peerId);
         this.dropPendingPeerFrames(peerId);
       }
     };
@@ -277,6 +297,7 @@ export class WebRtcCoordinator {
       dataChannels,
       state: connection.connectionState,
     });
+    this.notifySW('connection_state_changed', { peerId, connectionId, state: connection.connectionState });
     this.notifySW('network_path_changed', { peerId, relayed: null });
 
     console.log(`[WebRTC] Peer connection created: ${peerId}`);
@@ -285,36 +306,34 @@ export class WebRtcCoordinator {
   /**
    *  DataChannel
    */
-  private handleDataChannelMessage(
-    peerId: string,
-    channelId: number,
-    data: ArrayBuffer | Blob
-  ): void {
-    // Handle Blob or ArrayBuffer data
-    if (data instanceof Blob) {
-      // [DEBUG] Keep for now
-      console.log(
-        `[WebRTC] DataChannel message received: peer=${peerId} channel=${channelId} bytes=${data.size}`
-      );
-      data.arrayBuffer().then((buffer) => {
-        this.extractFragmentAndForward(peerId, channelId, new Uint8Array(buffer));
-      });
+  private isActorAuthFrame(frame: Uint8Array): boolean {
+    return WebRtcCoordinator.ACTOR_AUTH_PREFIX.every((value, index) => frame[index] === value);
+  }
+
+  private handleDataChannelMessage(peer: PeerConnectionInfo, channelId: number, channel: RTCDataChannel, data: ArrayBuffer): void {
+    if (!(data instanceof ArrayBuffer) || this.peers.get(peer.peerId) !== peer || peer.dataChannels.get(channelId) !== channel) return;
+    const frame = new Uint8Array(data);
+    if (channelId === 0 && this.isActorAuthFrame(frame) && !peer.actorChannelExpiry) {
+      peer.receivedActorAuthFrames = (peer.receivedActorAuthFrames ?? 0) + 1;
+      if (peer.receivedActorAuthFrames > WebRtcCoordinator.MAX_ACTOR_AUTH_FRAMES) {
+        this.closePeerConnection(peer.peerId);
+        return;
+      }
+      this.bindRpcPort(peer.peerId, channel);
+      this.rpcPorts.get(peer.peerId)?.postMessage(data, [data]);
       return;
     }
-
-    if (data instanceof ArrayBuffer) {
-      // [DEBUG] Keep for now
-      console.log(
-        `[WebRTC] DataChannel message received: peer=${peerId} channel=${channelId} bytes=${data.byteLength}`
-      );
-      this.extractFragmentAndForward(peerId, channelId, new Uint8Array(data));
-      return;
+    if (peer.state === 'connected' && (peer.actorChannelExpiry ?? 0) > Date.now()) {
+      this.extractFragmentAndForward(peer.peerId, channelId, frame);
+    } else if (!peer.actorChannelExpiry && this.rpcPorts.has(peer.peerId) &&
+      frame.byteLength <= WebRtcCoordinator.DC_MAX_MESSAGE_SIZE) {
+      // The Worker may still be processing the final proof when this frame
+      // arrives, particularly when a different SCTP lane carries the payload.
+      peer.pendingActorFrames ??= [];
+      if (peer.pendingActorFrames.length < WebRtcCoordinator.MAX_PENDING_ACTOR_FRAMES) {
+        peer.pendingActorFrames.push({ channelId, channel, frame });
+      }
     }
-
-    // [DEBUG] Keep for now
-    console.log(
-      `[WebRTC] DataChannel message received: peer=${peerId} channel=${channelId} type=${typeof data}`
-    );
   }
 
   /**
@@ -399,7 +418,8 @@ export class WebRtcCoordinator {
     const streamId = `${peerId}:${channelId}`;
 
     //  Fast Path Forwarder
-    this.forwarder.forward(streamId, data);
+    const peer = this.peers.get(peerId);
+    if (peer) this.forwarder.forward(streamId, data, peer.connectionId);
   }
 
   /**
@@ -462,6 +482,17 @@ export class WebRtcCoordinator {
   /**
    *  Remote Description
    */
+  private fingerprints(sdp: string | undefined): string {
+    return [...new Set((sdp?.match(/^a=fingerprint:[^\r\n]+/gm) ?? []).map(line => line.toLowerCase().trim()))].sort().join('\n');
+  }
+
+  private requireSameDtlsBinding(peer: PeerConnectionInfo, side: 'local' | 'remote', sdp: RTCSessionDescriptionInit): void {
+    if (peer.dtlsBinding && peer.dtlsBinding[side] !== this.fingerprints(sdp.sdp)) {
+      this.closePeerConnection(peer.peerId);
+      throw new Error('WebRTC DTLS fingerprint changed');
+    }
+  }
+
   private async setRemoteDescription(
     peerId: string,
     sdp: RTCSessionDescriptionInit
@@ -471,6 +502,7 @@ export class WebRtcCoordinator {
       throw new Error(`Peer ${peerId} not found`);
     }
 
+    this.requireSameDtlsBinding(peer, 'remote', sdp);
     await peer.connection.setRemoteDescription(sdp);
     console.log(`[WebRTC] Remote description set for ${peerId}`);
   }
@@ -484,6 +516,7 @@ export class WebRtcCoordinator {
       throw new Error(`Peer ${peerId} not found`);
     }
 
+    this.requireSameDtlsBinding(peer, 'local', sdp);
     await peer.connection.setLocalDescription(sdp);
     console.log(`[WebRTC] Local description set for ${peerId}`);
   }
@@ -498,6 +531,7 @@ export class WebRtcCoordinator {
     }
 
     const offer = await peer.connection.createOffer();
+    this.requireSameDtlsBinding(peer, 'local', offer);
     await peer.connection.setLocalDescription(offer);
 
     this.notifySW('local_description', {
@@ -518,6 +552,7 @@ export class WebRtcCoordinator {
 
     console.log(`[WebRTC] Creating ICE restart offer for ${peerId}`);
     const offer = await peer.connection.createOffer({ iceRestart: true });
+    this.requireSameDtlsBinding(peer, 'local', offer);
     await peer.connection.setLocalDescription(offer);
 
     this.notifySW('ice_restart_local_description', {
@@ -536,6 +571,7 @@ export class WebRtcCoordinator {
     }
 
     const answer = await peer.connection.createAnswer();
+    this.requireSameDtlsBinding(peer, 'local', answer);
     await peer.connection.setLocalDescription(answer);
 
     this.notifySW('local_description', {
@@ -650,18 +686,42 @@ export class WebRtcCoordinator {
       return;
     }
 
-    const previousPort = this.rpcPorts.get(peerId);
-    if (previousPort) {
-      try {
-        previousPort.close();
-      } catch {
-        // Ignore close errors for stale ports.
-      }
-    }
+    if (this.rpcPorts.has(peerId)) return;
+    const localSdp = peer.connection.currentLocalDescription?.sdp;
+    const remoteSdp = peer.connection.currentRemoteDescription?.sdp;
+    if (!localSdp || !remoteSdp) return;
+    peer.dtlsBinding = { local: this.fingerprints(localSdp), remote: this.fingerprints(remoteSdp) };
 
     const mc = new MessageChannel();
     mc.port1.onmessage = (e: MessageEvent) => {
+      if (this.rpcPorts.get(peerId) !== mc.port1 || this.peers.get(peerId) !== peer) return;
+      if (e.data === null) {
+        this.closePeerConnection(peerId);
+        return;
+      }
+      if (typeof e.data === 'number') {
+        peer.actorChannelExpiry = e.data;
+        peer.actorChannelTimer = setTimeout(() => {
+          if (this.rpcPorts.get(peerId) === mc.port1) this.closePeerConnection(peerId);
+        }, Math.max(0, e.data - Date.now()));
+        const pending = peer.pendingActorFrames;
+        peer.pendingActorFrames = undefined;
+        if (pending && peer.state === 'connected' && e.data > Date.now()) {
+          for (const { channelId, channel: source, frame } of pending) {
+            if (peer.dataChannels.get(channelId) === source) {
+              this.extractFragmentAndForward(peerId, channelId, frame);
+            }
+          }
+        }
+        this.flushPendingPortFrames(peerId, channel);
+        return;
+      }
       const src = this.toUint8Array(e.data);
+      if (this.isActorAuthFrame(src) && !peer.actorChannelExpiry && channel.readyState === 'open') {
+        channel.send(src.slice());
+        return;
+      }
+      if (peer.state !== 'connected' || (peer.actorChannelExpiry ?? 0) <= Date.now()) return;
       if (src.byteLength < 5) {
         console.warn(`[WebRTC] Dropping short SW transport frame: ${src.byteLength} bytes`);
         return;
@@ -686,8 +746,7 @@ export class WebRtcCoordinator {
     };
 
     this.rpcPorts.set(peerId, mc.port1);
-    this.swBridge.sendDataChannelPort(peerId, peer.connectionId, mc.port2);
-    this.flushPendingPortFrames(peerId, channel);
+    this.swBridge.sendDataChannelPort(peerId, peer.connectionId, mc.port2, localSdp, remoteSdp);
   }
 
   private flushPendingSends(peerId: string, channelId: number): void {
@@ -737,6 +796,8 @@ export class WebRtcCoordinator {
     channel: RTCDataChannel,
     payload: Uint8Array
   ): void {
+    const peer = this.peers.get(peerId);
+    if (!peer || peer.state !== 'connected' || (peer.actorChannelExpiry ?? 0) <= Date.now() || peer.dataChannels.get(channelId) !== channel) return;
     for (const frame of this.createFrames(peerId, channelId, payload)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       channel.send(frame as any);
@@ -774,10 +835,16 @@ export class WebRtcCoordinator {
   }
 
   private attachDataChannel(peerId: string, laneId: number, channel: RTCDataChannel): void {
+    const previous = this.peers.get(peerId)?.dataChannels.get(laneId);
+    if (previous && previous.readyState !== 'closed') {
+      channel.close();
+      return;
+    }
     channel.binaryType = 'arraybuffer';
 
     channel.onmessage = (event) => {
-      this.handleDataChannelMessage(peerId, laneId, event.data);
+      const peer = this.peers.get(peerId);
+      if (peer) this.handleDataChannelMessage(peer, laneId, channel, event.data);
     };
 
     channel.onopen = () => {
@@ -807,8 +874,8 @@ export class WebRtcCoordinator {
 
     channel.onclose = () => {
       console.log(`[WebRTC] DataChannel ${channel.label} closed`); // [DEBUG] Keep for now
-      if (laneId === 0) {
-        this.dropRpcPort(peerId);
+      if (laneId === 0 && this.peers.get(peerId)?.dataChannels.get(0) === channel) {
+        this.closePeerConnection(peerId);
       }
       this.dropPendingPeerFrames(peerId);
       this.notifySW('datachannel_close', {
@@ -865,8 +932,8 @@ export class WebRtcCoordinator {
     //  PeerConnection
     peer.connection.close();
 
-    this.peers.delete(peerId);
     this.dropRpcPort(peerId);
+    this.peers.delete(peerId);
     this.dropPendingPeerFrames(peerId);
     this.notifySW('peer_connection_closed', { peerId, connectionId: peer.connectionId });
     console.log(`[WebRTC] Peer connection closed: ${peerId}`);

@@ -67,7 +67,17 @@ async fn rtp_packets_dispatch_as_media_samples_with_014_labels() {
         );
     }
 
-    track_pump(test_actor_id(7), 1, track, meta, Some(registry.clone())).await;
+    track_pump(
+        test_actor_id(7),
+        1,
+        track,
+        meta,
+        Some(registry.clone()),
+        crate::transport::SecureCell::new_verified(crate::transport::secure_channel::test_context(
+            1,
+        )),
+    )
+    .await;
 
     // The dispatch spawns per-sample tasks; wait for both callbacks.
     tokio::time::timeout(WAIT, async {
@@ -111,7 +121,16 @@ async fn pump_without_registry_drops_frames_quietly() {
     crate::timer::timeout(
         crate::timer::ids::WEBRTC_PEER_SENDABLE,
         WAIT,
-        track_pump(test_actor_id(3), 1, track, meta, None),
+        track_pump(
+            test_actor_id(3),
+            1,
+            track,
+            meta,
+            None,
+            crate::transport::SecureCell::new_verified(
+                crate::transport::secure_channel::test_context(1),
+            ),
+        ),
     )
     .await
     .expect("pump should exit after the scripted events");
@@ -125,7 +144,16 @@ async fn poll_stream_end_exits_the_pump() {
     crate::timer::timeout(
         crate::timer::ids::WEBRTC_PEER_SENDABLE,
         WAIT,
-        track_pump(test_actor_id(4), 1, track, meta, None),
+        track_pump(
+            test_actor_id(4),
+            1,
+            track,
+            meta,
+            None,
+            crate::transport::SecureCell::new_verified(
+                crate::transport::secure_channel::test_context(1),
+            ),
+        ),
     )
     .await
     .expect("pump must exit when the event stream closes");

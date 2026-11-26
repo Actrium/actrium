@@ -15,14 +15,14 @@ use actr_protocol::prost::Message as _;
 use actr_protocol::{ActrError, ActrId, DataChunk, PayloadType};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn serial_rpc_helpers_follow_custom_identities_and_peer_replacement() {
-    let identity = |serial, realm, _name: &str| ActrId {
-        realm: format!("realm{realm}@example.com"),
+async fn serial_rpc_helpers_follow_custom_identities_and_peer_restart() {
+    let identity = |serial| ActrId {
+        realm: "realm19@example.com".into(),
         serial_number: serial,
     };
     let mut harness = TestHarness::with_vnet().await;
-    let source_id = identity(310, 19, "source");
-    let old_target_id = identity(320, 19, "old-target");
+    let source_id = identity(310);
+    let old_target_id = identity(320);
     harness
         .add_peer_with_options(TestPeerOptions::new(310).with_identity(source_id))
         .await;
@@ -80,11 +80,7 @@ async fn serial_rpc_helpers_follow_custom_identities_and_peer_replacement() {
         Err(ActrError::Unavailable(_))
     ));
     harness
-        .add_peer_with_options(TestPeerOptions::new(320).with_identity(identity(
-            320,
-            23,
-            "new-target",
-        )))
+        .add_peer_with_options(TestPeerOptions::new(320).with_identity(identity(320)))
         .await;
     harness.connect(310, 320).await;
     let response = tokio::time::timeout(
@@ -99,7 +95,7 @@ async fn serial_rpc_helpers_follow_custom_identities_and_peer_replacement() {
     .await
     .unwrap()
     .unwrap()
-    .expect("existing source must resolve the replacement identity");
+    .expect("existing source must reach the restarted Actor in its realm");
     assert_eq!(response.as_ref(), b"pong");
     assert_eq!(harness.peer(320).request_count("replaced-custom-target"), 1);
     harness.shutdown().await;

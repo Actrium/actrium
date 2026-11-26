@@ -25,6 +25,7 @@ use crate::wire::webrtc::rtc::address::DesktopLocalAddressProvider;
 use crate::wire::webrtc::rtc::event_handler::WebRtcEventHandler;
 use crate::wire::webrtc::rtc::factory::PeerConnectionFactory;
 use crate::wire::webrtc::rtc::manager::RtcConnectionManager;
+use crate::wire::webrtc::rtc::peer::authentication::ActorChannelCredentials;
 use crate::wire::webrtc::rtc::peer::effects::{SessionFactory, SessionOps};
 use crate::wire::webrtc::rtc::runtime::RtcRuntimeConfig;
 use crate::wire::webrtc::rtc::signaling::in_memory::{InMemorySignalingHub, InMemoryTransport};
@@ -128,11 +129,10 @@ fn spawn_wired_node_with_factory(
         }),
     ));
 
-    let manager = Arc::new(RtcConnectionManager::with_inbound(
-        factory,
-        signaling_tx,
-        inbound,
-    ));
+    let manager = Arc::new(
+        RtcConnectionManager::with_inbound(factory, signaling_tx, inbound)
+            .with_actor_channel_identity(ActorChannelCredentials::fixture(&local_id)),
+    );
     manager.supervisor().set_signaling_generation(Some(0));
     let router = Arc::new(SignalingRouter::new(
         manager.clone(),

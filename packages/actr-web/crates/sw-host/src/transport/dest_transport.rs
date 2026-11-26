@@ -174,10 +174,7 @@ impl DestTransport {
 
     pub(crate) async fn rtc_disconnected(&self) -> WebResult<()> {
         self.rtc_recovery.store(RTC_RECOVERING, Ordering::Release);
-        if let Some(connection) = self.wire_pool.get_connection(ConnType::WebRTC).await {
-            connection.close().await?;
-        }
-        self.wire_pool.mark_connection_failed(ConnType::WebRTC);
+        self.wire_pool.set_rtc_reachable(false);
         Ok(())
     }
 
@@ -188,6 +185,7 @@ impl DestTransport {
             Ordering::AcqRel,
             Ordering::Acquire,
         );
+        self.wire_pool.set_rtc_reachable(true);
     }
 
     /// The DOM confirmed that the physical connection has been closed.
@@ -400,7 +398,7 @@ mod tests {
         let old_port = web_sys::MessageChannel::new().unwrap();
         let mut old = WebRtcConnection::new("peer".into());
         old.set_connection_id("old".into());
-        old.set_datachannel_port(old_port.port1());
+        old.set_verified_port_for_test(old_port.port1());
         let transport =
             DestTransport::new(Dest::Peer("peer".into()), vec![WireHandle::WebRTC(old)])
                 .await
@@ -414,7 +412,7 @@ mod tests {
         let new_port = web_sys::MessageChannel::new().unwrap();
         let mut replacement = WebRtcConnection::new("peer".into());
         replacement.set_connection_id("new".into());
-        replacement.set_datachannel_port(new_port.port1());
+        replacement.set_verified_port_for_test(new_port.port1());
         transport
             .wire_pool()
             .reconnect(WireHandle::WebRTC(replacement.clone()));
@@ -479,7 +477,7 @@ mod tests {
             .set_onmessage(Some(on_message.as_ref().unchecked_ref()));
         channel.port2().start();
         let mut rtc = WebRtcConnection::new("peer".into());
-        rtc.set_datachannel_port(channel.port1());
+        rtc.set_verified_port_for_test(channel.port1());
         let rtc_path = rtc.clone();
         let transport = Arc::new(
             DestTransport::new(
@@ -577,7 +575,7 @@ mod tests {
         channel.port2().start();
         let mut rtc = WebRtcConnection::new("peer".into());
         rtc.set_connection_id("old-connection".into());
-        rtc.set_datachannel_port(channel.port1());
+        rtc.set_verified_port_for_test(channel.port1());
         rtc.set_network_path(Some(false));
         let transport = Arc::new(
             DestTransport::new(
@@ -650,7 +648,7 @@ mod tests {
         ));
         let old_channel = web_sys::MessageChannel::new().unwrap();
         let mut rtc = WebRtcConnection::new("peer".into());
-        rtc.set_datachannel_port(old_channel.port1());
+        rtc.set_verified_port_for_test(old_channel.port1());
         rtc.set_network_path(Some(false));
         let transport = Arc::new(
             DestTransport::new(
@@ -676,12 +674,10 @@ mod tests {
                 .is_err()
         );
         transport.rtc_connected();
-        assert!(
-            transport
-                .send(PayloadType::StreamReliable, b"not rebound")
-                .await
-                .is_err()
-        );
+        transport
+            .send(PayloadType::StreamReliable, b"resumed")
+            .await
+            .unwrap();
 
         let channel = web_sys::MessageChannel::new().unwrap();
         let rtc_frames = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
@@ -696,7 +692,7 @@ mod tests {
             .set_onmessage(Some(on_message.as_ref().unchecked_ref()));
         channel.port2().start();
         let mut recovered = WebRtcConnection::new("peer".into());
-        recovered.set_datachannel_port(channel.port1());
+        recovered.set_verified_port_for_test(channel.port1());
         // Relay is preferred over a TURN-mediated RTC path, but the recovered
         // RTC lane must first acknowledge all earlier reliable messages.
         recovered.set_network_path(Some(true));
@@ -760,7 +756,7 @@ mod tests {
             .set_onmessage(Some(on_message.as_ref().unchecked_ref()));
         channel.port2().start();
         let mut rtc = WebRtcConnection::new("peer".into());
-        rtc.set_datachannel_port(channel.port1());
+        rtc.set_verified_port_for_test(channel.port1());
         rtc.set_network_path(Some(false));
         let transport = Arc::new(
             DestTransport::new(
