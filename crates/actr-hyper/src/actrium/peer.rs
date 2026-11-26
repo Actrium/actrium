@@ -113,8 +113,36 @@ struct SessionState {
     lease_epoch: u64,
     secret: SessionSecret,
     channel: Arc<VerifiedPeerContext>,
+    service_actor_state_digest: Option<[u8; 32]>,
     expires_at_epoch_secs: u64,
     recovery_required: bool,
+}
+
+impl SessionState {
+    fn from_verified_response(
+        response: &AttachResponse,
+        secret: SessionSecret,
+        channel: Arc<VerifiedPeerContext>,
+    ) -> Self {
+        let service_actor_state_digest =
+            <[u8; 32]>::try_from(response.privacy.actor_state_digest.as_slice())
+                .ok()
+                .filter(|digest| *digest != [0; 32]);
+        let expires_at_epoch_secs = response
+            .lease
+            .expires_at_epoch_secs
+            .min(response.privacy.expires_at_epoch_secs)
+            .min(channel.peer_credential_expires_at_epoch_secs);
+        Self {
+            session_id: response.session_id.clone(),
+            lease_epoch: response.lease_epoch,
+            secret,
+            channel,
+            service_actor_state_digest,
+            expires_at_epoch_secs,
+            recovery_required: false,
+        }
+    }
 }
 
 /// One attached peer session. Clones share the same session state.
@@ -139,6 +167,15 @@ impl ActriumPeerSession {
 
     pub async fn lease_epoch(&self) -> u64 {
         self.state.lock().await.lease_epoch
+    }
+
+    /// Digest from the verified response for this local session. This is a
+    /// snapshot used to compare assurance replies, with freshness established
+    /// separately by the authenticated query.
+    pub async fn service_actor_state_digest(&self) -> Option<[u8; 32]> {
+        let state = self.state.lock().await;
+        Self::ensure_usable(&state, now_secs()).ok()?;
+        state.service_actor_state_digest
     }
 
     fn envelope(method: &str, payload: Vec<u8>) -> ActorResult<RpcEnvelope> {
@@ -214,14 +251,6 @@ impl ActriumPeerSession {
             ActrError::PermissionDenied("AttachResponse carries no valid session secret".into())
         })?;
         Ok(SessionSecret::from_bytes(secret))
-    }
-
-    fn response_expiry(response: &AttachResponse, channel: &VerifiedPeerContext) -> u64 {
-        response
-            .lease
-            .expires_at_epoch_secs
-            .min(response.privacy.expires_at_epoch_secs)
-            .min(channel.peer_credential_expires_at_epoch_secs)
     }
 
     fn expired_session_error() -> ActrError {
@@ -624,14 +653,7 @@ impl ActriumPeerSession {
         request.session_proof = resume_proof(previous.secret.as_bytes(), &request);
         let response: AttachResponse = self.session_rpc("Resume", &request).await?;
         let secret = self.verify_response(&response, &resume_digest(&request), &channel)?;
-        *self.state.lock().await = SessionState {
-            session_id: response.session_id.clone(),
-            lease_epoch: response.lease_epoch,
-            secret,
-            channel: channel.clone(),
-            expires_at_epoch_secs: Self::response_expiry(&response, &channel),
-            recovery_required: false,
-        };
+        *self.state.lock().await = SessionState::from_verified_response(&response, secret, channel);
         Ok(())
     }
 
@@ -659,14 +681,7 @@ impl ActriumPeerSession {
             .session_rpc("Takeover", &TakeoverPayload { takeover, attach })
             .await?;
         let secret = self.verify_response(&response, &request_digest, &channel)?;
-        *self.state.lock().await = SessionState {
-            session_id: response.session_id.clone(),
-            lease_epoch: response.lease_epoch,
-            secret,
-            channel: channel.clone(),
-            expires_at_epoch_secs: Self::response_expiry(&response, &channel),
-            recovery_required: false,
-        };
+        *self.state.lock().await = SessionState::from_verified_response(&response, secret, channel);
         self.restart_heartbeat(response.lease.heartbeat_interval_ms)
             .await;
         Ok(())
@@ -754,6 +769,7 @@ impl ActrRef {
                 lease_epoch: 0,
                 secret: SessionSecret::from_bytes([0; 32]),
                 channel: channel.clone(),
+                service_actor_state_digest: None,
                 expires_at_epoch_secs: u64::MAX,
                 recovery_required: false,
             }),
@@ -764,14 +780,8 @@ impl ActrRef {
         let response: AttachResponse = session.session_rpc("Attach", &attach).await?;
         let secret =
             session.verify_response(&response, &attach_request_digest(&attach), &channel)?;
-        *session.state.lock().await = SessionState {
-            session_id: response.session_id.clone(),
-            lease_epoch: response.lease_epoch,
-            secret,
-            channel: channel.clone(),
-            expires_at_epoch_secs: ActriumPeerSession::response_expiry(&response, &channel),
-            recovery_required: false,
-        };
+        *session.state.lock().await =
+            SessionState::from_verified_response(&response, secret, channel);
         session
             .start_heartbeat(response.lease.heartbeat_interval_ms)
             .await;

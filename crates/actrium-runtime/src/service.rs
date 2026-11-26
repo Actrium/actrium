@@ -7,7 +7,7 @@ use actrium_core::session::{
 
 use crate::{
     AttachOutcome, Clock, ConfigError, HeartbeatOutcome, InMemorySessionRegistry, ServiceConfig,
-    ServicePolicies, SessionError, SessionGuard,
+    ServiceInstance, ServicePolicies, SessionError, SessionGuard,
 };
 
 /// Public Service Host entry point. These are protocol operations, never
@@ -21,6 +21,29 @@ impl InMemorySessionService {
     pub fn new(config: ServiceConfig, policies: ServicePolicies) -> Result<Self, ConfigError> {
         Ok(Self {
             registry: InMemorySessionRegistry::new(config, policies)?,
+        })
+    }
+
+    /// Create the session service for a measured run after the lifecycle manager
+    /// has durably committed it. The digest appears in signed session responses
+    /// without changing the application's existing privacy policy.
+    pub fn new_with_actor_state(
+        config: ServiceConfig,
+        policies: ServicePolicies,
+        instance: &ServiceInstance,
+    ) -> Result<Self, ConfigError> {
+        if config.service_actor_id != instance.actor_id
+            || config.runtime_instance_id != instance.runtime_instance_id
+        {
+            return Err(ConfigError(
+                "the Actor state belongs to a different Service or runtime instance".into(),
+            ));
+        }
+        let digest = instance.current_actor_state_digest().ok_or_else(|| {
+            ConfigError("the Service runtime has no valid committed Actor state".into())
+        })?;
+        Ok(Self {
+            registry: InMemorySessionRegistry::new_with_actor_state(config, policies, digest)?,
         })
     }
 

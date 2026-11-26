@@ -4,6 +4,7 @@
 //! crate starts at that trust boundary and implements the application session
 //! protocol. No Service workload lifecycle hooks are used.
 
+mod actor_state;
 mod config;
 mod crypto;
 mod error;
@@ -13,6 +14,7 @@ mod policy;
 mod registry;
 mod service;
 
+pub use actor_state::ActorStateFingerprints;
 pub use config::{AttachmentPolicy, ServiceConfig};
 pub use crypto::{
     attach_request_digest, attach_request_signing_bytes, attach_response_signing_bytes,
