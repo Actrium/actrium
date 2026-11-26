@@ -48,7 +48,7 @@ class Element {
   removeChild(child) { this.children.splice(this.children.indexOf(child), 1); }
 }
 
-async function page({ upgrading = false } = {}) {
+async function page({ upgrading = false, hardReload = false } = {}) {
   const elements = new Map([...html.matchAll(/id="([^"]+)"/g)].map(([, id]) => [id, new Element(id)]));
   const imports = [];
   const workerUrls = [];
@@ -63,12 +63,13 @@ async function page({ upgrading = false } = {}) {
     },
   };
   const serviceWorker = new EventTarget();
-  serviceWorker.controller = upgrading ? { postMessage: message => oldMessages.push(message) } : worker;
+  const active = upgrading ? { postMessage: message => oldMessages.push(message) } : worker;
+  serviceWorker.controller = hardReload ? null : active;
   serviceWorker.register = async (url) => {
     workerUrls.push(url);
     worker.scriptURL = url;
     return {
-      active: serviceWorker.controller,
+      active,
       installing: upgrading ? worker : null,
       update: async () => {},
     };
@@ -111,6 +112,15 @@ async function page({ upgrading = false } = {}) {
 }
 
 describe('bundled actr run --web Realm key provisioning', () => {
+  it('uses the matching active worker on a hard reload without a controller', async () => {
+    const host = await page({ hardReload: true });
+    await host.choose(JSON.stringify(key));
+    const started = host.start();
+    await vi.waitFor(() => expect(host.imports).toHaveLength(1));
+    host.imports[0].port.postMessage({ type: 'runtime_ready' });
+    await started;
+  });
+
   it('waits for the versioned worker before sending configuration', async () => {
     const host = await page({ upgrading: true });
     await host.choose(JSON.stringify(key));

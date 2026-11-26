@@ -150,11 +150,11 @@ export class ServiceWorkerBridge {
       const expected = registration.installing ?? registration.waiting ?? registration.active;
       const target = await new Promise<ServiceWorker>((resolve, reject) => {
         const onControllerChange = () => {
-          const controller = navigator.serviceWorker.controller;
-          if (!controller || controller !== expected || controller.scriptURL !== workerUrl.href) return;
+          const worker = navigator.serviceWorker.controller ?? registration.active;
+          if (!worker || worker !== expected || worker.scriptURL !== workerUrl.href) return;
           clearTimeout(timeout);
           navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
-          resolve(controller);
+          resolve(worker);
         };
         const timeout = setTimeout(() => {
           navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);

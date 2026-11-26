@@ -331,11 +331,11 @@
                 const expected = reg.installing ?? reg.waiting ?? reg.active;
                 const target = await new Promise((resolve, reject) => {
                     const ready = () => {
-                        const controller = navigator.serviceWorker.controller;
-                        if (!controller || controller !== expected || controller.scriptURL !== workerUrl.href) return;
+                        const worker = navigator.serviceWorker.controller ?? reg.active;
+                        if (!worker || worker !== expected || worker.scriptURL !== workerUrl.href) return;
                         clearTimeout(timer);
                         navigator.serviceWorker.removeEventListener('controllerchange', ready);
-                        resolve(controller);
+                        resolve(worker);
                     };
                     const timer = setTimeout(() => {
                         navigator.serviceWorker.removeEventListener('controllerchange', ready);
