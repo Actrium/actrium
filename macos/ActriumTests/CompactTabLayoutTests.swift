@@ -306,22 +306,21 @@ struct CompactTabLayoutTests {
     }
 
     @Test func aTabShedsItsTitleBeforeItShedsItsSlot() {
-        // The painted floor is the icon plus equal padding either side, so the
-        // narrowest Tab still shows which site it holds.
-        #expect(
-            CompactToolbarLayout.iconOnlyTabContentPadding
-                - CompactToolbarLayout.tabSeparationWidth
-                == (CompactToolbarLayout.iconOnlyTabPaintedWidth
-                    - CompactToolbarLayout.tabIconSize) / 2
-        )
-
-        // The floor's seams sit outside that painted width, so squeezing a Tab
-        // to its minimum never shortens the gap to its neighbour: the gap is
-        // the same two half seams at every width the strip can resolve.
+        // The floor is the icon itself, so an icon-only Tab keeps adapting —
+        // the room around its icon is what shrinks — instead of stopping at a
+        // padded minimum and handing the remainder to the scroll view.
         #expect(
             CompactToolbarLayout.inactiveTabCompressedMinWidth
                 - CompactToolbarLayout.tabSeparationWidth * 2
-                == CompactToolbarLayout.iconOnlyTabPaintedWidth
+                == CompactToolbarLayout.tabIconSize
+        )
+
+        // The seams sit outside that floor, so squeezing a Tab to its minimum
+        // never shortens the gap to its neighbour: the gap is the same two
+        // half seams at every width the strip can resolve.
+        #expect(
+            CompactToolbarLayout.inactiveTabCompressedMinWidth
+                > CompactToolbarLayout.tabSeparationWidth * 2
         )
 
         // The floor is inside the icon-only band, so a Tab at its floor never

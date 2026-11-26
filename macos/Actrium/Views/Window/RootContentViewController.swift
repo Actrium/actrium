@@ -116,18 +116,13 @@ enum CompactToolbarLayout {
     static let inactiveTabMinWidth: CGFloat = 88
     /// Box the site icon draws in.
     static let tabIconSize: CGFloat = 16
-    /// Painted width of the narrowest Tab: the icon and equal padding either
-    /// side, so a Tab sitting on its floor still shows the site it holds.
-    static let iconOnlyTabPaintedWidth: CGFloat = 28
-    /// Padding the icon-only Tab's content needs inside its slot: its margin
-    /// within the painted Tab, plus the half seam the slot reserves per side.
-    static let iconOnlyTabContentPadding: CGFloat =
-        (iconOnlyTabPaintedWidth - tabIconSize) / 2 + tabSeparationWidth
-    /// The narrowest a Tab may be squeezed to, seam included. The two half
-    /// seams sit outside the painted floor, so resizing a Tab never eats into
-    /// the gap between it and its neighbour.
+    /// The narrowest a Tab may be squeezed to: the icon itself, plus the two
+    /// half seams the slot reserves. Those seams sit outside the icon, so
+    /// resizing a Tab never touches the gap between it and its neighbour. An
+    /// icon-only Tab carries no padding of its own, so it keeps adapting —
+    /// the room around its icon is what shrinks.
     static let inactiveTabCompressedMinWidth: CGFloat =
-        iconOnlyTabPaintedWidth + tabSeparationWidth * 2
+        tabIconSize + tabSeparationWidth * 2
     /// At or below this width a Tab shows its icon alone. Below it there is
     /// room for the icon, its gaps, the side padding and only a few
     /// characters of title, which reads as noise rather than a name.
@@ -1582,9 +1577,10 @@ struct MainWindowTabsView: View {
         }
     }
 
-    /// An inactive Tab gives up its title before it gives up its slot: once
-    /// the assigned width can no longer hold a readable name, the icon stands
-    /// alone and centres itself in the tightened padding.
+    /// An inactive Tab gives up its title before it gives up its slot. With
+    /// the title gone it keeps no padding of its own either: the icon centres
+    /// in whatever width the strip hands it, so the room around the icon is
+    /// what shrinks instead of the Tab stopping at a padded minimum.
     private func inactiveTab(_ tab: Tab, width: CGFloat) -> some View {
         let showsTitle = width > CompactToolbarLayout.inactiveTabIconOnlyMaxWidth
 
@@ -1599,10 +1595,7 @@ struct MainWindowTabsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(
-            .horizontal,
-            showsTitle ? 10 : CompactToolbarLayout.iconOnlyTabContentPadding
-        )
+        .padding(.horizontal, showsTitle ? 10 : 0)
         .frame(height: 32)
         .background {
             tabSurface(for: tab, isActive: false)
