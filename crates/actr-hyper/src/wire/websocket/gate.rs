@@ -160,6 +160,13 @@ impl WebSocketGate {
         if !self.relay_mode {
             return Err(ActrError::Internal("Relay ingress not configured".into()));
         }
+        if conn.secure_cell().verified_peer().is_none_or(|context| {
+            context.peer_actor_id != peer || context.peer_actor_type != actor_type
+        }) {
+            return Err(ActrError::Unavailable(
+                "Relay peer channel is unverified".into(),
+            ));
+        }
         let mailbox = loop {
             let notified = self.mailbox_ready.notified();
             tokio::pin!(notified);
@@ -200,7 +207,7 @@ impl WebSocketGate {
             peer,
             (
                 sink,
-                SecureCell::new(crate::transport::SecureChannelState::Verified),
+                SecureCell::new_verified(crate::transport::secure_channel::test_context(1)),
             ),
         );
     }
@@ -219,10 +226,15 @@ impl WebSocketGate {
     /// (not an error) when there is no sendable inbound connection from
     /// `peer`, so the caller may try another transport. Returns `Ok(true)`
     /// on a successful send; an error may mean submission was attempted.
-    pub async fn send_response(
+    pub async fn send_response(&self, peer: &ActrId, envelope: RpcEnvelope) -> ActorResult<bool> {
+        self.send_response_on_channel(peer, envelope, None).await
+    }
+
+    pub(crate) async fn send_response_on_channel(
         &self,
         peer: &ActrId,
         mut envelope: RpcEnvelope,
+        expected: Option<&VerifiedPeerContext>,
     ) -> ActorResult<bool> {
         let entry_opt = {
             let map = self.inbound_sinks.read().await;
@@ -249,7 +261,12 @@ impl WebSocketGate {
             }
             return Ok(false);
         }
-        if !secure.is_io_sendable() {
+        let can_send = || {
+            secure
+                .verified_peer()
+                .is_some_and(|current| expected.is_none_or(|expected| expected == current.as_ref()))
+        };
+        if !can_send() {
             return Ok(false);
         }
 
@@ -276,7 +293,7 @@ impl WebSocketGate {
                 Some(s) => {
                     // The session may have stopped being sendable while the
                     // shared writer was busy. No bytes have been attempted.
-                    if !secure.is_io_sendable() {
+                    if !can_send() {
                         return Ok(false);
                     }
                     write_started = true;
@@ -711,7 +728,10 @@ impl WebSocketGate {
                                 if secure.epoch() != observed_epoch {
                                     continue;
                                 }
-                                let peer_context = secure.verified_peer();
+                                let Some(peer_context) = secure.verified_peer() else {
+                                    continue;
+                                };
+                                let peer_context = Some(peer_context);
                                 if secure.epoch() != observed_epoch {
                                     continue;
                                 }

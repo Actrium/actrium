@@ -194,6 +194,7 @@ fn spawn_harness_with_signaling_capacity(serial: u64, capacity: usize) -> Harnes
         crate::wire::webrtc::rtc::peer::controller::SharedNodeDeps {
             inbound,
             media_registry: None,
+            actor_channel_identity: None,
             buffer_config: crate::wire::webrtc::rtc::config::RtcBufferConfig::default(),
             #[cfg(feature = "test-utils")]
             driver_event_observer: None,
@@ -1163,6 +1164,7 @@ async fn lane_pump_routes_all_events_to_inbound() {
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
         tokio_util::sync::CancellationToken::new(),
+        None,
     ));
 
     // The lane becomes Open, then Closed as the script plays out.
@@ -1227,6 +1229,7 @@ async fn lane_pump_rejects_message_from_non_sendable_generation() {
     let (lane_tx, mut lane_rx) = mpsc::channel(4);
     let inbound_generation =
         std::sync::Arc::new(super::session::InboundGenerationGate::with_generation(2));
+    inbound_generation.verify_for_test(1);
     let mut framed = Vec::new();
     crate::transport::encode_fragment_header(&mut framed, 7, 0, 1);
     framed.extend_from_slice(b"stale");
@@ -1253,6 +1256,7 @@ async fn lane_pump_rejects_message_from_non_sendable_generation() {
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
         tokio_util::sync::CancellationToken::new(),
+        None,
     ));
 
     assert!(matches!(
@@ -1293,6 +1297,7 @@ async fn lane_pump_releases_message_when_same_generation_becomes_sendable() {
         },
     )));
     let gate = std::sync::Arc::new(super::session::InboundGenerationGate::new());
+    gate.verify_for_test(1);
     let (lane_tx, mut lane_rx) = mpsc::channel(4);
     let mut framed = Vec::new();
     crate::transport::encode_fragment_header(&mut framed, 8, 0, 1);
@@ -1321,6 +1326,7 @@ async fn lane_pump_releases_message_when_same_generation_becomes_sendable() {
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
         cancellation,
+        None,
     ));
 
     // Let the pump consume the message and enter the admission wait before
@@ -1356,6 +1362,7 @@ async fn lane_pump_admission_deadline_is_shared_across_stale_messages() {
     let peer = test_actor_id(1);
     let inbound = std::sync::Arc::new(InboundRouter::discard());
     let gate = std::sync::Arc::new(super::session::InboundGenerationGate::new());
+    gate.verify_for_test(1);
     let (lane_tx, mut lane_rx) = mpsc::channel(4);
 
     fn stale_frame(msg_id: u32) -> RTCDataChannelMessage {
@@ -1388,6 +1395,7 @@ async fn lane_pump_admission_deadline_is_shared_across_stale_messages() {
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
         tokio_util::sync::CancellationToken::new(),
+        None,
     ));
 
     // The first stale message arms the one 10-second lane/generation window.
@@ -1454,6 +1462,7 @@ async fn session_close_explicitly_closes_owned_channels_and_cancels_pumps() {
             inbound_generation: Arc::new(super::session::InboundGenerationGate::with_generation(1)),
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
+        None,
     );
     session.register_channel(
         LaneKind::RpcSignal,
@@ -1465,6 +1474,7 @@ async fn session_close_explicitly_closes_owned_channels_and_cancels_pumps() {
             inbound_generation: Arc::new(super::session::InboundGenerationGate::with_generation(1)),
             reassembly_limits: crate::transport::ReassemblyLimits::default(),
         },
+        None,
     );
 
     // Both pumps report OnOpen.

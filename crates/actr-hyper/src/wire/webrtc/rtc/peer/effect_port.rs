@@ -516,6 +516,7 @@ impl WebRtcEffectRunner {
                             &self.deps.buffer_config,
                         ),
                     },
+                    self.deps.actor_channel_identity.clone(),
                 )
             })
         };
@@ -564,6 +565,7 @@ impl WebRtcEffectRunner {
                     &self.deps.buffer_config,
                 ),
             },
+            self.deps.actor_channel_identity.clone(),
         ) else {
             return ResourceRegistration::MissingOrMismatched;
         };
@@ -606,6 +608,7 @@ impl WebRtcEffectRunner {
             meta,
             &self.peer_id,
             self.deps.media_registry.clone(),
+            self.inbound_generation.security(generation),
         ) {
             Some(track_id) => ResourceRegistration::Registered(track_id),
             None => ResourceRegistration::MissingOrMismatched,
@@ -721,6 +724,7 @@ impl WebRtcEffectRunner {
                 );
             }
             for (generation, session) in map.drain() {
+                self.inbound_generation.retire_security(generation);
                 closing
                     .entry(generation)
                     .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(session)));
@@ -851,6 +855,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                     self.deps.buffer_config.max_session_resources,
                 ));
                 let resource_registry = handler.resources();
+                let generation_security = self.inbound_generation.clone();
                 let factory = self.factory.clone();
                 let sessions = self.sessions.clone();
                 let resources = self.resources.clone();
@@ -880,6 +885,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                                 operation_id,
                                 "RTC PeerConnection built; session registered"
                             );
+                            generation_security.register_security(generation);
                             sessions.lock().expect("sessions lock").insert(
                                 generation,
                                 PeerConnectionSession::new_with_resources(
@@ -1114,6 +1120,7 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 generation,
                 operation_id,
             } => {
+                self.inbound_generation.retire_security(generation);
                 let sessions = self.sessions.clone();
                 let closing_sessions = self.closing_sessions.clone();
                 let resources = self.resources.clone();

@@ -395,6 +395,12 @@ timer_inventory! {
         success: "state event plus authoritative ready check", interrupt: "event stream close",
         expiry: "return no sendable session", reset: "new send wait only", external: false
     },
+    WEBRTC_ACTOR_AUTHENTICATION => {
+        id: "webrtc.actor_authentication", owner: "webrtc_session", category: FailureDeadline,
+        duration: "Actor handshake budget, then the verified credential lifetime", arm: "reliable DataChannel starts or verifies its Actor exchange",
+        success: "mutual authentication and key confirmation", interrupt: "reliable lane retirement",
+        expiry: "close the reliable lane and invalidate the secure generation", reset: "new physical session", external: false
+    },
     WEBRTC_PEER_INBOUND_ADMISSION => {
         id: "webrtc.coordinator.peer_inbound_admission", owner: "webrtc_coordinator", category: FailureDeadline,
         duration: "INBOUND_ADMISSION_WAIT (one lane/generation grace window)",

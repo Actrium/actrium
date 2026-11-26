@@ -102,10 +102,11 @@ pub(crate) async fn track_pump(
     track: Arc<dyn TrackRemote>,
     meta: TrackMeta,
     media_registry: Option<Arc<MediaFrameRegistry>>,
+    secure: crate::transport::SecureCell,
 ) {
     while let Some(event) = track.poll().await {
         match event {
-            TrackRemoteEvent::OnRtpPacket(packet) => {
+            TrackRemoteEvent::OnRtpPacket(packet) if secure.is_io_sendable() => {
                 let Some(registry) = &media_registry else {
                     continue;
                 };

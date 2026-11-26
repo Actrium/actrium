@@ -224,7 +224,7 @@ impl DestTransport {
             route.retry_at = None;
             return Ok(preferred);
         }
-        if !previous.is_connected() || !previous.secure_channel_state().is_sendable() {
+        if !previous.is_connected() || !previous.is_verified() {
             return Err(NetworkError::SecureChannelNotReady(
                 "previous reliable route is recovering; handover is not acknowledged".into(),
             ));
@@ -313,6 +313,13 @@ impl DestTransport {
         data: &[u8],
         progress_sink: Option<&DeliveryProgressCell>,
     ) -> DestSendAttempt {
+        let bound_channel = channel_binding(payload_type, data);
+        let matches_channel = |wire: &dyn WireHandle| {
+            bound_channel.as_ref().is_none_or(|channel| {
+                wire.verified_peer_context()
+                    .is_some_and(|context| &context.channel_id == channel)
+            })
+        };
         let mut reliable = if payload_type == PayloadType::StreamReliable {
             Some(self.reliable.lock().await)
         } else {
@@ -379,9 +386,20 @@ impl DestTransport {
 
                 // Get connection and create/get Lane
                 if let Some(conn) = self.conn_mgr.get_connection(conn_type).await {
+                    if !matches_channel(conn.as_ref()) {
+                        continue;
+                    }
                     let conn = if let Some(route) = reliable.as_deref_mut() {
                         match self.reliable_wire(conn, route).await {
-                            Ok(conn) => conn,
+                            Ok(conn) if matches_channel(conn.as_ref()) => conn,
+                            Ok(_) => {
+                                return DestSendAttempt::failed_pre_send(
+                                    NetworkError::SecureChannelNotReady(
+                                        "reliable route handover has not reached the bound Actor channel"
+                                            .into(),
+                                    ),
+                                );
+                            }
                             Err(error) => return DestSendAttempt::failed_pre_send(error),
                         }
                     } else {
@@ -399,7 +417,7 @@ impl DestTransport {
                             // recovery).  Do not select that stale candidate;
                             // continue to the next payload-capable route so a
                             // ready WebSocket fallback can carry the send.
-                            if !lane.is_healthy() {
+                            if !lane.is_healthy() || !matches_channel(conn.as_ref()) {
                                 tracing::debug!(
                                     "🔍 {:?} lane on {:?} is not healthy, trying next route",
                                     payload_type,
@@ -481,6 +499,9 @@ impl DestTransport {
                                     conn.invalidate_lane(payload_type).await;
                                     match conn.get_lane(payload_type).await {
                                         Ok(new_lane) => {
+                                            if !matches_channel(conn.as_ref()) {
+                                                continue 'send;
+                                            }
                                             if let Some(cell) = progress_sink {
                                                 mark_delivery_write_in_flight(cell);
                                             }
@@ -832,24 +853,22 @@ impl DestTransport {
     /// holds; otherwise a fresh session could never bootstrap.
     pub(crate) async fn verified_peer_context(
         &self,
-    ) -> Option<Arc<crate::transport::VerifiedPeerContext>> {
-        let route = self.reliable.lock().await;
-        if let Some(context) = route
-            .current
-            .as_ref()
-            .and_then(|wire| wire.verified_peer_context())
-        {
-            return Some(context);
-        }
-        drop(route);
-        for conn_type in [ConnType::WebSocket, ConnType::WebRTC] {
-            if let Some(wire) = self.conn_mgr.get_connection(conn_type).await
+        required: Option<ConnType>,
+    ) -> Option<(ConnType, Arc<crate::transport::VerifiedPeerContext>)> {
+        let mut preferred = None;
+        for conn_type in [ConnType::WebRTC, ConnType::WebSocket] {
+            if required.is_none_or(|required| conn_type == required)
+                && let Some(wire) = self.conn_mgr.get_connection(conn_type).await
+                && wire.is_connected()
                 && let Some(context) = wire.verified_peer_context()
+                && preferred
+                    .as_ref()
+                    .is_none_or(|(priority, _, _)| wire.priority() > *priority)
             {
-                return Some(context);
+                preferred = Some((wire.priority(), conn_type, context));
             }
         }
-        None
+        preferred.map(|(_, conn_type, context)| (conn_type, context))
     }
 
     pub(crate) async fn adopt_ready(&self, connection: Arc<dyn WireHandle>) {
@@ -911,3 +930,28 @@ fn candidate_conn_types(lane_types: &[DataLaneType]) -> Vec<ConnType> {
 #[cfg(test)]
 #[path = "dest_transport_tests.rs"]
 mod tests;
+
+/// Session traffic is signed for one channel generation. Ordinary Actor traffic
+/// can use any verified wire; session traffic can only use its bound wire.
+fn channel_binding(payload_type: PayloadType, bytes: &[u8]) -> Option<String> {
+    let key = crate::actrium::metadata::CHANNEL_ID;
+    if !bytes
+        .windows(key.len())
+        .any(|window| window == key.as_bytes())
+    {
+        return None;
+    }
+    let entries = match payload_type {
+        PayloadType::RpcReliable | PayloadType::RpcSignal => {
+            actr_protocol::RpcEnvelope::decode(bytes).ok()?.metadata
+        }
+        PayloadType::StreamReliable | PayloadType::StreamLatencyFirst => {
+            actr_protocol::DataChunk::decode(bytes).ok()?.metadata
+        }
+        _ => return None,
+    };
+    entries
+        .into_iter()
+        .find(|entry| entry.key == key)
+        .map(|entry| entry.value)
+}

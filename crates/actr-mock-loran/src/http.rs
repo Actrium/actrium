@@ -374,9 +374,8 @@ pub async fn relay_identity_handler(
     }))
 }
 
-/// Mint an Actor channel certificate when the test enabled them and the
-/// enrollment carries a decodable Actor credential. Missing or malformed
-/// material degrades to the legacy response instead of failing enrollment.
+/// Mint an Actor channel certificate for an enrollment with a decodable
+/// Actor credential and signing key.
 fn issue_actor_certificate(
     state: &MockState,
     request: &actr_relay_security::IdentityRequest,
@@ -386,12 +385,6 @@ fn issue_actor_certificate(
 ) -> Option<actr_relay_security::ActorChannelCertificate> {
     use actr_protocol::prost::Message as _;
     use actr_relay_security::*;
-    if !state
-        .actor_certificates_enabled
-        .load(std::sync::atomic::Ordering::Relaxed)
-    {
-        return None;
-    }
     let enrollment = request.actor.as_ref()?;
     let credential =
         actr_protocol::AIdCredential::decode(enrollment.actor_credential.as_slice()).ok()?;

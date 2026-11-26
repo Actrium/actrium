@@ -19,6 +19,7 @@ use actr_framework::WebRtcPeerStatus;
 use crate::wire::webrtc::rtc::address::DesktopLocalAddressProvider;
 use crate::wire::webrtc::rtc::factory::PeerConnectionFactory;
 use crate::wire::webrtc::rtc::manager::RtcConnectionManager;
+use crate::wire::webrtc::rtc::peer::authentication::ActorChannelCredentials;
 use crate::wire::webrtc::rtc::runtime::RtcRuntimeConfig;
 use crate::wire::webrtc::rtc::signaling::in_memory::{InMemorySignalingHub, InMemoryTransport};
 use crate::wire::webrtc::rtc::signaling::router::SignalingRouter;
@@ -50,7 +51,10 @@ fn spawn_node(hub: &Arc<InMemorySignalingHub>, local_id: ActrId) -> RtcNode {
         ])),
         Vec::new(), // loopback host candidates only; no STUN/TURN
     ));
-    let manager = Arc::new(RtcConnectionManager::new(factory, signaling_tx));
+    let manager = Arc::new(
+        RtcConnectionManager::new(factory, signaling_tx)
+            .with_actor_channel_identity(ActorChannelCredentials::fixture(&local_id)),
+    );
     manager.supervisor().set_signaling_generation(Some(0));
     let router = Arc::new(SignalingRouter::new(
         manager.clone(),
@@ -83,7 +87,9 @@ fn spawn_node_with_media(
         Vec::new(),
     ));
     let manager = Arc::new(
-        RtcConnectionManager::new(factory, signaling_tx).with_media_registry(media_registry),
+        RtcConnectionManager::new(factory, signaling_tx)
+            .with_media_registry(media_registry)
+            .with_actor_channel_identity(ActorChannelCredentials::fixture(&local_id)),
     );
     manager.supervisor().set_signaling_generation(Some(0));
     let router = Arc::new(SignalingRouter::new(
@@ -116,11 +122,10 @@ fn spawn_node_with_inbound(
         ])),
         Vec::new(),
     ));
-    let manager = Arc::new(RtcConnectionManager::with_inbound(
-        factory,
-        signaling_tx,
-        inbound,
-    ));
+    let manager = Arc::new(
+        RtcConnectionManager::with_inbound(factory, signaling_tx, inbound)
+            .with_actor_channel_identity(ActorChannelCredentials::fixture(&local_id)),
+    );
     // Match `spawn_node`/`spawn_node_with_media`: this standalone harness has
     // no lifecycle supervisor, so commit a synthetic signaling generation and
     // open the RTC recovery gate (dea7ff08). Without it the controller drops
@@ -163,6 +168,22 @@ async fn await_sendable(manager: &RtcConnectionManager, peer: &ActrId) -> RtcPee
     })
     .await
     .unwrap_or_else(|_| panic!("peer {} did not become sendable", peer.to_string_repr()))
+}
+
+async fn await_verified(manager: &RtcConnectionManager, peer: &ActrId) {
+    await_sendable(manager, peer).await;
+    let handle = manager.get_controller(peer).await.expect("peer controller");
+    timeout(WAIT, async {
+        loop {
+            let epoch = handle.secure_epoch();
+            if handle.secure_cell().is_io_sendable() {
+                return;
+            }
+            handle.await_secure_state_change(epoch).await;
+        }
+    })
+    .await
+    .expect("peer did not complete Actor channel authentication");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -317,9 +338,8 @@ async fn all_four_lanes_send_business_data_over_real_pcs() {
 
     // A initiates; the hub assigns A (lower serial) as offerer.
     a.manager.connect(b.local_id.clone()).await;
-    let snap_a = await_sendable(&a.manager, &b.local_id).await;
-    let snap_b = await_sendable(&b.manager, &a.local_id).await;
-    assert!(snap_a.sendable && snap_b.sendable, "both ends sendable");
+    await_verified(&a.manager, &b.local_id).await;
+    await_verified(&b.manager, &a.local_id).await;
 
     // A -> B on all four lanes. The anchor (RpcReliable) is already up; the
     // other lanes are created lazily on first send.
@@ -505,8 +525,8 @@ async fn outbound_media_sample_reaches_remote_registry() {
     let b = spawn_node_with_media(&hub, test_actor_id(2), registry);
 
     a.manager.connect(b.local_id.clone()).await;
-    await_sendable(&a.manager, &b.local_id).await;
-    await_sendable(&b.manager, &a.local_id).await;
+    await_verified(&a.manager, &b.local_id).await;
+    await_verified(&b.manager, &a.local_id).await;
 
     let handle_a = a
         .manager

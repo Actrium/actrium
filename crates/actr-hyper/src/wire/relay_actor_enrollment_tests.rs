@@ -2,6 +2,8 @@ use super::*;
 use crate::issuer_client::ActorKeySigner as _;
 use crate::lifecycle::credential_manager::{CredentialManager, RegistrationContext};
 use actr_protocol::{TurnCredential, register_response};
+use actr_relay_security::{CERTIFICATE_DOMAIN, Certificate, IdentityClaims, signing_bytes};
+use ed25519_dalek::Signer;
 
 #[tokio::test]
 async fn certified_identity_enrolls_actor_certificate_from_issuer() {
@@ -132,7 +134,6 @@ async fn certified_identity_enrolls_actor_certificate_from_issuer() {
         .certified_identity(&endpoint, &[3; 32])
         .await
         .unwrap();
-    let actor = actor.expect("Actor identity from enrollment");
     assert_eq!(actor.claims().actor_id, endpoint);
     assert_eq!(actor.actor_public_key(), &signer.public_key());
     assert_eq!(
@@ -143,12 +144,12 @@ async fn certified_identity_enrolls_actor_certificate_from_issuer() {
         .certified_identity(&endpoint, &[3; 32])
         .await
         .unwrap();
-    assert!(cached.is_some());
+    assert!(Arc::ptr_eq(&cached, &actor));
     mock.assert_async().await;
 }
 
 #[tokio::test]
-async fn certified_identity_falls_back_when_issuer_omits_actor_certificate() {
+async fn certified_identity_fails_closed_when_issuer_omits_actor_certificate() {
     let root = tempfile::tempdir().unwrap();
     let actor_type = ActrType::from_string_repr("actrium/actrium-front@1.0.0").unwrap();
     let realm = "test@example.com".to_string();
@@ -247,21 +248,9 @@ async fn certified_identity_falls_back_when_issuer_omits_actor_certificate() {
         None,
     );
 
-    // The Issuer silently skipped the requested Actor certificate: the client
-    // must keep the relay channel usable via the legacy identity instead of
-    // failing the peer forever, and remember the issuer so the cached identity
-    // is reused rather than re-enrolled per connection.
-    let (identity, actor) = client
-        .certified_identity(&endpoint, &[3; 32])
-        .await
-        .unwrap();
-    assert!(actor.is_none(), "legacy fallback without an Actor channel");
-    assert_eq!(identity.endpoint, endpoint);
-    let (_, cached_actor) = client
-        .certified_identity(&endpoint, &[3; 32])
-        .await
-        .unwrap();
-    assert!(cached_actor.is_none());
+    let result = client.certified_identity(&endpoint, &[3; 32]).await;
+    assert!(matches!(result, Err(NetworkError::ConnectionError(message))
+        if message.contains("did not return an Actor channel certificate")));
     mock.assert_async().await;
 }
 
@@ -486,7 +475,6 @@ async fn certified_identity_heals_unbound_actor_key_via_reissue() {
         .certified_identity(&endpoint, &[3; 32])
         .await
         .unwrap();
-    let actor = actor.expect("Actor identity after the reissue heal");
     assert_eq!(actor.claims().actor_id, endpoint);
     assert_eq!(actor.claims().actor_credential_digest, {
         let snapshot = client.session.snapshot().await;
