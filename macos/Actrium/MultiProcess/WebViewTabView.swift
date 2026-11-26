@@ -1008,13 +1008,13 @@ final class WebViewHolderManager {
                 guard let self = self, !Task.isCancelled else { return }
                 for (tabId, holder) in self.holders {
                     // Scope the recapture to the window that actually
-                    // resized; Tabs in other windows keep their images.
-                    if let resizedWindow,
-                       let hostWindow = holder.webView.window,
-                       hostWindow !== resizedWindow {
-                        continue
-                    }
-                    guard holder.webView.window != nil || holder.snapshot != nil else { continue }
+                    // resized: a Tab refreshes only while its WebView is
+                    // still hosted by that window. A detached holder (no host
+                    // window) and Tabs in other windows keep their cached
+                    // image instead of recapturing through a window they are
+                    // no longer displayed in.
+                    guard let resizedWindow,
+                          holder.webView.window === resizedWindow else { continue }
                     await self.takeSnapshot(for: tabId)
                 }
             }
