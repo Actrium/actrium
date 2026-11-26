@@ -1596,6 +1596,13 @@ struct MainWindowTabsView: View {
             }
         }
         .padding(.horizontal, showsTitle ? 10 : 0)
+        // The plate spans the slot, never the content. A Tab whose content is
+        // narrower than its slot — an icon-only Tab above all — would
+        // otherwise paint a plate that stops short of the slot and leave a
+        // gap that grows with the width. Spanning the slot keeps the seam
+        // between two Tabs exactly the two half seams at every width, and the
+        // room around the icon is what a resize takes away instead.
+        .frame(maxWidth: .infinity)
         .frame(height: 32)
         .background {
             tabSurface(for: tab, isActive: false)
@@ -1650,8 +1657,10 @@ struct MainWindowTabsView: View {
     }
 
     /// The plate is inset only horizontally inside its zero-spacing slot. Two
-    /// touching 1.5pt side insets expose a 3pt live-Header separator, while the
-    /// top and bottom remain visually continuous with the Tab surface.
+    /// touching half seams expose a live-Header separator between neighbours,
+    /// while the top and bottom remain visually continuous with the Tab
+    /// surface. The inset is a constant, not a share of the width, so this
+    /// separator is what a resize must never touch.
     private func tabSurface(
         for tab: Tab,
         isActive: Bool,
