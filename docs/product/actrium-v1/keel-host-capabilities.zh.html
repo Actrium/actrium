@@ -92,6 +92,7 @@ body {
 }
 .nav-item .no { font-family: var(--mono); font-size: 10px; color: var(--ink-3); width: 20px; flex: none; }
 .nav-item.hidden-by-search { display: none; }
+.nav-group.hidden-by-search { display: none; }
 .no-result { display: none; padding: 12px 10px; font-size: 12.5px; color: var(--ink-3); }
 .main { margin-left: var(--sidebar-w); padding: 88px 48px 120px; max-width: 1120px; }
 section.doc-section { margin-bottom: 84px; }
@@ -256,13 +257,6 @@ details.fold .fold-body { padding: 4px 18px 16px; border-top: 1px dashed var(--l
 .comp-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(30,36,48,.08); }
 .comp-card .cc-name { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--ink); }
 .comp-card .cc-desc { color: var(--ink-3); font-size: 11.5px; margin-top: 3px; line-height: 1.5; }
-.term { border-bottom: 1.5px dotted var(--accent); cursor: help; position: relative; color: inherit; }
-.term:hover::after {
-  content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%;
-  transform: translateX(-50%); background: var(--ink); color: var(--paper); font-size: 12px;
-  line-height: 1.55; padding: 9px 13px; border-radius: 8px; width: max-content;
-  max-width: 300px; white-space: normal; z-index: 90; font-family: var(--sans); font-weight: 400;
-}
 .footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
 .footer .path { margin-right: 6px; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
@@ -464,7 +458,9 @@ details.fold .fold-body { padding: 4px 18px 16px; border-top: 1px dashed var(--l
         <tr><td><code>host:speech.onInterimResult</code></td><td><code>host:speech.onInterimResult</code></td><td>订阅</td><td>监听识别中的临时文本。</td></tr>
         <tr><td><code>host:speech.stop</code></td><td><code>host:speech.stop</code></td><td>RPC</td><td>停止当前识别会话。</td></tr>
         <tr><td><code>host:speech.onStateChange</code></td><td><code>host:speech.onStateChange</code></td><td>订阅</td><td>监听 <code>recording</code> / <code>finalizing</code>。</td></tr>
-        <tr><td><code>host:file-import.pick</code></td><td><code>host:file-import.pick</code></td><td>RPC</td><td>选择文件或照片，返回文件名和 Base64 内容。</td></tr>
+        <tr><td><code>host:file-import.pick</code></td><td><code>host:file-import.pick</code></td><td>RPC</td><td>选择文件或照片；默认返回 Base64 内容，<code>cache</code> 时返回缓存 fileId。</td></tr>
+        <tr><td><code>host:file-import.openPreview</code></td><td><code>host:file-import.openPreview</code></td><td>RPC</td><td>打开缓存附件的原生预览。</td></tr>
+        <tr><td><code>host:file-import.release</code></td><td><code>host:file-import.release</code></td><td>RPC</td><td>释放缓存附件，回收宿主存储。</td></tr>
       </tbody>
     </table>
   </div>
@@ -520,7 +516,7 @@ await removeItem({ key: 'old-draft' });</pre></div>
   </table></div>
 
   <h2 id="native-files">文件导入</h2>
-  <p><code>host:file-import.pick</code> 调用原生选择器，返回文件内容而非附件 ID。需要发给 Service 时，应再调用固定附件上传或按业务协议编码。</p>
+  <p><code>host:file-import</code> 提供三个方法：<code>pick</code> 调用原生选择器；<code>openPreview</code> 预览缓存附件；<code>release</code> 释放缓存附件。默认情况下 <code>pick</code> 返回文件内容而非附件 ID，需要发给 Service 时，应再调用固定附件上传或按业务协议编码；传入 <code>cache: true</code> 时改由 Host 缓存文件，返回可直接用于 <code>openPreview</code> / <code>release</code> 的 <code>fileId</code>。</p>
   <div class="codeblock"><div class="cb-head"><span class="cb-lang">TypeScript</span><span class="cb-file">file-import.ts</span><button class="copy-btn" data-copy type="button">复制</button></div><pre>import { pick } from 'host:file-import';
 
 const { files } = await pick({
@@ -536,7 +532,17 @@ for (const file of files) {
     <li><code>source</code>：可选，<code>files</code> 或 <code>photos</code>。</li>
     <li><code>accept</code>：可选字符串数组，传递给 Host 文件选择器。</li>
     <li><code>multiple</code>：可选布尔值；输出统一为 <code>files</code> 数组。</li>
+    <li><code>cache</code>：可选布尔值。省略时每个文件返回 <code>{ name, base64, thumbnailBase64? }</code>；置为 <code>true</code> 时文件由 Host 缓存，返回 <code>{ fileId, name, size, thumbnailBase64?, canPreview? }</code>，不再携带原始字节。</li>
   </ul>
+  <div class="codeblock"><div class="cb-head"><span class="cb-lang">TypeScript</span><span class="cb-file">file-import-cache.ts</span><button class="copy-btn" data-copy type="button">复制</button></div><pre>import { openPreview, pick, release } from 'host:file-import';
+
+const { files } = await pick({ source: 'photos', cache: true });
+const photo = files[0];
+if (photo.fileId) {
+  await openPreview({ fileId: photo.fileId }); // 原生预览，需 host:file-import.openPreview 授权
+  await release({ fileId: photo.fileId });     // 释放缓存，需 host:file-import.release 授权
+}</pre></div>
+  <p>三个方法各自执行独立的 capability 授权：<code>host:file-import.pick</code>、<code>host:file-import.openPreview</code>、<code>host:file-import.release</code>。缓存附件能力不可用时，对应调用会抛错。</p>
 
   <h2 id="native-speech">语音识别</h2>
   <p><code>host:speech</code> 支持最终识别结果、临时结果、状态订阅和主动停止。省略 <code>continuous</code> 表示单次语句识别；当前 Host 同时只允许一个识别会话。</p>
@@ -943,7 +949,12 @@ media-type = "application/json"</pre></div>
   });
 
   function resolveHash() {
-    var hash = decodeURIComponent(location.hash.slice(1));
+    var hash = location.hash.slice(1);
+    try {
+      hash = decodeURIComponent(hash);
+    } catch (error) {
+      // 保留原始 hash，避免 malformed URI 中断后续初始化。
+    }
     if (hash) {
       var match = null;
       for (var j = 0; j < navItems.length; j++) {
@@ -977,14 +988,7 @@ media-type = "application/json"</pre></div>
       if (hit) visible++;
     });
     document.querySelectorAll('.sidebar .nav-group').forEach(function (group) {
-      var node = group.nextElementSibling;
-      var hasVisibleItem = false;
-      while (node && !node.classList.contains('nav-group')) {
-        if (node.classList.contains('nav-item') && !node.classList.contains('hidden-by-search')) {
-          hasVisibleItem = true;
-        }
-        node = node.nextElementSibling;
-      }
+      var hasVisibleItem = !!group.querySelector('.nav-item:not(.hidden-by-search)');
       group.classList.toggle('hidden-by-search', !hasVisibleItem);
     });
     noResult.style.display = visible ? 'none' : 'block';
