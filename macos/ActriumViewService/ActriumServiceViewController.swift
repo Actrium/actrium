@@ -1582,23 +1582,6 @@ final class ServiceReactNativeHost {
         RCTHostCallFunction(host, "RCTDeviceEventEmitter" as NSString, "emit" as NSString, args)
     }
 
-    /// Delivers one terminal attachment upload result to the JS of the tab
-    /// that owns the session. `streamId` is the upload's resultStreamId; JS
-    /// filters the broadcast by it.
-    func emitAttachmentUploadResult(tabId: String, event: RealmServiceAttachmentResultEvent) {
-        var body: [String: Any] = [
-            "tabId": tabId,
-            "streamId": event.streamId,
-            "attachmentId": event.attachmentId,
-            "status": event.status,
-            "statusCode": event.statusCode,
-        ]
-        if let errorMessage = event.errorMessage {
-            body["errorMessage"] = errorMessage
-        }
-        emitDeviceEvent(RealmServiceAttachmentResultEvent.nativeEventName, body: body)
-    }
-
     func updateDimensionsForEntry(_ entry: TabViewControllerEntry) {
         let size = entry.containerSize
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0

@@ -106,8 +106,8 @@ struct RendererProcessPoolPolicyTests {
     }
 
     @Test func rendererOperationReachesAFreshTabWithNoStoredEpoch() {
-        // Both a first attachment result and a first event subscription use
-        // this check. A fresh tab's missing entry is epoch zero, not a mismatch.
+        // A first event subscription uses this check. A fresh tab's missing
+        // entry is epoch zero, not a mismatch.
         #expect(
             RendererProcessPool.rendererEpochIsCurrent(
                 capturedEpoch: 0,

@@ -24,19 +24,16 @@ use actr_protocol::{
 use actrium_runtime::{
     AttachRequest, AttachResponse, BusinessRequest, DetachRequest, HeartbeatOutcome,
     HeartbeatRequest, LeaseMode, MessageKind, ProgramRelease, ResumeRequest, SessionSecret,
-    TakeoverRequest, VerifiedChannel, attach_request_digest, resume_digest, resume_proof,
-    sign_attach_request, takeover_signing_bytes, verify_attach_response, verify_request_proof,
+    TakeoverRequest, attach_request_digest, resume_digest, resume_proof, sign_attach_request,
+    takeover_signing_bytes, verify_attach_response,
 };
 use bytes::Bytes;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use super::service::{
-    AttachmentResultCancellation, PendingCall, PendingCallGuard, Shared as PeerShared,
-    TakeoverPayload, attachment_prepare_accepted, fresh_attachment_result_stream,
-};
-use super::{ATTACHMENT_CANCEL_ROUTE, metadata};
+use super::service::{PendingCall, PendingCallGuard, Shared as PeerShared, TakeoverPayload};
+use super::metadata;
 use crate::actr_ref::ActrRef;
 use crate::outbound::PeerGate;
 use crate::transport::{PeerTransport, RpcDeadline, VerifiedPeerContext};
@@ -389,39 +386,13 @@ impl ActriumPeerSession {
         payload: Vec<u8>,
         timeout: Duration,
     ) -> ActorResult<Vec<u8>> {
-        let (result_stream, transport_stream, payload) =
-            match fresh_attachment_result_stream(route, &payload)
-                .map_err(|error| error.into_actr_error())?
-            {
-                Some((result_stream, transport_stream, payload)) => {
-                    (Some(result_stream), Some(transport_stream), payload)
-                }
-                None => (None, None, payload),
-            };
         let (envelope, pending) = self
             .business_envelope(route, capability, MessageKind::Request, payload, timeout)
             .await?;
         let request_id = envelope.request_id.clone();
         let deadline = RpcDeadline::from_timeout_ms(envelope.timeout_ms)?;
-        if let (Some(stream_id), Some(transport_stream_id)) =
-            (result_stream.as_ref(), transport_stream)
-        {
-            self.runtime
-                .shared
-                .register_peer_attachment_result(
-                    stream_id.clone(),
-                    transport_stream_id,
-                    request_id.clone(),
-                    capability.to_string(),
-                    self,
-                )
-                .map_err(|error| error.into_actr_error())?;
-        }
-        let preserve_result = result_stream.is_some();
-        let pending = PendingCallGuard::new(self.runtime.shared.clone(), request_id, pending)
-            .with_attachment_result(result_stream);
-        let result = self
-            .runtime
+        let _pending = PendingCallGuard::new(self.runtime.shared.clone(), request_id, pending);
+        self.runtime
             .gate
             .send_request_with_type_until(
                 &self.service,
@@ -430,15 +401,7 @@ impl ActriumPeerSession {
                 deadline,
             )
             .await
-            .map(|bytes| bytes.to_vec());
-        if preserve_result
-            && result
-                .as_ref()
-                .is_ok_and(|bytes| attachment_prepare_accepted(bytes))
-        {
-            let _pending = pending.preserve_attachment_result();
-        }
-        result
+            .map(|bytes| bytes.to_vec())
     }
 
     /// Fire-and-forget tell with a session-signed request. No response proof
@@ -462,48 +425,6 @@ impl ActriumPeerSession {
                 RpcDeadline::from_duration(Duration::from_secs(30)),
             )
             .await
-    }
-
-    /// Cancel one accepted Prepare on the Service. This signed Host RPC never
-    /// enters the Guest, and its acknowledgement uses the normal response proof.
-    async fn cancel_attachment_result(
-        &self,
-        stream_id: &str,
-        prepare_request_id: String,
-        capability: &str,
-    ) -> ActorResult<()> {
-        let payload = serde_json::to_vec(&AttachmentResultCancellation {
-            stream_id: stream_id.to_string(),
-            prepare_request_id,
-        })
-        .map_err(|error| ActrError::Internal(format!("session encoding failed: {error}")))?;
-        let (envelope, pending_call) = self
-            .business_envelope(
-                ATTACHMENT_CANCEL_ROUTE,
-                capability,
-                MessageKind::Request,
-                payload,
-                Duration::from_secs(30),
-            )
-            .await?;
-        let deadline = RpcDeadline::from_timeout_ms(envelope.timeout_ms)?;
-        let pending = PendingCallGuard::new(
-            self.runtime.shared.clone(),
-            envelope.request_id.clone(),
-            pending_call,
-        );
-        let result = self
-            .runtime
-            .gate
-            .send_request_with_type_until(
-                &self.service,
-                PayloadType::RpcReliable,
-                envelope,
-                deadline,
-            )
-            .await;
-        drop(pending);
-        result.map(|_| ())
     }
 
     /// Send a stream chunk to this session's Service. Session metadata is
@@ -572,37 +493,6 @@ impl ActriumPeerSession {
                 &operation_id,
             )
             .await
-    }
-
-    /// Verify a Service-originated terminal attachment result against the live
-    /// outbound session. The shared Guard holds only a Weak handle to self, so
-    /// the secret and channel generation are never copied into a second cache.
-    pub(crate) async fn verify_incoming_stream(
-        &self,
-        request: &BusinessRequest,
-        channel: &VerifiedChannel,
-    ) -> ActorResult<()> {
-        let now = now_secs();
-        let state = self.state.lock().await.clone();
-        Self::ensure_usable(&state, now)?;
-        let valid = request.session_id == state.session_id
-            && request.lease_epoch == state.lease_epoch
-            && request.service_actor_id == self.service_actor_id
-            && request.channel_id == state.channel.channel_id
-            && channel.channel_id == state.channel.channel_id
-            && channel.peer_actor_id == self.service_actor_id
-            && request.route == super::ATTACHMENT_UPLOAD_TRANSPORT
-            && request.kind == MessageKind::StreamChunk
-            && request.issued_at <= now.saturating_add(60)
-            && request.deadline >= now
-            && verify_request_proof(state.secret.as_bytes(), request, &request.proof);
-        if valid {
-            Ok(())
-        } else {
-            Err(ActrError::PermissionDenied(
-                "the attachment result does not match the current outbound session".to_string(),
-            ))
-        }
     }
 
     /// Resume the lease over a freshly authenticated channel after a
@@ -695,35 +585,14 @@ impl ActriumPeerSession {
         if let Some(handle) = self.heartbeat.lock().await.take() {
             handle.abort();
         }
-        self.runtime.shared.drop_peer_attachment_results(self);
         Ok(())
     }
 }
 
 impl ActrRef {
-    /// Unregister a local stream and cancel the matching Actrium attachment
-    /// result reservation on both peers. Explicit upload cancellation waits for
-    /// the Service acknowledgement so the stream can immediately be prepared again.
+    /// Unregister a local stream callback.
     pub async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
-        // Remove the old callback before releasing its reservation. A retry may
-        // register the same caller-visible stream while the Host cancellation is
-        // in flight, but this call must never unregister that replacement.
-        let unregistered = self.app_context().await.unregister_stream(stream_id).await;
-        let cancellation = if let Some(runtime) = self.shared.peer_runtime.as_ref()
-            && let Some(reservation) = runtime.shared.take_peer_attachment_result(stream_id)
-            && let Some(session) = reservation.session.upgrade()
-        {
-            session
-                .cancel_attachment_result(
-                    &reservation.transport_stream_id,
-                    reservation.request_id,
-                    &reservation.capability,
-                )
-                .await
-        } else {
-            Ok(())
-        };
-        cancellation.and(unregistered)
+        self.app_context().await.unregister_stream(stream_id).await
     }
 
     /// Connect to a peer Service over the verified Actor channel and Attach.

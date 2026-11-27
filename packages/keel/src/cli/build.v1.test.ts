@@ -16,7 +16,7 @@ const contract = defineKeelContract({
   version: '1.0.0',
   hostModules: {
     'host:clipboard': { writeText: rpc() },
-    'host:service': { call: rpc(), tell: rpc(), uploadAttachment: rpc() },
+    'host:service': { call: rpc(), tell: rpc() },
   },
   guestExports: {},
 });
@@ -136,26 +136,6 @@ test('requires a fixed route for service calls', async () => {
       true
     )
   ).rejects.toThrow(/fixed route/);
-});
-
-test('builds the fixed uploadAttachment transport import from host:service', async () => {
-  await buildGuest(
-    `import { uploadAttachment } from 'host:service';
-    export default function App() {
-      uploadAttachment({ filename: 'report.pdf', base64: 'AAEC' });
-      return null;
-    }`,
-    true
-  );
-  const script = await Bun.file('workload/guest.js').text();
-  const manifest = await Bun.file('workload/capabilities.json').json();
-  expect(manifest).toMatchObject({
-    guestEntry: 'workload/guest.js',
-    hostModules: {
-      service: { rpc: ['uploadAttachment'] },
-    },
-  });
-  expect(script).not.toContain('require("host:service")');
 });
 
 test('still rejects a raw tell import from host:service', async () => {

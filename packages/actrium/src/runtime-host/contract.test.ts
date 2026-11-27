@@ -31,11 +31,10 @@ const service = contract.hostModules['host:service'];
 const call = service.call as unknown as InputSchema;
 const tell = service.tell as unknown as InputSchema;
 const on = service.on as unknown as EventSchema;
-const uploadAttachment = service.uploadAttachment as unknown as InputSchema;
 
 const cachedFileId = '824be89f-48d0-451e-b016-ef133fde55c2';
 
-test('cached picks return metadata and uploads accept the opaque ID only', () => {
+test('cached picks return opaque metadata with the original bytes withheld', () => {
   const pick = descriptor('host:file-import', 'pick').schema!;
   expect(pick.parseInput?.({ cache: true })).toMatchObject({ cache: true });
   expect(pick.parseOutput?.({ files: [{ fileId: cachedFileId, name: 'original.png', size: 10 }] }))
@@ -43,16 +42,8 @@ test('cached picks return metadata and uploads accept the opaque ID only', () =>
   const image = { fileId: cachedFileId, name: 'original.png', size: 10, canPreview: true };
   expect(pick.parseOutput?.({ files: [image] })).toEqual({ files: [image] });
   expect(() => pick.parseOutput?.({ files: [{ ...image, canPreview: 'yes' }] })).toThrow();
-  expect(uploadAttachment.schema?.parseInput?.({ fileId: cachedFileId, type: 'image' }))
-    .toMatchObject({ fileId: cachedFileId, type: 'image' });
-  expect(() => uploadAttachment.schema?.parseInput?.({ fileId: cachedFileId, filename: 'override.png', base64: 'AAEC' })).toThrow();
+  expect(() => pick.parseOutput?.({ files: [{ fileId: cachedFileId, name: 'override.png', base64: 'AAEC', size: 10 }] })).toThrow();
   expect(() => pick.parseOutput?.({ files: [{ fileId: 'file:///private/image.png', name: 'image.png', size: 10 }] })).toThrow();
-});
-
-test('an undefined fileId preserves the legacy Base64 upload', () => {
-  const legacy = { filename: 'original.png', base64: 'AAEC' };
-  const parse = uploadAttachment.schema?.parseInput;
-  expect(parse?.({ ...legacy, fileId: undefined })).toEqual(parse?.(legacy));
 });
 
 describe('host:service contract', () => {
@@ -170,48 +161,6 @@ describe('host:service contract', () => {
       payloadBase64: '',
     });
     expect(() => on.schema?.parseEvent?.({ event: '', payloadBase64: '' })).toThrow();
-  });
-
-  test('uploadAttachment accepts a valid request and defaults the type', () => {
-    expect(
-      uploadAttachment.schema?.parseInput?.({
-        filename: 'report.pdf',
-        base64: 'AAEC',
-      })
-    ).toEqual({ filename: 'report.pdf', base64: 'AAEC', type: 'document', id: undefined });
-    expect(
-      uploadAttachment.schema?.parseInput?.({
-        filename: 'photo.png',
-        base64: 'AAEC',
-        type: 'image',
-        id: 'fixed-id',
-      })
-    ).toEqual({ filename: 'photo.png', base64: 'AAEC', type: 'image', id: 'fixed-id' });
-  });
-
-  test('uploadAttachment rejects invalid input', () => {
-    const reject = (input: unknown) =>
-      expect(() => uploadAttachment.schema?.parseInput?.(input)).toThrow();
-    reject({ base64: 'AAEC' }); // missing filename
-    reject({ filename: '', base64: 'AAEC' });
-    reject({ filename: 'a.txt', base64: 'AAE' }); // unpadded base64
-    reject({ filename: 'a.txt', base64: '!!!' });
-    reject({ filename: 'a.txt', base64: 'AAEC', type: 'archive' });
-    reject({ filename: 'a.txt', base64: 'AAEC', id: '' });
-    reject({ filename: 'a.txt', base64: 'AAEC', id: 1 });
-    // 7 MiB + 1 byte, base64-encoded.
-    const oversized = Buffer.alloc(7 * 1024 * 1024 + 1).toString('base64');
-    reject({ filename: 'big.bin', base64: oversized });
-  });
-
-  test('uploadAttachment validates the output attachment id', () => {
-    expect(uploadAttachment.schema?.parseOutput?.({ attachmentId: 'a-1' })).toEqual({
-      attachmentId: 'a-1',
-    });
-    expect(() => uploadAttachment.schema?.parseOutput?.({})).toThrow();
-    expect(() =>
-      uploadAttachment.schema?.parseOutput?.({ attachmentId: 1 })
-    ).toThrow();
   });
 });
 

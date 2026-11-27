@@ -903,7 +903,7 @@ useEffect(() =&gt; {
 <section class="doc-section" id="sec-service">
   <div class="sec-head">
     <div class="sec-kicker">SECTION 04 · BUSINESS RPC</div>
-    <h1 style="font-size:30px">固定路由 Service<span class="en">CALL · EVENT · ATTACHMENT</span></h1>
+    <h1 style="font-size:30px">固定路由 Service<span class="en">CALL · EVENT</span></h1>
   </div>
 
   <p>业务 RPC 使用 <code>host:service/&lt;固定路由&gt;</code> 模块。斜杠只分隔模块前缀和完整业务路由；路由本身使用点分名称，例如 <code>echo.v1.EchoService.Echo</code>。包内 proto 定义业务 route 和消息结构，Keel contract 定义 Guest/Host 边界，两者不能互相替代。</p>
@@ -917,12 +917,10 @@ useEffect(() =&gt; {
     <tr><th>导入形式</th><th>方法</th><th>输入 / 输出</th><th>说明</th></tr>
     <tr><td><code>host:service/&lt;route&gt;</code></td><td><code>call</code></td><td><code>{ payloadBase64, timeoutMs? }</code> → <code>{ payloadBase64 }</code></td><td>固定 route 由 Host 注入；Guest 不传 route</td></tr>
     <tr><td><code>host:service/&lt;event&gt;</code></td><td><code>on</code></td><td>handler 收 <code>{ event, payloadBase64 }</code> → 退订函数</td><td>只接收匹配的固定事件</td></tr>
-    <tr><td><code>host:service</code></td><td><code>uploadAttachment</code></td><td><code>{ filename, base64, type?, id? }</code> → <code>{ attachmentId }</code></td><td>原始字节分支：直接上传字节；固定上传传输；package 能力名是 <code>service.attachmentUpload</code></td></tr>
-    <tr><td><code>host:service</code></td><td><code>uploadAttachment</code></td><td><code>{ fileId, type?, id? }</code> → <code>{ attachmentId }</code></td><td>缓存分支：<code>fileId</code> 来自 <code>host:file-import</code> 的缓存附件，Host 读取缓存文件后上传，Guest 不经手字节；与原始字节分支是互斥的联合类型，二选一</td></tr>
   </table></div>
   <div class="callout danger">
     <div class="co-title">裸 host:service 不提供动态业务调用</div>
-    <p>Product v1 不允许从裸 <code>host:service</code> 导入 <code>call</code>、<code>tell</code> 或 <code>on</code>；只有 <code>uploadAttachment</code> 使用这种固定传输导入。<code>tell</code> 当前未实现，不在本文可用 API 范围内。</p>
+    <p>Product v1 不允许从裸 <code>host:service</code> 导入任何导出；业务 RPC 和事件只能通过 <code>host:service/&lt;route&gt;</code> 与 <code>host:service/&lt;event&gt;</code> 固定模块的命名导入获得。<code>tell</code> 当前未实现，不在本文可用 API 范围内。</p>
   </div>
 
   <h3>RPC 示例</h3>
@@ -945,33 +943,46 @@ const reply = decodeEchoReply(out.payloadBase64);</pre></div>
   }): Promise&lt;{ payloadBase64: string }&gt;;
 }</pre></div>
 
-  <h3>附件上传示例</h3>
+  <h3>文件导入 + 固定路由上传示例</h3>
+  <p>v1 没有专门的附件上传通道。Guest 用 <code>host:file-import</code> 取到文件字节，再通过自己声明的固定业务路由（例如 <code>upload.v1.UploadService.AppendChunk</code>）分片 <code>call</code> 上传；分片序号、重试和结束标记都由 Guest 负责。</p>
   <div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · guest</span><button class="copy-btn" data-copy>复制</button></div>
-<pre>import { uploadAttachment } from 'host:service';
+<pre>import { pick } from 'host:file-import';
+import { call as appendChunk } from 'host:service/upload.v1.UploadService.AppendChunk';
+import { decodeAppendChunkReply, encodeAppendChunk } from './upload-wire';
 
-// 原始字节分支：filename/base64 必填
-const { attachmentId } = await uploadAttachment({
-  filename: 'report.pdf',
-  base64: fileBase64,
-  type: 'document',
-});
-
-// 缓存分支：直接上传 host:file-import 缓存的附件，无需读取字节
-import { pick } from 'host:file-import';
-const { files } = await pick({ source: 'photos', cache: true });
+const { files } = await pick({ source: 'documents', cache: false });
 const file = files[0];
-if (file &amp;&amp; 'fileId' in file) {
-  const { attachmentId: cachedId } = await uploadAttachment({
-    fileId: file.fileId,
-    type: 'image',
+if (!file || !('base64' in file)) throw new Error('no file');
+
+// Host 对单次 call 的请求体上限是 64 KiB；base64 膨胀 4/3 后，
+// 原始字节每片约 48 KiB 才能装进一次 call。
+const CHUNK_BYTES = 48 * 1024;
+const bytes = base64ToBytes(file.base64);
+let sequence = 1;
+for (let offset = 0; offset &lt; bytes.length; offset += CHUNK_BYTES) {
+  const chunk = bytes.subarray(offset, offset + CHUNK_BYTES);
+  const eos = offset + CHUNK_BYTES &gt;= bytes.length;
+  const out = await appendChunk({
+    payloadBase64: encodeAppendChunk({
+      filename: file.name,
+      sequence,
+      chunk,
+      eos,
+    }),
   });
+  decodeAppendChunkReply(out.payloadBase64);
+  sequence += 1;
 }</pre></div>
+  <div class="callout warn">
+    <div class="co-title">适用边界</div>
+    <p><code>call</code> 的请求上限是 64 KiB、响应上限是 256 KiB，因此每次只能承载约 48 KiB 原始字节；<code>cache: false</code> 时整个文件会以 base64 形式驻留在 Guest 堆中（7 MiB 上限的文件约占 9.3 MiB）。该方式适合小文件或配置类中转，不做大文件流式传输；<code>cache: true</code> 返回的 <code>fileId</code> 字节对 Guest 不透明，不能用于自行分片。</p>
+  </div>
 
   <h3>超时</h3>
   <p><code>timeoutMs</code> 默认 30 秒，全局上限 300 秒；应用 contract 可以进一步收紧。示例中的 8 秒、10 秒或 120 秒是具体应用选择，不是所有 Service 的统一超时。</p>
 
   <h3>Package 声明</h3>
-  <p>业务 RPC、事件和附件分别需要 <code>service.call</code>、<code>service.on</code>、<code>service.attachmentUpload</code>。使用 Service 的 Front 还需要 <code>[dependencies.service]</code> 和双方共用的 proto contract 文件；只写生成 manifest 不会自动获得这些授权。</p>
+  <p>业务 RPC 和事件分别需要 <code>service.call</code>、<code>service.on</code>；读取文件字节需要 <code>host:file-import</code> 对应的文件导入能力。使用 Service 的 Front 还需要 <code>[dependencies.service]</code> 和双方共用的 proto contract 文件；只写生成 manifest 不会自动获得这些授权。</p>
 
   <h2 id="svc-current">当前 Product v1 调用路径</h2>
   <div class="pipeline">
@@ -1083,7 +1094,7 @@ path = "workload/capabilities.json"
 role = "profile"
 media-type = "application/json"
 # size 与 sha256 由 packer 更新</pre></div>
-  <p>上面只演示与 JSON 示例对应的声明。实际项目按真实用量填写；使用附件上传时还需 <code>service.attachmentUpload</code>，使用 Service 时还需 dependency 和 proto contract 文件。</p>
+  <p>上面只演示与 JSON 示例对应的声明。实际项目按真实用量填写；自行分片上传文件时还需要读取字节的 <code>host:file-import</code> 能力、<code>service.call</code> 以及对应的业务 route，使用 Service 时还需 dependency 和 proto contract 文件。</p>
 </section>
 
 <!-- ========== 06 安全与能力模型 ========== -->
@@ -1144,7 +1155,7 @@ requiresSandbox = boolean   // 调用期由 sandbox 消耗，不进有效集</pr
   <h3>本文涉及的第三方 Front capabilities</h3>
   <div class="table-wrap"><table>
     <tr><th>能力</th><th>grant</th><th>备注</th></tr>
-    <tr><td><code>service.call</code> / <code>service.on</code> / <code>service.attachmentUpload</code></td><td>none</td><td>沙箱内调用</td></tr>
+    <tr><td><code>service.call</code> / <code>service.on</code></td><td>none</td><td>沙箱内调用</td></tr>
     <tr><td><code>host:clipboard.write</code></td><td>user</td><td>剪贴板</td></tr>
     <tr><td><code>host:local-storage.getItem/setItem/removeItem/replaceItems</code></td><td>none</td><td><b>requiresBroker</b></td></tr>
     <tr><td><code>host:speech.recognize / onInterimResult / stop / onStateChange</code></td><td>user / none</td><td>录音进程内查系统权限</td></tr>
@@ -1260,7 +1271,7 @@ requiresSandbox = boolean   // 调用期由 sandbox 消耗，不进有效集</pr
   <div class="table-wrap"><table>
     <tr><th>ACTR Hub 示例</th><th>推荐参考内容</th></tr>
     <tr><td><code>echo</code></td><td>最小固定路由 RPC、v1 manifest、Front/Service 打包与验证</td></tr>
-    <tr><td><code>askaway</code></td><td>附件上传、文件导入、剪贴板</td></tr>
+    <tr><td><code>askaway</code></td><td>文件导入、剪贴板</td></tr>
     <tr><td><code>lattice</code></td><td>固定事件订阅、取消订阅、附件与多 RPC</td></tr>
     <tr><td><code>qwen-chat</code></td><td>较长超时、实际 Protobuf 编解码和长请求处理</td></tr>
   </table></div>

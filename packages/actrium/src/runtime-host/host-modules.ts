@@ -12,8 +12,6 @@ import type {
   ServiceCallInput,
   ServiceEvent,
   ServiceTellInput,
-  ServiceUploadAttachmentInput,
-  ServiceUploadAttachmentOutput,
   SpeechInterimHandler,
   SpeechRecognizeInput,
   SpeechRecognizeOutput,
@@ -22,7 +20,6 @@ import type {
 import type { FrontCapability } from './capabilities';
 import type { LocalStorageCall } from './local-storage';
 import type { ServiceEventSource } from './service-events';
-import type { AttachmentUploadManager } from './attachment-upload';
 import type { GuestTTS } from './guest-tts';
 
 export type ServiceCallRequest = ServiceCallInput;
@@ -49,7 +46,7 @@ export type HostModules = HostModulesImplementation<ActriumContract>;
 
 /** Methods with a real Host implementation, excluding throwing placeholders. */
 export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>>> = {
-  'host:service': new Set(['call', 'on', 'uploadAttachment']),
+  'host:service': new Set(['call', 'on']),
   'host:clipboard': new Set(['writeText']),
   'host:tab': new Set(['setTitle']),
   'host:local-storage': new Set(['getItem', 'setItem', 'removeItem', 'replaceItems']),
@@ -111,17 +108,11 @@ export function createHostModules(options: {
   saveFile?: HostModules['host:file-export']['save'];
   openFilePreview?: (fileId: string) => Promise<void>;
   releaseCachedFile?: (fileId: string) => Promise<void>;
-  readCachedFile?: (fileId: string) => Promise<{ filename: string; base64: string }>;
   recognizeSpeech?: (
     input: SpeechRecognizeInput, onInterim?: SpeechInterimHandler, onState?: SpeechStateHandler
   ) => Promise<SpeechRecognizeOutput>;
   stopSpeech?: () => Promise<void>;
   tts?: GuestTTS;
-  /**
-   * Fixed transport attachment uploader. When absent, `uploadAttachment`
-   * fails closed; there is deliberately no HTTP or legacy fallback.
-   */
-  attachmentUploader?: AttachmentUploadManager;
 }): HostModules {
   let requestSequence = 0;
   const localStorage: LocalStorageCall = async (operation, input) => {
@@ -232,20 +223,6 @@ export function createHostModules(options: {
         );
 
         return cleanup;
-      },
-      uploadAttachment: async (
-        input: ServiceUploadAttachmentInput
-      ): Promise<ServiceUploadAttachmentOutput> => {
-        if (!options.attachmentUploader) {
-          throw new Error('The native attachment upload bridge is unavailable.');
-        }
-        await options.authorizeCapability('service.attachmentUpload');
-        if (input.fileId !== undefined) {
-          if (!options.readCachedFile) throw new Error('The attachment cache is unavailable.');
-          const file = await options.readCachedFile(input.fileId);
-          return options.attachmentUploader.upload({ ...file, type: input.type, id: input.id });
-        }
-        return options.attachmentUploader.upload(input);
       },
     },
     'host:assets': {

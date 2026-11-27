@@ -2,26 +2,23 @@
 //! current-policy business guard, sharing one session service and admission state.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard, Weak};
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard};
 
 use actr_protocol::{
-    ActorResult, ActrError, ActrId, DataChunk, Direction, MetadataEntry, RpcEnvelope,
-    prost::Message as _,
+    ActorResult, ActrError, DataChunk, Direction, MetadataEntry, RpcEnvelope, prost::Message as _,
 };
 use actrium_runtime::{
     AttachRequest, BusinessRequest, DetachRequest, GetStatusRequest, GuardedRequest,
     HeartbeatRequest, InMemorySessionService, MessageKind, ResumeRequest, SessionSecret,
-    SessionState, TakeoverRequest, request_proof, request_signing_bytes, verify_request_proof,
+    TakeoverRequest, request_proof, request_signing_bytes, verify_request_proof,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
 use tokio::sync::Mutex;
 
 use super::{
-    ATTACHMENT_CANCEL_ROUTE, ATTACHMENT_PREPARE_ROUTE, ATTACHMENT_UPLOAD_TRANSPORT, guard_error,
-    invalid_metadata, metadata, missing_verified_channel,
-    peer::{ActriumPeerSession, business_metadata},
-    session_actr_error, verified_channel,
+    guard_error, invalid_metadata, metadata, missing_verified_channel, session_actr_error,
+    verified_channel,
 };
 use crate::lifecycle::{
     IncomingDispatchRequest, IncomingGuard, IncomingGuardError, IncomingGuardErrorCode,
@@ -36,85 +33,13 @@ pub struct TakeoverPayload {
     pub attach: AttachRequest,
 }
 
-const ATTACHMENT_RESULT_RETENTION_SECS: u64 = 300;
-const MAX_PENDING_ATTACHMENT_RESULTS: usize = 1024;
-
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
-/// Typed Prepare fields used to validate the result stream. The Host replaces
-/// field 8 directly in the original wire payload so fields introduced by a
-/// newer contract survive the attempt-specific transport rewrite.
-#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
-pub(crate) struct PrepareAttachmentRequest {
-    #[prost(string, tag = "1")]
-    pub(crate) id: String,
-    #[prost(string, tag = "2")]
-    pub(crate) filename: String,
-    #[prost(int32, tag = "3")]
-    pub(crate) r#type: i32,
-    #[prost(string, tag = "4")]
-    pub(crate) stream_id: String,
-    #[prost(string, tag = "5")]
-    pub(crate) checksum: String,
-    #[prost(string, tag = "6")]
-    pub(crate) checksum_algorithm: String,
-    #[prost(uint64, tag = "7")]
-    pub(crate) size_bytes: u64,
-    #[prost(string, tag = "8")]
-    pub(crate) result_stream_id: String,
-}
-
-/// A successful RPC transport does not imply that the application accepted the
-/// upload. Only a well-formed zero-status Prepare response retains its stream.
-#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
-struct PrepareAttachmentResponse {
-    #[prost(int32, tag = "2")]
-    status_code: i32,
-}
-
-pub(crate) fn attachment_prepare_accepted(payload: &[u8]) -> bool {
-    PrepareAttachmentResponse::decode(payload).is_ok_and(|response| response.status_code == 0)
-}
-
-/// Host-to-Host cancellation for one accepted Prepare. The request proof and
-/// verified channel authorize the session; both IDs select the exact reservation.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct AttachmentResultCancellation {
-    pub(crate) stream_id: String,
-    pub(crate) prepare_request_id: String,
-}
-
 #[derive(Default)]
 pub(crate) struct Shared {
     admitted: Mutex<HashMap<(String, String), Admitted>>,
-    /// Prepare RPCs bind one result stream to the same Host-owned session.
-    /// Entries expire and are consumed by the single terminal result chunk.
-    attachment_results: Mutex<HashMap<String, PendingAttachmentResult>>,
-    /// The Front side of the same exchange. Weak session handles avoid a second
-    /// secret cache: verification always reads the live outbound session state.
-    peer_attachment_results: StdMutex<HashMap<String, PeerAttachmentResult>>,
     /// Pending outbound calls waiting for their response proof. A synchronous
     /// mutex lets the RPC-owned guard reclaim its entry even when the caller
     /// drops the future while suspended.
     pending: StdMutex<HashMap<String, PendingCall>>,
-}
-
-struct PendingAttachmentResult {
-    signing: ResponseContext,
-    expires_at: u64,
-}
-
-pub(crate) struct PeerAttachmentResult {
-    pub(crate) session: Weak<ActriumPeerSession>,
-    pub(crate) request_id: String,
-    pub(crate) capability: String,
-    pub(crate) transport_stream_id: String,
-    expires_at: u64,
 }
 
 impl Shared {
@@ -122,122 +47,6 @@ impl Shared {
         self.pending
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    fn peer_attachment_results(&self) -> StdMutexGuard<'_, HashMap<String, PeerAttachmentResult>> {
-        self.peer_attachment_results
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    pub(crate) fn register_peer_attachment_result(
-        &self,
-        stream_id: String,
-        transport_stream_id: String,
-        request_id: String,
-        capability: String,
-        session: &Arc<ActriumPeerSession>,
-    ) -> Result<(), IncomingGuardError> {
-        let now = now_secs();
-        let mut results = self.peer_attachment_results();
-        results.retain(|_, entry| entry.expires_at > now && entry.session.strong_count() > 0);
-        if results.contains_key(&stream_id)
-            || results
-                .values()
-                .any(|entry| entry.transport_stream_id == transport_stream_id)
-            || results.len() >= MAX_PENDING_ATTACHMENT_RESULTS
-        {
-            return Err(IncomingGuardError::new(
-                IncomingGuardErrorCode::Unavailable,
-                "the attachment result stream is already pending or at capacity".to_string(),
-            ));
-        }
-        results.insert(
-            stream_id,
-            PeerAttachmentResult {
-                session: Arc::downgrade(session),
-                request_id,
-                capability,
-                transport_stream_id,
-                expires_at: now.saturating_add(ATTACHMENT_RESULT_RETENTION_SECS),
-            },
-        );
-        Ok(())
-    }
-
-    fn peer_attachment_result_for_transport(
-        &self,
-        transport_stream_id: &str,
-    ) -> Option<(Weak<ActriumPeerSession>, String, String)> {
-        let now = now_secs();
-        let mut results = self.peer_attachment_results();
-        results.retain(|_, entry| entry.expires_at > now && entry.session.strong_count() > 0);
-        results
-            .iter()
-            .find(|(_, entry)| entry.transport_stream_id == transport_stream_id)
-            .map(|(stream_id, entry)| {
-                (
-                    entry.session.clone(),
-                    entry.request_id.clone(),
-                    stream_id.clone(),
-                )
-            })
-    }
-
-    pub(crate) fn finish_peer_attachment_result_for_request(
-        &self,
-        stream_id: &str,
-        request_id: &str,
-    ) -> bool {
-        let mut results = self.peer_attachment_results();
-        if results
-            .get(stream_id)
-            .is_some_and(|entry| entry.request_id == request_id)
-        {
-            results.remove(stream_id);
-            true
-        } else {
-            false
-        }
-    }
-
-    pub(crate) fn take_peer_attachment_result(
-        &self,
-        stream_id: &str,
-    ) -> Option<PeerAttachmentResult> {
-        self.peer_attachment_results().remove(stream_id)
-    }
-
-    async fn finish_attachment_result_for_request(
-        &self,
-        stream_id: &str,
-        request_id: &str,
-        session_id: &str,
-    ) {
-        let mut results = self.attachment_results.lock().await;
-        if results.get(stream_id).is_some_and(|entry| {
-            entry.signing.request_id == request_id && entry.signing.session_id == session_id
-        }) {
-            results.remove(stream_id);
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn attachment_result_request_id(&self, stream_id: &str) -> Option<String> {
-        self.attachment_results
-            .lock()
-            .await
-            .get(stream_id)
-            .map(|entry| entry.signing.request_id.clone())
-    }
-
-    pub(crate) fn drop_peer_attachment_results(&self, session: &ActriumPeerSession) {
-        self.peer_attachment_results().retain(|_, entry| {
-            entry
-                .session
-                .upgrade()
-                .is_some_and(|candidate| !std::ptr::eq(Arc::as_ptr(&candidate), session))
-        });
     }
 }
 
@@ -254,8 +63,6 @@ pub(crate) struct PendingCall {
 pub(crate) struct PendingCallGuard {
     shared: Arc<Shared>,
     request_id: String,
-    attachment_result_stream: Option<String>,
-    preserve_attachment_result: bool,
 }
 
 impl PendingCallGuard {
@@ -264,31 +71,13 @@ impl PendingCallGuard {
         Self {
             shared,
             request_id,
-            attachment_result_stream: None,
-            preserve_attachment_result: false,
         }
-    }
-
-    pub(crate) fn with_attachment_result(mut self, stream_id: Option<String>) -> Self {
-        self.attachment_result_stream = stream_id;
-        self
-    }
-
-    pub(crate) fn preserve_attachment_result(mut self) -> Self {
-        self.preserve_attachment_result = true;
-        self
     }
 }
 
 impl Drop for PendingCallGuard {
     fn drop(&mut self) {
         self.shared.pending().remove(&self.request_id);
-        if !self.preserve_attachment_result
-            && let Some(stream_id) = self.attachment_result_stream.as_deref()
-        {
-            self.shared
-                .finish_peer_attachment_result_for_request(stream_id, &self.request_id);
-        }
     }
 }
 
@@ -344,85 +133,6 @@ impl ResponseContext {
     }
 }
 
-pub(crate) fn attachment_result_stream(
-    route: &str,
-    payload: &[u8],
-) -> Result<Option<String>, IncomingGuardError> {
-    if route != ATTACHMENT_PREPARE_ROUTE {
-        return Ok(None);
-    }
-    let prepare = PrepareAttachmentRequest::decode(payload).map_err(|error| {
-        invalid_metadata(format!("invalid attachment prepare payload: {error}"))
-    })?;
-    if prepare.result_stream_id.is_empty() {
-        return Err(invalid_metadata(
-            "attachment prepare requires a result stream id",
-        ));
-    }
-    Ok(Some(prepare.result_stream_id))
-}
-
-/// Replace every occurrence of a singular length-delimited field without
-/// decoding and re-encoding the surrounding message. In particular, unknown
-/// fields and their original wire representation remain byte-for-byte intact.
-fn replace_length_delimited_field(
-    payload: &[u8],
-    field: u32,
-    replacement: &str,
-) -> Result<Vec<u8>, IncomingGuardError> {
-    use actr_protocol::prost::encoding::{self, DecodeContext, WireType};
-
-    let invalid = |error: actr_protocol::prost::DecodeError| {
-        invalid_metadata(format!("invalid attachment prepare payload: {error}"))
-    };
-    let mut remaining = payload;
-    let mut copied = 0;
-    let mut replaced = false;
-    let mut output = Vec::with_capacity(payload.len() + replacement.len() + 16);
-    while !remaining.is_empty() {
-        let field_start = payload.len() - remaining.len();
-        let (tag, wire_type) = encoding::decode_key(&mut remaining).map_err(invalid)?;
-        encoding::skip_field(wire_type, tag, &mut remaining, DecodeContext::default())
-            .map_err(invalid)?;
-        if tag != field {
-            continue;
-        }
-        if wire_type != WireType::LengthDelimited {
-            return Err(invalid_metadata(
-                "attachment result stream id must be length-delimited",
-            ));
-        }
-        output.extend_from_slice(&payload[copied..field_start]);
-        encoding::encode_key(field, WireType::LengthDelimited, &mut output);
-        encoding::encode_varint(replacement.len() as u64, &mut output);
-        output.extend_from_slice(replacement.as_bytes());
-        copied = payload.len() - remaining.len();
-        replaced = true;
-    }
-    if !replaced {
-        return Err(invalid_metadata(
-            "attachment prepare requires a result stream id",
-        ));
-    }
-    output.extend_from_slice(&payload[copied..]);
-    Ok(output)
-}
-
-/// Give every Prepare a fresh wire-level result stream. A delayed result from
-/// an abandoned upload therefore cannot be authenticated as a later Prepare
-/// that happens to reuse the same caller-visible stream ID.
-pub(crate) fn fresh_attachment_result_stream(
-    route: &str,
-    payload: &[u8],
-) -> Result<Option<(String, String, Vec<u8>)>, IncomingGuardError> {
-    let Some(result_stream) = attachment_result_stream(route, payload)? else {
-        return Ok(None);
-    };
-    let transport_stream = format!("actrium-result-{}", uuid::Uuid::new_v4());
-    let payload = replace_length_delimited_field(payload, 8, &transport_stream)?;
-    Ok(Some((result_stream, transport_stream, payload)))
-}
-
 struct Admitted {
     /// Held between mailbox arrival and dequeue; `None` once the request has
     /// been rechecked at dequeue or when no durable mailbox is involved.
@@ -432,8 +142,6 @@ struct Admitted {
     /// Cached signing bytes of the admitted request, used for the dequeue
     /// byte-identical recheck.
     request_signing_bytes: Vec<u8>,
-    /// Prepare reservations are released when the application rejects the RPC.
-    attachment_result_stream: Option<String>,
 }
 
 /// Dispatches the exact `actrium.session.v1` system routes into the session
@@ -551,58 +259,6 @@ impl SessionRegistry for ActriumServiceRegistry {
                     .lock()
                     .await
                     .retain(|_, entry| entry.signing.session_id != detach.session_id);
-                self.shared
-                    .attachment_results
-                    .lock()
-                    .await
-                    .retain(|_, entry| entry.signing.session_id != detach.session_id);
-                Ok(Bytes::new())
-            }
-            SessionMethod::CancelAttachmentResult => {
-                let business = envelope_request(request.envelope, request.metadata)
-                    .map_err(|error| error.into_actr_error())?;
-                if business.kind != MessageKind::Request
-                    || business.route != ATTACHMENT_CANCEL_ROUTE
-                {
-                    return Err(ActrError::InvalidArgument(
-                        "attachment cancellation requires a signed Request on its exact route"
-                            .to_string(),
-                    ));
-                }
-                let guarded = self
-                    .service
-                    .guard()
-                    .authorize(business.clone(), &channel)
-                    .await
-                    .map_err(session_actr_error)?;
-                let cancellation: AttachmentResultCancellation =
-                    serde_json::from_slice(&business.payload).map_err(|error| {
-                        ActrError::InvalidArgument(format!(
-                            "invalid attachment cancellation payload: {error}"
-                        ))
-                    })?;
-                if cancellation.stream_id.is_empty() || cancellation.prepare_request_id.is_empty() {
-                    return Err(ActrError::InvalidArgument(
-                        "attachment cancellation requires a stream and Prepare request id"
-                            .to_string(),
-                    ));
-                }
-                self.shared
-                    .finish_attachment_result_for_request(
-                        &cancellation.stream_id,
-                        &cancellation.prepare_request_id,
-                        &business.session_id,
-                    )
-                    .await;
-                self.shared.admitted.lock().await.insert(
-                    (business.session_id.clone(), business.request_id.clone()),
-                    Admitted {
-                        guarded: Some(guarded),
-                        signing: ResponseContext::from_request(&business),
-                        request_signing_bytes: request_signing_bytes(&business),
-                        attachment_result_stream: None,
-                    },
-                );
                 Ok(Bytes::new())
             }
             SessionMethod::GetStatus => {
@@ -835,7 +491,6 @@ impl IncomingGuard for ActriumServiceGuard {
             return Err(invalid_metadata("business requests require a request id"));
         }
         let request_signing_bytes = request_signing_bytes(&business);
-        let result_stream = attachment_result_stream(&business.route, &business.payload)?;
         let guard = self.service.guard();
         let admission_key = (business.session_id.clone(), business.request_id.clone());
         let mut admitted = self.shared.admitted.lock().await;
@@ -866,31 +521,12 @@ impl IncomingGuard for ActriumServiceGuard {
             .authorize(business.clone(), &channel)
             .await
             .map_err(guard_error)?;
-        if let Some(stream_id) = result_stream.as_ref() {
-            let now = now_secs();
-            let mut results = self.shared.attachment_results.lock().await;
-            results.retain(|_, entry| entry.expires_at > now);
-            if results.len() >= MAX_PENDING_ATTACHMENT_RESULTS && !results.contains_key(stream_id) {
-                return Err(IncomingGuardError::new(
-                    IncomingGuardErrorCode::Unavailable,
-                    "too many pending attachment result streams".to_string(),
-                ));
-            }
-            results.insert(
-                stream_id.clone(),
-                PendingAttachmentResult {
-                    signing: ResponseContext::from_request(&business),
-                    expires_at: now.saturating_add(ATTACHMENT_RESULT_RETENTION_SECS),
-                },
-            );
-        }
         admitted.insert(
             admission_key,
             Admitted {
                 guarded: Some(guarded),
                 signing: ResponseContext::from_request(&business),
                 request_signing_bytes,
-                attachment_result_stream: result_stream,
             },
         );
         Ok(())
@@ -916,21 +552,7 @@ impl IncomingGuard for ActriumServiceGuard {
             return Ok(());
         };
         let signing = entry.signing.clone();
-        let attachment_result_stream = entry.attachment_result_stream.clone();
         drop(admitted);
-        if let Some(stream_id) = attachment_result_stream {
-            let accepted = response.error.is_none()
-                && attachment_prepare_accepted(response.payload.as_deref().unwrap_or_default());
-            if !accepted {
-                self.shared
-                    .finish_attachment_result_for_request(
-                        &stream_id,
-                        &signing.request_id,
-                        &signing.session_id,
-                    )
-                    .await;
-            }
-        }
         let secret = self
             .service
             .session_secret(&signing.session_id)
@@ -975,12 +597,6 @@ impl IncomingGuard for ActriumServiceGuard {
         Ok(())
     }
 
-    fn stream_alias(&self, stream_id: &str) -> Option<String> {
-        self.shared
-            .peer_attachment_result_for_transport(stream_id)
-            .map(|(_, _, stream_id)| stream_id)
-    }
-
     async fn check_stream(
         &self,
         request: IncomingStreamChunk<'_>,
@@ -990,253 +606,12 @@ impl IncomingGuard for ActriumServiceGuard {
             .as_deref()
             .ok_or_else(missing_verified_channel)?;
         let channel = verified_channel(context)?;
-        let transport_stream_id = request.chunk.stream_id.clone();
         let business = chunk_request(request.chunk, request.metadata())?;
-        if let Some((session, prepare_request_id, stream_id)) = self
-            .shared
-            .peer_attachment_result_for_transport(&transport_stream_id)
-        {
-            let session = session.upgrade().ok_or_else(|| {
-                IncomingGuardError::new(
-                    IncomingGuardErrorCode::Revoked,
-                    "the Front's outbound attachment session is closed".to_string(),
-                )
-            })?;
-            session
-                .verify_incoming_stream(&business, &channel)
-                .await
-                .map_err(|error| {
-                    IncomingGuardError::new(
-                        IncomingGuardErrorCode::PermissionDenied,
-                        format!("outbound attachment result proof verification failed: {error}"),
-                    )
-                })?;
-            // Cancellation may have released this attempt while verification
-            // was suspended. Consume its exact reservation before restoring the
-            // caller-visible ID so a late result cannot reach a replacement.
-            if !self
-                .shared
-                .finish_peer_attachment_result_for_request(&stream_id, &prepare_request_id)
-            {
-                return Err(IncomingGuardError::new(
-                    IncomingGuardErrorCode::Revoked,
-                    "the attachment result attempt is no longer active".to_string(),
-                ));
-            }
-            request.into_chunk().stream_id = stream_id;
-            return Ok(());
-        }
         self.service
             .guard()
             .authorize(business, &channel)
             .await
             .map_err(guard_error)?;
         Ok(())
-    }
-
-    async fn authenticate_stream(
-        &self,
-        target: &ActrId,
-        chunk: &mut DataChunk,
-    ) -> Result<(), IncomingGuardError> {
-        let pending = {
-            let now = now_secs();
-            let mut results = self.shared.attachment_results.lock().await;
-            results.retain(|_, entry| entry.expires_at > now);
-            results.remove(&chunk.stream_id)
-        };
-        let Some(pending) = pending else {
-            return Ok(());
-        };
-        let session = self
-            .service
-            .session(&pending.signing.session_id)
-            .await
-            .filter(|session| {
-                matches!(session.state, SessionState::Active | SessionState::Grace)
-                    && session.front_actor_id == target.to_string_repr()
-            })
-            .ok_or_else(|| {
-                IncomingGuardError::new(
-                    IncomingGuardErrorCode::Revoked,
-                    "the attachment result session is closed, expired, or targets another Front"
-                        .to_string(),
-                )
-            })?;
-        let secret = self
-            .service
-            .session_secret(&pending.signing.session_id)
-            .await
-            .ok_or_else(|| {
-                IncomingGuardError::new(
-                    IncomingGuardErrorCode::Revoked,
-                    "the attachment result session is closed or expired".to_string(),
-                )
-            })?;
-
-        let now = now_secs();
-        let mut proof_input = pending
-            .signing
-            .into_request(MessageKind::StreamChunk, chunk.payload.to_vec());
-        proof_input.route = ATTACHMENT_UPLOAD_TRANSPORT.to_string();
-        proof_input.request_id = format!("{}:{}", chunk.stream_id, chunk.sequence);
-        proof_input.lease_epoch = session.lease_epoch;
-        proof_input.service_actor_id = session.service_actor_id;
-        proof_input.channel_id = session.channel_id;
-        proof_input.issued_at = now;
-        proof_input.deadline = now.saturating_add(30);
-        proof_input.idempotency_key = None;
-        proof_input.proof = request_proof(secret.as_bytes(), &proof_input);
-
-        chunk.metadata.retain(|entry| {
-            !matches!(
-                entry.key.as_str(),
-                metadata::SESSION_ID
-                    | metadata::LEASE_EPOCH
-                    | metadata::SERVICE_ACTOR_ID
-                    | metadata::CHANNEL_ID
-                    | metadata::CAPABILITY
-                    | metadata::ROUTE
-                    | metadata::ISSUED_AT
-                    | metadata::DEADLINE
-                    | metadata::IDEMPOTENCY_KEY
-                    | metadata::PROOF
-            )
-        });
-        chunk.metadata.extend(business_metadata(&proof_input));
-        chunk.metadata.push(MetadataEntry {
-            key: metadata::ROUTE.to_string(),
-            value: ATTACHMENT_UPLOAD_TRANSPORT.to_string(),
-        });
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod attachment_reservation_tests {
-    use super::*;
-
-    fn pending(request_id: &str, session_id: &str) -> PendingAttachmentResult {
-        PendingAttachmentResult {
-            signing: ResponseContext {
-                session_id: session_id.to_string(),
-                lease_epoch: 1,
-                service_actor_id: "service".to_string(),
-                channel_id: "channel".to_string(),
-                route: ATTACHMENT_PREPARE_ROUTE.to_string(),
-                capability: "documents.read".to_string(),
-                request_id: request_id.to_string(),
-                issued_at: 1,
-                deadline: 30,
-                idempotency_key: None,
-            },
-            expires_at: u64::MAX,
-        }
-    }
-
-    #[test]
-    fn prepare_transport_streams_are_attempt_specific() {
-        let prepare = PrepareAttachmentRequest {
-            id: "attachment".to_string(),
-            filename: "notes.txt".to_string(),
-            r#type: 3,
-            stream_id: "chunks".to_string(),
-            checksum: "checksum".to_string(),
-            checksum_algorithm: "md5".to_string(),
-            size_bytes: 42,
-            result_stream_id: "result".to_string(),
-        };
-        let mut payload = prepare.encode_to_vec();
-        let unknown_start = payload.len();
-        actr_protocol::prost::encoding::encode_key(
-            100,
-            actr_protocol::prost::encoding::WireType::LengthDelimited,
-            &mut payload,
-        );
-        actr_protocol::prost::encoding::encode_varint(11, &mut payload);
-        payload.extend_from_slice(b"newer-field");
-        let unknown = payload[unknown_start..].to_vec();
-        let (public, first, first_payload) =
-            fresh_attachment_result_stream(ATTACHMENT_PREPARE_ROUTE, &payload)
-                .unwrap()
-                .unwrap();
-        let (_, second, second_payload) =
-            fresh_attachment_result_stream(ATTACHMENT_PREPARE_ROUTE, &payload)
-                .unwrap()
-                .unwrap();
-
-        assert_eq!(public, "result");
-        assert_ne!(first, second);
-        for (transport, payload) in [(first, first_payload), (second, second_payload)] {
-            assert!(payload.ends_with(&unknown));
-            let decoded = PrepareAttachmentRequest::decode(payload.as_slice()).unwrap();
-            let mut expected = prepare.clone();
-            expected.result_stream_id = transport;
-            assert_eq!(decoded, expected);
-        }
-    }
-
-    #[tokio::test]
-    async fn cleanup_only_removes_the_prepare_that_owns_the_reservation() {
-        let shared = Shared::default();
-        shared
-            .attachment_results
-            .lock()
-            .await
-            .insert("result".to_string(), pending("new-prepare", "new-session"));
-
-        shared
-            .finish_attachment_result_for_request("result", "old-prepare", "old-session")
-            .await;
-        assert_eq!(
-            shared
-                .attachment_results
-                .lock()
-                .await
-                .get("result")
-                .map(|entry| entry.signing.request_id.as_str()),
-            Some("new-prepare")
-        );
-        shared
-            .finish_attachment_result_for_request("result", "new-prepare", "old-session")
-            .await;
-        assert!(
-            shared
-                .attachment_results
-                .lock()
-                .await
-                .contains_key("result")
-        );
-        shared
-            .finish_attachment_result_for_request("result", "new-prepare", "new-session")
-            .await;
-        assert!(
-            !shared
-                .attachment_results
-                .lock()
-                .await
-                .contains_key("result")
-        );
-
-        shared.peer_attachment_results().insert(
-            "result".to_string(),
-            PeerAttachmentResult {
-                session: Weak::new(),
-                request_id: "new-prepare".to_string(),
-                capability: "documents.read".to_string(),
-                transport_stream_id: "new-transport".to_string(),
-                expires_at: u64::MAX,
-            },
-        );
-        shared.finish_peer_attachment_result_for_request("result", "old-prepare");
-        assert_eq!(
-            shared
-                .peer_attachment_results()
-                .get("result")
-                .map(|entry| entry.request_id.as_str()),
-            Some("new-prepare")
-        );
-        shared.finish_peer_attachment_result_for_request("result", "new-prepare");
-        assert!(!shared.peer_attachment_results().contains_key("result"));
     }
 }

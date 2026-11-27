@@ -44,38 +44,6 @@ private actor ControlledRealmServiceBinding: RealmServiceBindingHandle {
         suspendCount += 1
     }
 
-    var attachmentUploadAvailable: Bool { false }
-
-    func prepareAttachmentUpload(
-        _ request: RealmServiceAttachmentPrepareCall,
-        deliver: @escaping @Sendable (RealmServiceAttachmentResultEvent) -> Void
-    ) async -> RealmServiceAttachmentPrepareReply {
-        RealmServiceAttachmentPrepareReply(
-            id: request.id,
-            failure: RealmServiceFailure(code: "unavailable", message: "Test binding")
-        )
-    }
-
-    func sendAttachmentChunk(
-        _ request: RealmServiceAttachmentChunkCall
-    ) async -> RealmServiceAttachmentChunkReply {
-        RealmServiceAttachmentChunkReply(
-            id: request.id,
-            failure: RealmServiceFailure(code: "unavailable", message: "Test binding")
-        )
-    }
-
-    func unregisterAttachmentStream(
-        _ request: RealmServiceAttachmentUnregisterCall
-    ) async -> RealmServiceAttachmentUnregisterReply {
-        RealmServiceAttachmentUnregisterReply(
-            id: request.id,
-            failure: RealmServiceFailure(code: "unavailable", message: "Test binding")
-        )
-    }
-
-    func cancelAttachmentUploads() async {}
-
     func stop() {}
 }
 

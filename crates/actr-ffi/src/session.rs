@@ -80,7 +80,6 @@ impl ActriumServiceConfig {
             .into_iter()
             .map(|entry| (entry.route, entry.capabilities.into_iter().collect()))
             .collect();
-        let routes = actr_hyper::actrium::service_routes(&routes);
         actrium_runtime::ServiceConfig {
             service_actor_id: self.service_actor_id,
             runtime_instance_id: actr_hyper::process_runtime_instance_id().to_owned(),

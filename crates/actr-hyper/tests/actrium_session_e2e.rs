@@ -9,9 +9,7 @@ use actr_framework::{Bytes, Context, Dest, MessageDispatcher, Workload};
 use actr_hyper::actrium::{ActriumAttachParams, FrontSessionMetadata};
 use actr_hyper::test_support::TestSignalingServer;
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
-use actr_protocol::{
-    ActrId, ActrType, DataChunk, PayloadType, RpcEnvelope, RpcRequest, prost::Message as _,
-};
+use actr_protocol::{ActrId, ActrType, PayloadType, RpcEnvelope, RpcRequest};
 use actrium_runtime::{
     AttachmentPolicy, InMemorySessionService, ProgramRelease, ServiceConfig, ServicePolicies,
 };
@@ -20,8 +18,6 @@ use tempfile::TempDir;
 
 const REALM: &str = "test7@example.com";
 const READ: &str = "documents.read";
-const PREPARE_ATTACHMENT_ROUTE: &str = "ask.AskService.PrepareAttachmentUpload";
-const ATTACHMENT_UPLOAD_ROUTE: &str = "uploadAttachment";
 
 /// Minimal typed RPC request used for the business call.
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
@@ -34,20 +30,6 @@ pub struct EchoRequest {
 pub struct EchoResponse {
     #[prost(bytes = "vec", tag = "1")]
     pub payload: Vec<u8>,
-}
-
-#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
-pub struct PrepareAttachmentRequest {
-    #[prost(string, tag = "1")]
-    pub id: String,
-    #[prost(string, tag = "8")]
-    pub result_stream_id: String,
-}
-
-#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
-pub struct PrepareAttachmentResponse {
-    #[prost(int32, tag = "2")]
-    pub status_code: i32,
 }
 
 impl RpcRequest for EchoRequest {
@@ -77,22 +59,6 @@ impl MessageDispatcher for EchoDispatcher {
     ) -> actr_protocol::ActorResult<Bytes> {
         match envelope.route_key.as_str() {
             "echo" => Ok(envelope.payload.unwrap_or_default()),
-            PREPARE_ATTACHMENT_ROUTE => {
-                let payload = envelope.payload.unwrap_or_default();
-                let request =
-                    PrepareAttachmentRequest::decode(payload.clone()).map_err(|error| {
-                        actr_protocol::ActrError::InvalidArgument(format!(
-                            "invalid attachment prepare payload: {error}"
-                        ))
-                    })?;
-                if request.id == "reject" {
-                    Ok(Bytes::from(
-                        PrepareAttachmentResponse { status_code: 13 }.encode_to_vec(),
-                    ))
-                } else {
-                    Ok(payload)
-                }
-            }
             other => Err(actr_protocol::ActrError::InvalidArgument(format!(
                 "unknown route: {other}"
             ))),
@@ -301,13 +267,10 @@ fn make_service_config(
             keel_api: "1".into(),
         }],
         program_capabilities: BTreeSet::from([READ.to_string()]),
-        routes: actr_hyper::actrium::service_routes(&BTreeMap::from([
-            ("echo".to_string(), BTreeSet::from([READ.to_string()])),
-            (
-                ATTACHMENT_UPLOAD_ROUTE.to_string(),
-                BTreeSet::from([READ.to_string()]),
-            ),
-        ])),
+        routes: BTreeMap::from([(
+            "echo".to_string(),
+            BTreeSet::from([READ.to_string()]),
+        )]),
         attachment_policy: AttachmentPolicy::Exclusive,
         lease_duration: Duration::from_secs(300),
         heartbeat_interval: Duration::from_secs(30),
@@ -468,12 +431,14 @@ async fn two_fronts_use_the_same_service_over_ordinary_relay() {
     assert_eq!(first_reply.unwrap(), first_payload);
     assert_eq!(second_reply.unwrap(), second_payload);
 
+    // A route the Service manifest does not grant must be rejected by the
+    // session policy even when the caller is otherwise authenticated.
     let denied = first_context
         .call_raw(
             &target,
-            PREPARE_ATTACHMENT_ROUTE.into(),
+            "not.granted.Route".into(),
             PayloadType::RpcReliable,
-            Bytes::from(PrepareAttachmentRequest::default().encode_to_vec()),
+            Bytes::from_static(b"payload"),
             15_000,
         )
         .await;
@@ -552,258 +517,6 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
         .tell("echo", READ, b"tell payload".to_vec())
         .await
         .expect("session-signed tell is admitted");
-
-    // The same authenticated session carries the attachment prepare RPC and
-    // the stream chunks. Both paths are admitted by the receiving Guard.
-    let prepare = PrepareAttachmentRequest {
-        id: String::new(),
-        result_stream_id: "attachment-result".to_string(),
-    }
-    .encode_to_vec();
-    let prepared = session
-        .call(
-            PREPARE_ATTACHMENT_ROUTE,
-            READ,
-            prepare.clone(),
-            Duration::from_secs(30),
-        )
-        .await
-        .expect("prepare RPC is bound to the Attach session");
-    let prepared = PrepareAttachmentRequest::decode(prepared.as_slice()).unwrap();
-    let transport_result_stream = prepared.result_stream_id;
-    assert_ne!(transport_result_stream, "attachment-result");
-    assert!(transport_result_stream.starts_with("actrium-result-"));
-
-    // An application-level rejection is still a successful, authenticated RPC.
-    // It must release the Front reservation immediately; explicit cancellation
-    // through unregister_stream must do the same for an accepted Prepare.
-    let rejected = session
-        .call(
-            PREPARE_ATTACHMENT_ROUTE,
-            READ,
-            PrepareAttachmentRequest {
-                id: "reject".into(),
-                result_stream_id: "reused-attachment-result".into(),
-            }
-            .encode_to_vec(),
-            Duration::from_secs(30),
-        )
-        .await
-        .expect("the rejected Prepare response is authenticated");
-    assert_eq!(
-        PrepareAttachmentResponse::decode(rejected.as_slice())
-            .unwrap()
-            .status_code,
-        13
-    );
-    let accepted = PrepareAttachmentRequest {
-        id: String::new(),
-        result_stream_id: "reused-attachment-result".into(),
-    }
-    .encode_to_vec();
-    session
-        .call(
-            PREPARE_ATTACHMENT_ROUTE,
-            READ,
-            accepted.clone(),
-            Duration::from_secs(30),
-        )
-        .await
-        .expect("a rejected Prepare releases its result stream for immediate reuse");
-    front
-        .unregister_stream("reused-attachment-result")
-        .await
-        .expect("explicit cancellation unregisters the result stream");
-    session
-        .call(
-            PREPARE_ATTACHMENT_ROUTE,
-            READ,
-            accepted,
-            Duration::from_secs(30),
-        )
-        .await
-        .expect("explicit cancellation releases its result stream for immediate reuse");
-    front
-        .unregister_stream("reused-attachment-result")
-        .await
-        .expect("clean up the reused result stream");
-
-    // Reusing the caller-visible stream must not allow abandoned upload work
-    // to complete a newer Prepare. The Host gives each attempt a distinct
-    // transport stream and restores the public ID only after verification.
-    let old_prepare = session
-        .call(
-            PREPARE_ATTACHMENT_ROUTE,
-            READ,
-            PrepareAttachmentRequest {
-                id: "late-old".into(),
-                result_stream_id: "late-attachment-result".into(),
-            }
-            .encode_to_vec(),
-            Duration::from_secs(30),
-        )
-        .await
-        .expect("prepare the abandoned upload");
-    let old_transport_stream = PrepareAttachmentRequest::decode(old_prepare.as_slice())
-        .unwrap()
-        .result_stream_id;
-    front
-        .unregister_stream("late-attachment-result")
-        .await
-        .expect("cancel the abandoned upload");
-    let new_prepare = session
-        .call(
-            PREPARE_ATTACHMENT_ROUTE,
-            READ,
-            PrepareAttachmentRequest {
-                id: "late-new".into(),
-                result_stream_id: "late-attachment-result".into(),
-            }
-            .encode_to_vec(),
-            Duration::from_secs(30),
-        )
-        .await
-        .expect("reuse the public result stream for a new upload");
-    let new_transport_stream = PrepareAttachmentRequest::decode(new_prepare.as_slice())
-        .unwrap()
-        .result_stream_id;
-    assert_ne!(old_transport_stream, new_transport_stream);
-
-    let (late_results, mut late_result_rx) = tokio::sync::mpsc::unbounded_channel();
-    front
-        .app_context()
-        .await
-        .register_stream("late-attachment-result".into(), move |chunk, _| {
-            let late_results = late_results.clone();
-            Box::pin(async move {
-                late_results.send(chunk).unwrap();
-                Ok(())
-            })
-        })
-        .await
-        .expect("register the replacement result callback");
-    for (stream_id, payload) in [
-        (old_transport_stream, b"abandoned result".as_slice()),
-        (new_transport_stream, b"replacement result".as_slice()),
-    ] {
-        service
-            .app_context()
-            .await
-            .send_data_chunk(
-                &Dest::Peer(front.actor_id()),
-                DataChunk {
-                    stream_id,
-                    sequence: 0,
-                    payload: Bytes::copy_from_slice(payload),
-                    ..Default::default()
-                },
-                PayloadType::StreamReliable,
-            )
-            .await
-            .expect("send an attempt-specific terminal result");
-    }
-    let replacement = tokio::time::timeout(Duration::from_secs(10), late_result_rx.recv())
-        .await
-        .expect("the replacement attempt receives its own result")
-        .expect("the replacement result receiver is open");
-    assert_eq!(replacement.stream_id, "late-attachment-result");
-    assert_eq!(
-        replacement.payload,
-        Bytes::from_static(b"replacement result")
-    );
-    assert!(
-        tokio::time::timeout(Duration::from_millis(200), late_result_rx.recv())
-            .await
-            .is_err(),
-        "the abandoned attempt must not deliver to the replacement callback"
-    );
-
-    let (chunks, mut received) = tokio::sync::mpsc::unbounded_channel();
-    service
-        .app_context()
-        .await
-        .register_stream("attachment-chunk".into(), move |chunk, _| {
-            let chunks = chunks.clone();
-            Box::pin(async move {
-                chunks.send(chunk).unwrap();
-                Ok(())
-            })
-        })
-        .await
-        .expect("register the attachment chunk stream");
-    let chunk_payload = b"attachment bytes".to_vec();
-    session
-        .send_data_chunk(
-            ATTACHMENT_UPLOAD_ROUTE,
-            READ,
-            DataChunk {
-                stream_id: "attachment-chunk".into(),
-                sequence: 0,
-                payload: Bytes::from(chunk_payload.clone()),
-                ..Default::default()
-            },
-            PayloadType::StreamReliable,
-            Duration::from_secs(30),
-        )
-        .await
-        .expect("session-signed DataChunk is admitted");
-    let chunk = tokio::time::timeout(Duration::from_secs(10), received.recv())
-        .await
-        .expect("the Service receives the attachment chunk")
-        .expect("the chunk receiver is open");
-    assert_eq!(chunk.payload, Bytes::from(chunk_payload));
-    assert!(
-        chunk
-            .metadata
-            .iter()
-            .any(|entry| entry.key == actr_hyper::actrium::metadata::PROOF)
-    );
-
-    // The prepare RPC reserves its result stream. A raw workload-originated
-    // terminal chunk is signed inside the trusted Host, and the Front's Guard
-    // verifies it before invoking the registered completion callback.
-    let (results, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
-    front
-        .app_context()
-        .await
-        .register_stream("attachment-result".into(), move |chunk, _| {
-            let results = results.clone();
-            Box::pin(async move {
-                results.send(chunk).unwrap();
-                Ok(())
-            })
-        })
-        .await
-        .expect("register the Front attachment result stream");
-    service
-        .app_context()
-        .await
-        .send_data_chunk(
-            &Dest::Peer(front.actor_id()),
-            DataChunk {
-                stream_id: transport_result_stream,
-                sequence: 0,
-                payload: Bytes::from_static(b"terminal upload result"),
-                ..Default::default()
-            },
-            PayloadType::StreamReliable,
-        )
-        .await
-        .expect("the Host signs the terminal result on the prepared session");
-    let result = tokio::time::timeout(Duration::from_secs(10), result_rx.recv())
-        .await
-        .expect("the Front Guard admits the authenticated terminal result")
-        .expect("the result receiver is open");
-    assert_eq!(
-        result.payload,
-        Bytes::from_static(b"terminal upload result")
-    );
-    assert!(
-        result
-            .metadata
-            .iter()
-            .any(|entry| entry.key == actr_hyper::actrium::metadata::PROOF)
-    );
 
     // A rebuilt verified channel gets a fresh channel generation. Resume the
     // same lease before the next business request, exactly as the macOS Host
