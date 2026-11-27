@@ -149,9 +149,35 @@ struct NonceUse {
     timing: ReplayTiming,
 }
 
+/// Keep the application's privacy policy independent of the Host's measured
+/// state. A registry created for a measured run stops advertising it at stop
+/// or restart even if its privacy policy still returns a digest.
+#[derive(Default)]
+enum ActorStateSource {
+    #[default]
+    Policy,
+    Committed(Option<[u8; 32]>),
+}
+
+impl ActorStateSource {
+    fn for_response(&self, mut privacy: PrivacyState) -> PrivacyState {
+        if let Self::Committed(digest) = self {
+            privacy.actor_state_digest = digest.map_or_else(Vec::new, |value| value.to_vec());
+        }
+        privacy
+    }
+
+    fn retire(&mut self) {
+        if let Self::Committed(digest) = self {
+            *digest = None;
+        }
+    }
+}
+
 #[derive(Default)]
 struct State {
     runtime_instance_id: String,
+    actor_state: ActorStateSource,
     sessions: HashMap<String, SessionEntry>,
     active: Option<String>,
     completed: HashMap<String, CompletedAttach>,
@@ -192,14 +218,34 @@ impl InMemorySessionRegistry {
         policies: ServicePolicies,
         clock: Arc<dyn Clock>,
     ) -> Result<Self, ConfigError> {
-        Self::new_with_validation(config, policies, clock, false)
+        Self::new_with_validation(config, policies, clock, false, ActorStateSource::Policy)
     }
 
     pub(crate) fn new_peer(
         config: ServiceConfig,
         policies: ServicePolicies,
     ) -> Result<Self, ConfigError> {
-        Self::new_with_validation(config, policies, Arc::new(SystemClock), true)
+        Self::new_with_validation(
+            config,
+            policies,
+            Arc::new(SystemClock),
+            true,
+            ActorStateSource::Policy,
+        )
+    }
+
+    pub(crate) fn new_with_actor_state(
+        config: ServiceConfig,
+        policies: ServicePolicies,
+        digest: [u8; 32],
+    ) -> Result<Self, ConfigError> {
+        Self::new_with_validation(
+            config,
+            policies,
+            Arc::new(SystemClock),
+            false,
+            ActorStateSource::Committed(Some(digest)),
+        )
     }
 
     fn new_with_validation(
@@ -207,6 +253,7 @@ impl InMemorySessionRegistry {
         policies: ServicePolicies,
         clock: Arc<dyn Clock>,
         allow_empty_routes: bool,
+        actor_state: ActorStateSource,
     ) -> Result<Self, ConfigError> {
         if allow_empty_routes {
             config.validate_peer()?;
@@ -221,6 +268,7 @@ impl InMemorySessionRegistry {
             state: Arc::new(Mutex::new(State {
                 runtime_instance_ids: HashSet::from([runtime_instance_id.clone()]),
                 runtime_instance_id,
+                actor_state,
                 next_epoch: 1,
                 ..State::default()
             })),
@@ -892,7 +940,7 @@ impl InMemorySessionRegistry {
             epoch,
             lease,
             ceiling,
-            privacy.clone(),
+            state.actor_state.for_response(privacy.clone()),
             &request_digest,
             &secret,
         );
@@ -1208,7 +1256,7 @@ impl InMemorySessionRegistry {
             epoch,
             lease.clone(),
             ceiling.clone(),
-            privacy.clone(),
+            state.actor_state.for_response(privacy.clone()),
             &resume_digest(&request),
             &old.secret,
         );
@@ -1334,6 +1382,7 @@ impl InMemorySessionRegistry {
         let now = self.now();
         self.prune(&mut state, now);
         state.sessions.clear();
+        state.actor_state.retire();
         state.active = None;
         state.completed.clear();
         state.requests.clear();
@@ -1370,6 +1419,7 @@ impl InMemorySessionRegistry {
             .runtime_instance_ids
             .insert(new_runtime_instance_id.clone());
         state.runtime_instance_id = new_runtime_instance_id;
+        state.actor_state.retire();
         self.prune(&mut state, now);
         Ok(())
     }

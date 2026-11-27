@@ -22,6 +22,7 @@ use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
+use crate::actor_state::{ActorStateCommit, ActorStateFingerprints};
 use crate::{AttachOutcome, InMemorySessionService, SessionError, SessionStatus};
 
 const SCHEMA_VERSION: u32 = 1;
@@ -340,6 +341,8 @@ pub struct ServiceInstance {
     pub created_at_epoch_secs: u64,
     pub last_opened_at_epoch_secs: Option<u64>,
     pub updated_at_epoch_secs: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    actor_state: Option<ActorStateCommit>,
 }
 
 impl ServiceInstance {
@@ -369,7 +372,25 @@ impl ServiceInstance {
             created_at_epoch_secs: intent.created_at_epoch_secs,
             last_opened_at_epoch_secs: None,
             updated_at_epoch_secs: now_epoch_secs(),
+            actor_state: None,
         })
+    }
+
+    /// The most recent committed revision, including across stopped runs.
+    pub fn actor_state_revision(&self) -> Option<u64> {
+        self.actor_state
+            .as_ref()
+            .filter(|state| state.is_valid_for(&self.actor_id))
+            .map(|state| state.revision)
+    }
+
+    /// The committed state of the running workload, when this start was measured.
+    pub fn current_actor_state_digest(&self) -> Option<[u8; 32]> {
+        let state = self.actor_state.as_ref()?;
+        (self.lifecycle_state == LifecycleState::Running
+            && state.running_instance.as_deref() == Some(self.runtime_instance_id.as_str())
+            && state.is_valid_for(&self.actor_id))
+        .then_some(state.digest)
     }
 }
 
@@ -964,6 +985,29 @@ impl LifecycleService {
         actor_id: &str,
         runtime_instance_id: &str,
     ) -> Result<ServiceInstance, LifecycleError> {
+        self.mark_running_inner(actor_id, runtime_instance_id, None)
+            .await
+    }
+
+    /// Complete a pending start and atomically commit its measured Actor state.
+    /// The Host supplies fingerprints after loading the workload and installing
+    /// its effective grants and policy.
+    pub async fn mark_running_with_actor_state(
+        &self,
+        actor_id: &str,
+        runtime_instance_id: &str,
+        fingerprints: ActorStateFingerprints,
+    ) -> Result<ServiceInstance, LifecycleError> {
+        self.mark_running_inner(actor_id, runtime_instance_id, Some(fingerprints))
+            .await
+    }
+
+    async fn mark_running_inner(
+        &self,
+        actor_id: &str,
+        runtime_instance_id: &str,
+        fingerprints: Option<ActorStateFingerprints>,
+    ) -> Result<ServiceInstance, LifecycleError> {
         let operation_lock = self.operation_lock(format!("actor:{actor_id}"));
         let _guard = operation_lock.lock().await;
         let lifecycle_guard = self.lock_operation()?;
@@ -979,6 +1023,25 @@ impl LifecycleService {
             return Err(LifecycleError::InvalidRequest(
                 "the running runtime instance does not match the pending start".into(),
             ));
+        }
+        if let Some(fingerprints) = fingerprints {
+            let revision = match &instance.actor_state {
+                None => 1,
+                Some(state) if !state.is_valid_for(actor_id) => {
+                    return Err(LifecycleError::InvalidRequest(
+                        "the previous Actor state commit is invalid".into(),
+                    ));
+                }
+                Some(state) => state.revision.checked_add(1).ok_or_else(|| {
+                    LifecycleError::InvalidRequest("Actor state revision is exhausted".into())
+                })?,
+            };
+            instance.actor_state = Some(ActorStateCommit {
+                revision,
+                fingerprints,
+                digest: fingerprints.digest(actor_id, revision),
+                running_instance: Some(runtime_instance_id.to_owned()),
+            });
         }
         instance.reachability = Reachability::Online;
         instance.health = Health::Healthy;
@@ -1359,6 +1422,13 @@ impl LifecycleService {
     }
 
     fn persist(&self, instance: &mut ServiceInstance) -> Result<(), LifecycleError> {
+        if !matches!(
+            instance.lifecycle_state,
+            LifecycleState::Running | LifecycleState::Suspended
+        ) && let Some(state) = &mut instance.actor_state
+        {
+            state.running_instance = None;
+        }
         instance.updated_at_epoch_secs = now_epoch_secs();
         atomic_write_json(&self.instance_path(&instance.actor_id), instance)
     }
