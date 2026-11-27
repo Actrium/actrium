@@ -41,6 +41,7 @@ wit-parser = { version = "0.254.2", optional = true }
 serde_json.workspace = true
 tempfile.workspace = true
 flate2 = "1"
+tar = { version = "0.4", default-features = false }
 actr-config.workspace = true
 actr-service-compat.workspace = true
 

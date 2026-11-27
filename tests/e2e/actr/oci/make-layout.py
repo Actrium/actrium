@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the test Guest's single-image OCI layout and package manifest."""
+"""Build the test Guest's single-image OCI tar and package manifest."""
 
 import argparse
 import hashlib
@@ -10,20 +10,25 @@ import tarfile
 
 
 def build(guest: pathlib.Path, dest: pathlib.Path, architecture: str) -> None:
-    blobs = dest / "image" / "blobs" / "sha256"
-    blobs.mkdir(parents=True)
+    (dest / "bin").mkdir(parents=True)
+    layout = {}
     files = []
 
-    def declare(path: str, media_type: str, data: bytes, role: str = "image") -> str:
+    def add_to_tar(archive, path, data):
+        member = tarfile.TarInfo(path)
+        member.size = len(data)
+        member.mode = 0o644
+        archive.addfile(member, io.BytesIO(data))
+
+    def declare(path: str, media_type: str, data: bytes, role: str) -> None:
         digest = hashlib.sha256(data).hexdigest()
         (dest / path).write_bytes(data)
         files.append((path, role, media_type, len(data), digest))
-        return digest
 
     def blob(media_type: str, value: bytes | dict) -> dict:
         data = value if isinstance(value, bytes) else json.dumps(value).encode()
         digest = hashlib.sha256(data).hexdigest()
-        declare(f"image/blobs/sha256/{digest}", media_type, data)
+        layout[f"blobs/sha256/{digest}"] = data
         return {"mediaType": media_type, "digest": f"sha256:{digest}", "size": len(data)}
 
     archive = io.BytesIO()
@@ -43,10 +48,15 @@ def build(guest: pathlib.Path, dest: pathlib.Path, architecture: str) -> None:
     image = blob("application/vnd.oci.image.manifest.v1+json", {
         "schemaVersion": 2, "config": config, "layers": [tar],
     })
-    declare("image/oci-layout", "application/json", b'{"imageLayoutVersion":"1.0.0"}')
-    declare("image/index.json", "application/vnd.oci.image.index.v1+json", json.dumps({
+    layout["oci-layout"] = b'{"imageLayoutVersion":"1.0.0"}'
+    layout["index.json"] = json.dumps({
         "schemaVersion": 2, "manifests": [image],
-    }).encode(), "workload")
+    }).encode()
+    image_tar = io.BytesIO()
+    with tarfile.open(fileobj=image_tar, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+        for path, data in sorted(layout.items()):
+            add_to_tar(archive, path, data)
+    declare("bin/echo.oci.tar", "application/x-tar", image_tar.getvalue(), "workload")
     (dest / "contracts").mkdir()
     proto = pathlib.Path(__file__).with_name("echo.proto")
     declare("contracts/echo.proto", "text/plain", proto.read_bytes(), "contract")
@@ -60,7 +70,7 @@ version = "1.0.0"
 
 [workload]
 profile = "actr.oci/1"
-entry = "image/index.json"
+entry = "bin/echo.oci.tar"
 rpc-contract = "contracts/echo.proto"
 
 [workload.oci]

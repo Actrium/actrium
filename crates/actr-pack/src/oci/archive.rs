@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
@@ -12,7 +12,7 @@ use zip::read::{ArchiveOffset, Config};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use super::{OCI_PROFILE, image, invalid, require};
+use super::{OCI_PROFILE, image, invalid, layout::ImageLayout, require};
 use crate::actor_package::InspectedActorPackage;
 use crate::util::read_zip_entry_bounded;
 use crate::{
@@ -122,7 +122,7 @@ impl OciArchive {
             }
             remaining -= size;
         }
-        image::verify(package, staging.path(), self.limits.unpacked_layer_bytes)?;
+        let layout = image::verify(package, staging.path(), self.limits.unpacked_layer_bytes)?;
         Ok(VerifiedOciPackage {
             verified: VerifiedRuntimePackage {
                 manifest,
@@ -131,6 +131,7 @@ impl OciArchive {
                 signing_public_key: public_key.to_bytes(),
             },
             staging,
+            layout,
             digest: self.digest,
         })
     }
@@ -140,6 +141,7 @@ impl OciArchive {
 pub struct VerifiedOciPackage {
     verified: VerifiedRuntimePackage,
     staging: TempDir,
+    layout: ImageLayout,
     digest: [u8; 32],
 }
 
@@ -173,9 +175,10 @@ impl VerifiedOciPackage {
         crate::egress::validate_privacy_contract(self.manifest(), |path| self.read_metadata(path))
     }
 
-    pub fn layout_directory(&self) -> PathBuf {
-        let entry = Path::new(&self.manifest().workload.entry);
-        self.staging.path().join(entry.parent().unwrap())
+    /// Materialize the verified layout for the OCI unpacker on a cache miss.
+    /// The caller provides a path in a private directory.
+    pub fn extract_image_layout(&self, target: &Path) -> Result<(), PackError> {
+        self.layout.extract(target)
     }
 }
 
@@ -198,7 +201,7 @@ fn read_manifest(
     Ok((parse_runtime_manifest(source)?, raw))
 }
 
-/// Pack a local layout and its declared metadata from private snapshots.
+/// Pack an OCI image tar and its declared metadata from private snapshots.
 pub fn pack_oci_package<W: Write + Seek>(
     mut manifest: ActorPackageManifest,
     payload_root: &Path,
@@ -462,19 +465,12 @@ mod tests {
         const IMAGE_MANIFEST: &str = "application/vnd.oci.image.manifest.v1+json";
         const IMAGE_CONFIG: &str = "application/vnd.oci.image.config.v1+json";
         const LAYER: &str = "application/vnd.oci.image.layer.v1.tar";
-        let blobs = folder.join("image/blobs/sha256");
-        fs::create_dir_all(&blobs).unwrap();
-        let mut files = Vec::new();
+        let bin = folder.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let mut tar = tar::Builder::new(File::create(bin.join("echo.oci.tar")).unwrap());
         let mut blob = |media_type: &str, bytes: &[u8]| {
             let hash = hex::encode(Sha256::digest(bytes));
-            fs::write(blobs.join(&hash), bytes).unwrap();
-            files.push(crate::PackageFileEntry {
-                path: format!("image/blobs/sha256/{hash}"),
-                role: "image".into(),
-                media_type: media_type.into(),
-                size: 0,
-                sha256: "0".repeat(64),
-            });
+            append(&mut tar, &format!("blobs/sha256/{hash}"), bytes);
             json!({"mediaType": media_type, "digest": format!("sha256:{hash}"), "size": bytes.len()})
         };
         let layer = blob(LAYER, &[0; 1024]);
@@ -498,14 +494,11 @@ mod tests {
         );
         let index =
             serde_json::to_vec(&json!({"schemaVersion": 2, "manifests": [&image]})).unwrap();
-        fs::write(folder.join("image/index.json"), index).unwrap();
-        fs::write(
-            folder.join("image/oci-layout"),
-            br#"{"imageLayoutVersion":"1.0.0"}"#,
-        )
-        .unwrap();
+        append(&mut tar, "index.json", &index);
+        append(&mut tar, "oci-layout", br#"{"imageLayoutVersion":"1.0.0"}"#);
+        tar.finish().unwrap();
         let digest = image["digest"].as_str().unwrap();
-        let mut manifest = ActorPackageManifest::from_toml(&format!(
+        ActorPackageManifest::from_toml(&format!(
             r#"
 format = "actr-package/2"
 [actor]
@@ -514,7 +507,7 @@ name = "OciEcho"
 version = "1.0.0"
 [workload]
 profile = "actr.oci/1"
-entry = "image/index.json"
+entry = "bin/echo.oci.tar"
 [workload.oci]
 digest = "{digest}"
 platform = "linux/amd64"
@@ -528,24 +521,22 @@ algorithm = "ed25519"
 key-id = "placeholder"
 
 [[files]]
-path = "image/index.json"
+path = "bin/echo.oci.tar"
 role = "workload"
-media-type = "application/vnd.oci.image.index.v1+json"
-size = 0
-sha256 = "{zero_hash}"
-
-[[files]]
-path = "image/oci-layout"
-role = "image"
-media-type = "application/json"
+media-type = "application/x-tar"
 size = 0
 sha256 = "{zero_hash}"
 "#,
             zero_hash = "0".repeat(64)
         ))
-        .unwrap();
-        manifest.files.extend(files);
-        manifest
+        .unwrap()
+    }
+
+    fn append(tar: &mut tar::Builder<File>, name: &str, bytes: &[u8]) {
+        let mut header = tar::Header::new_ustar();
+        header.set_size(bytes.len() as u64);
+        header.set_mode(0o644);
+        tar.append_data(&mut header, name, bytes).unwrap();
     }
 
     #[test]
@@ -572,7 +563,12 @@ sha256 = "{zero_hash}"
             verified.archive_digest().as_slice(),
             &Sha256::digest(&bytes)[..]
         );
-        assert!(verified.layout_directory().join("index.json").is_file());
+        assert_eq!(verified.manifest().files.len(), 1);
+        assert!(!verified.staging.path().join("image").exists());
+        let image = folder.path().join("loaded-image");
+        verified.extract_image_layout(&image).unwrap();
+        assert!(image.join("index.json").is_file());
+        assert_eq!(fs::read_dir(image.join("blobs/sha256")).unwrap().count(), 3);
         let registration =
             RegistrationManifest::parse(&verified.verification().manifest_raw).unwrap();
         assert_eq!(registration.actor_type().name, "OciEcho");
@@ -593,5 +589,64 @@ sha256 = "{zero_hash}"
         )
         .unwrap_err();
         assert!(err.to_string().contains("DiffID mismatch"));
+    }
+
+    #[test]
+    fn rejects_a_layout_index_as_the_workload_entry() {
+        let folder = tempfile::tempdir().unwrap();
+        let hash = hex::encode(Sha256::digest([0; 1024]));
+        let mut manifest = image_fixture(folder.path(), format!("sha256:{hash}"));
+        manifest.workload.entry = "image/index.json".into();
+        manifest.files[0].path = manifest.workload.entry.clone();
+
+        let error = crate::oci::validate_oci_manifest(&manifest).unwrap_err();
+        assert!(error.to_string().contains("bin/<name>.oci.tar"));
+    }
+
+    #[test]
+    fn rejects_an_image_tar_with_duplicate_entries() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("image.oci.tar");
+        let mut tar = tar::Builder::new(File::create(&path).unwrap());
+        append(&mut tar, "index.json", b"{}");
+        append(&mut tar, "./index.json", b"{}");
+        tar.finish().unwrap();
+        let error = ImageLayout::index(path).unwrap_err();
+        assert!(error.to_string().contains("duplicate OCI image tar file"));
+    }
+
+    #[test]
+    fn rejects_a_layer_whose_contents_do_not_match_its_descriptor() {
+        let folder = tempfile::tempdir().unwrap();
+        let hash = hex::encode(Sha256::digest([0; 1024]));
+        let manifest = image_fixture(folder.path(), format!("sha256:{hash}"));
+        let path = folder.path().join("bin/echo.oci.tar");
+        let mut archive = tar::Archive::new(File::open(&path).unwrap());
+        let mut output = tar::Builder::new(tempfile::tempfile().unwrap());
+        for entry in archive.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let name = entry.path().unwrap().into_owned();
+            let mut header = entry.header().clone();
+            if name == Path::new(&format!("blobs/sha256/{hash}")) {
+                output
+                    .append_data(&mut header, name, &[1; 1024][..])
+                    .unwrap();
+            } else {
+                output.append_data(&mut header, name, &mut entry).unwrap();
+            }
+        }
+        let mut tar = output.into_inner().unwrap();
+        tar.rewind().unwrap();
+        io::copy(&mut tar, &mut File::create(path).unwrap()).unwrap();
+
+        let error = pack_oci_package(
+            manifest,
+            folder.path(),
+            &SigningKey::from_bytes(&[7; 32]),
+            Cursor::new(Vec::new()),
+            OciLimits::default(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("OCI descriptor digest mismatch"));
     }
 }

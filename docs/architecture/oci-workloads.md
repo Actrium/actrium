@@ -1,8 +1,8 @@
 # OCI workloads
 
-An `actr.oci/1` package carries one complete OCI Image Layout for
-`linux/amd64` or `linux/arm64`. Hyper executes a native Guest that matches
-the Linux host architecture in a rootless Syd OCI container.
+An `actr.oci/1` package carries one self-contained OCI Image Layout tar for
+`linux/amd64` or `linux/arm64` in `bin/<name>.oci.tar`. Hyper executes a native
+Guest that matches the Linux host architecture in a rootless Syd OCI container.
 The executable is a static PIE binary built with the `actr-framework`
 `oci-guest` feature. Its entry point awaits
 `actr_framework::guest::oci::run(workload)`.
@@ -17,14 +17,16 @@ bubblewrap with unprivileged user namespace support.
 
 ## Build and sign
 
-Prepare an OCI Image Layout with a single image manifest and a complete set of
-config and layer blobs. The image can carry OCI tar or gzip layer descriptors.
-The pack manifest uses these fields:
+Export an uncompressed OCI Image Layout tar with a single image manifest and
+all of its config and layer blobs. Include the root files `index.json` and
+`oci-layout`, with blob files under `blobs/sha256/`. The image layers inside
+the tar may use OCI tar or gzip media types. The manifest identifies the tar
+and its execution settings.
 
 ```toml
 [workload]
 profile = "actr.oci/1"
-entry = "image/index.json"
+entry = "bin/echo.oci.tar"
 rpc-contract = "contracts/echo.proto"
 
 [workload.oci]
@@ -37,16 +39,23 @@ args = ["/app/echo"]
 profile = "actr.oci-host/1"
 api = "1.0.0"
 required-capabilities = ["actor.receive"]
+
+[[files]]
+path = "bin/echo.oci.tar"
+role = "workload"
+media-type = "application/x-tar"
+size = 0
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 ```
 
 Set `platform = "linux/arm64"` for an AArch64 Guest. The image config and
 any index descriptor platform must agree with the signed platform.
 
-The entry is a `workload` file. Declare `oci-layout` and each referenced blob
-with role `image`, and set each blob's media type to its OCI descriptor type.
-Declare the signed RPC Proto under role `contract`. The normal
-`actr-package/2` actor and signature tables are also required. The packer
-computes sizes, hashes, and the publisher key ID.
+Declare the tar as the sole file with role `workload` and the signed RPC
+Proto as a separate file with role `contract`. The normal `actr-package/2`
+actor and signature tables are also required. The packer computes sizes,
+hashes, and the publisher key ID. The signed workload digest identifies the
+image manifest inside the tar.
 
 ```sh
 actr pkg pack --manifest-path manifest.toml --payload-root . --key publisher-key.json --output service.actr
@@ -54,7 +63,10 @@ actr pkg verify --package service.actr --pubkey publisher-public.json
 ```
 
 Verification uses a private archive snapshot and checks signed file hashes,
-OCI descriptors, and layer DiffIDs. It can run without Syd or a registry.
+tar members, OCI descriptors, and layer DiffIDs. It can run without Syd or a
+registry. On a cold start, `actr run` materializes the verified tar's OCI layout
+and unpacks it to a read-only root filesystem. On a cache hit it reuses the
+prepared filesystem after verifying the package.
 
 ## Deploy
 
@@ -65,10 +77,11 @@ the selected Syd and extraction tools user namespace access through their
 deployed executable profiles.
 
 Provision a private state directory with space for short Unix socket paths.
-Use a separate private cache volume with hard byte and inode limits. When
-granting writable application data, provision a dedicated, bounded data volume
-owned by the same service user. A finite volume is required for extraction
-and writable data.
+Use a separate private cache volume with hard byte and inode limits. On a
+cold start it must fit both the materialized image layout and the unpacked
+root filesystem. For writable application data, provision a dedicated, bounded
+data volume owned by the same service user. A finite volume is required for
+extraction and writable data.
 
 Set a static publisher anchor for offline package verification. Configure the
 runtime separately from the package:

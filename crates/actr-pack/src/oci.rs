@@ -10,6 +10,8 @@ use crate::{ActorPackageManifest, PackError, egress};
 mod archive;
 #[cfg(not(target_arch = "wasm32"))]
 mod image;
+#[cfg(not(target_arch = "wasm32"))]
+mod layout;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use archive::{
@@ -55,8 +57,11 @@ pub(crate) fn validate_oci_manifest(manifest: &ActorPackageManifest) -> Result<(
         "actr.oci/1 requires actr.oci-host/1 API 1.0.0",
     )?;
     require(
-        workload.entry == "index.json" || workload.entry.ends_with("/index.json"),
-        "OCI workload entry must name the layout's index.json",
+        workload.entry.strip_prefix("bin/").is_some_and(|name| {
+            name.strip_suffix(".oci.tar")
+                .is_some_and(|stem| !stem.is_empty() && !stem.contains('/'))
+        }),
+        "OCI workload entry must be bin/<name>.oci.tar",
     )?;
     require(
         matches!(
@@ -114,14 +119,16 @@ pub(crate) fn validate_oci_manifest(manifest: &ActorPackageManifest) -> Result<(
         capabilities.contains(ACTOR_RECEIVE) == workload.rpc_contract.is_some(),
         "OCI actor.receive and workload.rpc-contract must be declared together",
     )?;
+    let mut entries = manifest.files.iter().filter(|file| file.role == "workload");
     require(
-        manifest
-            .files
-            .iter()
-            .filter(|file| file.role == "workload")
-            .count()
-            == 1,
-        "OCI packages require one workload entry",
+        entries.next().is_some_and(|file| {
+            file.path == workload.entry && file.media_type == "application/x-tar"
+        }) && entries.next().is_none(),
+        "OCI requires one application/x-tar workload entry",
+    )?;
+    require(
+        manifest.files.iter().all(|file| file.role != "image"),
+        "OCI image files must be inside the workload tar",
     )
 }
 

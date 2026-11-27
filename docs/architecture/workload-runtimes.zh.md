@@ -213,7 +213,8 @@ QuickJS、Keel WASM 等属于 Keel Sandbox Engine，是 Keel Guest Runtime 的�
 ### 7.5 Actr OCI Runtime
 
 `actr.oci/1` 定义内含完整单平台 OCI 镜像的包执行契约。包内
-`workload.entry` 指向 `index.json`，签名的 `[workload.oci]` 固定镜像
+`workload.entry` 指向 `bin/<name>.oci.tar`，其中包含 OCI Image Layout。
+签名的 `[workload.oci]` 固定镜像
 digest、平台、IPC 版本及 Guest 参数。rootless Syd OCI 支持 Linux x86_64
 和 aarch64，镜像必须匹配宿主架构。文件、HTTPS 和 Actor RPC 按包声明与宿主授权加载。
 完整配置见[英文 OCI 工作负载指南](oci-workloads.md)。

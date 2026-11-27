@@ -8,7 +8,9 @@ use std::path::Path;
 use flate2::read::MultiGzDecoder;
 use serde::Deserialize;
 
-use super::{OCI_AMD64_PLATFORM, OCI_ARM64_PLATFORM, invalid, parse_digest, require};
+use super::{
+    OCI_AMD64_PLATFORM, OCI_ARM64_PLATFORM, invalid, layout::ImageLayout, parse_digest, require,
+};
 use crate::{ActorPackageManifest, PackError, egress};
 
 const INDEX: &str = "application/vnd.oci.image.index.v1+json";
@@ -100,18 +102,20 @@ pub(super) fn verify(
     manifest: &ActorPackageManifest,
     folder: &Path,
     unpacked_limit: u64,
-) -> Result<(), PackError> {
+) -> Result<ImageLayout, PackError> {
     let workload = manifest
         .workload
         .oci
         .as_ref()
         .ok_or_else(|| invalid("missing OCI metadata"))?;
-    let layout_dir = manifest.workload.entry.strip_suffix("index.json").unwrap();
-    let layout_path = format!("{layout_dir}oci-layout");
-    let layout: Layout = json(folder, &layout_path)?;
-    require(layout.version == "1.0.0", "unsupported OCI layout version")?;
+    let layout = ImageLayout::index(folder.join(&manifest.workload.entry))?;
+    let metadata: Layout = json(&layout, "oci-layout")?;
+    require(
+        metadata.version == "1.0.0",
+        "unsupported OCI layout version",
+    )?;
 
-    let index: Index = json(folder, &manifest.workload.entry)?;
+    let index: Index = json(&layout, "index.json")?;
     require(
         index.schema_version == 2
             && index.media_type.as_deref().is_none_or(|kind| kind == INDEX)
@@ -128,9 +132,9 @@ pub(super) fn verify(
                 .is_none_or(|platform| platform.matches(&workload.platform)),
         "OCI index descriptor does not match the signed manifest digest and platform",
     )?;
-    let mut image_files = BTreeSet::from([layout_path]);
-    let image_path = blob(descriptor, manifest, layout_dir, &mut image_files)?;
-    let image: ImageManifest = json(folder, &image_path)?;
+    let mut image_files = BTreeSet::from(["index.json".to_owned(), "oci-layout".to_owned()]);
+    let (image_path, _) = blob(descriptor, &layout, &mut image_files)?;
+    let image: ImageManifest = json(&layout, &image_path)?;
     require(
         image.schema_version == 2
             && image
@@ -140,8 +144,8 @@ pub(super) fn verify(
             && image.config.media_type == CONFIG,
         "invalid OCI image manifest or config media type",
     )?;
-    let config_path = blob(&image.config, manifest, layout_dir, &mut image_files)?;
-    let config: ImageConfig = json(folder, &config_path)?;
+    let (config_path, _) = blob(&image.config, &layout, &mut image_files)?;
+    let config: ImageConfig = json(&layout, &config_path)?;
     require(
         config.platform.matches(&workload.platform),
         "OCI config platform must match the signed workload platform",
@@ -156,14 +160,17 @@ pub(super) fn verify(
     )?;
     let mut remaining = unpacked_limit;
     for (descriptor, diff_id) in image.layers.iter().zip(&config.rootfs.diff_ids) {
-        let layer_path = blob(descriptor, manifest, layout_dir, &mut image_files)?;
-        let file = File::open(folder.join(layer_path))?;
-        let reader: Box<dyn Read> = match descriptor.media_type.as_str() {
-            TAR => Box::new(file),
-            GZIP => Box::new(MultiGzDecoder::new(file)),
+        let (layer_path, layer_hash) = blob(descriptor, &layout, &mut image_files)?;
+        let (actual, size) = match descriptor.media_type.as_str() {
+            TAR => (layer_hash, descriptor.size),
+            GZIP => super::archive::hash_and_copy(
+                MultiGzDecoder::new(layout.open(&layer_path)?),
+                std::io::sink(),
+                remaining,
+            )?,
             _ => return Err(invalid("unsupported OCI layer media type")),
         };
-        let (actual, size) = super::archive::hash_and_copy(reader, std::io::sink(), remaining)?;
+        require(size <= remaining, "OCI unpacked image exceeds size limit")?;
         require(
             hex::encode(actual) == parse_digest(diff_id)?,
             "OCI layer DiffID mismatch",
@@ -171,18 +178,9 @@ pub(super) fn verify(
         remaining -= size;
     }
 
-    for declared in &manifest.files {
-        require(
-            (declared.role == "image") == image_files.contains(&declared.path),
-            "OCI image files must match the complete image descriptor graph",
-        )?;
-    }
     require(
-        manifest
-            .files
-            .iter()
-            .any(|file| file.path == format!("{layout_dir}oci-layout") && file.role == "image"),
-        "oci-layout must be declared as an image file",
+        layout.files().all(|name| image_files.contains(name)),
+        "OCI image tar files must match the complete image descriptor graph",
     )?;
 
     egress::validate_privacy_contract(manifest, |path| read_metadata(folder, path))?;
@@ -193,37 +191,40 @@ pub(super) fn verify(
         actr_service_compat::spec_builder::validate_oci_rpc_routes(source)
             .map_err(|error| invalid(error.to_string()))?;
     }
-    Ok(())
+    Ok(layout)
 }
 
 fn blob(
     descriptor: &Descriptor,
-    manifest: &ActorPackageManifest,
-    layout_dir: &str,
+    layout: &ImageLayout,
     image_files: &mut BTreeSet<String>,
-) -> Result<String, PackError> {
+) -> Result<(String, [u8; 32]), PackError> {
     require(
         descriptor.urls.is_empty() && descriptor.data.is_none(),
-        "OCI blobs must be provided by the archive",
+        "OCI blobs must be provided by the tar",
     )?;
     let hash = parse_digest(&descriptor.digest)?;
-    let path = format!("{layout_dir}blobs/sha256/{hash}");
+    let path = format!("blobs/sha256/{hash}");
+    let source = layout.open(&path)?;
     require(
-        manifest.files.iter().any(|entry| {
-            entry.path == path
-                && entry.role == "image"
-                && entry.size == descriptor.size
-                && entry.sha256 == hash
-                && entry.media_type == descriptor.media_type
-        }),
-        "OCI descriptor does not match a declared blob",
+        source.limit() == descriptor.size,
+        "OCI descriptor size mismatch",
+    )?;
+    let (actual, size) = super::archive::hash_and_copy(source, std::io::sink(), descriptor.size)?;
+    require(
+        size == descriptor.size && hex::encode(actual) == hash,
+        "OCI descriptor digest mismatch",
     )?;
     image_files.insert(path.clone());
-    Ok(path)
+    Ok((path, actual))
 }
 
-fn json<T: serde::de::DeserializeOwned>(folder: &Path, path: &str) -> Result<T, PackError> {
-    serde_json::from_slice(&read_metadata(folder, path)?)
+fn json<T: serde::de::DeserializeOwned>(layout: &ImageLayout, path: &str) -> Result<T, PackError> {
+    let mut reader = layout.open(path)?;
+    require(reader.limit() <= MAX_METADATA, "OCI metadata exceeds 1 MiB")?;
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes)?;
+    serde_json::from_slice(&bytes)
         .map_err(|error| invalid(format!("invalid OCI JSON at {path}: {error}")))
 }
 

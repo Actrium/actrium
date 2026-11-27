@@ -155,7 +155,7 @@ async fn sdk_registration_and_recovery(oci: bool) {
             let mut manifest = ActorPackageManifest::from_toml(TEMPLATE).unwrap();
             manifest.actor.publisher = PUBLISHER.into();
             manifest.workload.profile = OCI_PROFILE.into();
-            manifest.workload.entry = "image/index.json".into();
+            manifest.workload.entry = "bin/echo.oci.tar".into();
             manifest.workload.oci = Some(OciWorkloadDescriptor {
                 digest: format!("sha256:{}", "0".repeat(64)),
                 platform: OCI_AMD64_PLATFORM.into(),
@@ -167,7 +167,7 @@ async fn sdk_registration_and_recovery(oci: bool) {
             manifest.host.api = "1.0.0".into();
             manifest.host.required_capabilities.clear();
             manifest.files[0].path = manifest.workload.entry.clone();
-            manifest.files[0].media_type = "application/vnd.oci.image.index.v1+json".into();
+            manifest.files[0].media_type = "application/x-tar".into();
             manifest.signature.key_id =
                 actr_pack::compute_key_id(publisher_key.verifying_key().as_bytes());
             manifest.to_toml().unwrap()
