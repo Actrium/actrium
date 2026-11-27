@@ -564,6 +564,98 @@ final class RealmNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testPlainOpenReverifiesWhenAnotherTabAdvancesTheProfileWhileItWaits() async throws {
+        let preferences = try makePreferences()
+        let realmURL = try XCTUnwrap(URL(string: realmURI))
+        let blockerURL = try XCTUnwrap(URL(string: "actr://other.example/other"))
+        let invite = try makeInviteText()
+        let blockerInvite = try makeInviteText(for: "other@other.example", secretByte: 2)
+        let inviteLink = try linkCarryingInvite(invite, to: realmURL)
+        let blockerLink = try linkCarryingInvite(blockerInvite, to: blockerURL)
+        let signer = Curve25519.Signing.PrivateKey()
+        let original = try discoveryDocuments(membership: "open", signer: signer)
+        let updated = try profile(membership: "open", signer: signer, sequence: 2).0
+        let blockerDocuments = try discoveryDocuments(membership: "invite-only", for: blockerURL)
+        let blocker = NavigationGate()
+        let exchange = NavigationGate()
+        defer {
+            blocker.release()
+            exchange.release()
+        }
+        var profileFetches = 0
+        var plainJoinSequences: [UInt64] = []
+        let view = BrowserViewModel(
+            realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
+            pendingRealmInvites: PendingRealmInvites(),
+            fetchRealmDocument: { url, _ in
+                if url.host == "publisher.example" { throw CancellationError() }
+                if url.path == "/realm/echo" {
+                    profileFetches += 1
+                    // Fetches 1-2 are the invited tab's and the first plain
+                    // tab's discovery (sequence 1). The second plain tab
+                    // discovers the republished profile (sequence 2).
+                    if profileFetches > 2 { return updated }
+                }
+                return try XCTUnwrap(original[url.absoluteString] ?? blockerDocuments[url.absoluteString])
+            },
+            joinOpenRealm: { admission in
+                XCTAssertEqual(admission.info.realmName, self.realmName)
+                plainJoinSequences.append(admission.info.sequence)
+            },
+            inviteMembershipExchange: { profile, code, _, _ in
+                if code == blockerInvite {
+                    await blocker.wait()
+                    return #"{"member_id":"blocker","role":"viewer","key_id":"key"}"#
+                }
+                XCTAssertEqual(code, invite)
+                await exchange.wait()
+                return #"{"member_id":"editor","role":"editor","key_id":"key"}"#
+            },
+            confirmRealmMembership: { _ in false },
+            saveBrowserSession: { _, _ in }
+        )
+        func acceptedSequence() -> UInt64? {
+            try? RealmProfileStore.currentRealm(realmName, preferences: preferences)?.accepted.info.sequence
+        }
+
+        view.navigateCurrentTab(to: blockerLink.absoluteString)
+        try await waitUntil("blocker exchange started") { blocker.waiting }
+        view.openURLInNewTab(inviteLink)
+        let invitedTab = try XCTUnwrap(view.currentTabId)
+        try await waitUntil("invited discovery accepted sequence 1") { acceptedSequence() == 1 }
+        view.openURLInNewTab(realmURL)
+        let firstPlainTab = try XCTUnwrap(view.currentTabId)
+        // The first plain link verified sequence 1 and is waiting for the invite.
+        try await waitUntil("first plain discovery fetched the profile") { profileFetches == 2 }
+
+        // While the invite is still pending, another tab discovers and accepts
+        // the republished Profile (sequence 2).
+        view.openURLInNewTab(realmURL)
+        let secondPlainTab = try XCTUnwrap(view.currentTabId)
+        try await waitUntil("another tab advanced the accepted profile") { acceptedSequence() == 2 }
+
+        blocker.release()
+        try await waitUntil("invited exchange started") { exchange.waiting }
+        exchange.release()
+
+        // The first plain link must not silently drop the navigation: it
+        // should re-verify the latest Profile and join under it, just like
+        // the second plain link that discovered sequence 2 itself.
+        try await waitUntil("both plain links joined after re-verifying") { plainJoinSequences.count == 2 }
+        XCTAssertEqual(plainJoinSequences, [2, 2])
+        try await waitUntil("invited tab opened the Realm") {
+            view.tabs.first(where: { $0.id == invitedTab })?.url == realmURL
+        }
+        try await waitUntil("first plain tab opened the Realm") {
+            view.tabs.first(where: { $0.id == firstPlainTab })?.url == realmURL
+        }
+        try await waitUntil("second plain tab opened the Realm") {
+            view.tabs.first(where: { $0.id == secondPlainTab })?.url == realmURL
+        }
+    }
+
+    @MainActor
     func testPlainOpenInAnotherWindowWaitsForPendingInvite() async throws {
         try await assertPlainOpenWaitsForInvite(inAnotherWindow: true)
     }
@@ -834,12 +926,12 @@ final class RealmNavigationTests: XCTestCase {
     }
 
     @MainActor
-    private func waitUntil(_ condition: () -> Bool) async throws {
+    private func waitUntil(_ label: String = "Realm navigation", _ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(3)
         while !condition() && ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        _ = try XCTUnwrap(condition() ? true : nil, "Timed out waiting for Realm navigation")
+        _ = try XCTUnwrap(condition() ? true : nil, "Timed out waiting for \(label)")
     }
 
     private func makePreferences() throws -> UserDefaults {

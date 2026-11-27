@@ -1827,7 +1827,42 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     admitted = true
                 } else if admission.isOpen {
                     await pendingRealmInvites.wait(for: realmName)
-                    guard try profileIsCurrent() else { return }
+                    try checkCurrent()
+                    if try !profileIsCurrent() {
+                        // A competing navigation — typically an invite exchange
+                        // for the same Realm — accepted a newer Profile while
+                        // this link waited its turn. Adopt that verified
+                        // snapshot instead of silently dropping the navigation.
+                        logger.notice("🔗 [navigateCurrentTab] Profile advanced while waiting for an invite; re-verifying \(realmName)")
+                        guard let latest = try RealmProfileStore.currentRealm(realmName, preferences: realmPreferences)
+                        else {
+                            throw NSError(
+                                domain: "ActrDiscovery", code: 26,
+                                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                                    "The Realm Profile changed while this link was waiting. Please try again.",
+                                    comment: "Actr realm profile advanced while waiting error")])
+                        }
+                        try validateProfile(latest.body)
+                        guard let refreshed = verifiedUpdate, refreshed.profile != nil else { return }
+                        try saveRealmTrust(refreshed.stateJson, .profile, name: realmName)
+                        let refreshedAdmission = try RealmJoinService.VerifiedProfile(
+                            body: latest.body, accepted: latest.accepted)
+                        guard refreshedAdmission.isOpen else {
+                            throw NSError(
+                                domain: "ActrDiscovery", code: 26,
+                                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                                    "The Realm Profile changed while this link was waiting. Please try again.",
+                                    comment: "Actr realm profile advanced while waiting error")])
+                        }
+                        admission = refreshedAdmission
+                        guard try profileIsCurrent() else {
+                            throw NSError(
+                                domain: "ActrDiscovery", code: 26,
+                                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                                    "The Realm Profile changed while this link was waiting. Please try again.",
+                                    comment: "Actr realm profile advanced while waiting error")])
+                        }
+                    }
                     try await joinOpenRealm(admission)
                     admitted = true
                 } else {
