@@ -22,6 +22,11 @@ Actrium The project contains a stand-alone project React Native bundle. Current 
 ./scripts/bundle-actrium-runtime.sh --help
 ```
 
+Xcode and the command-line script use the same Node.js configuration. Set
+`NODE_BINARY` in `macos/.xcode.env.local` to override the calling environment.
+The default is `node` on `PATH`. Use an executable absolute path or a command on
+`PATH`, for example `export NODE_BINARY="$HOME/.volta/bin/node"`.
+
 ## Bundle Annotations
 
 ### System Apps (`system.jsbundle`)
