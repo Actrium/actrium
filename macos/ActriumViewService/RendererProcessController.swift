@@ -871,6 +871,10 @@ final class RendererProcessController {
             }
         }
 
+        connection.onAccessibilitySnapshotRefresh = { [weak self] in
+            self?.refreshAccessibilitySnapshots()
+        }
+
         connection.onAccessibilityAction = { [weak self] request, reply in
             DispatchQueue.main.async {
                 let ok = self?.surfaces[request.tabID]?.performAccessibility(
@@ -1058,7 +1062,19 @@ final class RendererProcessController {
 
     func publishAccessibilityTree(tabId: String) {
         guard let surface = surfaces[tabId] else { return }
-        try? connection.sendAccessibilityTree(surface.accessibilityTree())
+        do {
+            try connection.sendAccessibilityTree(surface.accessibilityTree(), delivery: surface.accessibilityDelivery)
+        } catch IPCError.notConnected {
+            // The connection's disconnect handler owns teardown.
+        } catch {
+            NSLog("Renderer accessibility snapshot failed: %@", error.localizedDescription)
+        }
+    }
+
+    private func refreshAccessibilitySnapshots() {
+        for surface in surfaces.values where surface.accessibilityDelivery.takeRefreshRequest() {
+            publishAccessibilityTree(tabId: surface.tabId)
+        }
     }
 
     private func destroyTab(_ tabId: String) {
@@ -1262,6 +1278,7 @@ private final class TextSelectionGesture {
 private final class RendererTabSurface {
 
     let tabId: String
+    let accessibilityDelivery = AccessibilitySnapshotDelivery()
     let entry: TabViewControllerEntry
     let container: ResizableContainerView
     let window: RendererWindow

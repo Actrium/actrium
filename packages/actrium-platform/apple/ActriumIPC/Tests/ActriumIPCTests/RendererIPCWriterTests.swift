@@ -42,10 +42,39 @@ final class RendererIPCWriterTests: XCTestCase {
         await fulfillment(of: [disconnected], timeout: 3)
     }
 
+    func testFinalSnapshotRejectedAtCapacityIsRecoveredWithoutAnotherUIChange() async throws {
+        let (host, renderer) = try pausedConnection()
+        defer { renderer.disconnect(); host.stop() }
+
+        // One slot is occupied by the blocked write.
+        for id in 1..<UInt32(IPCFrameLimits.maxQueuedNonRequiredFrames) {
+            try renderer.sendViewportApplied(tabId: "one", requestId: id, width: 100, height: 100)
+        }
+        let finalTree = snapshot(tabId: "one", generation: 2)
+        let recovered = expectation(description: "Host receives the final snapshot after capacity returns")
+        let refresh = expectation(description: "renderer regenerates the snapshot without a UI event")
+        let delivery = trackSnapshot(using: renderer, refresh: refresh) {
+            self.snapshot(tabId: "one", generation: 3)
+        }
+        host.onAccessibilityTree = { tree in
+            XCTAssertEqual(tree.tabID, finalTree.tabID)
+            XCTAssertEqual(tree.generation, 3)
+            recovered.fulfill()
+        }
+        try renderer.sendAccessibilityTree(finalTree, delivery: delivery)
+        try host.start()
+        await fulfillment(of: [refresh, recovered], timeout: 3)
+    }
+
     func testRequiredFramesEvictQueuedSnapshotWhenFrameSlotsFill() async throws {
         let (host, renderer) = try pausedConnection()
         defer { renderer.disconnect(); host.stop() }
-        try renderer.sendAccessibilityTree(snapshot(tabId: "one", generation: 1))
+        let finalTree = snapshot(tabId: "one", generation: 1)
+        let refresh = expectation(description: "renderer regenerates the evicted snapshot")
+        let delivery = trackSnapshot(using: renderer, refresh: refresh) {
+            self.snapshot(tabId: "one", generation: 2)
+        }
+        try renderer.sendAccessibilityTree(finalTree, delivery: delivery)
 
         // One slot is still occupied by the blocked write.
         let ids = (1..<IPCFrameLimits.maxQueuedRendererFrames).map(UInt32.init)
@@ -59,9 +88,15 @@ final class RendererIPCWriterTests: XCTestCase {
             received.append(id)
             if id == ids.last { drained.fulfill() }
         }
-        host.onAccessibilityTree = { _ in XCTFail("A replaceable snapshot occupied a required frame's slot") }
+        let recovered = expectation(description: "Host receives the evicted snapshot after required frames")
+        host.onAccessibilityTree = { tree in
+            XCTAssertEqual(received, ids)
+            XCTAssertEqual(tree.tabID, finalTree.tabID)
+            XCTAssertEqual(tree.generation, 2)
+            recovered.fulfill()
+        }
         try host.start()
-        await fulfillment(of: [drained], timeout: 5)
+        await fulfillment(of: [drained, refresh, recovered], timeout: 5)
         XCTAssertEqual(received, ids)
     }
 
@@ -90,6 +125,23 @@ final class RendererIPCWriterTests: XCTestCase {
         for _ in 0..<8 {
             try renderer.sendHostEvent(name: "required", userInfoJSON: payload)
         }
+    }
+
+    private func trackSnapshot(
+        using renderer: IPCHelperConnection, refresh: XCTestExpectation,
+        makeSnapshot: @escaping () -> Actrium_Ipc_AccessibilityTree
+    ) -> AccessibilitySnapshotDelivery {
+        let delivery = AccessibilitySnapshotDelivery()
+        renderer.onAccessibilitySnapshotRefresh = { [weak renderer] in
+            guard delivery.takeRefreshRequest() else { return }
+            do {
+                try renderer?.sendAccessibilityTree(makeSnapshot(), delivery: delivery)
+                refresh.fulfill()
+            } catch {
+                XCTFail("Snapshot refresh failed: \(error)")
+            }
+        }
+        return delivery
     }
 
     private func snapshot(tabId: String, generation: UInt64) -> Actrium_Ipc_AccessibilityTree {

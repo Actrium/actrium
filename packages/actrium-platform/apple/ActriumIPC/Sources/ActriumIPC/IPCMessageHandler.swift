@@ -389,6 +389,7 @@ public final class IPCHelperConnection {
     public var onTabGetSurfaceID: ((String, @escaping (UInt32) -> Void) -> Void)?
     public var onDestroyTab: ((String) -> Void)?
     public var onGetAccessibilityTree: ((String, @escaping (Actrium_Ipc_AccessibilityTree) -> Void) -> Void)?
+    public var onAccessibilitySnapshotRefresh: (() -> Void)?
     public var onAccessibilityAction: ((Actrium_Ipc_AccessibilityActionRequest, @escaping (Bool, String?) -> Void) -> Void)?
     public var onHostEvent: ((String, String, String) -> Void)?
 
@@ -415,6 +416,10 @@ public final class IPCHelperConnection {
 
         client.onDisconnected = { [weak self] in
             self?.onDisconnected?()
+        }
+
+        client.onAccessibilityRefresh = { [weak self] in
+            self?.onAccessibilitySnapshotRefresh?()
         }
     }
 
@@ -549,10 +554,12 @@ public final class IPCHelperConnection {
         try send(msg)
     }
 
-    nonisolated public func sendAccessibilityTree(_ tree: Actrium_Ipc_AccessibilityTree) throws {
+    nonisolated public func sendAccessibilityTree(
+        _ tree: Actrium_Ipc_AccessibilityTree, delivery: AccessibilitySnapshotDelivery? = nil
+    ) throws {
         var msg = Actrium_Ipc_IPCMessage()
         msg.accessibilityTree = tree
-        try send(msg, policy: .accessibilitySnapshot(tree.tabID))
+        try send(msg, policy: .accessibilitySnapshot(tree.tabID, delivery))
     }
 
     // MARK: - Private
