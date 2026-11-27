@@ -291,6 +291,12 @@ timer_inventory! {
         success: "preflight, send, and response path completes", interrupt: "caller cancellation or completion",
         expiry: "remove pending correlation; return TimedOut before submission or DeliveryUncertain after possible submission; preserve the transport", reset: "new request only", external: false
     },
+    PEER_RPC_CHANNEL_DEADLINE => {
+        id: "outbound.peer.rpc_channel", owner: "peer_gate", category: FailureDeadline,
+        duration: "caller absolute RPC deadline", arm: "host prepares a peer business channel",
+        success: "a healthy RPC lane is available", interrupt: "host cancellation or completion",
+        expiry: "return TimedOut", reset: "new preparation only", external: false
+    },
     HOST_REQUEST_DEADLINE => {
         id: "outbound.host.request", owner: "host_transport", category: FailureDeadline,
         duration: "caller absolute RPC deadline", arm: "host request lane lookup starts",

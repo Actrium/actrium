@@ -226,6 +226,14 @@ impl ActrRef {
             .await
     }
 
+    /// Open a usable RPC channel to a discovered Actor without sending an RPC.
+    pub async fn prepare_peer_rpc(&self, peer: &ActrId, timeout_ms: i64) -> ActorResult<()> {
+        self.app_context()
+            .await
+            .prepare_peer_rpc(peer, timeout_ms)
+            .await
+    }
+
     /// Create an application-side runtime context bound to this running actor.
     ///
     /// When `SessionState` is available, the context is built from the

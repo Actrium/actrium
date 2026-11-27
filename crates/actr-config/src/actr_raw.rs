@@ -149,6 +149,22 @@ pub struct RuntimeRawConfig {
     /// ```
     #[serde(default)]
     pub actrium: Option<RawActriumConfig>,
+
+    /// Packaged Service authorization for ordinary Actor traffic.
+    /// The path is relative to this runtime configuration.
+    /// ```toml
+    /// [service_authorization]
+    /// front_package = "dist/front.actr"
+    /// ```
+    #[serde(default)]
+    pub service_authorization: Option<RawServiceAuthorization>,
+}
+
+/// Ordinary Service policy derived from the signed Front package.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawServiceAuthorization {
+    pub front_package: std::path::PathBuf,
 }
 
 /// Actrium v1 Service-host settings.

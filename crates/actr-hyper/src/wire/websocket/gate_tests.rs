@@ -829,7 +829,9 @@ async fn handle_envelope_response_resolves_pending_not_mailbox() {
     let pending = empty_pending();
     let actor = test_actor_id(1);
 
-    let rx = pending.register("req-2".to_string(), actor).into_receiver();
+    let rx = pending
+        .register("req-2".to_string(), actor.clone())
+        .into_receiver();
 
     let mut envelope = make_rpc_envelope("req-2");
     envelope.payload = Some(bytes::Bytes::from("response-payload"));
@@ -838,7 +840,7 @@ async fn handle_envelope_response_resolves_pending_not_mailbox() {
 
     WebSocketGate::handle_envelope(
         envelope,
-        vec![],
+        actr_protocol::prost::Message::encode_to_vec(&actor),
         None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
@@ -862,7 +864,9 @@ async fn handle_envelope_response_both_payload_and_error_gives_decode_failure() 
     let mailbox = CapturingMailbox::new();
     let pending = empty_pending();
     let actor = test_actor_id(2);
-    let rx = pending.register("req-3".to_string(), actor).into_receiver();
+    let rx = pending
+        .register("req-3".to_string(), actor.clone())
+        .into_receiver();
 
     let mut envelope = make_rpc_envelope("req-3");
     envelope.payload = Some(bytes::Bytes::from("x"));
@@ -875,7 +879,7 @@ async fn handle_envelope_response_both_payload_and_error_gives_decode_failure() 
 
     WebSocketGate::handle_envelope(
         envelope,
-        vec![],
+        actr_protocol::prost::Message::encode_to_vec(&actor),
         None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
@@ -897,7 +901,9 @@ async fn handle_envelope_response_error_only_gives_unavailable() {
     let mailbox = CapturingMailbox::new();
     let pending = empty_pending();
     let actor = test_actor_id(3);
-    let rx = pending.register("req-4".to_string(), actor).into_receiver();
+    let rx = pending
+        .register("req-4".to_string(), actor.clone())
+        .into_receiver();
 
     let mut envelope = make_rpc_envelope("req-4");
     envelope.payload = None;
@@ -910,7 +916,7 @@ async fn handle_envelope_response_error_only_gives_unavailable() {
 
     WebSocketGate::handle_envelope(
         envelope,
-        vec![],
+        actr_protocol::prost::Message::encode_to_vec(&actor),
         None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
@@ -933,7 +939,9 @@ async fn handle_envelope_response_removes_pending_entry() {
     let mailbox = CapturingMailbox::new();
     let pending = empty_pending();
     let actor = test_actor_id(4);
-    let _rx = pending.register("req-5".to_string(), actor).into_receiver();
+    let _rx = pending
+        .register("req-5".to_string(), actor.clone())
+        .into_receiver();
 
     let mut envelope = make_rpc_envelope("req-5");
     envelope.direction = Some(actr_protocol::Direction::Response as i32);
@@ -941,7 +949,7 @@ async fn handle_envelope_response_removes_pending_entry() {
 
     WebSocketGate::handle_envelope(
         envelope,
-        vec![],
+        actr_protocol::prost::Message::encode_to_vec(&actor),
         None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,
@@ -1037,7 +1045,7 @@ async fn handle_envelope_explicit_response_with_pending_wakes_caller() {
     let pending = empty_pending();
     let actor = test_actor_id(7);
     let rx = pending
-        .register("req-resp".to_string(), actor)
+        .register("req-resp".to_string(), actor.clone())
         .into_receiver();
 
     let mut envelope = make_rpc_envelope("req-resp");
@@ -1047,7 +1055,7 @@ async fn handle_envelope_explicit_response_with_pending_wakes_caller() {
 
     WebSocketGate::handle_envelope(
         envelope,
-        vec![],
+        actr_protocol::prost::Message::encode_to_vec(&actor),
         None,
         bytes::Bytes::from(data),
         PayloadType::RpcReliable,

@@ -424,6 +424,16 @@ impl RuntimeContext {
             .await
     }
 
+    pub(crate) async fn prepare_peer_rpc(&self, peer: &ActrId, timeout_ms: i64) -> ActorResult<()> {
+        let deadline = crate::transport::RpcDeadline::from_timeout_ms(timeout_ms)?;
+        self.ensure_session_ready_until(crate::timer::ids::RUNTIME_CALL_PREFLIGHT, deadline)
+            .await?;
+        let Gate::Peer(gate) = self.select_gate(&Dest::Peer(peer.clone()))? else {
+            return Err(ActrError::Unavailable("Peer gate is unavailable".into()));
+        };
+        gate.prepare_rpc_peer(peer, deadline).await
+    }
+
     pub(crate) async fn call_raw_with_deadline(
         &self,
         target: &Dest,
@@ -1089,9 +1099,11 @@ impl Context for RuntimeContext {
             "📊 Registering DataChunk callback for stream_id: {}",
             stream_id
         );
-        self.data_chunk_registry
-            .register(stream_id, Arc::new(callback));
-        Ok(())
+        self.data_chunk_registry.register_for_caller(
+            stream_id,
+            Arc::new(callback),
+            self.caller_id.as_ref(),
+        )
     }
 
     async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
@@ -1099,8 +1111,8 @@ impl Context for RuntimeContext {
             "🚫 Unregistering DataChunk callback for stream_id: {}",
             stream_id
         );
-        self.data_chunk_registry.unregister(stream_id);
-        Ok(())
+        self.data_chunk_registry
+            .unregister_for_caller(stream_id, self.caller_id.as_ref())
     }
 
     async fn send_data_chunk(

@@ -109,6 +109,9 @@ fn runtime_instance_id(manager: &Manager) -> String {
 async fn actor_binding_digests(
     ctx: &Rc<ClientContext>,
 ) -> Result<Option<([u8; 32], [u8; 32])>, JsValue> {
+    if !actr_relay_security::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+        return Ok(None);
+    }
     let rt = ctx.runtime.lock().await;
     let Some(credential) = rt.credential.clone() else {
         return Ok(None);

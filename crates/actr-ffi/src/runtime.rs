@@ -716,6 +716,14 @@ impl ActrRefWrapper {
             .map_err(ActrError::from)
     }
 
+    /// Prepare a reliable RPC channel without invoking a business operation.
+    pub async fn prepare_peer_rpc(&self, target: ActrId, timeout_ms: i64) -> ActrResult<()> {
+        self.inner
+            .prepare_peer_rpc(&target.into(), timeout_ms)
+            .await
+            .map_err(ActrError::from)
+    }
+
     /// Trigger shutdown.
     pub fn shutdown(&self) {
         self.inner.shutdown();
@@ -1237,6 +1245,15 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
         node.clone()
             .with_actrium_service(config, ActriumServicePolicies::allow_all())
             .expect("an event-only peer accepts an empty deny-all RPC table");
+        if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+            assert!(matches!(
+                node.start().await,
+                Err(ActrError::InvalidArgument { msg })
+                    if msg.contains("Actor channel authentication")
+            ));
+            server.shutdown().await;
+            return;
+        }
         let actr_ref = node
             .start()
             .await
@@ -1278,6 +1295,15 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
         node.clone()
             .with_actrium_service(config, ActriumServicePolicies::allow_all())
             .expect("the same node accepts a corrected config");
+        if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+            assert!(matches!(
+                node.start().await,
+                Err(ActrError::InvalidArgument { msg })
+                    if msg.contains("Actor channel authentication")
+            ));
+            server.shutdown().await;
+            return;
+        }
         let actr_ref = node
             .start()
             .await
