@@ -5,7 +5,7 @@ export interface NativeServiceStreamModule {
   unsubscribeServiceEvents(tabId: string, subscriptionId: string): void;
 }
 
-type StreamRegistration = { id?: string; ready: Promise<void> };
+type StreamRegistration = { id?: string; stopWatching?: () => void };
 
 export class NativeServiceStreams {
   private readonly streams = new Map<string, StreamRegistration>();
@@ -17,30 +17,42 @@ export class NativeServiceStreams {
     private readonly listen: (listener: (event: unknown) => void) => () => void,
   ) {}
 
-  async register(streamId: string): Promise<void> {
+  async register(
+    streamId: string,
+    watchRevocation?: (revoke: () => void) => (() => void) | undefined,
+  ): Promise<void> {
     if (this.disposed) throw new Error('The Service DataStream bridge is closed.');
     if (this.streams.has(streamId)) throw new Error('Service DataStream is already registered.');
-    const registration: StreamRegistration = {
-      ready: this.native.subscribeServiceStream(this.tabId, streamId).then((id) => {
-        registration.id = id;
-        if (this.streams.get(streamId) === registration) return;
-        this.native.unsubscribeServiceEvents(this.tabId, id);
-        throw new Error('Service DataStream registration was cancelled.');
-      }),
-    };
+    const registration: StreamRegistration = {};
     this.streams.set(streamId, registration);
     try {
-      await registration.ready;
+      const stopWatching = watchRevocation?.(() => this.unregisterRegistration(streamId, registration));
+      if (this.streams.get(streamId) !== registration) {
+        stopWatching?.();
+        throw new Error('Service DataStream registration was cancelled.');
+      }
+      registration.stopWatching = stopWatching;
+      const id = await this.native.subscribeServiceStream(this.tabId, streamId);
+      if (this.streams.get(streamId) !== registration) {
+        this.native.unsubscribeServiceEvents(this.tabId, id);
+        throw new Error('Service DataStream registration was cancelled.');
+      }
+      registration.id = id;
     } catch (error) {
-      if (this.streams.get(streamId) === registration) this.streams.delete(streamId);
+      this.unregisterRegistration(streamId, registration);
       throw error;
     }
   }
 
   unregister(streamId: string): void {
     const registration = this.streams.get(streamId);
-    if (!registration) return;
+    if (registration) this.unregisterRegistration(streamId, registration);
+  }
+
+  private unregisterRegistration(streamId: string, registration: StreamRegistration): void {
+    if (this.streams.get(streamId) !== registration) return;
     this.streams.delete(streamId);
+    registration.stopWatching?.();
     if (registration.id) this.native.unsubscribeServiceEvents(this.tabId, registration.id);
   }
 

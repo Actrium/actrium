@@ -1,4 +1,4 @@
-use actrium_core::{GuestLocalStorage, GuestLocalStorageError};
+use actrium_core::{GuestLocalStorage, GuestLocalStorageError, GuestLocalStorageItem};
 use rusqlite::{Connection, params};
 
 #[test]
@@ -86,6 +86,78 @@ fn rejects_over_quota_overwrites_without_losing_the_old_value() {
     store
         .set_item("two".into(), "tail".into(), full_value)
         .unwrap();
+}
+
+#[test]
+fn replaces_a_history_that_fits_only_after_removing_the_old_chunks() {
+    let store = GuestLocalStorage::new(":memory:".into());
+    let history = |prefix: &str, count| {
+        let mut entries = (0..count)
+            .map(|index| GuestLocalStorageItem {
+                key: format!("{prefix}/{index}"),
+                value: "x".repeat(64 * 1024),
+            })
+            .collect::<Vec<_>>();
+        entries.push(GuestLocalStorageItem {
+            key: "history".into(),
+            value: prefix.into(),
+        });
+        entries
+    };
+    store
+        .set_item("one".into(), "settings".into(), "keep".into())
+        .unwrap();
+    let old = history("old", 9);
+    for GuestLocalStorageItem { key, value } in &old {
+        store
+            .set_item("one".into(), key.clone(), value.clone())
+            .unwrap();
+    }
+    let next = history("new", 9);
+    let remove = old
+        .into_iter()
+        .map(|item| item.key)
+        .filter(|key| key != "history")
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        store.replace_items(
+            "one".into(),
+            "history".into(),
+            Some("different".into()),
+            remove.clone(),
+            next.clone()
+        ),
+        Err(GuestLocalStorageError::Conflict)
+    ));
+    let oversized = history("new", 16);
+    assert!(matches!(
+        store.replace_items(
+            "one".into(),
+            "history".into(),
+            Some("old".into()),
+            remove.clone(),
+            oversized
+        ),
+        Err(GuestLocalStorageError::QuotaExceeded)
+    ));
+    let get = |key: &str| store.get_item("one".into(), key.into()).unwrap();
+    assert_eq!(get("history").as_deref(), Some("old"));
+    assert!(get("old/0").is_some());
+    assert_eq!(get("new/0"), None);
+
+    store
+        .replace_items(
+            "one".into(),
+            "history".into(),
+            Some("old".into()),
+            remove,
+            next,
+        )
+        .unwrap();
+    assert_eq!(get("history").as_deref(), Some("new"));
+    assert_eq!(get("old/0"), None);
+    assert!(get("new/0").is_some());
+    assert_eq!(get("settings").as_deref(), Some("keep"));
 }
 
 #[test]

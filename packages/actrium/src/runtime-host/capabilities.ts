@@ -80,6 +80,11 @@ export const FRONT_CAPABILITY_SPECS = {
     hostModule: 'host:local-storage',
     hostMethod: 'removeItem',
   },
+  'host:local-storage.replaceItems': {
+    module: 'host:local-storage',
+    hostModule: 'host:local-storage',
+    hostMethod: 'replaceItems',
+  },
   'host:notifications.show': {
     module: 'host:notifications',
     hostModule: 'host:notifications',

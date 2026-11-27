@@ -389,6 +389,7 @@ public final class IPCHelperConnection {
     public var onTabGetSurfaceID: ((String, @escaping (UInt32) -> Void) -> Void)?
     public var onDestroyTab: ((String) -> Void)?
     public var onGetAccessibilityTree: ((String, @escaping (Actrium_Ipc_AccessibilityTree) -> Void) -> Void)?
+    public var onAccessibilitySnapshotRefresh: (() -> Void)?
     public var onAccessibilityAction: ((Actrium_Ipc_AccessibilityActionRequest, @escaping (Bool, String?) -> Void) -> Void)?
     public var onHostEvent: ((String, String, String) -> Void)?
 
@@ -415,6 +416,10 @@ public final class IPCHelperConnection {
 
         client.onDisconnected = { [weak self] in
             self?.onDisconnected?()
+        }
+
+        client.onAccessibilityRefresh = { [weak self] in
+            self?.onAccessibilitySnapshotRefresh?()
         }
     }
 
@@ -499,12 +504,28 @@ public final class IPCHelperConnection {
 
     /// Forward an allow-listed business action to the Browser Broker.
     nonisolated public func sendHostEvent(name: String, userInfoJSON: String, tabId: String = "") throws {
+        try send(Self.hostEvent(name: name, json: userInfoJSON, tabId: tabId))
+    }
+
+    nonisolated func enqueueHostEvent(
+        name: String, tabId: String, retainedBytes: Int,
+        prepareJSON: @escaping @Sendable () throws -> String?,
+        beginSend: @escaping @Sendable () -> Bool,
+        completion: @escaping @Sendable (Error?) -> Void
+    ) throws {
+        try client.enqueueSend(bytes: retainedBytes + tabId.utf8.count, policy: .request, {
+            guard let json = try prepareJSON() else { return nil }
+            return try Self.hostEvent(name: name, json: json, tabId: tabId).serializedData()
+        }, beginSend: beginSend, completion: completion)
+    }
+
+    private nonisolated static func hostEvent(name: String, json: String, tabId: String) -> Actrium_Ipc_IPCMessage {
         var msg = Actrium_Ipc_IPCMessage()
         msg.hostEvent = Actrium_Ipc_HostEvent()
         msg.hostEvent.name = name
-        msg.hostEvent.userInfoJson = userInfoJSON
+        msg.hostEvent.userInfoJson = json
         msg.hostEvent.tabID = tabId
-        try send(msg)
+        return msg
     }
 
     /// Send crash report
@@ -533,17 +554,24 @@ public final class IPCHelperConnection {
         try send(msg)
     }
 
-    nonisolated public func sendAccessibilityTree(_ tree: Actrium_Ipc_AccessibilityTree) throws {
+    nonisolated public func sendAccessibilityTree(
+        _ tree: Actrium_Ipc_AccessibilityTree, delivery: AccessibilitySnapshotDelivery? = nil
+    ) throws {
         var msg = Actrium_Ipc_IPCMessage()
         msg.accessibilityTree = tree
-        try send(msg)
+        try send(msg, policy: .accessibilitySnapshot(tree.tabID, delivery))
     }
 
     // MARK: - Private
 
-    nonisolated private func send(_ message: Actrium_Ipc_IPCMessage) throws {
+    nonisolated private func send(_ message: Actrium_Ipc_IPCMessage, policy: IPCWritePolicy = .required) throws {
         let data = try message.serializedData()
-        try client.send(data)
+        guard data.count < IPCFrameLimits.maxFrameBytes else { throw IPCError.frameTooLarge }
+        try client.enqueueSend(bytes: data.count + MemoryLayout<UInt32>.size, policy: policy, { data }) { error in
+            if let error, case IPCError.writeFailed = error {
+                NSLog("IPCHelperConnection: Failed to send a frame: %@", error.localizedDescription)
+            }
+        }
     }
 
     nonisolated private func sendResponse(requestId: UInt32, _ message: Actrium_Ipc_IPCMessage) throws {

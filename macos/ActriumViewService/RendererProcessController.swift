@@ -310,7 +310,7 @@ final class RendererProcessController {
 
     private let arguments: Arguments
     private let connection: IPCHelperConnection
-    private var serviceCalls: [UUID: (RealmServiceReply) -> Void] = [:]
+    private lazy var realmService = RealmServiceClient(connection: connection)
     private lazy var localStorage = GuestLocalStorageClient(connection: connection)
 
     static func callLocalStorage(
@@ -418,25 +418,7 @@ final class RendererProcessController {
             reply(RealmServiceReply(id: call.id, failure: failure))
             return
         }
-        do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = .withoutEscapingSlashes
-            let data = try encoder.encode(call)
-            try controller.connection.sendHostEvent(
-                name: RealmServiceCall.requestEvent,
-                userInfoJSON: String(decoding: data, as: UTF8.self),
-                tabId: tabId
-            )
-            controller.serviceCalls[call.id] = reply
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(call.timeoutMs)) { [weak controller] in
-                let failure = RealmServiceFailure(
-                    code: "realm_service_timeout", message: "The Service call timed out."
-                )
-                controller?.serviceCalls.removeValue(forKey: call.id)?(RealmServiceReply(id: call.id, failure: failure))
-            }
-        } catch {
-            reply(RealmServiceReply(id: call.id, failure: RealmServiceFailure(error: error)))
-        }
+        controller.realmService.send(call, tabId: tabId, reply: reply)
     }
     static func subscribeRealmServiceEvents(
         tabId: String,
@@ -739,10 +721,7 @@ final class RendererProcessController {
                 return
             }
             if name == RealmServiceCall.responseEvent {
-                guard let response = try? JSONDecoder().decode(RealmServiceReply.self, from: Data(json.utf8)) else {
-                    return
-                }
-                self.serviceCalls.removeValue(forKey: response.id)?(response)
+                realmService.receive(json: json, tabId: tabId)
                 return
             }
             if name == RealmServiceEventSubscription.responseEvent,
@@ -887,6 +866,10 @@ final class RendererProcessController {
             DispatchQueue.main.async {
                 reply(self?.surfaces[tabId]?.accessibilityTree() ?? Actrium_Ipc_AccessibilityTree())
             }
+        }
+
+        connection.onAccessibilitySnapshotRefresh = { [weak self] in
+            self?.refreshAccessibilitySnapshots()
         }
 
         connection.onAccessibilityAction = { [weak self] request, reply in
@@ -1076,12 +1059,25 @@ final class RendererProcessController {
 
     func publishAccessibilityTree(tabId: String) {
         guard let surface = surfaces[tabId] else { return }
-        try? connection.sendAccessibilityTree(surface.accessibilityTree())
+        do {
+            try connection.sendAccessibilityTree(surface.accessibilityTree(), delivery: surface.accessibilityDelivery)
+        } catch IPCError.notConnected {
+            // The connection's disconnect handler owns teardown.
+        } catch {
+            NSLog("Renderer accessibility snapshot failed: %@", error.localizedDescription)
+        }
+    }
+
+    private func refreshAccessibilitySnapshots() {
+        for surface in surfaces.values where surface.accessibilityDelivery.takeRefreshRequest() {
+            publishAccessibilityTree(tabId: surface.tabId)
+        }
     }
 
     private func destroyTab(_ tabId: String) {
         cancelFileImport(tabId)
         fileExport.close(tabId: tabId)
+        realmService.close(tabId: tabId)
         cancelGuestMenu(tabId)
         attachmentCache?.close(tabId: tabId)
         failPendingAttachmentCalls(tabId: tabId)
@@ -1281,6 +1277,7 @@ private final class TextSelectionGesture {
 private final class RendererTabSurface {
 
     let tabId: String
+    let accessibilityDelivery = AccessibilitySnapshotDelivery()
     let entry: TabViewControllerEntry
     let container: ResizableContainerView
     let window: RendererWindow

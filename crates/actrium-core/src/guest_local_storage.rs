@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
 
 pub(crate) const MAX_KEY_BYTES: usize = 1024;
@@ -30,6 +30,8 @@ pub enum GuestLocalStorageError {
     MigrationRequired,
     #[error("Storage migration failed: {0}")]
     MigrationConflict(String),
+    #[error("Local storage changed before the replacement could be saved.")]
+    Conflict,
 }
 
 impl From<rusqlite::Error> for GuestLocalStorageError {
@@ -42,6 +44,12 @@ impl From<rusqlite::Error> for GuestLocalStorageError {
 pub struct GuestLocalStorage {
     path: PathBuf,
     connection: Mutex<Option<Connection>>,
+}
+
+#[derive(Clone)]
+pub struct GuestLocalStorageItem {
+    pub key: String,
+    pub value: String,
 }
 
 impl GuestLocalStorage {
@@ -114,6 +122,54 @@ impl GuestLocalStorage {
         })
     }
 
+    pub fn replace_items(
+        &self,
+        origin: String,
+        key: String,
+        expected: Option<String>,
+        remove: Vec<String>,
+        set: Vec<GuestLocalStorageItem>,
+    ) -> Result<(), GuestLocalStorageError> {
+        validate_key(&key)?;
+        for key in remove.iter().chain(set.iter().map(|item| &item.key)) {
+            validate_key(key)?;
+        }
+        if expected
+            .iter()
+            .chain(set.iter().map(|item| &item.value))
+            .any(|value| value.len() > MAX_VALUE_BYTES)
+        {
+            return Err(GuestLocalStorageError::InvalidValue);
+        }
+        self.with_connection(|connection| {
+            let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let current: Option<String> = transaction.query_row(
+                "SELECT value FROM guest_local_storage WHERE origin = ?1 AND key = ?2",
+                params![origin, key],
+                |row| row.get(0),
+            ).optional()?;
+            if current != expected {
+                return Err(GuestLocalStorageError::Conflict);
+            }
+            for key in remove {
+                transaction.execute(
+                    "DELETE FROM guest_local_storage WHERE origin = ?1 AND key = ?2",
+                    params![origin, key],
+                )?;
+            }
+            for GuestLocalStorageItem { key, value } in set {
+                let size = key.len() + value.len();
+                transaction.execute(
+                    "INSERT INTO guest_local_storage (origin, key, value, size) VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT (origin, key) DO UPDATE SET value = excluded.value, size = excluded.size",
+                    params![origin, key, value, size],
+                )?;
+            }
+            enforce_quota(&transaction, &origin)?;
+            Ok(transaction.commit()?)
+        })
+    }
+
     fn open(&self) -> rusqlite::Result<Connection> {
         let connection = Connection::open(&self.path)?;
         connection.busy_timeout(Duration::from_secs(2))?;
@@ -143,6 +199,18 @@ impl GuestLocalStorage {
         };
         operation(connection)
     }
+}
+
+fn enforce_quota(connection: &Connection, origin: &str) -> Result<(), GuestLocalStorageError> {
+    let (bytes, entries): (usize, usize) = connection.query_row(
+        "SELECT COALESCE(SUM(size), 0), COUNT(*) FROM guest_local_storage WHERE origin = ?1",
+        [origin],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if bytes > MAX_ORIGIN_BYTES || entries > MAX_ORIGIN_ENTRIES {
+        return Err(GuestLocalStorageError::QuotaExceeded);
+    }
+    Ok(())
 }
 
 fn validate_key(key: &str) -> Result<(), GuestLocalStorageError> {

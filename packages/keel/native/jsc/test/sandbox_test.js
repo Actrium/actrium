@@ -746,7 +746,9 @@
   // A real host Promise settles on the host microtask queue, which only
   // drains after this script returns to the runtime. The runner executes
   // __jscSandboxTestPhase2 in a second evaluation to observe it.
-  var realRejected = Promise.reject(new TypeError('async-host-boom'));
+  var realRejected = Promise.reject(
+    Object.assign(new TypeError('async-host-boom'), { code: 'E_ASYNC_HOST' })
+  );
   realRejected.catch(function () {});
   ctx.inject('realRejected', realRejected);
   ctx.eval('realRejected.catch(function () {});');
@@ -803,6 +805,10 @@
     assert(
       ctx.eval('realRejection ? realRejection.message : null') === 'async-host-boom',
       'Real host Promise rejection keeps its message'
+    );
+    assert(
+      ctx.eval('realRejection ? realRejection.code : null') === 'E_ASYNC_HOST',
+      'Real host Promise rejection keeps its error code'
     );
     assert(
       ctx.eval(
