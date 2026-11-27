@@ -212,7 +212,7 @@ fn record_exit(config: &Launch, exit: GuestExit) -> Result<()> {
     Ok(())
 }
 
-fn wait_empty(group: &Path, duration: Duration) -> Result<bool> {
+pub(super) fn wait_empty(group: &Path, duration: Duration) -> Result<bool> {
     let deadline = Instant::now() + duration;
     loop {
         match fs::read_to_string(group.join("cgroup.events")) {

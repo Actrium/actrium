@@ -106,7 +106,7 @@ impl Permissions {
                 .await;
         }
 
-        let (alias, dependency, permit) = self.bind(&request, &invocation, operation)?;
+        let (dependency, permit) = self.bind(&request, &invocation, operation)?;
         let target = permit
             .target
             .clone()
@@ -154,21 +154,14 @@ impl Permissions {
                     Ok(bytes.to_vec())
                 }
                 HostOperation::Tell => {
-                    if !self
-                        .deployment
-                        .actors
-                        .iter()
-                        .any(|grant| grant.alias == alias && grant.allow_tell)
-                    {
-                        return Err(denied("OCI Actor Tell is not granted"));
-                    }
-                    let _ = dispatch_id.set(uuid::Uuid::new_v4().to_string());
                     context
-                        .tell_raw(
+                        .tell_raw_with_deadline(
                             &Dest::Peer(target),
                             route,
                             PayloadType::RpcReliable,
                             payload,
+                            RpcDeadline::at(deadline),
+                            Some(&dispatch_id),
                         )
                         .await?;
                     Ok(Vec::new())
@@ -198,56 +191,62 @@ impl Permissions {
         request: &HostRequest,
         invocation: &InvocationContext,
         operation: HostOperation,
-    ) -> ActorResult<(&'a str, &'a ScopedDependency, EgressPermit)> {
-        let mut matches =
-            self.actor.iter().filter_map(|(alias, dependency)| {
-                if !request.alias.is_empty() && request.alias != *alias {
+    ) -> ActorResult<(&'a ScopedDependency, EgressPermit)> {
+        let mut matches = self.actor.iter().filter_map(|(alias, dependency)| {
+            if !request.alias.is_empty() && request.alias != *alias {
+                return None;
+            }
+            if request
+                .actor_type
+                .as_ref()
+                .is_some_and(|actor_type| actor_type.to_string_repr() != dependency.lock.actr_type)
+            {
+                return None;
+            }
+            let package_sha256 = dependency.lock.package_sha256.as_deref()?;
+            let permit = dependency.permission.rpc_routes.iter().find_map(|route| {
+                let allowed = match operation {
+                    HostOperation::Call | HostOperation::Tell => route == &request.route,
+                    HostOperation::Resolve => !request.alias.is_empty(),
+                    HostOperation::Discover => request.actor_type.is_some(),
+                    _ => false,
+                };
+                if !allowed {
                     return None;
                 }
-                if request.actor_type.as_ref().is_some_and(|actor_type| {
-                    actor_type.to_string_repr() != dependency.lock.actr_type
-                }) {
+                let authorization = EgressRequest {
+                    invocation,
+                    source_package_sha256: &self.package_digest,
+                    privacy_contract_sha256: &self.contract_digest,
+                    data_classes: &dependency.permission.data_classes,
+                    alias,
+                    operation: EgressOperation::Actor {
+                        route,
+                        target_package_sha256: package_sha256,
+                        target_actor_type: &dependency.lock.actr_type,
+                        contract_fingerprint: &dependency.lock.fingerprint,
+                    },
+                };
+                let permit = self.policy.authorize(authorization).ok()?;
+                let target = permit.target.as_ref()?;
+                if request
+                    .target
+                    .as_ref()
+                    .is_some_and(|requested| requested != target)
+                {
                     return None;
                 }
-                let package_sha256 = dependency.lock.package_sha256.as_deref()?;
-                let permit = dependency.permission.rpc_routes.iter().find_map(|route| {
-                    let allowed = match operation {
-                        HostOperation::Call | HostOperation::Tell => route == &request.route,
-                        HostOperation::Resolve => !request.alias.is_empty(),
-                        HostOperation::Discover => request.actor_type.is_some(),
-                        _ => false,
-                    };
-                    if !allowed {
+                if operation == HostOperation::Tell {
+                    let (grant, _) =
+                        matching_actor_grant(&self.deployment, authorization, Some(target)).ok()?;
+                    if !grant.allow_tell {
                         return None;
                     }
-                    let permit = self
-                        .policy
-                        .authorize(EgressRequest {
-                            invocation,
-                            source_package_sha256: &self.package_digest,
-                            privacy_contract_sha256: &self.contract_digest,
-                            data_classes: &dependency.permission.data_classes,
-                            alias,
-                            operation: EgressOperation::Actor {
-                                route,
-                                target_package_sha256: package_sha256,
-                                target_actor_type: &dependency.lock.actr_type,
-                                contract_fingerprint: &dependency.lock.fingerprint,
-                            },
-                        })
-                        .ok()?;
-                    let target = permit.target.as_ref()?;
-                    if request
-                        .target
-                        .as_ref()
-                        .is_some_and(|requested| requested != target)
-                    {
-                        return None;
-                    }
-                    Some(permit)
-                })?;
-                Some((alias.as_str(), dependency, permit))
-            });
+                }
+                Some(permit)
+            })?;
+            Some((dependency, permit))
+        });
         let first = matches
             .next()
             .ok_or_else(|| denied("OCI dependency or operation is not authorized"))?;
@@ -282,29 +281,7 @@ impl EgressPolicy for FilePolicy {
                 }
                 None
             }
-            EgressOperation::Actor {
-                route,
-                target_package_sha256,
-                target_actor_type,
-                contract_fingerprint,
-            } => {
-                let grant = self
-                    .0
-                    .actors
-                    .iter()
-                    .find(|grant| {
-                        grant.alias == request.alias
-                            && grant.package_sha256 == target_package_sha256
-                            && grant.contract_fingerprint == contract_fingerprint
-                            && grant.routes.iter().any(|allowed| allowed == route)
-                            && request
-                                .data_classes
-                                .iter()
-                                .all(|class| grant.data_classes.contains(class))
-                    })
-                    .ok_or_else(|| denied("Actor route is outside the OCI deployment grant"))?;
-                Some(granted_target(grant, target_actor_type)?)
-            }
+            EgressOperation::Actor { .. } => Some(matching_actor_grant(&self.0, request, None)?.1),
         };
         Ok(EgressPermit {
             expires_at: Instant::now() + EGRESS_TIMEOUT,
@@ -324,17 +301,167 @@ impl EgressPolicy for FilePolicy {
     }
 }
 
-fn granted_target(grant: &OciActorGrant, expected_type: &str) -> ActorResult<ActrId> {
-    let actor = ActrId::from_string_repr(&grant.target)
-        .map_err(|_| denied("OCI deployment has an invalid Actor ID"))?;
-    if grant.actor_type != expected_type {
-        return Err(denied(
-            "OCI Actor target does not match the signed dependency type",
-        ));
+fn matching_actor_grant<'a>(
+    deployment: &'a OciRuntimeConfig,
+    request: EgressRequest<'_>,
+    target: Option<&ActrId>,
+) -> ActorResult<(&'a OciActorGrant, ActrId)> {
+    let EgressOperation::Actor {
+        route,
+        target_package_sha256,
+        target_actor_type,
+        contract_fingerprint,
+    } = request.operation
+    else {
+        return Err(denied("expected an Actor grant"));
+    };
+    for grant in &deployment.actors {
+        if grant.alias == request.alias
+            && grant.package_sha256 == target_package_sha256
+            && grant.contract_fingerprint == contract_fingerprint
+            && grant.actor_type == target_actor_type
+            && grant.routes.iter().any(|allowed| allowed == route)
+            && request
+                .data_classes
+                .iter()
+                .all(|class| grant.data_classes.contains(class))
+        {
+            let granted = ActrId::from_string_repr(&grant.target)
+                .map_err(|_| denied("OCI deployment has an invalid Actor ID"))?;
+            if target.is_none_or(|target| target == &granted) {
+                return Ok((grant, granted));
+            }
+        }
     }
-    Ok(actor)
+    Err(denied(
+        "Actor route or target is outside the OCI deployment grant",
+    ))
 }
 
 fn denied(message: &str) -> ActrError {
     ActrError::PermissionDenied(message.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actr_config::lock::LockedDependency;
+    use actr_pack::egress::EgressPermissions;
+
+    #[test]
+    fn tell_requires_the_grant_for_the_requested_route_and_target() {
+        let mut settings: OciRuntimeConfig = toml::from_str(
+            r#"
+syd-oci = "/unused"
+umoci = "/unused"
+bubblewrap = "/unused"
+supervisor = "/unused"
+state-dir = "/unused"
+image-dir = "/unused"
+policy = "/unused"
+cgroup-parent = "/unused"
+package-sha256 = "source-digest"
+"#,
+        )
+        .unwrap();
+        let peer = ActrId {
+            realm: "test@example.com".into(),
+            serial_number: 2,
+        };
+        let other = ActrId {
+            serial_number: 3,
+            ..peer.clone()
+        };
+        let actor_type = "local/Echo@1.0.0";
+        let talk = "echo.Echo.Talk";
+        let ping = "echo.Echo.Ping";
+        let grant = OciActorGrant {
+            alias: "echo".into(),
+            target: peer.to_string_repr(),
+            actor_type: actor_type.into(),
+            package_sha256: "target-digest".into(),
+            contract_fingerprint: "fingerprint".into(),
+            routes: vec![talk.into()],
+            data_classes: vec!["public".into()],
+            allow_tell: true,
+        };
+        settings.actors = vec![
+            grant.clone(),
+            OciActorGrant {
+                routes: vec![ping.into()],
+                allow_tell: false,
+                ..grant.clone()
+            },
+            OciActorGrant {
+                routes: vec![ping.into()],
+                target: other.to_string_repr(),
+                ..grant
+            },
+        ];
+        let lock = LockFile {
+            metadata: None,
+            dependencies: vec![LockedDependency {
+                name: "Echo".into(),
+                alias: "echo".into(),
+                actr_type: actor_type.into(),
+                package_sha256: Some("target-digest".into()),
+                description: None,
+                fingerprint: "fingerprint".into(),
+                published_at: None,
+                tags: vec![],
+                cached_at: "2026-01-01T00:00:00Z".into(),
+                files: vec![],
+            }],
+        };
+        let contract = PackagePrivacyContract {
+            sha256: "privacy-digest".into(),
+            dependency_digests: BTreeMap::new(),
+            egress: EgressPermissions {
+                https: BTreeMap::new(),
+                actor: BTreeMap::from([(
+                    "echo".into(),
+                    ActorPermission {
+                        rpc_routes: vec![talk.into(), ping.into()],
+                        data_classes: vec!["public".into()],
+                        target_actor_type: actor_type.into(),
+                    },
+                )]),
+            },
+        };
+        let permissions = Permissions::new(
+            Arc::new(settings),
+            None,
+            "source-digest".into(),
+            contract,
+            Some(&lock),
+        );
+        let invocation = InvocationContext {
+            self_id: ActrId {
+                serial_number: 1,
+                ..peer.clone()
+            },
+            caller_id: None,
+            request_id: "test".into(),
+        };
+        let request = |route: &str| HostRequest {
+            alias: "echo".into(),
+            route: route.into(),
+            target: Some(peer.clone()),
+            ..HostRequest::default()
+        };
+        assert!(
+            permissions
+                .bind(&request(talk), &invocation, HostOperation::Tell)
+                .is_ok()
+        );
+        assert!(
+            permissions
+                .bind(&request(ping), &invocation, HostOperation::Call)
+                .is_ok()
+        );
+        assert!(matches!(
+            permissions.bind(&request(ping), &invocation, HostOperation::Tell),
+            Err(ActrError::PermissionDenied(_))
+        ));
+    }
 }

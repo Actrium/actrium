@@ -1,8 +1,9 @@
 //! Isolated OCI unpack, image admission, and cache leases.
 
 use std::fs::{self, File};
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::AsRawFd;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -15,6 +16,9 @@ use sha2::{Digest, Sha256};
 use tokio::process::Command;
 
 use super::runtime::{private_dir, validate_cgroup, volume_limits};
+use super::supervisor::wait_empty;
+
+pub(super) const UNPACK_PREFIX: &str = "actr-unpack-";
 
 pub(super) struct ImageLease {
     pub rootfs: PathBuf,
@@ -70,7 +74,10 @@ pub(super) async fn prepare(
         index["manifests"][0]["annotations"] =
             serde_json::json!({"org.opencontainers.image.ref.name": "actr-verified"});
         fs::write(&index_file, serde_json::to_vec(&index)?)?;
-        let limits = UnpackCgroup::new(&validate_cgroup(&config.cgroup_parent)?)?;
+        let limits = UnpackCgroup::new(
+            &private_dir(&config.state_dir)?,
+            &validate_cgroup(&config.cgroup_parent)?,
+        )?;
         let diagnostic = stage.path().join("unpack.stderr");
         let mut cmd = Command::new(&config.bubblewrap);
         cmd.env_clear()
@@ -130,7 +137,10 @@ pub(super) async fn prepare(
             cmd.status(),
         )
         .await
-        .context("OCI image extraction timed out")??;
+        .context("OCI image extraction timed out");
+        let cleanup = limits.finish().await;
+        let status = status??;
+        cleanup?;
         if !status.success() {
             let mut detail = Vec::new();
             File::open(diagnostic)?
@@ -231,19 +241,38 @@ fn ensure_directory(root: &Path, relative: &str) -> Result<()> {
     Ok(())
 }
 
-struct UnpackCgroup(PathBuf);
+struct UnpackCgroup {
+    path: PathBuf,
+    record: PathBuf,
+    _owner: File,
+    cleaned: bool,
+}
 
 impl UnpackCgroup {
-    fn new(parent: &Path) -> Result<Self> {
-        let path = parent.join(format!("actr-unpack-{}", uuid::Uuid::new_v4().simple()));
-        fs::create_dir(&path)?;
-        let group = Self(path);
+    fn new(state: &Path, parent: &Path) -> Result<Self> {
+        let name = format!("{UNPACK_PREFIX}{}", uuid::Uuid::new_v4().simple());
+        let path = parent.join(&name);
+        let record = state.join(format!("{name}.lock"));
+        let mut owner = tempfile::NamedTempFile::new_in(state)?;
+        owner.write_all(parent.as_os_str().as_bytes())?;
+        owner.as_file().lock()?;
+        let owner = owner.persist_noclobber(&record)?;
+        if let Err(error) = fs::create_dir(&path) {
+            let _ = fs::remove_file(&record);
+            return Err(error.into());
+        }
+        let group = Self {
+            path,
+            record,
+            _owner: owner,
+            cleaned: false,
+        };
         for (file, value) in [
             ("memory.max", "536870912"),
             ("pids.max", "32"),
             ("cpu.max", "100000 100000"),
         ] {
-            fs::write(group.0.join(file), value)?;
+            fs::write(group.path.join(file), value)?;
         }
         Ok(group)
     }
@@ -251,7 +280,7 @@ impl UnpackCgroup {
     fn constrain(&self, command: &mut Command) -> Result<()> {
         let cgroup = File::options()
             .write(true)
-            .open(self.0.join("cgroup.procs"))?;
+            .open(self.path.join("cgroup.procs"))?;
         // Run the child in the bounded cgroup before its first exec. The
         // pre-exec closure does one async-signal-safe write on a preopened fd.
         unsafe {
@@ -266,13 +295,45 @@ impl UnpackCgroup {
         }
         Ok(())
     }
+    async fn finish(self) -> Result<()> {
+        tokio::task::spawn_blocking(move || {
+            let mut group = self;
+            cleanup_unpack_cgroup(&group.path)?;
+            fs::remove_file(&group.record)?;
+            group.cleaned = true;
+            Ok(())
+        })
+        .await?
+    }
 }
 
 impl Drop for UnpackCgroup {
     fn drop(&mut self) {
-        let _ = fs::write(self.0.join("cgroup.kill"), "1");
-        if let Err(error) = fs::remove_dir(&self.0) {
-            tracing::warn!(%error, "OCI unpack cgroup requires reconciliation");
+        if !self.cleaned {
+            // Cancellation cannot await. Keep the record for GC and stop
+            // the unpacker's process group before releasing ownership.
+            if let Err(error) = fs::write(self.path.join("cgroup.kill"), "1") {
+                if error.kind() != io::ErrorKind::NotFound {
+                    tracing::warn!(%error, "OCI unpack cgroup requires reconciliation");
+                }
+            }
         }
+    }
+}
+
+pub(super) fn cleanup_unpack_cgroup(path: &Path) -> Result<()> {
+    match fs::write(path.join("cgroup.kill"), "1") {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    }
+    ensure!(
+        wait_empty(path, Duration::from_secs(5))?,
+        "OCI unpack cgroup remains populated"
+    );
+    match fs::remove_dir(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
     }
 }

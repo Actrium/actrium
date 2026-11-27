@@ -173,11 +173,16 @@ that handle to `Node::attach_verified_oci` on the same Hyper instance.
   Syd binary still returns `ENOSYS`. Qualify a Linux x86_64 kernel by testing the
   actual runtime. On Apple Silicon, use an OrbStack ARM64 Linux machine and
   a `linux/arm64` package.
-- An RPC that may have reached the Guest but loses its result returns
-  `DeliveryUncertain`. Callers can use the operation ID to reconcile its outcome.
-  When the supervisor reports an OOM before cleanup, the error includes that cause.
+- A caller deadline cancels that invocation's host operations. Hyper lets the
+  Guest finish the in-flight IPC exchange within its own execution deadline so
+  the next RPC can reuse the session. A transport failure or host deadline can
+  still stop the Guest. If the caller loses the result after dispatch, use the
+  operation ID in `DeliveryUncertain` to reconcile the outcome. When available,
+  the supervisor's OOM report is included as the cause.
 - If the supervisor cannot clean up an owned container, its private bundle
   remains available for inspection and reconciliation with `actr oci gc`.
+  GC also reclaims abandoned unpack cgroups recorded in the private state
+  directory after their processes stop.
 - For systemd deployment, direct planned shutdown through Hyper before
   systemd's cgroup-wide termination. Keep cgroup-wide termination as the
   fallback for an unresponsive service.

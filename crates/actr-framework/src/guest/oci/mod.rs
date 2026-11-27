@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use actr_protocol::oci as wire;
+use actr_protocol::prost::Message as _;
 use actr_protocol::{ActorResult, ActrError, ReplyMode};
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
@@ -38,11 +39,22 @@ impl Port {
         sequence: u64,
         body: wire::Body,
     ) -> ActorResult<oneshot::Receiver<io::Result<()>>> {
-        let frame = wire::Frame {
+        let mut frame = wire::Frame {
             session: self.session.clone(),
             sequence,
             body: Some(body),
         };
+        if frame.encoded_len() > wire::MAX_FRAME_BYTES {
+            if !matches!(frame.body, Some(wire::Body::InvokeResult(_))) {
+                return Err(ActrError::InvalidArgument(
+                    "OCI Guest frame exceeds the IPC limit".into(),
+                ));
+            }
+            let result: ActorResult<Vec<u8>> = Err(ActrError::Internal(
+                "OCI Guest response exceeds the IPC limit".into(),
+            ));
+            frame.body = Some(wire::Body::InvokeResult(result.into()));
+        }
         let (complete, receipt) = oneshot::channel();
         self.send
             .try_send((frame, complete))

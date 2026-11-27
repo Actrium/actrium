@@ -59,6 +59,8 @@ async fn starts_from_a_verified_complete_image_and_reclaims_the_container() -> a
     host.supervisor = PathBuf::from(env!("CARGO_BIN_EXE_actr-oci-supervisor"));
     host.allowed_capabilities = vec!["actor.receive".into()];
 
+    verify_unpack_reconciliation(&host).await?;
+
     let mut signaling = TestSignalingServer::start().await?;
     let url = signaling.url();
     let issuer = format!("http://127.0.0.1:{}/issuer", signaling.port());
@@ -165,6 +167,57 @@ exit 1
     Ok(())
 }
 
+async fn verify_unpack_reconciliation(host: &OciRuntimeConfig) -> anyhow::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::ffi::OsStrExt as _;
+    use std::time::Duration;
+
+    let name = format!("actr-unpack-{}", uuid::Uuid::new_v4().simple());
+    let record = host.state_dir.join(format!("{name}.lock"));
+    let group = host.cgroup_parent.join(&name);
+    let mut owner = File::create_new(&record)?;
+    owner.lock()?;
+    owner.write_all(host.cgroup_parent.canonicalize()?.as_os_str().as_bytes())?;
+    fs::create_dir(&group)?;
+    let mut child = tokio::process::Command::new("sleep")
+        .arg("60")
+        .kill_on_drop(true)
+        .spawn()?;
+    fs::write(group.join("cgroup.procs"), child.id().unwrap().to_string())?;
+
+    actr_hyper::oci::gc(host).await?;
+    assert!(record.exists() && group.exists());
+    assert!(child.try_wait()?.is_none(), "GC stopped an owned unpack");
+    drop(owner);
+
+    actr_hyper::oci::gc(host).await?;
+    assert!(!record.exists() && !group.exists());
+    tokio::time::timeout(Duration::from_secs(5), child.wait()).await??;
+    Ok(())
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct Burst {}
+
+impl RpcRequest for Burst {
+    type Response = Burst;
+
+    fn route_key() -> &'static str {
+        "echo.Echo.Burst"
+    }
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct Large {}
+
+impl RpcRequest for Large {
+    type Response = Large;
+
+    fn route_key() -> &'static str {
+        "echo.Echo.Large"
+    }
+}
+
 #[derive(Clone, PartialEq, Message)]
 struct Proxy {
     #[prost(bytes, tag = "1")]
@@ -212,6 +265,7 @@ async fn enforces_file_https_and_actor_capabilities() -> anyhow::Result<()> {
     };
     use actr_pack::{ActorDependency, PackageFileEntry, oci};
     use actr_service_compat::{ProtoFile, build_self_contained_service_spec};
+    use anyhow::Context as _;
 
     let fixture =
         PathBuf::from(std::env::var_os("ACTR_OCI_TEST_LAYOUT").expect("ACTR_OCI_TEST_LAYOUT"));
@@ -454,8 +508,30 @@ data_classes = ["public"]
             },
             15_000,
         )
-        .await?;
+        .await
+        .context("scoped outbound Actor call")?;
     assert_eq!(route.data, b"scoped outbound actor");
+    actor
+        .call(Burst {}, 15_000)
+        .await
+        .context("Guest callback burst")?;
+    let oversized = actor.call(Large {}, 5_000).await;
+    assert!(matches!(
+        oversized,
+        Err(actr_protocol::ActrError::Internal(message)) if message.contains("IPC limit")
+    ));
+    assert_eq!(
+        actor
+            .call(
+                Ping {
+                    data: b"after oversized".to_vec()
+                },
+                5_000
+            )
+            .await?
+            .data,
+        b"after oversized"
+    );
     let result = actor.call(Fetch { data: Vec::new() }, 10_000).await;
     if https.is_some() {
         assert!(result?.data.is_empty());
@@ -568,11 +644,63 @@ data_classes = ["public"]
     wait_for_marker(&waiting).await?;
     active.abort();
     let _ = active.await;
-    tokio::time::timeout(
-        std::time::Duration::from_secs(20),
-        actor.wait_for_shutdown(),
-    )
-    .await?;
+    fs::write(&resume, b"resume")?;
+    assert_eq!(
+        actor
+            .call(
+                Ping {
+                    data: b"after local cancellation".to_vec()
+                },
+                5_000
+            )
+            .await?
+            .data,
+        b"after local cancellation"
+    );
+
+    let guest_id = actor.actor_id().clone();
+    target
+        .call_remote(
+            guest_id.clone(),
+            Ping {
+                data: b"warm up".to_vec(),
+            },
+            10_000,
+        )
+        .await?;
+    fs::remove_file(&resume)?;
+    fs::remove_file(&waiting)?;
+    let remote = {
+        let caller = target.clone();
+        let guest_id = guest_id.clone();
+        tokio::spawn(async move { caller.call_remote(guest_id, Block {}, 2_000).await })
+    };
+    wait_for_marker(&waiting).await?;
+    let timeout = remote.await?;
+    assert!(
+        matches!(
+            timeout,
+            Err(actr_protocol::ActrError::TimedOut
+                | actr_protocol::ActrError::DeliveryUncertain { .. })
+        ),
+        "{timeout:?}"
+    );
+    fs::write(&resume, b"resume")?;
+    assert_eq!(
+        target
+            .call_remote(
+                guest_id,
+                Ping {
+                    data: b"same guest".to_vec()
+                },
+                5_000
+            )
+            .await?
+            .data,
+        b"same guest"
+    );
+    actor.shutdown();
+    actor.wait_for_shutdown().await;
     assert_eq!(
         target
             .call(

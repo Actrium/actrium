@@ -18,6 +18,7 @@ const MAX_RESPONSE: usize = 256 * 1024;
 const MAX_DURATION: Duration = Duration::from_secs(5);
 
 /// A host-owned request. All invocation identities come from the runtime.
+#[derive(Clone, Copy)]
 pub struct EgressRequest<'a> {
     pub invocation: &'a InvocationContext,
     pub source_package_sha256: &'a str,
@@ -29,6 +30,7 @@ pub struct EgressRequest<'a> {
 }
 
 /// Operations that the embedding Host must authorize against current policy.
+#[derive(Clone, Copy)]
 pub enum EgressOperation<'a> {
     Actor {
         route: &'a str,

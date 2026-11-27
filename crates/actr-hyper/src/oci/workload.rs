@@ -461,12 +461,29 @@ impl OciWorkload {
         }
         let mut invoke_started = false;
         let body = async {
+            if !scope.is_active() {
+                return Err(ActrError::TimedOut);
+            }
             invoke_started = true;
             session.send_frame(&frame).await?;
+            let caller_ended = async {
+                tokio::select! {
+                    _ = scope.token().cancelled() => CancelReason::CallerDropped,
+                    _ = crate::timer::sleep_until(crate::timer::ids::OCI_CALLER_SCOPE, scope.deadline()) => {
+                        CancelReason::DeadlineExpired
+                    }
+                }
+            };
+            tokio::pin!(caller_ended);
+            let mut caller_cancelled = false;
             let mut calls = FuturesUnordered::new();
             loop {
                 tokio::select! {
                     biased;
+                    reason = &mut caller_ended, if !caller_cancelled => {
+                        scope.cancel(reason);
+                        caller_cancelled = true;
+                    }
                     frame = session.receive() => {
                         let frame = frame?;
                         match frame.body {
@@ -483,6 +500,11 @@ impl OciWorkload {
                                 }
                                 if calls.len() >= wire::MAX_HOST_REQUESTS {
                                     return Err(unavailable("OCI Guest exceeded its host operation limit"));
+                                }
+                                if !scope.is_active() {
+                                    let result = Err::<Vec<u8>, _>(ActrError::TimedOut);
+                                    session.send(frame.sequence, wire::Body::HostResult(result.into())).await?;
+                                    continue;
                                 }
                                 if request.payload.len() > 64 * 1024 {
                                     let result = Err::<Vec<u8>, _>(ActrError::PermissionDenied("OCI host request body exceeds its limit".into()));
@@ -510,13 +532,21 @@ impl OciWorkload {
                 }
             }
         };
-        let settled = tokio::select! {
-            _ = crate::timer::sleep_until(crate::timer::ids::OCI_WORKLOAD_INVOKE, scope.deadline()) => Err(ActrError::TimedOut),
-            _ = RequestScope::wait_cancelled(Some(&scope)) => Err(ActrError::TimedOut),
-            output = body => output,
-        };
+        // A caller deadline ends its host operations, while IPC must settle
+        // the in-flight invocation before the next command can use the stream.
+        let settled =
+            crate::timer::timeout_at(crate::timer::ids::OCI_WORKLOAD_INVOKE, deadline, body)
+                .await
+                .unwrap_or(Err(ActrError::TimedOut));
+        let caller_cancelled = !scope.is_active();
         scope.cancel(CancelReason::CallerDropped);
         match settled {
+            Ok(_) if kind == wire::InvocationKind::Dispatch && caller_cancelled => {
+                Err(ActrError::DeliveryUncertain {
+                    operation_id: invocation.request_id.clone(),
+                    cause: "OCI invocation completed after its caller scope ended".into(),
+                })
+            }
             Ok(result) => result.into_actor_result(),
             // A cancelled scope before any IPC write leaves the current
             // session usable.
@@ -656,8 +686,19 @@ impl Session {
                     frame = wire::read_frame(&mut read) => {
                         match frame {
                             Ok(frame) => {
-                                if frame.session != session_token || send.try_send(frame).is_err() {
+                                if frame.session != session_token {
                                     break GuestFailure::Disconnected;
+                                }
+                                tokio::select! {
+                                    biased;
+                                    queued = send.send(frame) => {
+                                        if queued.is_err() {
+                                            break GuestFailure::Disconnected;
+                                        }
+                                    }
+                                    outcome = runtime::wait_for_guest_exit(&mut exit) => {
+                                        break outcome.map_or(GuestFailure::Disconnected, GuestFailure::Exited);
+                                    }
                                 }
                             }
                             Err(_) => break runtime::guest_failure(&mut exit).await,

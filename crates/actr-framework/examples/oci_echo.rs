@@ -68,6 +68,15 @@ mod guest {
                         .call_dependency("echo", "echo.Echo.Ping", data)
                         .await
                 }
+                "echo.Echo.Burst" => {
+                    let calls = (0..actr_protocol::oci::MAX_HOST_REQUESTS)
+                        .map(|_| context.resolve_dependency("echo"));
+                    for result in futures_util::future::join_all(calls).await {
+                        result?;
+                    }
+                    Ok(Bytes::new())
+                }
+                "echo.Echo.Large" => Ok(Bytes::from(vec![0; actr_protocol::oci::MAX_FRAME_BYTES])),
                 "echo.Echo.Block" => {
                     if std::env::var("ACTR_ECHO_EXHAUST_MEMORY").as_deref() == Ok("dispatch") {
                         allocate_past_memory_limit();

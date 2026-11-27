@@ -1,12 +1,14 @@
 //! Reconcile OCI resources whose supervisor no longer owns them.
 
 use std::fs::{self, File, TryLockError};
-use std::io;
+use std::io::{self, Read};
+use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use actr_config::OciRuntimeConfig;
 use anyhow::{Context, Result, ensure};
 
+use super::image::{UNPACK_PREFIX, cleanup_unpack_cgroup};
 use super::runtime::{private_dir, validate_cgroup};
 use super::supervisor::{Launch, cleanup};
 
@@ -26,6 +28,7 @@ fn collect(config: &OciRuntimeConfig, evict: bool) -> Result<(usize, usize)> {
     let state = private_dir(&config.state_dir)?;
     let images = private_dir(&config.image_dir)?;
     let cgroup = validate_cgroup(&config.cgroup_parent)?;
+    reconcile_unpack_cgroups(&state, &cgroup)?;
     let mut instances = 0;
     let mut protected_images = Vec::new();
     for entry in fs::read_dir(&state)? {
@@ -106,6 +109,44 @@ fn collect(config: &OciRuntimeConfig, evict: bool) -> Result<(usize, usize)> {
         }
     }
     Ok((instances, removed_images))
+}
+
+fn reconcile_unpack_cgroups(state: &Path, parent: &Path) -> Result<()> {
+    for entry in fs::read_dir(state)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name();
+        let Some(name) = file_name
+            .to_str()
+            .and_then(|name| name.strip_suffix(".lock"))
+        else {
+            continue;
+        };
+        if !name
+            .strip_prefix(UNPACK_PREFIX)
+            .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        {
+            continue;
+        }
+        let record = entry.path();
+        let mut owner = match exclusive(&record) {
+            Ok(Some(owner)) => owner,
+            Ok(None) => continue,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        let mut deployment = Vec::new();
+        (&mut owner).take(4096).read_to_end(&mut deployment)?;
+        if deployment != parent.as_os_str().as_bytes() {
+            continue;
+        }
+        cleanup_unpack_cgroup(&parent.join(name))
+            .context("reconcile interrupted OCI image unpack")?;
+        fs::remove_file(&record)?;
+    }
+    Ok(())
 }
 
 fn exclusive(path: &Path) -> io::Result<Option<File>> {
