@@ -347,18 +347,19 @@ nonisolated enum ActrPackageCache {
 
     // MARK: - Direct-link URL memo (B2: no re-download for a known link)
 
-    /// Returns the digest previously downloaded for a direct link, when the
+    /// Returns the last accepted digest for a direct link, when the
     /// cached archive for it still exists. Falls through to download otherwise.
     static func cachedDigest(forDownloadURL url: URL) -> String? {
         withCacheLock {
             guard let record = urlMap()[url.absoluteString], let digest = record["digest"],
+                  isValidDigest(digest),
                   FileManager.default.fileExists(atPath: archiveURL(forDigest: digest).path)
             else { return nil }
             return digest
         }
     }
 
-    /// Remembers which digest a direct link resolved to.
+    /// Remembers which accepted digest a direct link resolved to.
     static func rememberDownloadURL(_ url: URL, digest: String) {
         withCacheLock {
             var map = urlMap()
@@ -366,6 +367,15 @@ nonisolated enum ActrPackageCache {
                 "digest": digest,
                 "installedAtUnix": String(Date().timeIntervalSince1970),
             ]
+            saveURLMap(map)
+        }
+    }
+
+    static func forgetDownloadURL(_ url: URL, matchingDigest digest: String) {
+        withCacheLock {
+            var map = urlMap()
+            guard map[url.absoluteString]?["digest"] == digest else { return }
+            map.removeValue(forKey: url.absoluteString)
             saveURLMap(map)
         }
     }

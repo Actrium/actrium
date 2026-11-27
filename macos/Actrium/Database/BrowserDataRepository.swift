@@ -372,6 +372,17 @@ final class BrowserDataRepository {
             || scheme == "actr" || scheme == "actro"
     }
 
+    static func sessionAddress(for tab: Tab) -> URL? {
+        guard let url = tab.url, isSessionRestorableURL(url) else { return nil }
+        guard let failure = tab.actrOpenFailure else { return url }
+        // Keep recoverable Realm addresses without persisting their error pages.
+        guard url.scheme?.lowercased() == "actr" else { return nil }
+        switch failure {
+        case .invalidLink, .realmRetired, .instanceNotFound: return nil
+        default: return url
+        }
+    }
+
     struct RestoredSessionTab {
         let id: UUID
         let title: String
@@ -395,8 +406,7 @@ final class BrowserDataRepository {
     func saveSession(tabs: [Tab], currentTabId: UUID?) {
         let now = Int64(Date().timeIntervalSince1970)
         let browserTabs = tabs.compactMap { tab -> (id: UUID, item: AppleBrowserSessionTab)? in
-            guard tab.actrOpenFailure == nil,
-                  let url = tab.url, Self.isSessionRestorableURL(url) else { return nil }
+            guard let url = Self.sessionAddress(for: tab) else { return nil }
             let item = AppleBrowserSessionTab(
                 id: tab.id.uuidString,
                 title: normalizedTitle(tab.title, url: url),

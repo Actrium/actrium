@@ -180,7 +180,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     private let joinOpenRealm: @MainActor (RealmJoinService.VerifiedProfile) async throws -> Void
     private let inviteMembershipExchange: RealmJoinService.InviteExchange?
     private let confirmRealmMembership: @MainActor (RealmJoinService.VerifiedProfile) async throws -> Bool
-    private let downloadRealmArchive: @MainActor (URL) async throws -> URL
+    private let downloadArchive: @MainActor (URL) async throws -> URL
     private let guestStorageDatabase: GuestStorageDatabase
 
     var currentTab: Tab? {
@@ -201,7 +201,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         joinOpenRealm: (@MainActor (RealmJoinService.VerifiedProfile) async throws -> Void)? = nil,
         inviteMembershipExchange: RealmJoinService.InviteExchange? = nil,
         confirmRealmMembership: (@MainActor (RealmJoinService.VerifiedProfile) async throws -> Bool)? = nil,
-        downloadRealmArchive: (@MainActor (URL) async throws -> URL)? = nil,
+        downloadArchive: (@MainActor (URL) async throws -> URL)? = nil,
         saveBrowserSession: @escaping ([Tab], UUID?) -> Void = { tabs, currentTabId in
             BrowserDataRepository.shared.saveSession(tabs: tabs, currentTabId: currentTabId)
         }
@@ -219,7 +219,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         self.confirmRealmMembership = confirmRealmMembership ?? {
             try await RealmJoinService.hasConfirmedMembership($0, preferences: realmPreferences)
         }
-        self.downloadRealmArchive = downloadRealmArchive ?? { try await ActrPackageDownloadService.download(from: $0) }
+        self.downloadArchive = downloadArchive ?? { try await ActrPackageDownloadService.download(from: $0) }
         self.saveBrowserSession = saveBrowserSession
         if let appRepository { self.appRepository = appRepository }
         // Initialize slot positions first
@@ -387,6 +387,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         RealmServiceBindings.shared.remove(id)
         RendererLifecycleManager.shared.tabDidClose(id)
         CapabilityPermissionStore.shared.clearSessionGrants(tabId: id)
+    }
+
+    private func detachRealmFront(from tabId: UUID) {
+        loadedRealmFronts.removeValue(forKey: tabId)
+        RealmServiceBindings.shared.remove(tabId)
     }
 
     func closeTab(id: UUID) {
@@ -1058,7 +1063,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             // Check if it's an about: URL for system apps
             if let systemType = SystemTabType.from(url: url) {
                 logger.notice("📱 [navigateCurrentTab] Navigation to System Application: \(url.absoluteString)")
-                RealmServiceBindings.shared.remove(currentTabId)
+                detachRealmFront(from: currentTabId)
                 tabs[index].reloadNonce &+= 1
                 // Update Tab to system app
                 tabs[index].systemTabType = systemType
@@ -1122,18 +1127,20 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 // package reopens without downloading or re-extracting.
                 if let digest = ActrPackageCache.cachedDigest(forDownloadURL: url) {
                     logger.notice("📦 [navigateCurrentTab] Cache hit, sha256=\(digest)")
-                    importACTRPackage(
+                    if importACTRPackage(
                         from: ActrPackageCache.archiveURL(forDigest: digest),
                         knownDigest: digest,
-                        download: request)
-                } else {
-                    pendingPackageDownload = request
+                        download: request,
+                        reportFailure: false
+                    ) != nil { return }
+                    ActrPackageCache.forgetDownloadURL(url, matchingDigest: digest)
                 }
+                pendingPackageDownload = request
                 return
             }
 
             logger.notice("🌐 [navigateCurrentTab] Navigator to URL: \(url.absoluteString)")
-            RealmServiceBindings.shared.remove(currentTabId)
+            detachRealmFront(from: currentTabId)
             tabs[index].reloadNonce &+= 1
             // Update Tab Yes Web Contents
             tabs[index].url = url
@@ -1330,7 +1337,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private func performPackageDownload(_ active: ActivePackageDownload) async {
         do {
-            let localURL = try await ActrPackageDownloadService.download(from: active.pending.url)
+            let localURL = try await downloadArchive(active.pending.url)
             defer { try? FileManager.default.removeItem(at: localURL) }
             if activePackageDownload?.id == active.id {
                 activePackageDownload?.phase = .verifying
@@ -1344,16 +1351,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             }
             logger.notice("✅ [PackageDownload] \(active.pending.filename) downloaded, sha256=\(digest)")
 
-            // Keep the archive in the digest-addressed cache (15-B B2, 05 §15) and
-            // remember the link → digest mapping so re-opening the same link skips
-            // the download; the import pipeline reuses the cached extraction.
+            // The import verifies the package before the link can reuse this digest.
             let cachedArchiveURL = try ActrPackageCache.installArchive(at: localURL, digest: digest)
-            ActrPackageCache.rememberDownloadURL(active.pending.url, digest: digest)
-
-            // Hand over to the existing import pipeline (manifest → runtime tab).
-            // ed25519 verification (15-B B3) hooks into this chain next.
             activePackageDownload = nil
-            importACTRPackage(from: cachedArchiveURL, knownDigest: digest, download: active.pending)
+            if importACTRPackage(from: cachedArchiveURL, knownDigest: digest, download: active.pending) != nil {
+                ActrPackageCache.rememberDownloadURL(active.pending.url, digest: digest)
+            }
         } catch {
             // Download already cancelled/replaced by the user — keep the new state.
             guard activePackageDownload?.id == active.id else { return }
@@ -1439,7 +1442,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 appURL = ActriumAppURLScheme.appURL(filePath: resolvedURL.path) ?? resolvedURL
             }
 
-            RealmServiceBindings.shared.remove(tabs[tabIndex].id)
+            detachRealmFront(from: tabs[tabIndex].id)
             tabs[tabIndex].reloadNonce &+= 1
             // Update current tab in-place (like about: URL handling)
             logger.notice("📱 [loadActrPackageIntoCurrentTab] Update Current Tab: \(tabTitle), url=\(appURL.absoluteString)")
@@ -1620,7 +1623,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                   ), !link.isLocal, let realmId = link.realmId else { return false }
             return "\(realmId)@\(link.domain)" == realmName
         }
-        stopRealmRuntimes(affected)
+        stopRealmRuntimes(affected, failure: .realmRetired)
     }
 
     private func stopRevokedRealmRuntimes(domain: String, trustedKeys: Set<String>) {
@@ -1633,12 +1636,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         stopRealmRuntimes(affected, preserveRealmLoad: true)
     }
 
-    private func stopRealmRuntimes(_ affected: [Int], preserveRealmLoad: Bool = false) {
+    private func stopRealmRuntimes(
+        _ affected: [Int], preserveRealmLoad: Bool = false, failure: ActrOpenFailure? = nil
+    ) {
         guard !affected.isEmpty else { return }
         for index in affected {
             let tabId = tabs[index].id
             releaseTabRuntime(tabId, preserveRealmLoad: preserveRealmLoad)
             Self.clearRealmContent(&tabs[index])
+            tabs[index].actrOpenFailure = failure
         }
         objectWillChange.send()
         persistBrowserPageSession()
@@ -1648,6 +1654,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         guard let refresh = realmRefreshes.removeValue(forKey: id) else { return }
         pendingRealmInvites.cancelBeforeExchange(refresh.id)
         refresh.task.cancel()
+    }
+
+    private func hasRunningRealmFront(_ tab: Tab, address: URL) -> Bool {
+        guard tab.url == address, tab.actrOpenFailure == nil,
+              case .reactNative = tab.contentType else { return false }
+        return loadedRealmFronts[tab.id]?.address == address
     }
 
     /// Realm discovery (verification-funnel layer 1) followed by Realm
@@ -1855,7 +1867,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 // The signed Profile names this Realm instance; the Front manifest
                 // names the application package and must not replace the instance title.
                 let instanceTitle = profile.displayName.isEmpty ? title : profile.displayName
-                let isLoadingTab = tab.url != address || loadedRealmFronts[replacingTabId]?.address != address
+                let isLoadingTab = !hasRunningRealmFront(tabs[index], address: address)
                 if isLoadingTab, localFrontApprovals[replacingTabId] == nil {
                     unloadRealmFront(at: index)
                     tabs[index].title = deferredTitle ?? instanceTitle
@@ -1964,7 +1976,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                                 "The package location is invalid.",
                                 comment: "Actr package URL error")])
                     }
-                    let downloadedURL = try await downloadRealmArchive(packageURL)
+                    let downloadedURL = try await downloadArchive(packageURL)
                     defer { try? FileManager.default.removeItem(at: downloadedURL) }
                     let actualDigest = try await ActrPackageDownloadService.sha256Digest(of: downloadedURL)
                     guard actualDigest == digest else {
@@ -2092,7 +2104,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 guard !Task.isCancelled, let index = tabIndex() else { return }
                 logger.warning("Realm \(realmName): Front refresh failed: \(error)")
                 let failure = ActrOpenFailure(error)
-                if failure == .realmRetired || loadedRealmFronts[replacingTabId]?.address != address {
+                if failure == .realmRetired || !hasRunningRealmFront(tabs[index], address: address) {
                     showActrOpenFailure(failure, at: index, address: address, title: deferredTitle ?? title)
                 }
             }
@@ -2766,16 +2778,18 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         preparedLocalStorage: PreparedLocalStorage? = nil,
         replacingTabId: UUID? = nil,
         realmAddress: URL? = nil,
-        download: PendingPackageDownload? = nil
+        download: PendingPackageDownload? = nil,
+        reportFailure: Bool = true
     ) -> Tab? {
         let resolvedURL = fileURL.standardizedFileURL
+        let showImportFailure = reportFailure && realmAddress == nil
         let replacingTabId = replacingTabId ?? download.flatMap { request in
             guard !request.opensInNewTab else { return nil }
             return tabs.first { request.matches($0) && $0.actrOpenFailure != nil && $0.url == request.url }?.id
         }
         guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
             logger.error(" Not found .actr Documents:\(resolvedURL.path)")
-            if realmAddress == nil {
+            if showImportFailure {
                 showPackageImportFailure(.packageNotFound, at: resolvedURL, replacingTabId: replacingTabId, download: download)
             }
             return nil
@@ -2810,7 +2824,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 cachedArchiveURL = archiveURL
             } catch {
                 logger.error(" .actr Loading failed:\(error.localizedDescription)")
-                if realmAddress == nil {
+                if showImportFailure {
                     showPackageImportFailure(.init(error, fallback: .invalidPackage), at: resolvedURL,
                                              replacingTabId: replacingTabId, download: download)
                 }
@@ -2977,7 +2991,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             }
         } catch {
             logger.error("ACTR package could not be loaded: \(error)")
-            if realmAddress == nil {
+            if showImportFailure {
                 showPackageImportFailure(.init(error, fallback: .invalidPackage), at: resolvedURL,
                                          replacingTabId: replacingTabId, download: download)
             }

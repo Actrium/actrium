@@ -572,6 +572,7 @@ final class RealmAdmissionTests: XCTestCase {
         let stale = try profile(membership: "open", status: "retired", signer: signer)
         XCTAssertThrowsError(try accept(stale, preferences: preferences))
         XCTAssertTrue(windows.allSatisfy { $0.currentTab?.guestScript == "active guest" })
+        XCTAssertTrue(windows.allSatisfy { $0.currentTab?.actrOpenFailure == nil })
         XCTAssertEqual(pool.rendererIdentifier(for: tabId), renderer)
 
         let retired = try profile(membership: "open", sequence: 3, status: "retired", signer: signer)
@@ -582,6 +583,11 @@ final class RealmAdmissionTests: XCTestCase {
             XCTAssertEqual(name, self.realmName)
         }
         XCTAssertTrue(windows.allSatisfy { $0.currentTab?.appId == nil && $0.currentTab?.guestScript == nil })
+        XCTAssertTrue(windows.allSatisfy {
+            $0.currentTab?.actrOpenFailure == .realmRetired
+                && $0.currentTab?.url?.absoluteString == "actr://realm.example/echo"
+                && $0.currentTab?.contentType == .reactNative(bundleFingerprint: "system.actr-error")
+        })
         XCTAssertEqual(windows[0].currentTabId, tabId)
         XCTAssertNil(pool.rendererIdentifier(for: tabId))
         XCTAssertNil(coordinator.allocatedServiceId)
