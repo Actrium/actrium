@@ -3035,6 +3035,7 @@ async fn run_barrier(
             host_abi,
             span,
             reply,
+            ..
         } => {
             if reply.is_closed() {
                 return BarrierNext::Continue;

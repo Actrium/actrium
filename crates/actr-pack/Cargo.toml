@@ -14,7 +14,6 @@ workspace = true
 [features]
 profile-validation = [
     "dep:actr-framework",
-    "dep:serde_json",
     "dep:wasmparser",
     "dep:wit-component",
     "dep:wit-parser",
@@ -34,12 +33,14 @@ thiserror.workspace = true
 tracing.workspace = true
 actr-protocol.workspace = true
 actr-framework = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
 wasmparser = { version = "0.254.2", default-features = false, features = ["std", "component-model", "validate", "features", "simd"], optional = true }
 wit-component = { version = "0.254.2", optional = true }
 wit-parser = { version = "0.254.2", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
+flate2 = "1"
 actr-config.workspace = true
 actr-service-compat.workspace = true
 

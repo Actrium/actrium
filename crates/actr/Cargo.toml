@@ -35,6 +35,7 @@ default = ["runtime", "config"]
 
 # Runtime support - includes the full ActrNode/ActrRef runtime
 runtime = ["dep:actr-runtime", "dep:actr-hyper", "config"]
+oci-engine = ["runtime", "actr-hyper/oci-engine"]
 
 # Config support - includes configuration file parsing
 config = ["dep:actr-config"]

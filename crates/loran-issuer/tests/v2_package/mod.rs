@@ -101,6 +101,16 @@ async fn seed_main_service(realm: &str) {
 #[tokio::test]
 #[serial]
 async fn v2_package_sdk_register_renew_reissue_preserves_raw_bytes_and_identity() {
+    sdk_registration_and_recovery(false).await;
+}
+
+#[tokio::test]
+#[serial]
+async fn oci_package_sdk_register_renew_reissue_preserves_raw_bytes_and_identity() {
+    sdk_registration_and_recovery(true).await;
+}
+
+async fn sdk_registration_and_recovery(oci: bool) {
     use axum::middleware;
 
     let mut env = setup_test_environment().await;
@@ -111,6 +121,59 @@ async fn v2_package_sdk_register_renew_reissue_preserves_raw_bytes_and_identity(
     let publisher_key = SigningKey::generate(&mut OsRng);
     seed_publisher_with_key(pool, PUBLISHER, &publisher_key).await;
     let mut registration = v2_request(realm, &publisher_key);
+    if oci {
+        use actr_pack::oci::{
+            OCI_AMD64_PLATFORM, OCI_HOST_PROFILE, OCI_IPC_PROFILE, OCI_PROFILE,
+            OciWorkloadDescriptor,
+        };
+        let source = if let Some(layout) = std::env::var_os("ACTR_OCI_ISSUER_LAYOUT") {
+            let layout = std::path::PathBuf::from(layout);
+            let mut manifest = ActorPackageManifest::from_toml(
+                &std::fs::read_to_string(layout.join("manifest.toml")).unwrap(),
+            )
+            .unwrap();
+            manifest.actor.publisher = PUBLISHER.into();
+            manifest.actor.name = "echo".into();
+            let mut archive = tempfile::tempfile().unwrap();
+            actr_pack::oci::pack_oci_package(
+                manifest,
+                &layout,
+                &publisher_key,
+                &mut archive,
+                actr_pack::oci::OciLimits::default(),
+            )
+            .unwrap();
+            use std::io::Seek as _;
+            archive.rewind().unwrap();
+            let signed =
+                actr_pack::oci::OciArchive::snapshot(archive, actr_pack::oci::OciLimits::default())
+                    .unwrap()
+                    .verify(&publisher_key.verifying_key(), None)
+                    .unwrap();
+            String::from_utf8(signed.verification().manifest_raw.clone()).unwrap()
+        } else {
+            let mut manifest = ActorPackageManifest::from_toml(TEMPLATE).unwrap();
+            manifest.actor.publisher = PUBLISHER.into();
+            manifest.workload.profile = OCI_PROFILE.into();
+            manifest.workload.entry = "image/index.json".into();
+            manifest.workload.oci = Some(OciWorkloadDescriptor {
+                digest: format!("sha256:{}", "0".repeat(64)),
+                platform: OCI_AMD64_PLATFORM.into(),
+                ipc: OCI_IPC_PROFILE.into(),
+                args: vec!["/app/echo".into()],
+                env: BTreeMap::new(),
+            });
+            manifest.host.profile = OCI_HOST_PROFILE.into();
+            manifest.host.api = "1.0.0".into();
+            manifest.host.required_capabilities.clear();
+            manifest.files[0].path = manifest.workload.entry.clone();
+            manifest.files[0].media_type = "application/vnd.oci.image.index.v1+json".into();
+            manifest.signature.key_id =
+                actr_pack::compute_key_id(publisher_key.verifying_key().as_bytes());
+            manifest.to_toml().unwrap()
+        };
+        registration = resign(&registration, source, &publisher_key);
+    }
     // Preserve Publisher comments/CRLF too: signatures are over bytes, not TOML values.
     let source = String::from_utf8(registration.manifest_raw.as_ref().unwrap().to_vec())
         .unwrap()

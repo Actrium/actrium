@@ -121,8 +121,15 @@ pub struct HyperConfig {
     /// On macOS, the resolved directory's ancestors must be readable and
     /// searchable by the host process.
     pub wasi_data_dir: WasiDataDir,
-    /// Trusted embedding Host decision point for scoped WASM egress.
-    #[cfg(feature = "wasm-engine")]
+    /// Trusted embedding Host decision point for scoped Guest egress.
+    #[cfg(any(
+        feature = "wasm-engine",
+        all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )
+    ))]
     pub egress_policy: Option<Arc<dyn crate::egress::EgressPolicy>>,
 }
 
@@ -769,7 +776,14 @@ impl HyperConfig {
             dispatch_concurrency: None,
             wasm_limits: None,
             wasi_data_dir: WasiDataDir::Inherit,
-            #[cfg(feature = "wasm-engine")]
+            #[cfg(any(
+                feature = "wasm-engine",
+                all(
+                    feature = "oci-engine",
+                    target_os = "linux",
+                    any(target_arch = "x86_64", target_arch = "aarch64")
+                )
+            ))]
             egress_policy: None,
         }
     }

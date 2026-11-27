@@ -190,7 +190,14 @@ impl RequestScope {
         &self.token
     }
 
-    #[cfg(feature = "wasm-engine")]
+    #[cfg(any(
+        feature = "wasm-engine",
+        all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )
+    ))]
     pub(crate) async fn wait_cancelled(scope: Option<&Self>) {
         match scope {
             Some(scope) => scope.token.cancelled().await,

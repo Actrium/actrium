@@ -129,13 +129,21 @@ pub fn read_v2_lock(
     manifest: &ActorPackageManifest,
     max_bytes: usize,
 ) -> HyperResult<Option<LockFile>> {
+    read_v2_lock_with(manifest, |path| {
+        manifest
+            .read_declared_file(bytes, path, max_bytes)
+            .map_err(|e| HyperError::InvalidManifest(e.to_string()))
+    })
+}
+
+pub(crate) fn read_v2_lock_with(
+    manifest: &ActorPackageManifest,
+    read: impl Fn(&str) -> HyperResult<Vec<u8>>,
+) -> HyperResult<Option<LockFile>> {
     let mut lock = None;
     for file in &manifest.files {
         if file.path == V2_LOCK_PATH && file.role == "lock" {
-            let raw = manifest
-                .read_declared_file(bytes, V2_LOCK_PATH, max_bytes)
-                .map_err(|e| HyperError::InvalidManifest(e.to_string()))?;
-            lock = Some(parse_lock(&raw)?);
+            lock = Some(parse_lock(&read(V2_LOCK_PATH)?)?);
         } else if file.path == V2_LOCK_PATH || file.role == "lock" {
             return Err(HyperError::InvalidManifest(
                 "v2 dependency lock must be manifest.lock.toml with role `lock`".into(),
@@ -183,9 +191,7 @@ pub fn read_v2_lock(
                         entry.alias
                     )));
                 };
-                let content = manifest
-                    .read_declared_file(bytes, path, max_bytes)
-                    .map_err(|e| HyperError::InvalidManifest(e.to_string()))?;
+                let content = read(path)?;
                 let content = String::from_utf8(content).map_err(|e| {
                     HyperError::InvalidManifest(format!("read contract `{path}`: {e}"))
                 })?;
@@ -382,6 +388,7 @@ files = [{{ path = "echo/echo.proto", fingerprint = "{}" }}]
                 entry: "workload/main.wasm".into(),
                 rpc_contract: rpc_contract.map(str::to_owned),
                 keel: None,
+                oci: None,
             },
             host: actr_pack::HostRequirements {
                 profile: "actr.host/1".into(),

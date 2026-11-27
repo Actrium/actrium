@@ -31,6 +31,12 @@ pub enum HyperError {
     #[error("storage error: {0}")]
     Storage(String),
 
+    #[error("runtime feature is disabled: {0}")]
+    FeatureDisabled(&'static str),
+
+    #[error("unsupported platform: {0}")]
+    UnsupportedPlatform(&'static str),
+
     /// Configuration error
     #[error("config error: {0}")]
     Config(String),

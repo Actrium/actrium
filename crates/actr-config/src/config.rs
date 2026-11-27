@@ -118,6 +118,9 @@ pub struct RuntimeConfig {
     /// Maximum access the deployment permits for the WASI data directory.
     pub wasi_data_access: WasiDataAccess,
 
+    /// OCI execution settings from the host runtime configuration.
+    pub oci: Option<crate::OciRuntimeConfig>,
+
     /// Actrium v1 Service-host settings from the `[actrium]` section.
     ///
     /// When present, `actr run` installs the Attach server and accepts
@@ -691,6 +694,7 @@ mod tests {
             storage_root: None,
             wasi_data_dir: None,
             wasi_data_access: WasiDataAccess::default(),
+            oci: None,
             actrium: None,
         };
 

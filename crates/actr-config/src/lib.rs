@@ -31,6 +31,9 @@
 // Core modules
 pub mod actr_raw;
 pub mod config;
+
+mod oci;
+pub use oci::{OciActorGrant, OciDataConfig, OciHttpsGrant, OciRuntimeConfig};
 pub mod error;
 pub mod lock;
 pub mod parser;

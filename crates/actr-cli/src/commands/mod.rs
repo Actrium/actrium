@@ -18,6 +18,7 @@ pub mod init;
 pub mod initialize;
 pub mod install;
 pub mod logs;
+pub mod oci;
 pub(crate) mod package_build;
 pub mod pkg;
 pub(crate) mod process;

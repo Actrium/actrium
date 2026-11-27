@@ -27,6 +27,7 @@ pub mod error;
 pub mod identity;
 pub mod load;
 pub mod manifest;
+pub mod oci;
 pub mod pack;
 pub mod realm;
 pub mod registration;

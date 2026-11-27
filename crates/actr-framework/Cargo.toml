@@ -21,7 +21,6 @@ uuid = { version = "1.18" }
 # Optional dependencies for utilities
 anyhow = "1.0"
 tracing = "0.1"
-tokio = { workspace = true, optional = true }
 maxminddb = { version = "0.27", optional = true }
 # Keep Reqwest on Rustls 0.23 so the verifier security floors below apply.
 reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls-native-roots", "blocking"], optional = true }
@@ -33,6 +32,7 @@ tar = { version = "0.4", optional = true }
 
 [features]
 default = []
+oci-guest = ["dep:tokio", "actr-protocol/oci-ipc"]
 # `cdylib`: enable native shared-library guest runtime (dynclib ABI)
 cdylib = ["dep:tokio"]
 # `test-utils`: enable testing helpers such as `DummyContext` (includes UUID v4 generation and is not compatible with `wasm32`)
@@ -56,6 +56,9 @@ geoip = [
     "flate2",
     "tar",
 ] # GeoIP with auto-download support
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, optional = true }
 
 # wit-bindgen is only needed when compiling the guest for wasm32-wasip2.
 # The generated code is gated by `#[cfg(target_arch = "wasm32")]`, so hosts
@@ -90,3 +93,7 @@ windows-sys = { version = "0.61.2", features = ["Win32_System_Performance"] }
 
 [dev-dependencies]
 tokio.workspace = true
+
+[[example]]
+name = "oci_echo"
+required-features = ["oci-guest"]
