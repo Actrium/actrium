@@ -4,7 +4,7 @@ import { createHostModuleDispatch } from 'keel/contract';
 import { contract } from './contract';
 import type { FileImportPickInput, FileImportPickOutput } from './contract';
 import type { FrontCapability } from './capabilities';
-import type { AttachmentUploadManager } from './attachment-upload';
+import { decodeBase64, encodeBase64 } from './base64';
 import { createHostModules, type HostModules } from './host-modules';
 import { createTestServiceEventSource } from './service-events.test-utils';
 
@@ -327,126 +327,45 @@ describe('host:service implementation', () => {
   });
 });
 
-describe('host:service.attachmentUpload implementation', () => {
-  function createUploader(result: { attachmentId: string } = { attachmentId: 'a-1' }) {
-    const uploads: unknown[] = [];
-    const uploader = {
-      available: true,
-      upload: async (input: unknown) => {
-        uploads.push(input);
-        return result;
-      },
-      dispose: () => {},
-    };
-    return { uploader, uploads };
-  }
+describe('host:file-import + fixed route call (attachment upload, plan B)', () => {
+  const CHUNK_SIZE = 48 * 1024;
 
-  test('fails closed when the native bridge is unavailable', async () => {
-    const hostModules = createTestHostModules();
-    await expect(
-      hostModules['host:service'].uploadAttachment({
-        filename: 'a.txt',
-        base64: 'AAEC',
-      })
-    ).rejects.toThrow('native attachment upload bridge is unavailable');
-  });
-
-  test('authorizes the capability before uploading', async () => {
-    const { uploader, uploads } = createUploader();
-    const grants: string[] = [];
-    const hostModules = createHostModules({
-      hasServiceCapability: true,
-      hasServiceOnCapability: true,
-      callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
-      authorizeCapability: async (capability) => {
-        grants.push(capability);
-      },
-      writeClipboardText: async () => {},
-      attachmentUploader: uploader as unknown as AttachmentUploadManager,
-    });
-
-    const legacy = { filename: 'a.txt', base64: 'AAEC', type: 'image' as const, fileId: undefined };
-    await expect(hostModules['host:service'].uploadAttachment(legacy)).resolves.toEqual({ attachmentId: 'a-1' });
-    expect(grants).toEqual(['service.attachmentUpload']);
-    expect(uploads).toEqual([{ filename: 'a.txt', base64: 'AAEC', type: 'image' }]);
-  });
-
-  test('does not upload when authorization fails', async () => {
-    const { uploader, uploads } = createUploader();
-    const hostModules = createHostModules({
-      hasServiceCapability: true,
-      hasServiceOnCapability: true,
-      callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
-      authorizeCapability: async () => {
-        throw new Error('permission_required: service.attachmentUpload');
-      },
-      writeClipboardText: async () => {},
-      attachmentUploader: uploader as unknown as AttachmentUploadManager,
-    });
-
-    await expect(
-      hostModules['host:service'].uploadAttachment({
-        filename: 'a.txt',
-        base64: 'AAEC',
-      })
-    ).rejects.toThrow('permission_required');
-    expect(uploads).toEqual([]);
-  });
-
-  test('dispatches through the contract boundary', async () => {
-    const { uploader } = createUploader();
-    const dispatch = createHostModuleDispatch(
-      contract,
-      createHostModules({
-        hasServiceCapability: true,
-        hasServiceOnCapability: true,
-        callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
-        authorizeCapability: async () => {},
-        writeClipboardText: async () => {},
-        attachmentUploader: uploader as unknown as AttachmentUploadManager,
-      })
+  test('picks bytes and uploads them in <=48 KiB chunks through host:service.call', async () => {
+    const payload = Uint8Array.from(
+      { length: CHUNK_SIZE + 10 },
+      (_, index) => index % 256
     );
-
-    await expect(
-      dispatch['host:service'].uploadAttachment({
-        filename: 'a.txt',
-        base64: 'AAEC',
-      })
-    ).resolves.toEqual({ attachmentId: 'a-1' });
-    expect(() =>
-      dispatch['host:service'].uploadAttachment({ filename: 'a.txt', base64: 'AAE' })
-    ).toThrow('Boundary input validation failed');
-  });
-
-  test('dispatches cached picks, preview, upload and release with the same file ID', async () => {
-    const fileId = '824be89f-48d0-451e-b016-ef133fde55c2';
-    const original = { filename: 'photo.png', base64: 'AAEC' };
-    const files = [{ fileId, name: original.filename, size: 3, canPreview: true }];
-    const operations: string[] = [];
-    const { uploader, uploads } = createUploader();
+    const files = [{ name: 'report.bin', base64: encodeBase64(payload) }];
+    const calls: Array<{ route: string; bytes: number }> = [];
     const dispatch = createHostModuleDispatch(contract, createHostModules({
       hasServiceCapability: true,
       hasServiceOnCapability: false,
-      callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
-      authorizeCapability: async (capability) => { operations.push(capability); },
+      callActor: async ({ route, payloadBase64 }) => {
+        calls.push({ route, bytes: decodeBase64(payloadBase64).byteLength });
+        return { success: true, payloadBase64: '' };
+      },
+      authorizeCapability: async () => {},
       writeClipboardText: async () => {},
       pickFiles: async () => ({ files }),
-      openFilePreview: async (id) => { expect(id).toBe(fileId); },
-      releaseCachedFile: async (id) => { expect(id).toBe(fileId); },
-      readCachedFile: async (id) => {
-        expect(id).toBe(fileId);
-        return original;
-      },
-      attachmentUploader: uploader as unknown as AttachmentUploadManager,
     }));
-    const picker = dispatch['host:file-import'];
-    expect(await picker.pick({ cache: true })).toEqual({ files });
-    await picker.openPreview({ fileId });
-    await dispatch['host:service'].uploadAttachment({ fileId, type: 'image' });
-    await picker.release({ fileId });
-    expect(uploads).toEqual([{ ...original, type: 'image', id: undefined }]);
-    expect(operations).toEqual([
-      'host:file-import.pick', 'host:file-import.openPreview', 'service.attachmentUpload', 'host:file-import.release',
+
+    const picked = (await dispatch['host:file-import'].pick({ cache: false })) as FileImportPickOutput;
+    const file = picked.files[0];
+    if (!('base64' in file)) throw new Error('expected raw file bytes');
+    const bytes = decodeBase64(file.base64);
+    // The Guest owns chunking: split into <=48 KiB slices (base64 stays under
+    // the 64 KiB per-call request bound) and send each with a fixed route call.
+    for (let offset = 0; offset < bytes.byteLength; offset += CHUNK_SIZE) {
+      const slice = bytes.subarray(offset, Math.min(offset + CHUNK_SIZE, bytes.byteLength));
+      await dispatch['host:service'].call({
+        route: 'ask.AskService.UploadChunk',
+        payloadBase64: encodeBase64(slice),
+      });
+    }
+
+    expect(calls).toEqual([
+      { route: 'ask.AskService.UploadChunk', bytes: CHUNK_SIZE },
+      { route: 'ask.AskService.UploadChunk', bytes: 10 },
     ]);
   });
 });

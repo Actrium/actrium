@@ -42,43 +42,10 @@ extension RealmServiceFailure {
 
 protocol RealmServiceBindingHandle: AnyObject, Sendable {
     var id: UUID { get }
-    var attachmentUploadAvailable: Bool { get async }
     func call(_ request: RealmServiceCall) async throws -> Data
     func subscribe(events: [String], generation: UInt64) async throws
     func suspendEvents(ifGeneration generation: UInt64) async
-    func prepareAttachmentUpload(
-        _ request: RealmServiceAttachmentPrepareCall,
-        deliver: @escaping @Sendable (RealmServiceAttachmentResultEvent) -> Void
-    ) async -> RealmServiceAttachmentPrepareReply
-    func sendAttachmentChunk(
-        _ request: RealmServiceAttachmentChunkCall
-    ) async -> RealmServiceAttachmentChunkReply
-    func unregisterAttachmentStream(
-        _ request: RealmServiceAttachmentUnregisterCall
-    ) async -> RealmServiceAttachmentUnregisterReply
-    func cancelAttachmentUploads() async
     func stop() async
-}
-
-/// Receives `Ask_AttachmentUploadResult` protobufs on the per-upload result
-/// stream. The FFI runtime owns the callback while the stream is registered;
-/// the closure hops onto the binding actor for session bookkeeping.
-private final class RealmServiceAttachmentResultCallback: ActrBindings.DataChunkCallback {
-    private let expectedSender: ActrBindings.ActrId
-    private let onChunk: @Sendable (ActrBindings.DataChunk) -> Void
-
-    init(
-        expectedSender: ActrBindings.ActrId,
-        onChunk: @escaping @Sendable (ActrBindings.DataChunk) -> Void
-    ) {
-        self.expectedSender = expectedSender
-        self.onChunk = onChunk
-    }
-
-    func onStream(chunk: ActrBindings.DataChunk, sender: ActrBindings.ActrId) async throws {
-        guard sender == expectedSender else { return }
-        onChunk(chunk)
-    }
 }
 
 /// A lock-protected intake snapshot for the nonisolated Rust event callback.
@@ -293,72 +260,6 @@ final class RealmServiceBindings {
             }
         }
     }
-
-    func prepareAttachmentUpload(
-        _ request: RealmServiceAttachmentPrepareCall,
-        tabId: UUID,
-        deliver: @escaping @Sendable (RealmServiceAttachmentResultEvent) -> Void
-    ) async -> RealmServiceAttachmentPrepareReply {
-        guard let binding = bindings[tabId] else {
-            return RealmServiceAttachmentPrepareReply(
-                id: request.id,
-                failure: RealmServiceFailure(
-                    code: "realm_tab_unavailable",
-                    message: "The tab has no Realm Service."
-                )
-            )
-        }
-        return await binding.prepareAttachmentUpload(request, deliver: deliver)
-    }
-
-    func sendAttachmentChunk(
-        _ request: RealmServiceAttachmentChunkCall,
-        tabId: UUID
-    ) async -> RealmServiceAttachmentChunkReply {
-        guard let binding = bindings[tabId] else {
-            return RealmServiceAttachmentChunkReply(
-                id: request.id,
-                failure: RealmServiceFailure(
-                    code: "realm_tab_unavailable",
-                    message: "The tab has no Realm Service."
-                )
-            )
-        }
-        return await binding.sendAttachmentChunk(request)
-    }
-
-    func unregisterAttachmentStream(
-        _ request: RealmServiceAttachmentUnregisterCall,
-        tabId: UUID
-    ) async -> RealmServiceAttachmentUnregisterReply {
-        guard let binding = bindings[tabId] else {
-            return RealmServiceAttachmentUnregisterReply(
-                id: request.id,
-                failure: RealmServiceFailure(
-                    code: "realm_tab_unavailable",
-                    message: "The tab has no Realm Service."
-                )
-            )
-        }
-        return await binding.unregisterAttachmentStream(request)
-    }
-
-    /// Cancels every attachment session of one tab without touching the
-    /// binding itself. Used when the tab's renderer is replaced while the
-    /// Front keeps running.
-    /// True when the tab actually owns a Realm Service binding that still
-    /// permits the fixed upload transport. Used by the renderer preflight so
-    /// a Guest without a Realm Service (for example a locally bundled
-    /// package) fails before its engine starts instead of on first upload.
-    func attachmentUploadAvailable(_ tabId: UUID) async -> Bool {
-        guard let binding = bindings[tabId] else { return false }
-        return await binding.attachmentUploadAvailable
-    }
-
-    func cancelAttachmentUploads(_ tabId: UUID) {
-        guard let binding = bindings[tabId] else { return }
-        Task { await binding.cancelAttachmentUploads() }
-    }
 }
 
 /// The Rust callback is synchronous so `publish` snapshots eligible
@@ -571,20 +472,12 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     private let trustedFrontKey: Data
     private let configuration: String
     private let serviceType: ActrBindings.ActrType
-    /// Business routes; internal for the attachment transport wiring tests.
+    /// Business routes declared by the verified Front manifest.
     let routes: Set<String>
     private let routeCapabilities: [String: String]
     private let events: Set<String>
     private let eventRelay: RealmServiceEventRelay
     private let eventPeers = RealmServiceEventPeerController()
-    /// `true` only when the manifest grants `service.attachmentUpload` AND the
-    /// capability manifest declares the reserved `uploadAttachment` transport.
-    /// Internal for the attachment transport wiring tests.
-    let attachmentUploadAllowed: Bool
-    private let sessions = RealmServiceAttachmentSessionStore()
-    /// Keyed by the unique registration attempt. Public stream IDs and the
-    /// caller-supplied attachment ID may both be reused by a later upload.
-    private var attachmentDeliveries: [UUID: @Sendable (RealmServiceAttachmentResultEvent) -> Void] = [:]
     private var startup: (id: UUID, task: Task<RuntimeConnection, Error>)?
     private var recovery: (id: UUID, task: Task<RuntimeConnection, Error>, discoversTarget: Bool)?
     /// The detached old session retained while a verified Local Front
@@ -598,8 +491,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         front: Data,
         metadata: ActriumSessionMetadata,
         trustedFrontKey: Data,
-        capabilitiesJSON: String,
-        permissions: [String]
+        capabilitiesJSON: String
     ) throws {
         let connection = try Connection(profile: profile, verifiedProfileBody: verifiedProfileBody)
         let capabilities = try JSONDecoder().decode(Capabilities.self, from: Data(capabilitiesJSON.utf8))
@@ -618,11 +510,8 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                 version: metadata.program.version
             ),
             trustedFrontKey: trustedFrontKey,
-            routes: RealmServiceAttachmentUploadPolicy.businessRoutes(declaredRoutes),
-            events: Set(services.flatMap { $0.events ?? [] }),
-            attachmentUploadAllowed: RealmServiceAttachmentUploadPolicy.isPermitted(
-                permissions: permissions, declaredRoutes: declaredRoutes
-            )
+            routes: declaredRoutes,
+            events: Set(services.flatMap { $0.events ?? [] })
         )
     }
 
@@ -634,8 +523,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         serviceType: ActrBindings.ActrType,
         trustedFrontKey: Data,
         routes: Set<String>,
-        events: Set<String>,
-        attachmentUploadAllowed: Bool
+        events: Set<String>
     ) throws {
         self.connection = connection
         let bindingId = UUID()
@@ -651,7 +539,6 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             capabilities[route.route] = route.capabilities.first
         }
         self.events = events
-        self.attachmentUploadAllowed = attachmentUploadAllowed
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
@@ -687,8 +574,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         guard !stopped else { throw CancellationError() }
         return try RealmServiceBinding(
             connection: connection, front: front, metadata: metadata, frontType: frontType,
-            serviceType: serviceType, trustedFrontKey: trustedFrontKey, routes: routes, events: events,
-            attachmentUploadAllowed: attachmentUploadAllowed
+            serviceType: serviceType, trustedFrontKey: trustedFrontKey, routes: routes, events: events
         )
     }
 
@@ -785,331 +671,6 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
 
     private func clearEventPeer() async {
         await eventPeers.clear()
-    }
-
-    /// Availability as seen by this binding: the manifest must opt in and the
-    /// binding must still be running. Actor-isolated so a race with `stop()`
-    /// cannot report a binding that is already tearing down.
-    var attachmentUploadAvailable: Bool {
-        attachmentUploadAllowed && !stopped
-    }
-
-    /// Prepares one attachment upload: validates capability and fields, binds
-    /// the prepare RPC and every later chunk to the same Service instance,
-    /// registers the result stream, then issues the fixed
-    /// `ask.AskService.PrepareAttachmentUpload` reliable RPC with a 20 second
-    /// budget. Any failure unregisters the result stream again so no state
-    /// leaks; JS never waits on a timeout for these paths.
-    func prepareAttachmentUpload(
-        _ call: RealmServiceAttachmentPrepareCall,
-        deliver: @escaping @Sendable (RealmServiceAttachmentResultEvent) -> Void
-    ) async -> RealmServiceAttachmentPrepareReply {
-        do {
-            guard attachmentUploadAllowed else { throw RealmServiceAttachmentUploadError.notPermitted }
-            guard !stopped else { throw RealmServiceAttachmentUploadError.cancelled }
-            let checksum = try RealmServiceAttachmentUploadPolicy.validatePrepare(call)
-            // Register before the first suspension: connect(), recovery, and
-            // stream registration may take seconds, and a renderer
-            // cancellation during that window must find this upload instead
-            // of letting it start afterwards.
-            let attemptId = try await sessions.registerPreparing(call, checksum: checksum)
-            do {
-                let connection = try await readyConnection(resolveTargetForCall: !Self.actriumAttachEnabled)
-                let reference = connection.reference
-                guard !stopped,
-                      await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
-                    throw RealmServiceAttachmentUploadError.cancelled
-                }
-                // Prepare and every chunk use the selected Service;
-                // a second Discover could select a different Service instance.
-                // The result delivery must exist before registration: the
-                // Service may answer the prepare RPC and publish its terminal
-                // result while this actor is still suspended on the RPC.
-                attachmentDeliveries[attemptId] = deliver
-                let callback = RealmServiceAttachmentResultCallback(
-                    expectedSender: connection.target
-                ) { [weak self] chunk in
-                    let payload = chunk.payload
-                    Task {
-                        await self?.receiveAttachmentResult(
-                            streamId: call.resultStreamId,
-                            attemptId: attemptId,
-                            payload: payload
-                        )
-                    }
-                }
-                try await reference.registerStream(streamId: attemptId.uuidString, callback: callback)
-                // Cancellation may have run while registration was suspended.
-                // The prepare-owning catch below performs the final unregister
-                // only after this late registration has finished.
-                guard await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
-                    throw RealmServiceAttachmentUploadError.cancelled
-                }
-                var request = Ask_PrepareAttachmentUploadRequest()
-                request.id = call.attachmentId
-                request.filename = call.filename
-                request.type = Ask_AttachmentType(rawValue: Int(call.type)) ?? .other
-                request.streamID = call.streamId
-                request.checksum = checksum
-                request.checksumAlgorithm = call.checksumAlgorithm
-                request.sizeBytes = call.sizeBytes
-                request.resultStreamID = attemptId.uuidString
-                let response = try await connection.call(
-                    route: RealmServiceAttachmentIPC.prepareRoute,
-                    capability: routeCapabilities[RealmServiceAttachmentUploadPolicy.transportRoute]
-                        ?? "service",
-                    payload: request.serializedData(),
-                    timeoutMs: UInt64(RealmServiceAttachmentIPC.prepareTimeoutMs)
-                )
-                // A late reply belongs to this attempt only. If the caller
-                // unregistered and started a retry with the same attachment
-                // id, the session now carries a different chunk stream and
-                // this reply must not mutate it.
-                guard !stopped,
-                      await sessions.isCurrent(attachmentId: call.attachmentId, streamId: call.streamId) else {
-                    throw RealmServiceAttachmentUploadError.cancelled
-                }
-                let reply = try Ask_PrepareAttachmentUploadResponse(serializedBytes: response)
-                // A non-zero status is a Service rejection. Do not expose the
-                // chunk stream and do not leave a live result registration.
-                guard reply.statusCode == 0 else {
-                    throw RealmServiceAttachmentUploadError.rejected(
-                        reply.statusCode,
-                        reply.errorMessage.isEmpty ? nil : reply.errorMessage)
-                }
-                try await sessions.markUploading(
-                    attachmentId: call.attachmentId,
-                    streamId: call.streamId,
-                    target: connection.target
-                )
-                return RealmServiceAttachmentPrepareReply(
-                    id: call.id,
-                    attachmentId: call.attachmentId,
-                    statusCode: reply.statusCode
-                )
-            } catch {
-                await cleanupPreparingAttachmentSession(
-                    attachmentId: call.attachmentId,
-                    streamId: call.streamId
-                )
-                throw error
-            }
-        } catch let error as RealmServiceAttachmentUploadError {
-            return RealmServiceAttachmentPrepareReply(id: call.id, failure: error.failure)
-        } catch {
-            return RealmServiceAttachmentPrepareReply(
-                id: call.id, failure: RealmServiceFailure(serviceError: error))
-        }
-    }
-
-    /// Sends one validated chunk to the session's fixed target on the
-    /// prepare-registered chunk stream. Sequence continuity, the 48 KiB
-    /// payload cap and the declared-size accounting are enforced by the
-    /// session store before any byte hits the transport.
-    func sendAttachmentChunk(_ call: RealmServiceAttachmentChunkCall) async -> RealmServiceAttachmentChunkReply {
-        do {
-            guard attachmentUploadAllowed else { throw RealmServiceAttachmentUploadError.notPermitted }
-            guard !stopped else { throw RealmServiceAttachmentUploadError.cancelled }
-            let connection = try await readyConnection()
-            guard !stopped else { throw RealmServiceAttachmentUploadError.cancelled }
-            let planned = try await sessions.planChunk(
-                streamId: call.streamId,
-                sequence: call.sequence,
-                payloadBytes: call.payload.count,
-                metadata: call.metadata
-            )
-            // Reconnecting may select a different Service instance. Its upload
-            // state does not exist there, so never continue a prepared stream
-            // against a new target; the caller must restart the upload.
-            guard planned.session.target == connection.target else {
-                await cleanupAttachmentSession(
-                    attachmentId: planned.session.attachmentId,
-                    streamId: planned.session.chunkStreamId,
-                    attemptId: planned.session.attemptId
-                )
-                throw RealmServiceAttachmentUploadError.unavailable(
-                    "The Service instance changed after reconnecting; restart the attachment upload.")
-            }
-            let chunk = ActrBindings.DataChunk(
-                streamId: planned.session.chunkStreamId,
-                sequence: planned.plan.sequence,
-                payload: call.payload,
-                metadata: call.metadata.map { ActrBindings.MetadataEntry(key: $0.key, value: $0.value) },
-                timestampMs: Int64(Date().timeIntervalSince1970 * 1000)
-            )
-            do {
-                if let session = connection.session {
-                    try await session.sendDataChunk(
-                        route: RealmServiceAttachmentUploadPolicy.transportRoute,
-                        capability: routeCapabilities[RealmServiceAttachmentUploadPolicy.transportRoute]
-                            ?? "service",
-                        chunk: chunk,
-                        payloadType: .streamReliable,
-                        timeoutMs: UInt64(RealmServiceAttachmentIPC.chunkTimeoutMs)
-                    )
-                } else {
-                    try await connection.reference.sendDataChunk(
-                        target: connection.target, chunk: chunk, payloadType: .streamReliable
-                    )
-                }
-            } catch {
-                // The sequence window already moved; the session cannot
-                // recover from a failed send. Scope the cleanup to this
-                // attempt so a retry reusing the attachment id survives.
-                await cleanupAttachmentSession(
-                    attachmentId: planned.session.attachmentId,
-                    streamId: planned.session.chunkStreamId,
-                    attemptId: planned.session.attemptId
-                )
-                throw error
-            }
-            return RealmServiceAttachmentChunkReply(id: call.id)
-        } catch let error as RealmServiceAttachmentUploadError {
-            return RealmServiceAttachmentChunkReply(id: call.id, failure: error.failure)
-        } catch {
-            return RealmServiceAttachmentChunkReply(
-                id: call.id, failure: RealmServiceFailure(serviceError: error))
-        }
-    }
-
-    /// Idempotent session teardown referenced by either the chunk stream or
-    /// the result stream; the whole session (both streams) is cleaned up.
-    func unregisterAttachmentStream(_ call: RealmServiceAttachmentUnregisterCall) async -> RealmServiceAttachmentUnregisterReply {
-        if let session = await sessions.unregister(streamId: call.streamId) {
-            await teardownAttachmentSession(session)
-        }
-        return RealmServiceAttachmentUnregisterReply(id: call.id)
-    }
-
-    /// Drops every upload session of this binding without delivering
-    /// results. Used when the tab's renderer is replaced: the JS side that
-    /// owned these sessions is gone.
-    func cancelAttachmentUploads() async {
-        let removed = await sessions.cancelAll()
-        for session in removed {
-            await teardownAttachmentSession(session)
-        }
-    }
-
-    /// Decodes one result-stream chunk. Anything that is not a decodable
-    /// terminal `Ask_AttachmentUploadResult` becomes an explicit FAILED
-    /// event so JS settles instead of waiting for its own timeout.
-    private func receiveAttachmentResult(streamId: String, attemptId: UUID, payload: Data) async {
-        guard let session = await sessions.claimResult(streamId: streamId, attemptId: attemptId) else {
-            return
-        }
-        let failedStatus = Int32(Ask_AttachmentUploadStatus.failed.rawValue)
-        let event: RealmServiceAttachmentResultEvent
-        if let result = try? Ask_AttachmentUploadResult(serializedBytes: payload) {
-            switch result.status {
-            case .completed:
-                if result.id.isEmpty {
-                    event = RealmServiceAttachmentResultEvent(
-                        streamId: streamId,
-                        attachmentId: session.attachmentId,
-                        status: failedStatus,
-                        statusCode: -1,
-                        errorMessage: "The upload completed without an attachment id."
-                    )
-                } else {
-                    event = RealmServiceAttachmentResultEvent(
-                        streamId: streamId,
-                        attachmentId: result.id,
-                        status: Int32(Ask_AttachmentUploadStatus.completed.rawValue),
-                        statusCode: result.statusCode
-                    )
-                }
-            case .failed:
-                event = RealmServiceAttachmentResultEvent(
-                    streamId: streamId,
-                    attachmentId: session.attachmentId,
-                    status: failedStatus,
-                    statusCode: result.statusCode,
-                    errorMessage: result.errorMessage.isEmpty
-                        ? "The attachment upload failed."
-                        : result.errorMessage
-                )
-            default:
-                event = RealmServiceAttachmentResultEvent(
-                    streamId: streamId,
-                    attachmentId: session.attachmentId,
-                    status: failedStatus,
-                    statusCode: result.statusCode,
-                    errorMessage: "The upload result had a non-terminal status (\(result.status.rawValue))."
-                )
-            }
-        } else {
-            event = RealmServiceAttachmentResultEvent(
-                streamId: streamId,
-                attachmentId: session.attachmentId,
-                status: failedStatus,
-                statusCode: -1,
-                errorMessage: "The upload result could not be decoded."
-            )
-        }
-        // Delivery is attempt-scoped and claimed before cleanup. Only the
-        // first result for this registration may settle the upload.
-        let deliver = attachmentDeliveries.removeValue(forKey: session.attemptId)
-        await teardownAttachmentSession(session)
-        deliver?(event)
-    }
-
-    /// Starts terminal cleanup for a live upload. A preparing session stays
-    /// reserved until its owning prepare call has finished any late stream
-    /// registration and performs the final transport cleanup.
-    private func cleanupAttachmentSession(
-        attachmentId: String,
-        streamId: String,
-        attemptId: UUID
-    ) async {
-        guard let session = await sessions.cancel(
-            attachmentId: attachmentId,
-            streamId: streamId,
-            attemptId: attemptId
-        ) else {
-            return
-        }
-        await teardownAttachmentSession(session)
-    }
-
-    /// Finishes the prepare call's own cleanup, including when cancellation
-    /// already claimed the session while registration or the RPC was in flight.
-    private func cleanupPreparingAttachmentSession(attachmentId: String, streamId: String) async {
-        guard let session = await sessions.preparationCleanup(
-            attachmentId: attachmentId,
-            streamId: streamId
-        ) else {
-            return
-        }
-        await teardownAttachmentSession(session, includePreparing: true)
-    }
-
-    private func teardownAttachmentSession(
-        _ session: RealmServiceAttachmentSession,
-        includePreparing: Bool = false
-    ) async {
-        attachmentDeliveries.removeValue(forKey: session.attemptId)
-        guard includePreparing || session.state != .preparing else { return }
-        await unregisterAttachmentStreams(session)
-    }
-
-    /// Unregisters transport state and only then releases the session's public
-    /// IDs. Until that point a replacement cannot register under the same IDs.
-    private func unregisterAttachmentStreams(_ session: RealmServiceAttachmentSession) async {
-        if let reference = await startedReference {
-            try? await reference.unregisterStream(streamId: session.attemptId.uuidString)
-            try? await reference.unregisterStream(streamId: session.chunkStreamId)
-        }
-        await sessions.completeTeardown(session)
-    }
-
-    /// The runtime reference of an already started connection, if any.
-    /// Attachment teardown must never start a new node just to unregister.
-    private var startedReference: ActrRefWrapper? {
-        get async {
-            guard let startup else { return nil }
-            return try? await startup.task.value.reference
-        }
     }
 
     /// Return a connection whose session is valid on the current verified
@@ -1523,18 +1084,6 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         // same runtime as the original startup connection.
         let connection = recovered ?? base ?? localFrontHandoff
 
-        // Unregister every attachment stream before the runtime goes down so
-        // a restarting Service never sees ghost streams. Local bookkeeping is
-        // dropped even when startup never produced a usable runtime.
-        let removed = await sessions.cancelAll()
-        for session in removed {
-            attachmentDeliveries.removeValue(forKey: session.attemptId)
-            if let reference = connection?.reference {
-                try? await reference.unregisterStream(streamId: session.attemptId.uuidString)
-                try? await reference.unregisterStream(streamId: session.chunkStreamId)
-            }
-            await sessions.completeTeardown(session)
-        }
         if let connection {
             try? await connection.session?.detach()
             connection.reference.shutdown()

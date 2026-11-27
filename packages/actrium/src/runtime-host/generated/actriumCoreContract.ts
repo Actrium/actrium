@@ -110,7 +110,6 @@ export const ACTR_BRIDGE_CONTRACT = {
   streamTypes: {
     text: 'text',
     voice: 'voice',
-    attachmentResult: 'attachmentResult',
   },
   streamStatus: {
     ok: 0,
@@ -124,40 +123,15 @@ export const ACTR_BRIDGE_CONTRACT = {
   routes: {
     askServicePrompt: 'ask.AskService.Prompt',
     askServiceAttach: 'ask.AskService.Attach',
-    askServicePrepareAttachmentUpload: 'ask.AskService.PrepareAttachmentUpload',
     askLocalServiceSendText: 'actrium.AskLocalService.SendText',
     askLocalServiceStartSendVoice: 'actrium.AskLocalService.StartSendVoice',
     askLocalServiceSendVoiceChunk: 'actrium.AskLocalService.SendVoiceChunk',
   },
   rpcTimeoutMs: {
     iosAskServicePrompt: 20000,
-    iosAskServicePrepareAttachmentUpload: 20000,
     androidAskServicePrompt: 300000,
     androidAskServiceAttach: 30000,
     androidAskLocalService: 30000,
-  },
-  attachment: {
-    resultTimeoutMs: 30000,
-    chunkSizeBytes: 49152,
-    checksumAlgorithms: {
-      md5: 'md5',
-    },
-    statusCode: {
-      ok: 0,
-    },
-    types: {
-      unknown: 0,
-      image: 1,
-      document: 2,
-      audio: 3,
-      video: 4,
-      other: 99,
-    },
-    uploadStatus: {
-      unknown: 0,
-      completed: 1,
-      failed: 2,
-    },
   },
   errors: {
     invalidInput: 'INVALID_INPUT',
@@ -279,18 +253,6 @@ export const USER_INFO_BRIDGE_CONTRACT = {
     updatedAt: 'updatedAt',
     requestContext: 'requestContext',
     isLoggedIn: 'isLoggedIn',
-  },
-} as const;
-
-export const REALM_SERVICE_CONTRACT = {
-  moduleName: 'RealmService',
-  methods: {
-    prepareAttachmentUpload: 'prepareAttachmentUpload',
-    sendAttachmentChunk: 'sendAttachmentChunk',
-    unregisterStream: 'unregisterStream',
-  },
-  events: {
-    attachmentResult: 'RealmServiceAttachmentResult',
   },
 } as const;
 

@@ -1,4 +1,4 @@
-import { decodeBase64 } from './attachment-upload';
+import { decodeBase64 } from './base64';
 
 const JPEG_PREFIX = 'data:image/jpeg;base64,';
 const MAX_THUMBNAIL_BASE64_LENGTH = 16 * 1024;

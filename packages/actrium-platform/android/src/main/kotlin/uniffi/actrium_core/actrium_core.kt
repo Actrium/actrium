@@ -1276,6 +1276,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -1845,6 +1847,8 @@ fun uniffi_actrium_core_checksum_method_guestlocalstorage_keep_storage_separate(
 ): Short
 fun uniffi_actrium_core_checksum_method_guestlocalstorage_remove_item(
 ): Short
+fun uniffi_actrium_core_checksum_method_guestlocalstorage_replace_items(
+): Short
 fun uniffi_actrium_core_checksum_method_guestlocalstorage_resolve_signed_origin(
 ): Short
 fun uniffi_actrium_core_checksum_method_guestlocalstorage_set_item(
@@ -1919,6 +1923,8 @@ fun uniffi_actrium_core_fn_method_guestlocalstorage_get_item(`ptr`: Pointer,`ori
 fun uniffi_actrium_core_fn_method_guestlocalstorage_keep_storage_separate(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`publisherIdentity`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_actrium_core_fn_method_guestlocalstorage_remove_item(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+fun uniffi_actrium_core_fn_method_guestlocalstorage_replace_items(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`expected`: RustBuffer.ByValue,`remove`: RustBuffer.ByValue,`set`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 fun uniffi_actrium_core_fn_method_guestlocalstorage_resolve_signed_origin(`ptr`: Pointer,`origin`: RustBuffer.ByValue,`publisherIdentity`: RustBuffer.ByValue,`migrationApproval`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -3425,6 +3431,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_remove_item() != 23454.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_replace_items() != 34003.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actrium_core_checksum_method_guestlocalstorage_resolve_signed_origin() != 29707.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -3910,6 +3919,8 @@ public interface GuestLocalStorageInterface {
 
     fun `removeItem`(`origin`: kotlin.String, `key`: kotlin.String)
 
+    fun `replaceItems`(`origin`: kotlin.String, `key`: kotlin.String, `expected`: kotlin.String?, `remove`: List<kotlin.String>, `set`: List<GuestLocalStorageItem>)
+
     fun `resolveSignedOrigin`(`origin`: kotlin.String, `publisherIdentity`: kotlin.String?, `migrationApproval`: kotlin.String?): kotlin.String
 
     fun `setItem`(`origin`: kotlin.String, `key`: kotlin.String, `value`: kotlin.String)
@@ -4083,6 +4094,18 @@ open class GuestLocalStorage: Disposable, AutoCloseable, GuestLocalStorageInterf
     uniffiRustCallWithError(GuestLocalStorageException) { _status ->
     UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_remove_item(
         it, FfiConverterString.lower(`origin`),FfiConverterString.lower(`key`),_status)
+}
+    }
+
+
+
+
+    @Throws(GuestLocalStorageException::class)override fun `replaceItems`(`origin`: kotlin.String, `key`: kotlin.String, `expected`: kotlin.String?, `remove`: List<kotlin.String>, `set`: List<GuestLocalStorageItem>)
+        =
+    callWithPointer {
+    uniffiRustCallWithError(GuestLocalStorageException) { _status ->
+    UniffiLib.INSTANCE.uniffi_actrium_core_fn_method_guestlocalstorage_replace_items(
+        it, FfiConverterString.lower(`origin`),FfiConverterString.lower(`key`),FfiConverterOptionalString.lower(`expected`),FfiConverterSequenceString.lower(`remove`),FfiConverterSequenceTypeGuestLocalStorageItem.lower(`set`),_status)
 }
     }
 
@@ -4326,33 +4349,17 @@ data class ActrBridgeContractInfo (
     var `statusConnected`: kotlin.String,
     var `streamTypeText`: kotlin.String,
     var `streamTypeVoice`: kotlin.String,
-    var `streamTypeAttachmentResult`: kotlin.String,
     var `streamStatusOk`: kotlin.Int,
     var `streamStatusError`: kotlin.Int,
     var `streamMetadataEosKey`: kotlin.String,
     var `streamMetadataAosKey`: kotlin.String,
     var `streamMetadataTerminalValue`: kotlin.String,
-    var `attachmentResultTimeoutMs`: kotlin.UInt,
-    var `attachmentChunkSizeBytes`: kotlin.UInt,
-    var `attachmentChecksumAlgorithmMd5`: kotlin.String,
-    var `attachmentStatusCodeOk`: kotlin.Int,
-    var `attachmentTypeUnknown`: kotlin.Int,
-    var `attachmentTypeImage`: kotlin.Int,
-    var `attachmentTypeDocument`: kotlin.Int,
-    var `attachmentTypeAudio`: kotlin.Int,
-    var `attachmentTypeVideo`: kotlin.Int,
-    var `attachmentTypeOther`: kotlin.Int,
-    var `attachmentUploadStatusUnknown`: kotlin.Int,
-    var `attachmentUploadStatusCompleted`: kotlin.Int,
-    var `attachmentUploadStatusFailed`: kotlin.Int,
     var `askServicePromptRouteKey`: kotlin.String,
     var `askServiceAttachRouteKey`: kotlin.String,
-    var `askServicePrepareAttachmentUploadRouteKey`: kotlin.String,
     var `askLocalServiceSendTextRouteKey`: kotlin.String,
     var `askLocalServiceStartSendVoiceRouteKey`: kotlin.String,
     var `askLocalServiceSendVoiceChunkRouteKey`: kotlin.String,
     var `iosAskServicePromptTimeoutMs`: kotlin.UInt,
-    var `iosAskServicePrepareAttachmentUploadTimeoutMs`: kotlin.UInt,
     var `androidAskServicePromptTimeoutMs`: kotlin.UInt,
     var `androidAskServiceAttachTimeoutMs`: kotlin.UInt,
     var `androidAskLocalServiceRpcTimeoutMs`: kotlin.UInt,
@@ -4414,23 +4421,6 @@ public object FfiConverterTypeActrBridgeContractInfo: FfiConverterRustBuffer<Act
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
-            FfiConverterInt.read(buf),
-            FfiConverterInt.read(buf),
-            FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
-            FfiConverterUInt.read(buf),
-            FfiConverterUInt.read(buf),
-            FfiConverterString.read(buf),
-            FfiConverterInt.read(buf),
-            FfiConverterInt.read(buf),
-            FfiConverterInt.read(buf),
-            FfiConverterInt.read(buf),
-            FfiConverterInt.read(buf),
-            FfiConverterInt.read(buf),
-            FfiConverterInt.read(buf),
-            FfiConverterInt.read(buf),
             FfiConverterInt.read(buf),
             FfiConverterInt.read(buf),
             FfiConverterString.read(buf),
@@ -4439,7 +4429,8 @@ public object FfiConverterTypeActrBridgeContractInfo: FfiConverterRustBuffer<Act
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
-            FfiConverterUInt.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
             FfiConverterUInt.read(buf),
             FfiConverterUInt.read(buf),
             FfiConverterUInt.read(buf),
@@ -4495,33 +4486,17 @@ public object FfiConverterTypeActrBridgeContractInfo: FfiConverterRustBuffer<Act
             FfiConverterString.allocationSize(value.`statusConnected`) +
             FfiConverterString.allocationSize(value.`streamTypeText`) +
             FfiConverterString.allocationSize(value.`streamTypeVoice`) +
-            FfiConverterString.allocationSize(value.`streamTypeAttachmentResult`) +
             FfiConverterInt.allocationSize(value.`streamStatusOk`) +
             FfiConverterInt.allocationSize(value.`streamStatusError`) +
             FfiConverterString.allocationSize(value.`streamMetadataEosKey`) +
             FfiConverterString.allocationSize(value.`streamMetadataAosKey`) +
             FfiConverterString.allocationSize(value.`streamMetadataTerminalValue`) +
-            FfiConverterUInt.allocationSize(value.`attachmentResultTimeoutMs`) +
-            FfiConverterUInt.allocationSize(value.`attachmentChunkSizeBytes`) +
-            FfiConverterString.allocationSize(value.`attachmentChecksumAlgorithmMd5`) +
-            FfiConverterInt.allocationSize(value.`attachmentStatusCodeOk`) +
-            FfiConverterInt.allocationSize(value.`attachmentTypeUnknown`) +
-            FfiConverterInt.allocationSize(value.`attachmentTypeImage`) +
-            FfiConverterInt.allocationSize(value.`attachmentTypeDocument`) +
-            FfiConverterInt.allocationSize(value.`attachmentTypeAudio`) +
-            FfiConverterInt.allocationSize(value.`attachmentTypeVideo`) +
-            FfiConverterInt.allocationSize(value.`attachmentTypeOther`) +
-            FfiConverterInt.allocationSize(value.`attachmentUploadStatusUnknown`) +
-            FfiConverterInt.allocationSize(value.`attachmentUploadStatusCompleted`) +
-            FfiConverterInt.allocationSize(value.`attachmentUploadStatusFailed`) +
             FfiConverterString.allocationSize(value.`askServicePromptRouteKey`) +
             FfiConverterString.allocationSize(value.`askServiceAttachRouteKey`) +
-            FfiConverterString.allocationSize(value.`askServicePrepareAttachmentUploadRouteKey`) +
             FfiConverterString.allocationSize(value.`askLocalServiceSendTextRouteKey`) +
             FfiConverterString.allocationSize(value.`askLocalServiceStartSendVoiceRouteKey`) +
             FfiConverterString.allocationSize(value.`askLocalServiceSendVoiceChunkRouteKey`) +
             FfiConverterUInt.allocationSize(value.`iosAskServicePromptTimeoutMs`) +
-            FfiConverterUInt.allocationSize(value.`iosAskServicePrepareAttachmentUploadTimeoutMs`) +
             FfiConverterUInt.allocationSize(value.`androidAskServicePromptTimeoutMs`) +
             FfiConverterUInt.allocationSize(value.`androidAskServiceAttachTimeoutMs`) +
             FfiConverterUInt.allocationSize(value.`androidAskLocalServiceRpcTimeoutMs`) +
@@ -4575,33 +4550,17 @@ public object FfiConverterTypeActrBridgeContractInfo: FfiConverterRustBuffer<Act
             FfiConverterString.write(value.`statusConnected`, buf)
             FfiConverterString.write(value.`streamTypeText`, buf)
             FfiConverterString.write(value.`streamTypeVoice`, buf)
-            FfiConverterString.write(value.`streamTypeAttachmentResult`, buf)
             FfiConverterInt.write(value.`streamStatusOk`, buf)
             FfiConverterInt.write(value.`streamStatusError`, buf)
             FfiConverterString.write(value.`streamMetadataEosKey`, buf)
             FfiConverterString.write(value.`streamMetadataAosKey`, buf)
             FfiConverterString.write(value.`streamMetadataTerminalValue`, buf)
-            FfiConverterUInt.write(value.`attachmentResultTimeoutMs`, buf)
-            FfiConverterUInt.write(value.`attachmentChunkSizeBytes`, buf)
-            FfiConverterString.write(value.`attachmentChecksumAlgorithmMd5`, buf)
-            FfiConverterInt.write(value.`attachmentStatusCodeOk`, buf)
-            FfiConverterInt.write(value.`attachmentTypeUnknown`, buf)
-            FfiConverterInt.write(value.`attachmentTypeImage`, buf)
-            FfiConverterInt.write(value.`attachmentTypeDocument`, buf)
-            FfiConverterInt.write(value.`attachmentTypeAudio`, buf)
-            FfiConverterInt.write(value.`attachmentTypeVideo`, buf)
-            FfiConverterInt.write(value.`attachmentTypeOther`, buf)
-            FfiConverterInt.write(value.`attachmentUploadStatusUnknown`, buf)
-            FfiConverterInt.write(value.`attachmentUploadStatusCompleted`, buf)
-            FfiConverterInt.write(value.`attachmentUploadStatusFailed`, buf)
             FfiConverterString.write(value.`askServicePromptRouteKey`, buf)
             FfiConverterString.write(value.`askServiceAttachRouteKey`, buf)
-            FfiConverterString.write(value.`askServicePrepareAttachmentUploadRouteKey`, buf)
             FfiConverterString.write(value.`askLocalServiceSendTextRouteKey`, buf)
             FfiConverterString.write(value.`askLocalServiceStartSendVoiceRouteKey`, buf)
             FfiConverterString.write(value.`askLocalServiceSendVoiceChunkRouteKey`, buf)
             FfiConverterUInt.write(value.`iosAskServicePromptTimeoutMs`, buf)
-            FfiConverterUInt.write(value.`iosAskServicePrepareAttachmentUploadTimeoutMs`, buf)
             FfiConverterUInt.write(value.`androidAskServicePromptTimeoutMs`, buf)
             FfiConverterUInt.write(value.`androidAskServiceAttachTimeoutMs`, buf)
             FfiConverterUInt.write(value.`androidAskLocalServiceRpcTimeoutMs`, buf)
@@ -6210,6 +6169,38 @@ public object FfiConverterTypeEmailBridgeContractInfo: FfiConverterRustBuffer<Em
 
 
 
+data class GuestLocalStorageItem (
+    var `key`: kotlin.String,
+    var `value`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeGuestLocalStorageItem: FfiConverterRustBuffer<GuestLocalStorageItem> {
+    override fun read(buf: ByteBuffer): GuestLocalStorageItem {
+        return GuestLocalStorageItem(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: GuestLocalStorageItem) = (
+            FfiConverterString.allocationSize(value.`key`) +
+            FfiConverterString.allocationSize(value.`value`)
+    )
+
+    override fun write(value: GuestLocalStorageItem, buf: ByteBuffer) {
+            FfiConverterString.write(value.`key`, buf)
+            FfiConverterString.write(value.`value`, buf)
+    }
+}
+
+
+
 data class LocalRealmFront (
     var `signingKeyId`: kotlin.String,
     var `allowRebuild`: kotlin.Boolean
@@ -7773,6 +7764,8 @@ sealed class GuestLocalStorageException(message: String): kotlin.Exception(messa
 
         class MigrationConflict(message: String) : GuestLocalStorageException(message)
 
+        class Conflict(message: String) : GuestLocalStorageException(message)
+
 
     companion object ErrorHandler : UniffiRustCallStatusErrorHandler<GuestLocalStorageException> {
         override fun lift(error_buf: RustBuffer.ByValue): GuestLocalStorageException = FfiConverterTypeGuestLocalStorageError.lift(error_buf)
@@ -7794,6 +7787,7 @@ public object FfiConverterTypeGuestLocalStorageError : FfiConverterRustBuffer<Gu
             6 -> GuestLocalStorageException.IdentityChanged(FfiConverterString.read(buf))
             7 -> GuestLocalStorageException.MigrationRequired(FfiConverterString.read(buf))
             8 -> GuestLocalStorageException.MigrationConflict(FfiConverterString.read(buf))
+            9 -> GuestLocalStorageException.Conflict(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
 
@@ -7835,6 +7829,10 @@ public object FfiConverterTypeGuestLocalStorageError : FfiConverterRustBuffer<Gu
             }
             is GuestLocalStorageException.MigrationConflict -> {
                 buf.putInt(8)
+                Unit
+            }
+            is GuestLocalStorageException.Conflict -> {
+                buf.putInt(9)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -8478,6 +8476,34 @@ public object FfiConverterSequenceTypeDefaultTagInfo: FfiConverterRustBuffer<Lis
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeDefaultTagInfo.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeGuestLocalStorageItem: FfiConverterRustBuffer<List<GuestLocalStorageItem>> {
+    override fun read(buf: ByteBuffer): List<GuestLocalStorageItem> {
+        val len = buf.getInt()
+        return List<GuestLocalStorageItem>(len) {
+            FfiConverterTypeGuestLocalStorageItem.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<GuestLocalStorageItem>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeGuestLocalStorageItem.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<GuestLocalStorageItem>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeGuestLocalStorageItem.write(it, buf)
         }
     }
 }

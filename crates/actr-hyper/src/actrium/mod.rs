@@ -48,10 +48,7 @@ pub mod peer;
 pub mod policies;
 pub mod service;
 
-pub use manifest::{
-    ATTACHMENT_CANCEL_ROUTE, ATTACHMENT_PREPARE_ROUTE, ATTACHMENT_UPLOAD_TRANSPORT,
-    FrontSessionMetadata, front_session_metadata, service_routes,
-};
+pub use manifest::{FrontSessionMetadata, front_session_metadata};
 pub use peer::{ActriumAttachParams, ActriumPeerSession};
 pub use policies::allow_all_service_policies;
 pub use service::{ActriumServiceGuard, ActriumServiceRegistry};

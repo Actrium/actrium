@@ -1136,33 +1136,17 @@ public struct ActrBridgeContractInfo {
     public var statusConnected: String
     public var streamTypeText: String
     public var streamTypeVoice: String
-    public var streamTypeAttachmentResult: String
     public var streamStatusOk: Int32
     public var streamStatusError: Int32
     public var streamMetadataEosKey: String
     public var streamMetadataAosKey: String
     public var streamMetadataTerminalValue: String
-    public var attachmentResultTimeoutMs: UInt32
-    public var attachmentChunkSizeBytes: UInt32
-    public var attachmentChecksumAlgorithmMd5: String
-    public var attachmentStatusCodeOk: Int32
-    public var attachmentTypeUnknown: Int32
-    public var attachmentTypeImage: Int32
-    public var attachmentTypeDocument: Int32
-    public var attachmentTypeAudio: Int32
-    public var attachmentTypeVideo: Int32
-    public var attachmentTypeOther: Int32
-    public var attachmentUploadStatusUnknown: Int32
-    public var attachmentUploadStatusCompleted: Int32
-    public var attachmentUploadStatusFailed: Int32
     public var askServicePromptRouteKey: String
     public var askServiceAttachRouteKey: String
-    public var askServicePrepareAttachmentUploadRouteKey: String
     public var askLocalServiceSendTextRouteKey: String
     public var askLocalServiceStartSendVoiceRouteKey: String
     public var askLocalServiceSendVoiceChunkRouteKey: String
     public var iosAskServicePromptTimeoutMs: UInt32
-    public var iosAskServicePrepareAttachmentUploadTimeoutMs: UInt32
     public var androidAskServicePromptTimeoutMs: UInt32
     public var androidAskServiceAttachTimeoutMs: UInt32
     public var androidAskLocalServiceRpcTimeoutMs: UInt32
@@ -1211,39 +1195,23 @@ public struct ActrBridgeContractInfo {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(moduleName: String, streamEventName: String, statusConnected: String, streamTypeText: String, streamTypeVoice: String, streamTypeAttachmentResult: String, streamStatusOk: Int32, streamStatusError: Int32, streamMetadataEosKey: String, streamMetadataAosKey: String, streamMetadataTerminalValue: String, attachmentResultTimeoutMs: UInt32, attachmentChunkSizeBytes: UInt32, attachmentChecksumAlgorithmMd5: String, attachmentStatusCodeOk: Int32, attachmentTypeUnknown: Int32, attachmentTypeImage: Int32, attachmentTypeDocument: Int32, attachmentTypeAudio: Int32, attachmentTypeVideo: Int32, attachmentTypeOther: Int32, attachmentUploadStatusUnknown: Int32, attachmentUploadStatusCompleted: Int32, attachmentUploadStatusFailed: Int32, askServicePromptRouteKey: String, askServiceAttachRouteKey: String, askServicePrepareAttachmentUploadRouteKey: String, askLocalServiceSendTextRouteKey: String, askLocalServiceStartSendVoiceRouteKey: String, askLocalServiceSendVoiceChunkRouteKey: String, iosAskServicePromptTimeoutMs: UInt32, iosAskServicePrepareAttachmentUploadTimeoutMs: UInt32, androidAskServicePromptTimeoutMs: UInt32, androidAskServiceAttachTimeoutMs: UInt32, androidAskLocalServiceRpcTimeoutMs: UInt32, errorInvalidInput: String, errorUnknown: String, errorPromptRequest: String, errorNotConnected: String, errorActr: String, errorGeneric: String, keyTabId: String, keyActorType: String, keyPath: String, keyStatus: String, keyMessageId: String, keySessionId: String, keyText: String, keyMessage: String, keyStreamId: String, keyStreamIdUpper: String, keyTextResponseStreamId: String, keyVoiceResponseStreamId: String, keyAttachmentIds: String, keyLocation: String, keyLatitude: String, keyLongitude: String, keyAddress: String, keyPlaceName: String, keyFileData: String, keyAttachmentId: String, keyChecksum: String, keyChecksumAlgorithm: String, keySizeBytes: String, keyResultStreamId: String, keyId: String, keyFilename: String, keyType: String, keyStatusCode: String, keyErrorMessage: String, keyQuestionId: String, keyChunkId: String, keyMetadata: String, keyMetadataKey: String, keyMetadataValue: String, keySequence: String, keyTimestampMs: String) {
+    public init(moduleName: String, streamEventName: String, statusConnected: String, streamTypeText: String, streamTypeVoice: String, streamStatusOk: Int32, streamStatusError: Int32, streamMetadataEosKey: String, streamMetadataAosKey: String, streamMetadataTerminalValue: String, askServicePromptRouteKey: String, askServiceAttachRouteKey: String, askLocalServiceSendTextRouteKey: String, askLocalServiceStartSendVoiceRouteKey: String, askLocalServiceSendVoiceChunkRouteKey: String, iosAskServicePromptTimeoutMs: UInt32, androidAskServicePromptTimeoutMs: UInt32, androidAskServiceAttachTimeoutMs: UInt32, androidAskLocalServiceRpcTimeoutMs: UInt32, errorInvalidInput: String, errorUnknown: String, errorPromptRequest: String, errorNotConnected: String, errorActr: String, errorGeneric: String, keyTabId: String, keyActorType: String, keyPath: String, keyStatus: String, keyMessageId: String, keySessionId: String, keyText: String, keyMessage: String, keyStreamId: String, keyStreamIdUpper: String, keyTextResponseStreamId: String, keyVoiceResponseStreamId: String, keyAttachmentIds: String, keyLocation: String, keyLatitude: String, keyLongitude: String, keyAddress: String, keyPlaceName: String, keyFileData: String, keyAttachmentId: String, keyChecksum: String, keyChecksumAlgorithm: String, keySizeBytes: String, keyResultStreamId: String, keyId: String, keyFilename: String, keyType: String, keyStatusCode: String, keyErrorMessage: String, keyQuestionId: String, keyChunkId: String, keyMetadata: String, keyMetadataKey: String, keyMetadataValue: String, keySequence: String, keyTimestampMs: String) {
         self.moduleName = moduleName
         self.streamEventName = streamEventName
         self.statusConnected = statusConnected
         self.streamTypeText = streamTypeText
         self.streamTypeVoice = streamTypeVoice
-        self.streamTypeAttachmentResult = streamTypeAttachmentResult
         self.streamStatusOk = streamStatusOk
         self.streamStatusError = streamStatusError
         self.streamMetadataEosKey = streamMetadataEosKey
         self.streamMetadataAosKey = streamMetadataAosKey
         self.streamMetadataTerminalValue = streamMetadataTerminalValue
-        self.attachmentResultTimeoutMs = attachmentResultTimeoutMs
-        self.attachmentChunkSizeBytes = attachmentChunkSizeBytes
-        self.attachmentChecksumAlgorithmMd5 = attachmentChecksumAlgorithmMd5
-        self.attachmentStatusCodeOk = attachmentStatusCodeOk
-        self.attachmentTypeUnknown = attachmentTypeUnknown
-        self.attachmentTypeImage = attachmentTypeImage
-        self.attachmentTypeDocument = attachmentTypeDocument
-        self.attachmentTypeAudio = attachmentTypeAudio
-        self.attachmentTypeVideo = attachmentTypeVideo
-        self.attachmentTypeOther = attachmentTypeOther
-        self.attachmentUploadStatusUnknown = attachmentUploadStatusUnknown
-        self.attachmentUploadStatusCompleted = attachmentUploadStatusCompleted
-        self.attachmentUploadStatusFailed = attachmentUploadStatusFailed
         self.askServicePromptRouteKey = askServicePromptRouteKey
         self.askServiceAttachRouteKey = askServiceAttachRouteKey
-        self.askServicePrepareAttachmentUploadRouteKey = askServicePrepareAttachmentUploadRouteKey
         self.askLocalServiceSendTextRouteKey = askLocalServiceSendTextRouteKey
         self.askLocalServiceStartSendVoiceRouteKey = askLocalServiceStartSendVoiceRouteKey
         self.askLocalServiceSendVoiceChunkRouteKey = askLocalServiceSendVoiceChunkRouteKey
         self.iosAskServicePromptTimeoutMs = iosAskServicePromptTimeoutMs
-        self.iosAskServicePrepareAttachmentUploadTimeoutMs = iosAskServicePrepareAttachmentUploadTimeoutMs
         self.androidAskServicePromptTimeoutMs = androidAskServicePromptTimeoutMs
         self.androidAskServiceAttachTimeoutMs = androidAskServiceAttachTimeoutMs
         self.androidAskLocalServiceRpcTimeoutMs = androidAskLocalServiceRpcTimeoutMs
@@ -1314,9 +1282,6 @@ extension ActrBridgeContractInfo: Equatable, Hashable {
         if lhs.streamTypeVoice != rhs.streamTypeVoice {
             return false
         }
-        if lhs.streamTypeAttachmentResult != rhs.streamTypeAttachmentResult {
-            return false
-        }
         if lhs.streamStatusOk != rhs.streamStatusOk {
             return false
         }
@@ -1332,52 +1297,10 @@ extension ActrBridgeContractInfo: Equatable, Hashable {
         if lhs.streamMetadataTerminalValue != rhs.streamMetadataTerminalValue {
             return false
         }
-        if lhs.attachmentResultTimeoutMs != rhs.attachmentResultTimeoutMs {
-            return false
-        }
-        if lhs.attachmentChunkSizeBytes != rhs.attachmentChunkSizeBytes {
-            return false
-        }
-        if lhs.attachmentChecksumAlgorithmMd5 != rhs.attachmentChecksumAlgorithmMd5 {
-            return false
-        }
-        if lhs.attachmentStatusCodeOk != rhs.attachmentStatusCodeOk {
-            return false
-        }
-        if lhs.attachmentTypeUnknown != rhs.attachmentTypeUnknown {
-            return false
-        }
-        if lhs.attachmentTypeImage != rhs.attachmentTypeImage {
-            return false
-        }
-        if lhs.attachmentTypeDocument != rhs.attachmentTypeDocument {
-            return false
-        }
-        if lhs.attachmentTypeAudio != rhs.attachmentTypeAudio {
-            return false
-        }
-        if lhs.attachmentTypeVideo != rhs.attachmentTypeVideo {
-            return false
-        }
-        if lhs.attachmentTypeOther != rhs.attachmentTypeOther {
-            return false
-        }
-        if lhs.attachmentUploadStatusUnknown != rhs.attachmentUploadStatusUnknown {
-            return false
-        }
-        if lhs.attachmentUploadStatusCompleted != rhs.attachmentUploadStatusCompleted {
-            return false
-        }
-        if lhs.attachmentUploadStatusFailed != rhs.attachmentUploadStatusFailed {
-            return false
-        }
         if lhs.askServicePromptRouteKey != rhs.askServicePromptRouteKey {
             return false
         }
         if lhs.askServiceAttachRouteKey != rhs.askServiceAttachRouteKey {
-            return false
-        }
-        if lhs.askServicePrepareAttachmentUploadRouteKey != rhs.askServicePrepareAttachmentUploadRouteKey {
             return false
         }
         if lhs.askLocalServiceSendTextRouteKey != rhs.askLocalServiceSendTextRouteKey {
@@ -1390,9 +1313,6 @@ extension ActrBridgeContractInfo: Equatable, Hashable {
             return false
         }
         if lhs.iosAskServicePromptTimeoutMs != rhs.iosAskServicePromptTimeoutMs {
-            return false
-        }
-        if lhs.iosAskServicePrepareAttachmentUploadTimeoutMs != rhs.iosAskServicePrepareAttachmentUploadTimeoutMs {
             return false
         }
         if lhs.androidAskServicePromptTimeoutMs != rhs.androidAskServicePromptTimeoutMs {
@@ -1539,33 +1459,17 @@ extension ActrBridgeContractInfo: Equatable, Hashable {
         hasher.combine(statusConnected)
         hasher.combine(streamTypeText)
         hasher.combine(streamTypeVoice)
-        hasher.combine(streamTypeAttachmentResult)
         hasher.combine(streamStatusOk)
         hasher.combine(streamStatusError)
         hasher.combine(streamMetadataEosKey)
         hasher.combine(streamMetadataAosKey)
         hasher.combine(streamMetadataTerminalValue)
-        hasher.combine(attachmentResultTimeoutMs)
-        hasher.combine(attachmentChunkSizeBytes)
-        hasher.combine(attachmentChecksumAlgorithmMd5)
-        hasher.combine(attachmentStatusCodeOk)
-        hasher.combine(attachmentTypeUnknown)
-        hasher.combine(attachmentTypeImage)
-        hasher.combine(attachmentTypeDocument)
-        hasher.combine(attachmentTypeAudio)
-        hasher.combine(attachmentTypeVideo)
-        hasher.combine(attachmentTypeOther)
-        hasher.combine(attachmentUploadStatusUnknown)
-        hasher.combine(attachmentUploadStatusCompleted)
-        hasher.combine(attachmentUploadStatusFailed)
         hasher.combine(askServicePromptRouteKey)
         hasher.combine(askServiceAttachRouteKey)
-        hasher.combine(askServicePrepareAttachmentUploadRouteKey)
         hasher.combine(askLocalServiceSendTextRouteKey)
         hasher.combine(askLocalServiceStartSendVoiceRouteKey)
         hasher.combine(askLocalServiceSendVoiceChunkRouteKey)
         hasher.combine(iosAskServicePromptTimeoutMs)
-        hasher.combine(iosAskServicePrepareAttachmentUploadTimeoutMs)
         hasher.combine(androidAskServicePromptTimeoutMs)
         hasher.combine(androidAskServiceAttachTimeoutMs)
         hasher.combine(androidAskLocalServiceRpcTimeoutMs)
@@ -1628,33 +1532,17 @@ public struct FfiConverterTypeActrBridgeContractInfo: FfiConverterRustBuffer {
                 statusConnected: FfiConverterString.read(from: &buf),
                 streamTypeText: FfiConverterString.read(from: &buf),
                 streamTypeVoice: FfiConverterString.read(from: &buf),
-                streamTypeAttachmentResult: FfiConverterString.read(from: &buf),
                 streamStatusOk: FfiConverterInt32.read(from: &buf),
                 streamStatusError: FfiConverterInt32.read(from: &buf),
                 streamMetadataEosKey: FfiConverterString.read(from: &buf),
                 streamMetadataAosKey: FfiConverterString.read(from: &buf),
                 streamMetadataTerminalValue: FfiConverterString.read(from: &buf),
-                attachmentResultTimeoutMs: FfiConverterUInt32.read(from: &buf),
-                attachmentChunkSizeBytes: FfiConverterUInt32.read(from: &buf),
-                attachmentChecksumAlgorithmMd5: FfiConverterString.read(from: &buf),
-                attachmentStatusCodeOk: FfiConverterInt32.read(from: &buf),
-                attachmentTypeUnknown: FfiConverterInt32.read(from: &buf),
-                attachmentTypeImage: FfiConverterInt32.read(from: &buf),
-                attachmentTypeDocument: FfiConverterInt32.read(from: &buf),
-                attachmentTypeAudio: FfiConverterInt32.read(from: &buf),
-                attachmentTypeVideo: FfiConverterInt32.read(from: &buf),
-                attachmentTypeOther: FfiConverterInt32.read(from: &buf),
-                attachmentUploadStatusUnknown: FfiConverterInt32.read(from: &buf),
-                attachmentUploadStatusCompleted: FfiConverterInt32.read(from: &buf),
-                attachmentUploadStatusFailed: FfiConverterInt32.read(from: &buf),
                 askServicePromptRouteKey: FfiConverterString.read(from: &buf),
                 askServiceAttachRouteKey: FfiConverterString.read(from: &buf),
-                askServicePrepareAttachmentUploadRouteKey: FfiConverterString.read(from: &buf),
                 askLocalServiceSendTextRouteKey: FfiConverterString.read(from: &buf),
                 askLocalServiceStartSendVoiceRouteKey: FfiConverterString.read(from: &buf),
                 askLocalServiceSendVoiceChunkRouteKey: FfiConverterString.read(from: &buf),
                 iosAskServicePromptTimeoutMs: FfiConverterUInt32.read(from: &buf),
-                iosAskServicePrepareAttachmentUploadTimeoutMs: FfiConverterUInt32.read(from: &buf),
                 androidAskServicePromptTimeoutMs: FfiConverterUInt32.read(from: &buf),
                 androidAskServiceAttachTimeoutMs: FfiConverterUInt32.read(from: &buf),
                 androidAskLocalServiceRpcTimeoutMs: FfiConverterUInt32.read(from: &buf),
@@ -1709,33 +1597,17 @@ public struct FfiConverterTypeActrBridgeContractInfo: FfiConverterRustBuffer {
         FfiConverterString.write(value.statusConnected, into: &buf)
         FfiConverterString.write(value.streamTypeText, into: &buf)
         FfiConverterString.write(value.streamTypeVoice, into: &buf)
-        FfiConverterString.write(value.streamTypeAttachmentResult, into: &buf)
         FfiConverterInt32.write(value.streamStatusOk, into: &buf)
         FfiConverterInt32.write(value.streamStatusError, into: &buf)
         FfiConverterString.write(value.streamMetadataEosKey, into: &buf)
         FfiConverterString.write(value.streamMetadataAosKey, into: &buf)
         FfiConverterString.write(value.streamMetadataTerminalValue, into: &buf)
-        FfiConverterUInt32.write(value.attachmentResultTimeoutMs, into: &buf)
-        FfiConverterUInt32.write(value.attachmentChunkSizeBytes, into: &buf)
-        FfiConverterString.write(value.attachmentChecksumAlgorithmMd5, into: &buf)
-        FfiConverterInt32.write(value.attachmentStatusCodeOk, into: &buf)
-        FfiConverterInt32.write(value.attachmentTypeUnknown, into: &buf)
-        FfiConverterInt32.write(value.attachmentTypeImage, into: &buf)
-        FfiConverterInt32.write(value.attachmentTypeDocument, into: &buf)
-        FfiConverterInt32.write(value.attachmentTypeAudio, into: &buf)
-        FfiConverterInt32.write(value.attachmentTypeVideo, into: &buf)
-        FfiConverterInt32.write(value.attachmentTypeOther, into: &buf)
-        FfiConverterInt32.write(value.attachmentUploadStatusUnknown, into: &buf)
-        FfiConverterInt32.write(value.attachmentUploadStatusCompleted, into: &buf)
-        FfiConverterInt32.write(value.attachmentUploadStatusFailed, into: &buf)
         FfiConverterString.write(value.askServicePromptRouteKey, into: &buf)
         FfiConverterString.write(value.askServiceAttachRouteKey, into: &buf)
-        FfiConverterString.write(value.askServicePrepareAttachmentUploadRouteKey, into: &buf)
         FfiConverterString.write(value.askLocalServiceSendTextRouteKey, into: &buf)
         FfiConverterString.write(value.askLocalServiceStartSendVoiceRouteKey, into: &buf)
         FfiConverterString.write(value.askLocalServiceSendVoiceChunkRouteKey, into: &buf)
         FfiConverterUInt32.write(value.iosAskServicePromptTimeoutMs, into: &buf)
-        FfiConverterUInt32.write(value.iosAskServicePrepareAttachmentUploadTimeoutMs, into: &buf)
         FfiConverterUInt32.write(value.androidAskServicePromptTimeoutMs, into: &buf)
         FfiConverterUInt32.write(value.androidAskServiceAttachTimeoutMs, into: &buf)
         FfiConverterUInt32.write(value.androidAskLocalServiceRpcTimeoutMs, into: &buf)

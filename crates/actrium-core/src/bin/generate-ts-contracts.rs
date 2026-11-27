@@ -7,10 +7,7 @@ use actrium_core::{
         SUPPORTED_INTEGRITY_ALGORITHM,
     },
     auth,
-    bridge::{
-        actr_bridge_contract, email_bridge_contract, realm_service_contract,
-        user_info_bridge_contract,
-    },
+    bridge::{actr_bridge_contract, email_bridge_contract, user_info_bridge_contract},
     domain::SystemAppType,
     runtime_container_size_change_event_name, runtime_extension_panel_visible_change_event_name,
     runtime_login_result_code_key, runtime_login_result_error_key, runtime_login_result_event_name,
@@ -76,7 +73,6 @@ fn render_typescript() -> String {
     let tts_bridge_contract = render_tts_bridge_contract();
     let email_bridge_contract = render_email_bridge_contract();
     let user_info_bridge_contract = render_user_info_bridge_contract();
-    let realm_service_contract = render_realm_service_contract();
     let auth_environment_contract = render_auth_environment_contract();
     let auth_endpoint_contract = render_auth_endpoint_contract();
     let actr_config_helpers = render_actr_config_helpers();
@@ -157,7 +153,6 @@ export const RUNTIME_NATIVE_EVENTS = {{
 {tts_bridge_contract}
 {email_bridge_contract}
 {user_info_bridge_contract}
-{realm_service_contract}
 {auth_environment_contract}
 {auth_endpoint_contract}
 {actr_config_helpers}
@@ -653,7 +648,6 @@ fn render_actr_bridge_contract() -> String {
   streamTypes: {{
     text: '{stream_type_text}',
     voice: '{stream_type_voice}',
-    attachmentResult: '{stream_type_attachment_result}',
   }},
   streamStatus: {{
     ok: {stream_status_ok},
@@ -667,40 +661,15 @@ fn render_actr_bridge_contract() -> String {
   routes: {{
     askServicePrompt: '{ask_service_prompt_route_key}',
     askServiceAttach: '{ask_service_attach_route_key}',
-    askServicePrepareAttachmentUpload: '{ask_service_prepare_attachment_upload_route_key}',
     askLocalServiceSendText: '{ask_local_service_send_text_route_key}',
     askLocalServiceStartSendVoice: '{ask_local_service_start_send_voice_route_key}',
     askLocalServiceSendVoiceChunk: '{ask_local_service_send_voice_chunk_route_key}',
   }},
   rpcTimeoutMs: {{
     iosAskServicePrompt: {ios_ask_service_prompt_timeout_ms},
-    iosAskServicePrepareAttachmentUpload: {ios_ask_service_prepare_attachment_upload_timeout_ms},
     androidAskServicePrompt: {android_ask_service_prompt_timeout_ms},
     androidAskServiceAttach: {android_ask_service_attach_timeout_ms},
     androidAskLocalService: {android_ask_local_service_rpc_timeout_ms},
-  }},
-  attachment: {{
-    resultTimeoutMs: {attachment_result_timeout_ms},
-    chunkSizeBytes: {attachment_chunk_size_bytes},
-    checksumAlgorithms: {{
-      md5: '{attachment_checksum_algorithm_md5}',
-    }},
-    statusCode: {{
-      ok: {attachment_status_code_ok},
-    }},
-    types: {{
-      unknown: {attachment_type_unknown},
-      image: {attachment_type_image},
-      document: {attachment_type_document},
-      audio: {attachment_type_audio},
-      video: {attachment_type_video},
-      other: {attachment_type_other},
-    }},
-    uploadStatus: {{
-      unknown: {attachment_upload_status_unknown},
-      completed: {attachment_upload_status_completed},
-      failed: {attachment_upload_status_failed},
-    }},
   }},
   errors: {{
     invalidInput: '{error_invalid_input}',
@@ -755,7 +724,6 @@ fn render_actr_bridge_contract() -> String {
         status_connected = quote_ts(contract::STATUS_CONNECTED),
         stream_type_text = quote_ts(contract::STREAM_TYPE_TEXT),
         stream_type_voice = quote_ts(contract::STREAM_TYPE_VOICE),
-        stream_type_attachment_result = quote_ts(contract::STREAM_TYPE_ATTACHMENT_RESULT),
         stream_status_ok = contract::STREAM_STATUS_OK,
         stream_status_error = contract::STREAM_STATUS_ERROR,
         stream_metadata_eos_key = quote_ts(contract::STREAM_METADATA_EOS_KEY),
@@ -763,8 +731,6 @@ fn render_actr_bridge_contract() -> String {
         stream_metadata_terminal_value = quote_ts(contract::STREAM_METADATA_TERMINAL_VALUE),
         ask_service_prompt_route_key = quote_ts(contract::ASK_SERVICE_PROMPT_ROUTE_KEY),
         ask_service_attach_route_key = quote_ts(contract::ASK_SERVICE_ATTACH_ROUTE_KEY),
-        ask_service_prepare_attachment_upload_route_key =
-            quote_ts(contract::ASK_SERVICE_PREPARE_ATTACHMENT_UPLOAD_ROUTE_KEY),
         ask_local_service_send_text_route_key =
             quote_ts(contract::ASK_LOCAL_SERVICE_SEND_TEXT_ROUTE_KEY),
         ask_local_service_start_send_voice_route_key =
@@ -772,25 +738,10 @@ fn render_actr_bridge_contract() -> String {
         ask_local_service_send_voice_chunk_route_key =
             quote_ts(contract::ASK_LOCAL_SERVICE_SEND_VOICE_CHUNK_ROUTE_KEY),
         ios_ask_service_prompt_timeout_ms = contract::IOS_ASK_SERVICE_PROMPT_TIMEOUT_MS,
-        ios_ask_service_prepare_attachment_upload_timeout_ms =
-            contract::IOS_ASK_SERVICE_PREPARE_ATTACHMENT_UPLOAD_TIMEOUT_MS,
         android_ask_service_prompt_timeout_ms = contract::ANDROID_ASK_SERVICE_PROMPT_TIMEOUT_MS,
         android_ask_service_attach_timeout_ms = contract::ANDROID_ASK_SERVICE_ATTACH_TIMEOUT_MS,
         android_ask_local_service_rpc_timeout_ms =
             contract::ANDROID_ASK_LOCAL_SERVICE_RPC_TIMEOUT_MS,
-        attachment_result_timeout_ms = contract::ATTACHMENT_RESULT_TIMEOUT_MS,
-        attachment_chunk_size_bytes = contract::ATTACHMENT_CHUNK_SIZE_BYTES,
-        attachment_checksum_algorithm_md5 = quote_ts(contract::ATTACHMENT_CHECKSUM_ALGORITHM_MD5),
-        attachment_status_code_ok = contract::ATTACHMENT_STATUS_CODE_OK,
-        attachment_type_unknown = contract::ATTACHMENT_TYPE_UNKNOWN,
-        attachment_type_image = contract::ATTACHMENT_TYPE_IMAGE,
-        attachment_type_document = contract::ATTACHMENT_TYPE_DOCUMENT,
-        attachment_type_audio = contract::ATTACHMENT_TYPE_AUDIO,
-        attachment_type_video = contract::ATTACHMENT_TYPE_VIDEO,
-        attachment_type_other = contract::ATTACHMENT_TYPE_OTHER,
-        attachment_upload_status_unknown = contract::ATTACHMENT_UPLOAD_STATUS_UNKNOWN,
-        attachment_upload_status_completed = contract::ATTACHMENT_UPLOAD_STATUS_COMPLETED,
-        attachment_upload_status_failed = contract::ATTACHMENT_UPLOAD_STATUS_FAILED,
         error_invalid_input = quote_ts(contract::ERROR_INVALID_INPUT),
         error_unknown = quote_ts(contract::ERROR_UNKNOWN),
         error_prompt_request = quote_ts(contract::ERROR_PROMPT_REQUEST),
@@ -933,30 +884,6 @@ fn render_email_bridge_contract() -> String {
         uri_scheme_mailto = quote_ts(contract::URI_SCHEME_MAILTO),
         error_invalid_recipients = quote_ts(contract::ERROR_INVALID_RECIPIENTS),
         error_open_failed = quote_ts(contract::ERROR_OPEN_FAILED),
-    )
-}
-
-fn render_realm_service_contract() -> String {
-    use realm_service_contract as contract;
-
-    format!(
-        r#"export const REALM_SERVICE_CONTRACT = {{
-  moduleName: '{module_name}',
-  methods: {{
-    prepareAttachmentUpload: '{method_prepare_attachment_upload}',
-    sendAttachmentChunk: '{method_send_attachment_chunk}',
-    unregisterStream: '{method_unregister_stream}',
-  }},
-  events: {{
-    attachmentResult: '{event_attachment_result}',
-  }},
-}} as const;
-"#,
-        module_name = quote_ts(contract::MODULE_NAME),
-        method_prepare_attachment_upload = quote_ts(contract::METHOD_PREPARE_ATTACHMENT_UPLOAD),
-        method_send_attachment_chunk = quote_ts(contract::METHOD_SEND_ATTACHMENT_CHUNK),
-        method_unregister_stream = quote_ts(contract::METHOD_UNREGISTER_STREAM),
-        event_attachment_result = quote_ts(contract::EVENT_ATTACHMENT_RESULT),
     )
 }
 

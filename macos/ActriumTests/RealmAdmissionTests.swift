@@ -390,7 +390,7 @@ final class RealmAdmissionTests: XCTestCase {
             protocolFingerprint: Data(repeating: 3, count: 32),
             runtime: ActriumRuntime(actriumVersion: "1.0.0", frontHostApi: "1.0", keelApi: "1.0"),
             programCapabilities: ["service"],
-            routes: [ActriumRoute(route: "uploadAttachment", capabilities: ["service"])]
+            routes: [ActriumRoute(route: "echo.EchoService.Echo", capabilities: ["service"])]
         )
         let binding = try RealmServiceBinding(
             profile: accepted.info,
@@ -398,28 +398,18 @@ final class RealmAdmissionTests: XCTestCase {
             front: Data(),
             metadata: metadata,
             trustedFrontKey: Data(),
-            capabilitiesJSON: #"{"hostModules":{"service":{"rpc":["uploadAttachment"]}}}"#,
-            permissions: ["service.attachmentUpload"]
+            capabilitiesJSON: #"{"hostModules":{"service":{"rpc":["echo.EchoService.Echo"]}}}"#
         )
         RealmServiceBindings.shared.attach(binding, to: sourceId)
         defer { RealmServiceBindings.shared.remove(sourceId) }
-        let sourceWasBound = await RealmServiceBindings.shared.attachmentUploadAvailable(sourceId)
-        XCTAssertTrue(sourceWasBound)
+        XCTAssertNotNil(RealmServiceBindings.shared.binding(for: sourceId))
 
         let transfer = Tab(title: "Echo", url: link, guestScript: source.tabs[0].guestScript)
         destination.insertTabFromCrossWindow(transfer, at: destination.tabs.count, groupId: nil, select: false)
         source.removeTabById(sourceId)
         XCTAssertFalse(source.tabs.contains { $0.id == sourceId })
         XCTAssertNil(destination.tabs.last?.guestScript)
-        let sourceStillBound = await RealmServiceBindings.shared.attachmentUploadAvailable(sourceId)
-        XCTAssertFalse(sourceStillBound)
-
-        let deadline = ContinuousClock.now + .seconds(2)
-        while ContinuousClock.now < deadline {
-            if !(await binding.attachmentUploadAvailable) { return }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        XCTFail("The source Realm binding was not stopped")
+        XCTAssertNil(RealmServiceBindings.shared.binding(for: sourceId))
     }
 
     @MainActor

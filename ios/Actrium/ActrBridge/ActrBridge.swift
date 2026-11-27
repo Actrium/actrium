@@ -6,6 +6,13 @@ import ActrBindings
 import OSLog
 import React
 
+// The shared ActrBridgeContract no longer publishes the attachment-upload
+// transport. Keep the legacy wire values local to the iOS bridge until it
+// migrates to the Guest-side file-import + fixed-route upload flow.
+private let legacyAttachmentResultStreamType = "attachmentResult"
+private let legacyPrepareAttachmentUploadRouteKey = "ask.AskService.PrepareAttachmentUpload"
+private let legacyPrepareAttachmentUploadTimeoutMs: UInt32 = 20_000
+
 /// React Native bridge for Actr High Level API
 /// This class provides a bridge between React Native and the Actr Swift SDK,
 /// exposing the high-level API (ActrSystem, ActrNode, ActrRef) to JavaScript.
@@ -547,7 +554,7 @@ enum StreamType {
         case .voice:
             return contract.streamTypeVoice
         case .attachmentResult:
-            return contract.streamTypeAttachmentResult
+            return legacyAttachmentResultStreamType
         }
     }
 }
@@ -853,10 +860,10 @@ public actor AskLocalServiceHandlerImpl: AskLocalServiceHandler {
 
         let responseData = try await ctx.callRaw(
             target: targetId,
-            routeKey: contract.askServicePrepareAttachmentUploadRouteKey,
+            routeKey: legacyPrepareAttachmentUploadRouteKey,
             payloadType: .rpcReliable,
             payload: try askRequest.serializedData(),
-            timeoutMs: Int64(contract.iosAskServicePrepareAttachmentUploadTimeoutMs)
+            timeoutMs: Int64(legacyPrepareAttachmentUploadTimeoutMs)
         )
 
         let reply = try Ask_PrepareAttachmentUploadResponse(serializedBytes: responseData)

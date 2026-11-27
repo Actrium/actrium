@@ -293,33 +293,17 @@ pub struct ActrBridgeContractInfo {
     pub status_connected: String,
     pub stream_type_text: String,
     pub stream_type_voice: String,
-    pub stream_type_attachment_result: String,
     pub stream_status_ok: i32,
     pub stream_status_error: i32,
     pub stream_metadata_eos_key: String,
     pub stream_metadata_aos_key: String,
     pub stream_metadata_terminal_value: String,
-    pub attachment_result_timeout_ms: u32,
-    pub attachment_chunk_size_bytes: u32,
-    pub attachment_checksum_algorithm_md5: String,
-    pub attachment_status_code_ok: i32,
-    pub attachment_type_unknown: i32,
-    pub attachment_type_image: i32,
-    pub attachment_type_document: i32,
-    pub attachment_type_audio: i32,
-    pub attachment_type_video: i32,
-    pub attachment_type_other: i32,
-    pub attachment_upload_status_unknown: i32,
-    pub attachment_upload_status_completed: i32,
-    pub attachment_upload_status_failed: i32,
     pub ask_service_prompt_route_key: String,
     pub ask_service_attach_route_key: String,
-    pub ask_service_prepare_attachment_upload_route_key: String,
     pub ask_local_service_send_text_route_key: String,
     pub ask_local_service_start_send_voice_route_key: String,
     pub ask_local_service_send_voice_chunk_route_key: String,
     pub ios_ask_service_prompt_timeout_ms: u32,
-    pub ios_ask_service_prepare_attachment_upload_timeout_ms: u32,
     pub android_ask_service_prompt_timeout_ms: u32,
     pub android_ask_service_attach_timeout_ms: u32,
     pub android_ask_local_service_rpc_timeout_ms: u32,
@@ -3934,29 +3918,13 @@ pub fn actr_bridge_contract() -> ActrBridgeContractInfo {
         status_connected: contract::STATUS_CONNECTED.to_string(),
         stream_type_text: contract::STREAM_TYPE_TEXT.to_string(),
         stream_type_voice: contract::STREAM_TYPE_VOICE.to_string(),
-        stream_type_attachment_result: contract::STREAM_TYPE_ATTACHMENT_RESULT.to_string(),
         stream_status_ok: contract::STREAM_STATUS_OK,
         stream_status_error: contract::STREAM_STATUS_ERROR,
         stream_metadata_eos_key: contract::STREAM_METADATA_EOS_KEY.to_string(),
         stream_metadata_aos_key: contract::STREAM_METADATA_AOS_KEY.to_string(),
         stream_metadata_terminal_value: contract::STREAM_METADATA_TERMINAL_VALUE.to_string(),
-        attachment_result_timeout_ms: contract::ATTACHMENT_RESULT_TIMEOUT_MS,
-        attachment_chunk_size_bytes: contract::ATTACHMENT_CHUNK_SIZE_BYTES,
-        attachment_checksum_algorithm_md5: contract::ATTACHMENT_CHECKSUM_ALGORITHM_MD5.to_string(),
-        attachment_status_code_ok: contract::ATTACHMENT_STATUS_CODE_OK,
-        attachment_type_unknown: contract::ATTACHMENT_TYPE_UNKNOWN,
-        attachment_type_image: contract::ATTACHMENT_TYPE_IMAGE,
-        attachment_type_document: contract::ATTACHMENT_TYPE_DOCUMENT,
-        attachment_type_audio: contract::ATTACHMENT_TYPE_AUDIO,
-        attachment_type_video: contract::ATTACHMENT_TYPE_VIDEO,
-        attachment_type_other: contract::ATTACHMENT_TYPE_OTHER,
-        attachment_upload_status_unknown: contract::ATTACHMENT_UPLOAD_STATUS_UNKNOWN,
-        attachment_upload_status_completed: contract::ATTACHMENT_UPLOAD_STATUS_COMPLETED,
-        attachment_upload_status_failed: contract::ATTACHMENT_UPLOAD_STATUS_FAILED,
         ask_service_prompt_route_key: contract::ASK_SERVICE_PROMPT_ROUTE_KEY.to_string(),
         ask_service_attach_route_key: contract::ASK_SERVICE_ATTACH_ROUTE_KEY.to_string(),
-        ask_service_prepare_attachment_upload_route_key:
-            contract::ASK_SERVICE_PREPARE_ATTACHMENT_UPLOAD_ROUTE_KEY.to_string(),
         ask_local_service_send_text_route_key: contract::ASK_LOCAL_SERVICE_SEND_TEXT_ROUTE_KEY
             .to_string(),
         ask_local_service_start_send_voice_route_key:
@@ -3964,8 +3932,6 @@ pub fn actr_bridge_contract() -> ActrBridgeContractInfo {
         ask_local_service_send_voice_chunk_route_key:
             contract::ASK_LOCAL_SERVICE_SEND_VOICE_CHUNK_ROUTE_KEY.to_string(),
         ios_ask_service_prompt_timeout_ms: contract::IOS_ASK_SERVICE_PROMPT_TIMEOUT_MS,
-        ios_ask_service_prepare_attachment_upload_timeout_ms:
-            contract::IOS_ASK_SERVICE_PREPARE_ATTACHMENT_UPLOAD_TIMEOUT_MS,
         android_ask_service_prompt_timeout_ms: contract::ANDROID_ASK_SERVICE_PROMPT_TIMEOUT_MS,
         android_ask_service_attach_timeout_ms: contract::ANDROID_ASK_SERVICE_ATTACH_TIMEOUT_MS,
         android_ask_local_service_rpc_timeout_ms:
@@ -5605,25 +5571,11 @@ mod tests {
         assert_eq!(contract.status_connected, "connected");
         assert_eq!(contract.stream_type_text, "text");
         assert_eq!(contract.stream_type_voice, "voice");
-        assert_eq!(contract.stream_type_attachment_result, "attachmentResult");
         assert_eq!(contract.stream_status_ok, 0);
         assert_eq!(contract.stream_status_error, -1);
         assert_eq!(contract.stream_metadata_eos_key, "eos");
         assert_eq!(contract.stream_metadata_aos_key, "aos");
         assert_eq!(contract.stream_metadata_terminal_value, "true");
-        assert_eq!(contract.attachment_result_timeout_ms, 30_000);
-        assert_eq!(contract.attachment_chunk_size_bytes, 49_152);
-        assert_eq!(contract.attachment_checksum_algorithm_md5, "md5");
-        assert_eq!(contract.attachment_status_code_ok, 0);
-        assert_eq!(contract.attachment_type_unknown, 0);
-        assert_eq!(contract.attachment_type_image, 1);
-        assert_eq!(contract.attachment_type_document, 2);
-        assert_eq!(contract.attachment_type_audio, 3);
-        assert_eq!(contract.attachment_type_video, 4);
-        assert_eq!(contract.attachment_type_other, 99);
-        assert_eq!(contract.attachment_upload_status_unknown, 0);
-        assert_eq!(contract.attachment_upload_status_completed, 1);
-        assert_eq!(contract.attachment_upload_status_failed, 2);
         assert_eq!(
             contract.ask_service_prompt_route_key,
             "ask.AskService.Prompt"
@@ -5631,10 +5583,6 @@ mod tests {
         assert_eq!(
             contract.ask_service_attach_route_key,
             "ask.AskService.Attach"
-        );
-        assert_eq!(
-            contract.ask_service_prepare_attachment_upload_route_key,
-            "ask.AskService.PrepareAttachmentUpload"
         );
         assert_eq!(
             contract.ask_local_service_send_text_route_key,
@@ -5649,10 +5597,6 @@ mod tests {
             "actrium.AskLocalService.SendVoiceChunk"
         );
         assert_eq!(contract.ios_ask_service_prompt_timeout_ms, 20_000);
-        assert_eq!(
-            contract.ios_ask_service_prepare_attachment_upload_timeout_ms,
-            20_000
-        );
         assert_eq!(contract.android_ask_service_prompt_timeout_ms, 300_000);
         assert_eq!(contract.android_ask_service_attach_timeout_ms, 30_000);
         assert_eq!(contract.android_ask_local_service_rpc_timeout_ms, 30_000);

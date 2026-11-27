@@ -392,7 +392,7 @@ details.fold .fold-body { padding: 4px 18px 16px; border-top: 1px dashed var(--l
       <div class="arch-label">Keel Guest（不受信）</div>
       <div class="arch-row">
         <div class="arch-node untrusted"><div class="an-title">named import</div><div class="an-sub">host:clipboard · host:local-storage · host:speech · host:file-import</div></div>
-        <div class="arch-node untrusted"><div class="an-title">固定路由模块</div><div class="an-sub">host:service/&lt;route-or-event&gt; · 固定附件上传</div></div>
+        <div class="arch-node untrusted"><div class="an-title">固定路由模块</div><div class="an-sub">host:service/&lt;route-or-event&gt;</div></div>
       </div>
     </div>
     <div class="arch-arrow"><span class="arr">↓</span> 仅暴露 linkage 中已验证的方法</div>
@@ -441,7 +441,7 @@ details.fold .fold-body { padding: 4px 18px 16px; border-top: 1px dashed var(--l
     <h1>能力目录<span class="en">IMPLEMENTED GUEST-FACING MODULES</span></h1>
   </div>
 
-  <p>下表列出当前有真实 Host 实现、且能进入 Guest 运行时的 Guest API。<strong>“已实现”不代表任意环境下必然成功</strong>：文件选择、语音、存储和附件上传仍需要目标运行环境提供对应原生适配器，Service 还需要当前 Tab 已附着业务 Service。</p>
+  <p>下表列出当前有真实 Host 实现、且能进入 Guest 运行时的 Guest API。<strong>“已实现”不代表任意环境下必然成功</strong>：文件选择、语音和存储仍需要目标运行环境提供对应原生适配器，Service 还需要当前 Tab 已附着业务 Service。</p>
 
   <div class="table-wrap">
     <table>
@@ -449,7 +449,6 @@ details.fold .fold-body { padding: 4px 18px 16px; border-top: 1px dashed var(--l
       <tbody>
         <tr><td><code>host:service/&lt;route&gt;.call</code></td><td><code>service.call</code></td><td>RPC</td><td>固定业务路由；输入为 Base64 载荷和可选超时。</td></tr>
         <tr><td><code>host:service/&lt;event&gt;.on</code></td><td><code>service.on</code></td><td>订阅</td><td>只接收指定固定事件；返回同步取消函数。</td></tr>
-        <tr><td><code>host:service.uploadAttachment</code></td><td><code>service.attachmentUpload</code></td><td>RPC</td><td>裸 <code>host:service</code> 唯一允许的直接导入。</td></tr>
         <tr><td><code>host:clipboard.writeText</code></td><td><code>host:clipboard.write</code></td><td>RPC</td><td>写入文本剪贴板；导出 name 与 capability name 不同。</td></tr>
         <tr><td><code>host:local-storage.getItem</code></td><td><code>host:local-storage.getItem</code></td><td>RPC</td><td>读取字符串；不存在时返回 <code>null</code>。</td></tr>
         <tr><td><code>host:local-storage.setItem</code></td><td><code>host:local-storage.setItem</code></td><td>RPC</td><td>写入字符串值。</td></tr>
@@ -468,7 +467,7 @@ details.fold .fold-body { padding: 4px 18px 16px; border-top: 1px dashed var(--l
 
   <div class="callout tip">
     <div class="co-title">统一导入规则</div>
-    <p><code>host:*</code> 使用 named imports。Service RPC 和事件分别使用 <code>host:service/&lt;route&gt;</code> 与 <code>host:service/&lt;event&gt;</code> 固定模块；附件上传使用 <code>host:service</code> 的 <code>uploadAttachment</code>。</p>
+    <p><code>host:*</code> 使用 named imports。Service RPC 和事件分别使用 <code>host:service/&lt;route&gt;</code> 与 <code>host:service/&lt;event&gt;</code> 固定模块；裸 <code>host:service</code> 不允许导入任何导出。</p>
   </div>
 
   <h3>声明能力不等于授权成功</h3>
@@ -520,7 +519,7 @@ await removeItem({ key: 'old-draft' });</pre></div>
   </table></div>
 
   <h2 id="native-files">文件导入</h2>
-  <p><code>host:file-import</code> 提供三个方法：<code>pick</code> 调用原生选择器；<code>openPreview</code> 预览缓存附件；<code>release</code> 释放缓存附件。默认情况下 <code>pick</code> 返回文件内容而非附件 ID，需要发给 Service 时，应再调用固定附件上传或按业务协议编码；传入 <code>cache: true</code> 时改由 Host 缓存文件，返回可直接用于 <code>openPreview</code> / <code>release</code> 的 <code>fileId</code>。</p>
+  <p><code>host:file-import</code> 提供三个方法：<code>pick</code> 调用原生选择器；<code>openPreview</code> 预览缓存附件；<code>release</code> 释放缓存附件。默认情况下 <code>pick</code> 返回文件内容（Base64），需要发给 Service 时由 Guest 通过固定业务路由的 <code>call</code> 自行分片发送；传入 <code>cache: true</code> 时改由 Host 缓存文件，返回可直接用于 <code>openPreview</code> / <code>release</code> 的 <code>fileId</code>，其字节对 Guest 不透明。</p>
   <div class="codeblock"><div class="cb-head"><span class="cb-lang">TypeScript</span><span class="cb-file">file-import.ts</span><button class="copy-btn" data-copy type="button">复制</button></div><pre>import { pick } from 'host:file-import';
 
 const { files } = await pick({
@@ -622,27 +621,42 @@ useEffect(() =&gt; {
 }, []);</pre></div>
   <p><code>on</code> 返回同步清理函数，应作为 React effect cleanup 或在组件销毁时调用。Host 先过滤固定事件，再交给 Guest handler；权限撤销、Tab 拆除或 Engine reload 时也会关闭关联传输。</p>
 
-  <h2 id="service-upload">固定附件上传</h2>
+  <h2 id="service-upload">文件导入 + 固定路由分片上传</h2>
+  <p>v1 没有 Host 内置的附件上传通道。Guest 通过 <code>host:file-import</code> 读取文件字节，再用自己声明的固定业务路由（<code>call</code>）逐片发送；分片、序号、重试和结束标记都由 Guest 负责。</p>
   <div class="codeblock"><div class="cb-head"><span class="cb-lang">TypeScript</span><span class="cb-file">attachment.ts</span><button class="copy-btn" data-copy type="button">复制</button></div><pre>import { pick } from 'host:file-import';
-import { uploadAttachment } from 'host:service';
+import { call as appendChunk } from 'host:service/upload.AttachmentService.AppendChunk';
+import { decodeAppendChunkReply, encodeAppendChunk } from './attachment-wire';
 
-const { files } = await pick({ source: 'files', multiple: false });
-if (files.length &gt; 0) {
-  const receipt = await uploadAttachment({
-    filename: files[0].name,
-    base64: files[0].base64,
-    type: 'document',
-  });
-  // receipt.attachmentId 可放入后续业务 RPC 的 proto 消息。
+const { files } = await pick({ source: 'files', multiple: false, cache: false });
+const file = files[0];
+if (file &amp;&amp; 'base64' in file) {
+  const bytes = base64ToBytes(file.base64);
+  // 单次 call 请求上限 64 KiB；base64 膨胀 4/3 后每片约 48 KiB 原始字节。
+  const CHUNK_BYTES = 48 * 1024;
+  let sequence = 1;
+  for (let offset = 0; offset &lt; bytes.length; offset += CHUNK_BYTES) {
+    const eos = offset + CHUNK_BYTES &gt;= bytes.length;
+    const out = await appendChunk({
+      payloadBase64: encodeAppendChunk({
+        filename: file.name,
+        sequence,
+        chunk: bytes.subarray(offset, offset + CHUNK_BYTES),
+        eos,
+      }),
+    });
+    decodeAppendChunkReply(out.payloadBase64);
+    sequence += 1;
+  }
 }</pre></div>
   <div class="table-wrap"><table>
     <thead><tr><th>字段 / 行为</th><th>约定</th></tr></thead>
     <tbody>
-      <tr><td><code>filename</code></td><td>非空文件名。</td></tr>
-      <tr><td><code>base64</code></td><td>严格 RFC 4648 padded Base64；解码后最多 7 MiB。</td></tr>
-      <tr><td><code>type</code></td><td><code>image</code> / <code>document</code> / <code>audio</code> / <code>video</code> / <code>other</code>；默认 <code>document</code>。</td></tr>
-      <tr><td><code>id</code></td><td>可选的调用方附件 ID；省略时由 Host 生成。</td></tr>
-      <tr><td>传输</td><td>由 Host 原生 prepare / chunk / result 流程完成，需要当前运行环境提供附件上传桥。</td></tr>
+      <tr><td>请求上限</td><td>单次 <code>call</code> 请求 ≤ 64 KiB；base64 膨胀后每片约 48 KiB 原始字节。</td></tr>
+      <tr><td>响应上限</td><td>单次 <code>call</code> 响应 ≤ 256 KiB。</td></tr>
+      <tr><td>分片与结束</td><td>序号、重试、EOS 标记与组装均由 Guest 按业务 proto 定义管理。</td></tr>
+      <tr><td>内存</td><td><code>cache: false</code> 时整个文件以 base64 驻留 Guest 堆（≤7 MiB 的文件约占 9.3 MiB）。</td></tr>
+      <tr><td>缓存 fileId</td><td><code>cache: true</code> 返回的 <code>fileId</code> 字节对 Guest 不透明，不能用于自行分片。</td></tr>
+      <tr><td>路由合法性</td><td>业务 route 必须是签名依赖 proto 中的 unary 方法，并在 package 能力中声明 <code>service.call</code>。</td></tr>
     </tbody>
   </table></div>
 
@@ -723,7 +737,6 @@ api = "^1.0.0"
 required-capabilities = [
   "service.call",
   "service.on",
-  "service.attachmentUpload",
   "host:clipboard.write",
   "host:file-import.pick"
 ]
@@ -742,7 +755,7 @@ media-type = "application/json"</pre></div>
 
   <div class="callout warn">
     <div class="co-title">能力命名注意事项</div>
-    <p>新包推荐按照能力目录填写方法级能力名，并只声明实际使用的能力。特别注意名称差异：Guest 导出的 <code>writeText</code> 对应 package 中的 <code>host:clipboard.write</code>。固定 Service RPC、事件和附件上传分别声明 <code>service.call</code>、<code>service.on</code> 和 <code>service.attachmentUpload</code>。</p>
+    <p>新包推荐按照能力目录填写方法级能力名，并只声明实际使用的能力。特别注意名称差异：Guest 导出的 <code>writeText</code> 对应 package 中的 <code>host:clipboard.write</code>。固定 Service RPC 和事件分别声明 <code>service.call</code> 和 <code>service.on</code>；读取文件字节声明 <code>host:file-import.pick</code>。</p>
   </div>
 </section>
 
@@ -789,7 +802,7 @@ media-type = "application/json"</pre></div>
 
   <div class="callout info">
     <div class="co-title">Service 权限粒度</div>
-    <p>固定路由用于确定业务 RPC 或事件目标，package 仍需声明对应的方法级能力：<code>service.call</code>、<code>service.on</code> 或 <code>service.attachmentUpload</code>。权限拒绝时，应同时检查这些声明和当前会话授权。</p>
+    <p>固定路由用于确定业务 RPC 或事件目标，package 仍需声明对应的方法级能力：<code>service.call</code> 或 <code>service.on</code>。权限拒绝时，应同时检查这些声明和当前会话授权。</p>
   </div>
 </section>
 

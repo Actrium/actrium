@@ -1107,8 +1107,7 @@ high-confidence shared logic:
   normalization
 - `actr_bridge_contract`, the canonical ActrBridge native module name,
   stream-event name, payload keys, stream type values, stream metadata terminal
-  markers, stream status literals, attachment upload/result metadata, attachment
-  chunk/checksum/status/type values, prompt/attachment/local-service RPC route
+  markers, stream status literals, prompt/attachment/local-service RPC route
   keys, platform-specific RPC timeout values, and promise error codes used by
   iOS native, Android native, and RN TypeScript bridge adapters
 - `parse_actr_actor_type`, the canonical `publisher/program@version` Actr actor type
@@ -1182,9 +1181,8 @@ uses `actrium-core` constants/types for:
   container-size, and global-search input events
 - `ACTR_BRIDGE_CONTRACT` for the ActrBridge native module name, stream-event
   name, payload keys, stream type values, stream metadata terminal markers,
-  stream status literals, attachment upload/result metadata, attachment
-  chunk/checksum/status/type values, prompt/attachment/local-service RPC route
-  keys, platform-specific RPC timeout values, and promise error codes
+  stream status literals, prompt/attachment/local-service RPC route keys,
+  platform-specific RPC timeout values, and promise error codes
 - `ASR_BRIDGE_CONTRACT` and `TTS_BRIDGE_CONTRACT` for speech-related RN/native
   bridge names, events, payload keys, and option keys
 
@@ -1231,14 +1229,13 @@ generated module:
   Rust-owned constants while keeping RN event subscription local
 - `ActrNativeBridge.ts`, `ActrEvents.ts`, and `ActrStreamRouter.ts` delegate the
   ActrBridge native module lookup, stream-event name, selected payload keys,
-  stream type values, stream metadata terminal markers, attachment result
-  timeout/status values, prompt RPC route/timeout values, and status/error
-  literals to generated Rust-owned constants while keeping RN NativeModules
-  invocation, event subscription, and stream routing local
-- `ActrConnection.ts` and `ActrConnection.type.ts` delegate attachment chunk
-  size, checksum algorithm, attachment type/status values, and stream terminal
-  metadata to generated Rust-owned constants while keeping RN file IO and upload
-  orchestration local
+  stream type values, stream metadata terminal markers, prompt RPC route/timeout
+  values, and status/error literals to generated Rust-owned constants while
+  keeping RN NativeModules invocation, event subscription, and stream routing
+  local
+- `ActrConnection.ts` and `ActrConnection.type.ts` keep RN file IO and upload
+  orchestration local; any legacy attachment upload constants live with that
+  adapter rather than the shared Rust contract
 - `ActrConfigUtils.ts` re-exports Rust-generated config helpers while keeping
   RN file creation in `useActrConnection`
 - `TTSBridge.ts` and `TTSEvents.ts` delegate TTS native module lookup, event
@@ -1419,10 +1416,10 @@ local until another platform or Windows adapter needs the same event surface.
 iOS `ActrBridge` now consumes `ActriumCore.actrBridgeContract()` for the
 ActrBridge module name, stream-event name, request/result field names,
 stream callback payload keys, stream type values, stream status literals,
-stream chunk acknowledgement status, attachment upload/result metadata keys, and
-promise error codes used by the RN bridge. Swift still owns Actr SDK service
-lifecycle, Protobuf request/response mapping, attachment chunk file IO, prompt
-RPC timeout selection, promise handling, and React Native event emission.
+stream chunk acknowledgement status, and promise error codes used by the RN
+bridge. Swift still owns Actr SDK service lifecycle, Protobuf request/response
+mapping, the legacy attachment upload path, prompt RPC timeout selection,
+promise handling, and React Native event emission.
 
 iOS `ActrBridge` also calls `ActriumCore.parseActrActorType(raw:)` to validate
 and split the RN `actorType` wire string before constructing the Swift SDK
@@ -1531,8 +1528,8 @@ native module name, stream-event name, request/result field names, status
 literals, and promise error codes used by the RN bridge. Android still owns
 ReadableMap extraction, WritableMap construction, coroutine dispatch,
 `ActrManager` RPC calls, and React Native event emission. The shared contract
-also exposes attachment upload/result keys for iOS/RN parity; Android does not
-currently implement the attachment-upload native methods.
+only carries generic stream and Service field names; the attachment-upload
+channel is no longer part of it.
 
 Android `ActriumDataStreamCallback` now consumes the same contract for stream
 event payload keys, metadata entry keys, stream type values, and stream status
@@ -1698,10 +1695,8 @@ This keeps large binary blobs out of normal source commits.
      Rust-owned as well. iOS/Android/RN ActrBridge module/event
      names, request/result payload keys, stream callback payload keys, stream
      type values, stream metadata terminal markers, stream status literals,
-     attachment upload/result metadata, attachment chunk/checksum/status/type
-     values, prompt/attachment/local-service RPC route keys,
-     platform-specific RPC timeout values, and promise error codes are now
-     Rust-owned through
+     prompt/attachment/local-service RPC route keys, platform-specific RPC
+     timeout values, and promise error codes are now Rust-owned through
      `actr_bridge_contract` and generated `ACTR_BRIDGE_CONTRACT`.
      `parse_actr_actor_type` now also owns the shared `publisher/program@version`
      actorType parsing rule consumed by iOS and Android. `openTab` is capped at

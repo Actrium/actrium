@@ -291,7 +291,6 @@ describe('capability model data', () => {
     expect(HOST_SUPPORTED_CAPABILITIES).toEqual(new Set([
       'service.call',
       'service.on',
-      'service.attachmentUpload',
       'host:clipboard.write',
       'host:tab.setTitle',
       'host:file-import.pick',
@@ -313,15 +312,6 @@ describe('capability model data', () => {
       if (HOST_SUPPORTED_CAPABILITIES.has(capability)) continue;
       expect(FRONT_CAPABILITY_DEFINITIONS[capability].implemented).toBe(false);
     }
-  });
-
-  test('service.attachmentUpload needs no grant and is implemented', () => {
-    expect(FRONT_CAPABILITY_DEFINITIONS['service.attachmentUpload']).toMatchObject({
-      requiresGrant: 'none',
-      requiresBroker: false,
-      requiresSandbox: true,
-      implemented: true,
-    });
   });
 
   test('placeholder capabilities never enter the effective set', () => {

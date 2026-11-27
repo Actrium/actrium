@@ -333,10 +333,6 @@ final class RendererProcessController {
     private var guestMenus: [String: (call: GuestMenuCall, reply: (GuestMenuReply) -> Void)] = [:]
     private let attachmentStorage: (cache: RendererAttachmentCache, lock: FileHandle)?
     private var attachmentCache: RendererAttachmentCache? { attachmentStorage?.cache }
-    private var attachmentPrepareReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentPrepareReply) -> Void)] = [:]
-    private var attachmentChunkReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentChunkReply) -> Void)] = [:]
-    private var attachmentUnregisterReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentUnregisterReply) -> Void)] = [:]
-    private var attachmentAvailabilityReplies: [UUID: (tabId: String, reply: (RealmServiceAttachmentAvailabilityReply) -> Void)] = [:]
 
     static func showGuestMenu(
         _ call: GuestMenuCall, tabId: String, reply: @escaping (GuestMenuReply) -> Void
@@ -493,147 +489,6 @@ final class RendererProcessController {
         )
     }
 
-
-    // MARK: - Attachment upload transport
-
-    /// The Host RPC budget is 20 seconds; add IPC slack so a slow-but-honest
-    /// Host answer still wins over the local timeout.
-    nonisolated static let attachmentPrepareTimeoutMs = 25_000
-    nonisolated static let attachmentChunkTimeoutMs = 30_000
-    nonisolated static let attachmentUnregisterTimeoutMs = 10_000
-    nonisolated static let attachmentAvailabilityTimeoutMs = 5_000
-
-    /// Queries the Host whether the owning tab has a usable Realm Service
-    /// upload binding. Fails closed on every transport or timeout error.
-    static func attachmentUploadAvailable(
-        tabId: String,
-        call: RealmServiceAttachmentAvailabilityCall,
-        reply: @escaping (RealmServiceAttachmentAvailabilityReply) -> Void
-    ) {
-        guard let controller = RendererProcessLifetime.shared.controller,
-              controller.surfaces[tabId] != nil else {
-            reply(RealmServiceAttachmentAvailabilityReply(id: call.id, available: false))
-            return
-        }
-        do {
-            let data = try JSONEncoder().encode(call)
-            try controller.connection.sendHostEvent(
-                name: RealmServiceAttachmentAvailabilityCall.requestEvent,
-                userInfoJSON: String(decoding: data, as: UTF8.self),
-                tabId: tabId
-            )
-            controller.attachmentAvailabilityReplies[call.id] = (tabId, reply)
-            let requestId = call.id
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(attachmentAvailabilityTimeoutMs)) { [weak controller] in
-                controller?.attachmentAvailabilityReplies.removeValue(forKey: requestId)?
-                    .reply(RealmServiceAttachmentAvailabilityReply(id: requestId, available: false))
-            }
-        } catch {
-            reply(RealmServiceAttachmentAvailabilityReply(id: call.id, available: false))
-        }
-    }
-
-    static func prepareAttachmentUpload(
-        tabId: String,
-        call: RealmServiceAttachmentPrepareCall,
-        reply: @escaping (RealmServiceAttachmentPrepareReply) -> Void
-    ) {
-        guard let controller = RendererProcessLifetime.shared.controller,
-              controller.surfaces[tabId] != nil else {
-            reply(RealmServiceAttachmentPrepareReply(
-                id: call.id,
-                failure: RealmServiceFailure(code: "realm_tab_unavailable", message: "The Realm tab is unavailable.")
-            ))
-            return
-        }
-        do {
-            let data = try JSONEncoder().encode(call)
-            try controller.connection.sendHostEvent(
-                name: RealmServiceAttachmentPrepareCall.requestEvent,
-                userInfoJSON: String(decoding: data, as: UTF8.self),
-                tabId: tabId
-            )
-            controller.attachmentPrepareReplies[call.id] = (tabId, reply)
-            let requestId = call.id
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(attachmentPrepareTimeoutMs)) { [weak controller] in
-                let failure = RealmServiceFailure(
-                    code: "realm_attachment_timeout", message: "The attachment prepare timed out."
-                )
-                controller?.attachmentPrepareReplies.removeValue(forKey: requestId)?
-                    .reply(RealmServiceAttachmentPrepareReply(id: requestId, failure: failure))
-            }
-        } catch {
-            reply(RealmServiceAttachmentPrepareReply(id: call.id, failure: RealmServiceFailure(error: error)))
-        }
-    }
-
-    static func sendAttachmentChunk(
-        tabId: String,
-        call: RealmServiceAttachmentChunkCall,
-        reply: @escaping (RealmServiceAttachmentChunkReply) -> Void
-    ) {
-        guard let controller = RendererProcessLifetime.shared.controller,
-              controller.surfaces[tabId] != nil else {
-            reply(RealmServiceAttachmentChunkReply(
-                id: call.id,
-                failure: RealmServiceFailure(code: "realm_tab_unavailable", message: "The Realm tab is unavailable.")
-            ))
-            return
-        }
-        do {
-            let data = try JSONEncoder().encode(call)
-            try controller.connection.sendHostEvent(
-                name: RealmServiceAttachmentChunkCall.requestEvent,
-                userInfoJSON: String(decoding: data, as: UTF8.self),
-                tabId: tabId
-            )
-            controller.attachmentChunkReplies[call.id] = (tabId, reply)
-            let requestId = call.id
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(attachmentChunkTimeoutMs)) { [weak controller] in
-                let failure = RealmServiceFailure(
-                    code: "realm_attachment_timeout", message: "The attachment chunk timed out."
-                )
-                controller?.attachmentChunkReplies.removeValue(forKey: requestId)?
-                    .reply(RealmServiceAttachmentChunkReply(id: requestId, failure: failure))
-            }
-        } catch {
-            reply(RealmServiceAttachmentChunkReply(id: call.id, failure: RealmServiceFailure(error: error)))
-        }
-    }
-
-    static func unregisterAttachmentStream(
-        tabId: String,
-        call: RealmServiceAttachmentUnregisterCall,
-        reply: @escaping (RealmServiceAttachmentUnregisterReply) -> Void
-    ) {
-        guard let controller = RendererProcessLifetime.shared.controller,
-              controller.surfaces[tabId] != nil else {
-            reply(RealmServiceAttachmentUnregisterReply(
-                id: call.id,
-                failure: RealmServiceFailure(code: "realm_tab_unavailable", message: "The Realm tab is unavailable.")
-            ))
-            return
-        }
-        do {
-            let data = try JSONEncoder().encode(call)
-            try controller.connection.sendHostEvent(
-                name: RealmServiceAttachmentUnregisterCall.requestEvent,
-                userInfoJSON: String(decoding: data, as: UTF8.self),
-                tabId: tabId
-            )
-            controller.attachmentUnregisterReplies[call.id] = (tabId, reply)
-            let requestId = call.id
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(attachmentUnregisterTimeoutMs)) { [weak controller] in
-                let failure = RealmServiceFailure(
-                    code: "realm_attachment_timeout", message: "The attachment unregister timed out."
-                )
-                controller?.attachmentUnregisterReplies.removeValue(forKey: requestId)?
-                    .reply(RealmServiceAttachmentUnregisterReply(id: requestId, failure: failure))
-            }
-        } catch {
-            reply(RealmServiceAttachmentUnregisterReply(id: call.id, failure: RealmServiceFailure(error: error)))
-        }
-    }
     private let reactNativeHost = ServiceReactNativeHost.shared
     private var surfaces: [String: RendererTabSurface] = [:]
     private var isTerminating = false
@@ -763,55 +618,6 @@ final class RendererProcessController {
                let event = try? JSONDecoder().decode(RealmServiceEvent.self, from: Data(json.utf8)),
                let tabId = self.serviceEventTabs[event.subscriptionId] {
                 RealmService.emit(event, tabId: tabId)
-                return
-            }
-            if name == RealmServiceAttachmentPrepareCall.responseEvent {
-                guard let response = try? JSONDecoder().decode(RealmServiceAttachmentPrepareReply.self, from: Data(json.utf8)) else {
-                    return
-                }
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.attachmentPrepareReplies[response.id]?.tabId == tabId else { return }
-                    self.attachmentPrepareReplies.removeValue(forKey: response.id)?.reply(response)
-                }
-                return
-            }
-            if name == RealmServiceAttachmentChunkCall.responseEvent {
-                guard let response = try? JSONDecoder().decode(RealmServiceAttachmentChunkReply.self, from: Data(json.utf8)) else {
-                    return
-                }
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.attachmentChunkReplies[response.id]?.tabId == tabId else { return }
-                    self.attachmentChunkReplies.removeValue(forKey: response.id)?.reply(response)
-                }
-                return
-            }
-            if name == RealmServiceAttachmentUnregisterCall.responseEvent {
-                guard let response = try? JSONDecoder().decode(RealmServiceAttachmentUnregisterReply.self, from: Data(json.utf8)) else {
-                    return
-                }
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.attachmentUnregisterReplies[response.id]?.tabId == tabId else { return }
-                    self.attachmentUnregisterReplies.removeValue(forKey: response.id)?.reply(response)
-                }
-                return
-            }
-            if name == RealmServiceAttachmentAvailabilityCall.responseEvent {
-                guard let response = try? JSONDecoder().decode(RealmServiceAttachmentAvailabilityReply.self, from: Data(json.utf8)) else {
-                    return
-                }
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.attachmentAvailabilityReplies[response.id]?.tabId == tabId else { return }
-                    self.attachmentAvailabilityReplies.removeValue(forKey: response.id)?.reply(response)
-                }
-                return
-            }
-            if name == RealmServiceAttachmentResultEvent.event {
-                guard let event = try? JSONDecoder().decode(RealmServiceAttachmentResultEvent.self, from: Data(json.utf8)) else {
-                    return
-                }
-                DispatchQueue.main.async {
-                    ServiceReactNativeHost.shared.emitAttachmentUploadResult(tabId: tabId, event: event)
-                }
                 return
             }
             // IME composition runs in the Host process (TSM never engages in
@@ -1098,7 +904,6 @@ final class RendererProcessController {
         fileExport.close(tabId: tabId)
         cancelGuestMenu(tabId)
         attachmentCache?.close(tabId: tabId)
-        failPendingAttachmentCalls(tabId: tabId)
         if let surface = surfaces.removeValue(forKey: tabId) {
             // Before the hierarchy is detached: afterwards backing.window is
             // nil and no prune can reach the tab's composition entries, while
@@ -1107,28 +912,6 @@ final class RendererProcessController {
             surface.close()
         }
         reactNativeHost.destroyRendererEntry(tabId: tabId)
-    }
-
-    /// Rejects every attachment Promise still waiting on this tab so JS
-    /// never hangs when the surface disappears mid-upload.
-    private func failPendingAttachmentCalls(tabId: String) {
-        let failure = RealmServiceFailure(code: "realm_tab_closed", message: "The tab was closed.")
-        for (id, pending) in attachmentPrepareReplies where pending.tabId == tabId {
-            attachmentPrepareReplies.removeValue(forKey: id)?
-                .reply(RealmServiceAttachmentPrepareReply(id: id, failure: failure))
-        }
-        for (id, pending) in attachmentChunkReplies where pending.tabId == tabId {
-            attachmentChunkReplies.removeValue(forKey: id)?
-                .reply(RealmServiceAttachmentChunkReply(id: id, failure: failure))
-        }
-        for (id, pending) in attachmentUnregisterReplies where pending.tabId == tabId {
-            attachmentUnregisterReplies.removeValue(forKey: id)?
-                .reply(RealmServiceAttachmentUnregisterReply(id: id, failure: failure))
-        }
-        for (id, pending) in attachmentAvailabilityReplies where pending.tabId == tabId {
-            attachmentAvailabilityReplies.removeValue(forKey: id)?
-                .reply(RealmServiceAttachmentAvailabilityReply(id: id, available: false))
-        }
     }
 
     private func cancelGuestMenu(_ tabId: String) {

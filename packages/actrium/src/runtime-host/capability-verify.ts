@@ -12,7 +12,6 @@ const SERVICE_TRANSPORT_CAPABILITIES: ReadonlyMap<string, string> = new Map([
   ['call', 'service.call'],
   ['tell', 'service.tell'],
   ['on', 'service.on'],
-  ['uploadAttachment', 'service.attachmentUpload'],
 ]);
 
 /**
@@ -155,8 +154,8 @@ export function verifyCapabilityManifest(
       const moduleId = toModuleId(rawKey);
       if (moduleId === 'host:service') {
         // `host:service` entries are business routes/events or fixed
-        // transport exports (`call`/`tell`/`on`/`uploadAttachment`).
-        // Transport exports never enter the business route ACL; business
+        // transport exports (`call`/`tell`/`on`). Transport exports never
+        // enter the business route ACL; business
         // routes are validated against the service policy whenever one is
         // supplied, independently of `contractKinds`.
         if (options.serviceCapabilities) {
@@ -212,7 +211,7 @@ export function verifyCapabilityManifest(
     for (const [rawKey, entry] of Object.entries(manifest.hostModules)) {
       const moduleId = toModuleId(rawKey);
       // `host:service` entries are business routes/events or fixed transport
-      // exports (`call`/`tell`/`on`/`uploadAttachment`). Business routes are
+      // exports (`call`/`tell`/`on`). Business routes are
       // deferred to `serviceCapabilities`; fixed transports must actually be
       // implemented by the Host.
       if (moduleId === 'host:service') {
@@ -271,9 +270,9 @@ export function verifyCapabilityManifest(
     for (const [rawKey, entry] of Object.entries(manifest.hostModules)) {
       const moduleId = toModuleId(rawKey);
       if (moduleId === 'host:service') {
-        // Fixed transport exports (`call` / `tell` / `on` /
-        // `uploadAttachment`) expand from `host:service.<name>` and need
-        // their exact capability; business routes do not expand and instead
+        // Fixed transport exports (`call` / `tell` / `on`) expand from
+        // `host:service.<name>` and need their exact capability; business
+        // routes do not expand and instead
         // require the transport method capability explicitly.
         const transportNames = new Set<string>();
         for (const transportName of [
@@ -334,9 +333,7 @@ export function verifyCapabilityManifest(
     }
     // Importing a host module is itself a capability acquisition, even when
     // the manifest records no calls or events for it. `host:service` is
-    // satisfied by any capability of the service module: upload-only Guests
-    // still import the module while declaring `service.attachmentUpload`
-    // explicitly instead of the `service` shorthand.
+    // satisfied by any capability of the service module.
     for (const importName of manifest.imports) {
       if (!importName.startsWith('host:')) continue;
       const capability =

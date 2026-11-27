@@ -1,12 +1,5 @@
 import { defineKeelContract, rpc, subscription } from 'keel/contract';
 import { isAllowedThumbnailBase64 } from './image-asset';
-
-import {
-  ATTACHMENT_UPLOAD_MAX_BYTES,
-  type AttachmentUploadType,
-  parseAttachmentUploadInput,
-  parseAttachmentUploadType,
-} from './attachment-upload';
 import type { TTSSpeakInput, TTSSpeakOutput, TTSVoice } from './guest-tts';
 
 /**
@@ -38,29 +31,6 @@ export type ServiceTellInput = {
 export type ServiceEvent = {
   event: string;
   payloadBase64: string;
-};
-
-/**
- * Fixed transport upload exposed on `host:service`. Unlike `call`/`tell`/
- * `on`, the Guest cannot name a route here: the Host owns the whole
- * prepare/chunk/result protocol natively.
- */
-export type ServiceUploadAttachmentInput = {
-  fileId?: undefined;
-  filename: string;
-  base64: string;
-  /** Defaults to `document`. */
-  type?: AttachmentUploadType;
-  /** Optional caller-chosen attachment id. */
-  id?: string;
-} | {
-  fileId: string;
-  type?: AttachmentUploadType;
-  id?: string;
-};
-
-export type ServiceUploadAttachmentOutput = {
-  attachmentId: string;
 };
 
 export type AssetsReadInput = { path: string };
@@ -101,6 +71,9 @@ export type LocationPositionOutput = {
 export type ExternalLinkOpenInput = { url: string };
 
 export type NavigateInput = { path: string; mode?: 'push' | 'replace' };
+
+/** Hard cap the Host file picker accepts for a single imported file. 7 MiB. */
+export const FILE_IMPORT_MAX_BYTES = 7 * 1024 * 1024;
 
 export type FileImportFile = { name: string; base64: string; thumbnailBase64?: string };
 export type CachedFileImport = {
@@ -154,7 +127,7 @@ function parsePickedFile(value: unknown, label: string): FileImportFile | Cached
     const canPreview = optionalBoolean(file.canPreview, `${label}.canPreview`);
     return {
       name, fileId: parseCachedFileId(file.fileId), ...preview,
-      size: requireNumber(file.size, `${label}.size`, { min: 0, max: ATTACHMENT_UPLOAD_MAX_BYTES, integer: true }),
+      size: requireNumber(file.size, `${label}.size`, { min: 0, max: FILE_IMPORT_MAX_BYTES, integer: true }),
       ...(canPreview === undefined ? {} : { canPreview }),
     };
   }
@@ -457,41 +430,6 @@ export const contract = defineKeelContract({
               payloadBase64: requireBase64(
                 event.payloadBase64,
                 'service.on event.payloadBase64'
-              ),
-            };
-          },
-        },
-      }),
-      uploadAttachment: rpc<ServiceUploadAttachmentInput, ServiceUploadAttachmentOutput>({
-        schema: {
-          parseInput: (value) => {
-            const request = asObject(value, 'uploadAttachment input');
-            if (Object.hasOwn(request, 'fileId') && request.fileId !== undefined) {
-              if (Object.hasOwn(request, 'base64') || Object.hasOwn(request, 'filename')) {
-                throw new Error('A cached upload takes a fileId without filename or base64.');
-              }
-              return {
-                fileId: parseCachedFileId(request.fileId),
-                type: request.type === undefined ? 'document' : parseAttachmentUploadType(request.type),
-                id: optionalString(request.id, 'uploadAttachment input.id'),
-              };
-            }
-            // Shared boundary validation: strict base64, 7 MiB cap, type
-            // defaulting to `document`.
-            const input = parseAttachmentUploadInput(value);
-            return {
-              filename: input.filename,
-              base64: input.base64,
-              type: input.type,
-              id: input.id,
-            };
-          },
-          parseOutput: (value) => {
-            const output = asObject(value, 'service.uploadAttachment output');
-            return {
-              attachmentId: requireString(
-                output.attachmentId,
-                'service.uploadAttachment output.attachmentId'
               ),
             };
           },

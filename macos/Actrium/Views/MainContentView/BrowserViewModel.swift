@@ -2012,8 +2012,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         front: verified.bytes,
                         metadata: sessionMetadata,
                         trustedFrontKey: verified.trustedKey,
-                        capabilitiesJSON: capabilities,
-                        permissions: manifest.permissions
+                        capabilitiesJSON: capabilities
                     )
                 }
                 if prepareService, let candidateBinding {
@@ -2226,8 +2225,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             )
             return try RealmServiceBinding(
                 profile: profile, verifiedProfileBody: profileData, front: archive,
-                metadata: sessionMetadata, trustedFrontKey: trustedKey, capabilitiesJSON: capabilities,
-                permissions: manifest.permissions
+                metadata: sessionMetadata, trustedFrontKey: trustedKey, capabilitiesJSON: capabilities
             )
         }
         var installed = false

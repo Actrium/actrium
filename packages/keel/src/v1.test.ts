@@ -9,23 +9,24 @@ import {
 const contract = defineKeelContract({
   version: '1.0.0',
   hostModules: {
-    'host:service': { call: rpc(), tell: rpc(), on: rpc(), uploadAttachment: rpc() },
+    'host:service': { call: rpc(), tell: rpc(), on: rpc() },
     'host:clipboard': { writeText: rpc() },
   },
   guestExports: {},
 });
 
-test('records the fixed uploadAttachment transport in the manifest', () => {
+test('records a fixed business route call in the manifest', () => {
+  const route = 'echo.v1.EchoService.Echo';
   const manifest = createV1CapabilityManifest(
     {
       guestEntry: 'workload/guest.js',
-      links: [['host:service', 'uploadAttachment']],
+      links: [[`${V1_SERVICE_PREFIX}${route}`, 'call']],
     },
     contract
   );
   expect(manifest.imports).toEqual(['host:service']);
   expect(manifest.hostModules).toEqual({
-    service: { rpc: ['uploadAttachment'] },
+    service: { rpc: [route] },
   });
 });
 
@@ -43,44 +44,26 @@ test('keeps raw call, tell and on imports rejected on host:service', () => {
   }
 });
 
-test('rejects an uploadAttachment link when the contract lacks the method', () => {
-  const withoutUpload = defineKeelContract({
-    version: '1.0.0',
-    hostModules: {
-      'host:service': { call: rpc() },
-    },
-    guestExports: {},
-  });
-  expect(() =>
-    createV1CapabilityManifest(
-      {
-        guestEntry: 'workload/guest.js',
-        links: [['host:service', 'uploadAttachment']],
-      },
-      withoutUpload
-    )
-  ).toThrow(/absent from the contract/);
-});
-
-test('mixes the fixed transport with fixed business routes', () => {
-  const route = 'echo.v1.EchoService.Echo';
+test('mixes several fixed business routes', () => {
+  const first = 'echo.v1.EchoService.Echo';
+  const second = 'notes.NotesService.Save';
   const manifest = createV1CapabilityManifest(
     {
       guestEntry: 'workload/guest.js',
       links: [
-        ['host:service', 'uploadAttachment'],
-        [`${V1_SERVICE_PREFIX}${route}`, 'call'],
+        [`${V1_SERVICE_PREFIX}${first}`, 'call'],
+        [`${V1_SERVICE_PREFIX}${second}`, 'call'],
       ],
     },
     contract
   );
   expect(manifest.hostModules).toEqual({
-    service: { rpc: [route, 'uploadAttachment'] },
+    service: { rpc: [first, second].sort() },
   });
 });
 
 test('fixed business route links still only accept call, tell and on', () => {
   expect(() =>
-    v1ServiceLink(`${V1_SERVICE_PREFIX}echo.v1.EchoService.Echo`, 'uploadAttachment')
+    v1ServiceLink(`${V1_SERVICE_PREFIX}echo.v1.EchoService.Echo`, 'notAllowed')
   ).toThrow(/invalid fixed route or event/);
 });

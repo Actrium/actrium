@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use actr_protocol::{ActrId, ActrType, Direction, MetadataEntry, RpcEnvelope, prost::Message as _};
+use actr_protocol::{ActrId, ActrType, Direction, MetadataEntry, RpcEnvelope};
 use actrium_runtime::{
     AttachAuthorization, AttachQuotaContext, AttachRequest, AttachResponse, AttachmentPolicy,
     AuthorizeAttachDecision, BusinessRequest, DetachRequest, GetStatusRequest, HeartbeatRequest,
@@ -22,11 +22,7 @@ use ed25519_dalek::SigningKey;
 use super::metadata;
 use super::peer::business_metadata;
 use super::service::{
-    ActriumServiceRegistry, AttachmentResultCancellation, PendingCall, PendingCallGuard,
-    PrepareAttachmentRequest, Shared as PeerShared,
-};
-use super::{
-    ATTACHMENT_CANCEL_ROUTE, ATTACHMENT_PREPARE_ROUTE, ATTACHMENT_UPLOAD_TRANSPORT, service_routes,
+    ActriumServiceRegistry, PendingCall, PendingCallGuard, Shared as PeerShared,
 };
 use crate::lifecycle::{
     IncomingDispatchRequest, IncomingGuard, IncomingMetadata, IncomingStreamChunk, SessionRegistry,
@@ -212,13 +208,10 @@ fn service() -> InMemorySessionService {
             keel_api: "1".into(),
         }],
         program_capabilities: BTreeSet::from([READ.to_string()]),
-        routes: service_routes(&BTreeMap::from([
-            (ROUTE.to_string(), BTreeSet::from([READ.to_string()])),
-            (
-                ATTACHMENT_UPLOAD_TRANSPORT.to_string(),
-                BTreeSet::from([READ.to_string()]),
-            ),
-        ])),
+        routes: BTreeMap::from([(
+            ROUTE.to_string(),
+            BTreeSet::from([READ.to_string()]),
+        )]),
         attachment_policy: AttachmentPolicy::Exclusive,
         lease_duration: std::time::Duration::from_secs(60),
         heartbeat_interval: std::time::Duration::from_secs(5),
@@ -386,34 +379,6 @@ fn response_metadata(request: &RpcEnvelope) -> Vec<MetadataEntry> {
     entries
 }
 
-async fn cancel_attachment(
-    registry: &ActriumServiceRegistry,
-    guard: &super::ActriumServiceGuard,
-    attach: &AttachResponse,
-    secret: &SessionSecret,
-    request_id: &str,
-    prepare_request_id: &str,
-) {
-    let payload = serde_json::to_vec(&AttachmentResultCancellation {
-        stream_id: "result".to_string(),
-        prepare_request_id: prepare_request_id.to_string(),
-    })
-    .unwrap();
-    let envelope =
-        signed_business_request(attach, secret, ATTACHMENT_CANCEL_ROUTE, request_id, payload);
-    registry
-        .dispatch(
-            crate::lifecycle::SessionMethod::CancelAttachmentResult,
-            dispatch_request(&envelope, Some(service_context())),
-        )
-        .await
-        .expect("signed cancellation succeeds");
-    guard
-        .finish(request_id, IncomingMetadata::new(&envelope.metadata))
-        .await
-        .unwrap();
-}
-
 #[tokio::test]
 async fn attach_business_call_and_response_proof_round_trip() {
     let shared = Arc::new(PeerShared::default());
@@ -495,71 +460,6 @@ async fn attach_business_call_and_response_proof_round_trip() {
         error.code,
         crate::lifecycle::IncomingGuardErrorCode::Revoked
     );
-}
-
-#[tokio::test]
-async fn attachment_cancellation_releases_only_its_own_service_reservation() {
-    let shared = Arc::new(PeerShared::default());
-    let (registry, guard) = ActriumServiceRegistry::new(service(), shared.clone());
-    let (attach, secret) = attach(&registry).await;
-    let prepare_payload = PrepareAttachmentRequest {
-        result_stream_id: "result".to_string(),
-        ..Default::default()
-    }
-    .encode_to_vec();
-
-    for request_id in ["prepare-old", "prepare-new"] {
-        let prepare = signed_business_request(
-            &attach,
-            &secret,
-            ATTACHMENT_PREPARE_ROUTE,
-            request_id,
-            prepare_payload.clone(),
-        );
-        guard
-            .check(dispatch_request(&prepare, Some(service_context())))
-            .await
-            .expect("Prepare reserves its result stream");
-        guard
-            .finish(request_id, IncomingMetadata::new(&prepare.metadata))
-            .await
-            .unwrap();
-        assert_eq!(
-            shared
-                .attachment_result_request_id("result")
-                .await
-                .as_deref(),
-            Some(request_id)
-        );
-    }
-
-    cancel_attachment(
-        &registry,
-        &guard,
-        &attach,
-        &secret,
-        "cancel-old",
-        "prepare-old",
-    )
-    .await;
-    assert_eq!(
-        shared
-            .attachment_result_request_id("result")
-            .await
-            .as_deref(),
-        Some("prepare-new"),
-        "a late cancellation cannot remove the newer Prepare"
-    );
-    cancel_attachment(
-        &registry,
-        &guard,
-        &attach,
-        &secret,
-        "cancel-new",
-        "prepare-new",
-    )
-    .await;
-    assert_eq!(shared.attachment_result_request_id("result").await, None);
 }
 
 #[tokio::test]
