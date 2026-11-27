@@ -133,6 +133,88 @@ test.each(['\ud800', '\udc00'])('storage rejects unpaired UTF-16 surrogates', (s
   expect(() => methods.setItem({ key: 'key', value: 'prefix' + surrogate })).toThrow('valid Unicode');
 });
 
+test('storage checks replacement limits before calling the native bridge', async () => {
+  let calls = 0;
+  const { replaceItems } = createHostModuleDispatch(contract, createHostModules({
+    hasServiceCapability: false, hasServiceOnCapability: false,
+    callActor: async () => ({ success: false }),
+    writeClipboardText: async () => {},
+    authorizeCapability: async () => {},
+    localStorage: async () => { calls += 1; return null; },
+  }))[moduleId];
+  const key = 'history';
+  const replacement = {
+    expected: '\u00e9'.repeat(32 * 1024),
+    remove: Array.from({ length: 1024 }, (_, index) => `old/${index}`),
+    set: Array.from({ length: 1024 }, (_, index) => ({ key: `new/${index}`, value: '' })),
+  };
+  await replaceItems({ key, replacement });
+  expect(() => replaceItems({
+    key, replacement: { ...replacement, expected: replacement.expected + 'a' },
+  })).toThrow('expected local storage value is too large');
+  expect(() => replaceItems({
+    key, replacement: { ...replacement, expected: '\ud800' },
+  })).toThrow('valid Unicode');
+  expect(() => replaceItems({
+    key, replacement: { ...replacement, remove: [...replacement.remove, 'extra'] },
+  })).toThrow('at most 1024 keys');
+  expect(() => replaceItems({
+    key, replacement: { ...replacement, set: [...replacement.set, { key: 'extra', value: '' }] },
+  })).toThrow('at most 1024 items');
+  expect(calls).toBe(1);
+});
+
+test('a v1 Guest observes the native storage conflict and quota error codes', async () => {
+  const codes = ['local_storage_conflict', 'local_storage_quota_exceeded'];
+  const linkage: V1Linkage = {
+    guestEntry: 'workload/guest.js',
+    links: [[moduleId, 'replaceItems'], [moduleId, 'setItem']],
+  };
+  const bundle = writeV1Bundle(linkage, `
+    const { replaceItems, setItem } = __keel.hostModules['host:local-storage'];
+    void (async () => {
+      const codes = [];
+      for (const key of ${JSON.stringify(codes)}) {
+        try {
+          await replaceItems({ key, replacement: { expected: null, remove: [], set: [] } });
+        } catch (error) {
+          codes.push(error.code);
+        }
+      }
+      await setItem({ key: 'report', value: JSON.stringify(codes) });
+    })();
+    module.exports = function App() { return null; };
+  `);
+  const report = Promise.withResolvers<string>();
+  const localStorage = bindNativeLocalStorage({
+    perform: async (_tabId, _documentId, operation, json) => {
+      const input = JSON.parse(json) as { key: string; value: string };
+      if (operation === 'replaceItems') throw Object.assign(new Error('Write rejected'), { code: input.key });
+      report.resolve(input.value);
+      return 'null';
+    },
+  }, 'tab', 'document');
+  const authorizeCapability = async () => {};
+  const implementations = createHostModules({
+    hasServiceCapability: false, hasServiceOnCapability: false,
+    callActor: async () => ({ success: false }),
+    writeClipboardText: async () => {},
+    authorizeCapability,
+    localStorage,
+  });
+  const engine = new Engine({
+    sandbox: 'node-vm',
+    ...bindV1HostModules(linkage, implementations, authorizeCapability),
+  });
+  try {
+    engine.createReceiver();
+    await engine.loadBundle(bundle);
+    expect(await report.promise).toBe(JSON.stringify(codes));
+  } finally {
+    engine.destroy();
+  }
+});
+
 test('the v1 CLI and Guest Engine round-trip all three named storage methods', async () => {
   const root = mkdtempSync(join(tmpdir(), 'actrium-local-storage-'));
   let engine: Engine | undefined;

@@ -22,6 +22,10 @@
   "dependencies": {
     "@babel/runtime": "^7.28.4",
     "@boomsi/rn-speech-recognition": "3.2.0",
+    "@goaskaway/supramark-core": "0.1.0-rc.3",
+    "@goaskaway/supramark-markdown-native-rn": "0.1.0-rc.3",
+    "@goaskaway/supramark-rn": "0.1.0-rc.3",
+    "@goaskaway/supramark-rn-selection": "0.1.0-rc.3",
     "askit": "file:../actrium-app-sdk",
     "keel": "file:../keel",
     "react": "19.0.0",

@@ -18,7 +18,7 @@ const config = {
   signaling_url: 'wss://provider.example/signaling',
   package: { full_type: 'apps.example/echo@1.0.0' },
   package_url: '/packages/echo.actr',
-  runtime_wasm_url: '/packages/actr_sw_host_bg.wasm',
+  runtime_wasm_url: '/packages/actr_sw_host_bg.wasm?v=runtime-revision',
   trust: [{ kind: 'static', pubkey_b64: 'public-verification-material' }],
 };
 const key = {
@@ -48,9 +48,11 @@ class Element {
   removeChild(child) { this.children.splice(this.children.indexOf(child), 1); }
 }
 
-async function page() {
+async function page({ upgrading = false, hardReload = false } = {}) {
   const elements = new Map([...html.matchAll(/id="([^"]+)"/g)].map(([, id]) => [id, new Element(id)]));
   const imports = [];
+  const workerUrls = [];
+  const oldMessages = [];
   const requests = [];
   const logs = [];
   const worker = {
@@ -60,15 +62,24 @@ async function page() {
       }
     },
   };
+  const serviceWorker = new EventTarget();
+  const active = upgrading ? { postMessage: message => oldMessages.push(message) } : worker;
+  serviceWorker.controller = hardReload ? null : active;
+  serviceWorker.register = async (url) => {
+    workerUrls.push(url);
+    worker.scriptURL = url;
+    return {
+      active,
+      installing: upgrading ? worker : null,
+      update: async () => {},
+    };
+  };
   const context = {
     document: { getElementById: id => elements.get(id), createElement: () => new Element('log') },
     window: { addEventListener() {} },
-    navigator: { serviceWorker: {
-      controller: worker,
-      ready: Promise.resolve(),
-      register: async () => ({ active: worker, update: async () => {} }),
-      addEventListener() {},
-    } },
+    navigator: { serviceWorker },
+    URL,
+    location: { href: 'https://browser.example/' },
     fetch: async (url, options) => {
       requests.push({ url, options });
       return { ok: true, json: async () => structuredClone(config) };
@@ -86,7 +97,11 @@ async function page() {
   runInNewContext(source, context);
   await vi.waitFor(() => expect(elements.get('realmKeyFile').listeners.has('change')).toBe(true));
   return {
-    elements, imports, requests, logs,
+    elements, imports, requests, logs, workerUrls, oldMessages,
+    activateWorker() {
+      serviceWorker.controller = worker;
+      serviceWorker.dispatchEvent(new Event('controllerchange'));
+    },
     turnCredential: () => runInNewContext('_coordinator.turnCred', context),
     async choose(text) {
       elements.get('realmKeyFile').files = [{ text: async () => text }];
@@ -97,6 +112,30 @@ async function page() {
 }
 
 describe('bundled actr run --web Realm key provisioning', () => {
+  it('uses the matching active worker on a hard reload without a controller', async () => {
+    const host = await page({ hardReload: true });
+    await host.choose(JSON.stringify(key));
+    const started = host.start();
+    await vi.waitFor(() => expect(host.imports).toHaveLength(1));
+    host.imports[0].port.postMessage({ type: 'runtime_ready' });
+    await started;
+  });
+
+  it('waits for the versioned worker before sending configuration', async () => {
+    const host = await page({ upgrading: true });
+    await host.choose(JSON.stringify(key));
+    const started = host.start();
+    await vi.waitFor(() => expect(host.workerUrls).toEqual([
+      'https://browser.example/actor.sw.js?runtime=runtime-revision',
+    ]));
+    expect(host.imports).toHaveLength(0);
+    expect(host.oldMessages).toHaveLength(0);
+    host.activateWorker();
+    await vi.waitFor(() => expect(host.imports).toHaveLength(1));
+    host.imports[0].port.postMessage({ type: 'runtime_ready' });
+    await started;
+  });
+
   it('imports a local key on first startup and waits for the worker acknowledgement', async () => {
     const host = await page();
     expect(host.imports).toHaveLength(0);

@@ -845,6 +845,27 @@ impl DestTransport {
         self.conn_mgr.watch_ready()
     }
 
+    pub(crate) async fn wait_for_rpc_lane(&self) -> NetworkResult<()> {
+        let mut ready = self.conn_mgr.watch_ready();
+        loop {
+            let ready_connections = ready.borrow_and_update().clone();
+            for conn_type in [ConnType::WebRTC, ConnType::WebSocket] {
+                if ready_connections.contains(&conn_type)
+                    && let Some(wire) = self.conn_mgr.get_connection(conn_type).await
+                    && let Ok(lane) = wire.get_lane(PayloadType::RpcReliable).await
+                    && lane.is_healthy()
+                {
+                    return Ok(());
+                }
+            }
+            if !self.has_live_connection_candidate().await || ready.changed().await.is_err() {
+                return Err(NetworkError::ConnectionClosed(
+                    "Peer has no usable RPC channel".into(),
+                ));
+            }
+        }
+    }
+
     /// The verified Actrium context of this destination's wire, if Actor
     /// mutual authentication has completed on it.
     ///

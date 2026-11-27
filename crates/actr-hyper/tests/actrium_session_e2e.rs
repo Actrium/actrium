@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use actr_framework::{Bytes, Context, Dest, MessageDispatcher, WebRtcNetworkPath, Workload};
-use actr_hyper::actrium::ActriumAttachParams;
+use actr_hyper::actrium::{ActriumAttachParams, FrontSessionMetadata};
 use actr_hyper::test_support::{TestRtcControl, TestSignalingServer};
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
 use actr_protocol::{
@@ -163,6 +163,7 @@ fn runtime_config(
         storage_root: None,
         wasi_data_dir: None,
         wasi_data_access: actr_config::WasiDataAccess::default(),
+        oci: None,
         actrium: None,
     }
 }
@@ -347,28 +348,50 @@ fn make_service_config(
     }
 }
 
-async fn start_service_node(
+async fn register_node(
     server: &TestSignalingServer,
     dir: &TempDir,
+    actor_type: ActrType,
+) -> Node<actr_hyper::Registered> {
+    register_node_with_webrtc(
+        server,
+        dir,
+        actor_type,
+        actr_config::WebRtcConfig::default(),
+    )
+    .await
+}
+
+async fn register_node_with_webrtc(
+    server: &TestSignalingServer,
+    dir: &TempDir,
+    actor_type: ActrType,
     webrtc: actr_config::WebRtcConfig,
-    heartbeat_interval: Duration,
-) -> (ActrRef, ActrId, InMemorySessionService) {
-    let service_type = service_type();
+) -> Node<actr_hyper::Registered> {
     let hyper = Hyper::new(HyperConfig::new(
         dir.path(),
         Arc::new(StaticTrust::dev_only()),
     ))
     .await
     .unwrap();
-    let mut config = runtime_config(dir, server, service_type);
+    let mut config = runtime_config(dir, server, actor_type);
     config.webrtc = webrtc;
-    let registered = Node::from_hyper(hyper, config)
+    Node::from_hyper(hyper, config)
         .link(EchoWorkload)
         .await
         .unwrap()
         .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
         .await
-        .unwrap();
+        .unwrap()
+}
+
+async fn start_service_node(
+    server: &TestSignalingServer,
+    dir: &TempDir,
+    webrtc: actr_config::WebRtcConfig,
+    heartbeat_interval: Duration,
+) -> (ActrRef, ActrId, InMemorySessionService) {
+    let registered = register_node_with_webrtc(server, dir, service_type(), webrtc).await;
     let service_actor_id = registered.actor_id();
 
     let policies = ServicePolicies {
@@ -400,22 +423,7 @@ async fn start_front_node(
     dir: &TempDir,
     webrtc: actr_config::WebRtcConfig,
 ) -> ActrRef {
-    let front_type = front_type();
-    let hyper = Hyper::new(HyperConfig::new(
-        dir.path(),
-        Arc::new(StaticTrust::dev_only()),
-    ))
-    .await
-    .unwrap();
-    let mut config = runtime_config(dir, server, front_type);
-    config.webrtc = webrtc;
-    let registered = Node::from_hyper(hyper, config)
-        .link(EchoWorkload)
-        .await
-        .unwrap()
-        .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
-        .await
-        .unwrap();
+    let registered = register_node_with_webrtc(server, dir, front_type(), webrtc).await;
     let front_actor_id = registered.actor_id();
 
     let policies = ServicePolicies {
@@ -442,7 +450,106 @@ async fn start_front_node(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_fronts_use_the_same_service_over_ordinary_relay() {
+    let mut server = TestSignalingServer::start_with_relay().await.unwrap();
+    server.pause_forwarding();
+    let service_dir = TempDir::new().unwrap();
+    let first_dir = TempDir::new().unwrap();
+    let second_dir = TempDir::new().unwrap();
+    let params = attach_params();
+    let service = register_node(&server, &service_dir, service_type())
+        .await
+        .with_ordinary_service_authorization(FrontSessionMetadata {
+            service_type: service_type(),
+            front_actor_type: front_type(),
+            package_digest: params.package_digest,
+            guest_digest: params.guest_digest,
+            protocol_fingerprint: params.protocol_fingerprint,
+            runtime: params.runtime,
+            program_capabilities: BTreeSet::from([READ.to_owned()]),
+            routes: BTreeMap::from([("echo".to_owned(), BTreeSet::from([READ.to_owned()]))]),
+        })
+        .start()
+        .await
+        .unwrap();
+    let first = register_node(&server, &first_dir, front_type())
+        .await
+        .start()
+        .await
+        .unwrap();
+    let second = register_node(&server, &second_dir, front_type())
+        .await
+        .start()
+        .await
+        .unwrap();
+    assert_ne!(first.actor_id(), second.actor_id());
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while server.relay_connection_count() != 3 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("all three nodes connect to Relay");
+
+    let service_id = service.actor_id();
+    first.prepare_peer_rpc(&service_id, 15_000).await.unwrap();
+    let unknown = ActrId {
+        serial_number: service_id.serial_number + 10_000,
+        ..service_id.clone()
+    };
+    assert!(first.prepare_peer_rpc(&unknown, 500).await.is_err());
+
+    let target = Dest::Peer(service_id);
+    let first_context = first.app_context().await;
+    let second_context = second.app_context().await;
+    let first_payload = Bytes::from_static(b"first");
+    let second_payload = Bytes::from_static(b"second");
+    let (first_reply, second_reply) = tokio::join!(
+        first_context.call_raw(
+            &target,
+            "echo".into(),
+            PayloadType::RpcReliable,
+            first_payload.clone(),
+            15_000
+        ),
+        second_context.call_raw(
+            &target,
+            "echo".into(),
+            PayloadType::RpcReliable,
+            second_payload.clone(),
+            15_000
+        ),
+    );
+    assert_eq!(first_reply.unwrap(), first_payload);
+    assert_eq!(second_reply.unwrap(), second_payload);
+
+    let denied = first_context
+        .call_raw(
+            &target,
+            PREPARE_ATTACHMENT_ROUTE.into(),
+            PayloadType::RpcReliable,
+            Bytes::from(PrepareAttachmentRequest::default().encode_to_vec()),
+            15_000,
+        )
+        .await;
+    assert!(matches!(
+        denied,
+        Err(actr_protocol::ActrError::PermissionDenied(message))
+            if message.contains("Service policy does not grant this caller the requested route")
+    ));
+
+    for node in [first, second, service] {
+        node.shutdown();
+        node.wait_for_shutdown().await;
+    }
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn attach_and_session_signed_business_call_over_verified_relay() {
+    if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+        return;
+    }
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer()

@@ -127,6 +127,14 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     requiresSandbox: true,
     implemented: true,
   },
+  'host:local-storage.replaceItems': {
+    name: 'host:local-storage.replaceItems',
+    audience: 'third_party',
+    requiresGrant: 'none',
+    requiresBroker: true,
+    requiresSandbox: true,
+    implemented: true,
+  },
   'host:notifications.show': {
     name: 'host:notifications.show',
     audience: 'third_party',
@@ -251,7 +259,7 @@ export const FRONT_CAPABILITY_DEFINITIONS: Record<
     requiresGrant: 'user',
     requiresBroker: false,
     requiresSandbox: true,
-    implemented: false,
+    implemented: true,
   },
   'host:share.share': {
     name: 'host:share.share',

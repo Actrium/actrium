@@ -326,6 +326,11 @@ pub trait IncomingGuard: Send + Sync + 'static {
         request: IncomingStreamChunk<'_>,
     ) -> Result<(), IncomingGuardError>;
 
+    /// Bind callbacks registered during a peer operation to its transport caller.
+    fn binds_streams_to_caller(&self) -> bool {
+        false
+    }
+
     /// Authenticate an outbound stream chunk when it belongs to a Host-owned
     /// session exchange. Ordinary chunks remain unchanged by default.
     async fn authenticate_stream(

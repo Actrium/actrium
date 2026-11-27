@@ -43,13 +43,14 @@ These checks do not read Realm private keys or require signing certificates.
 Runtime bundles can be generated independently with
 `npm run bundle:macos:system`.
 
-To enable the local Guest `Supramark` component, point
-`ACTRIUM_SUPRAMARK_DIR` to a Supramark checkout with its workspace dependencies
-and macOS parser dylib prepared. The macOS renderer uses the runtime's pinned
-`react-native-svg` dependency for both Guest SVG and Supramark.
+The macOS renderer includes the Guest `Supramark` component. The bundled
+JavaScript uses the `@goaskaway` npm packages, and CocoaPods links the macOS
+parser dylib and native selection metrics shipped in those packages. Guest SVG
+and Supramark share the runtime's pinned `react-native-svg` dependency.
+From the repository root, install the runtime packages before installing Pods.
 
 ```sh
-export ACTRIUM_SUPRAMARK_DIR=/path/to/supramark
+pnpm --filter @actrium/runtime install --frozen-lockfile
 (cd macos && pod install)
 npm run verify:macos
 ```

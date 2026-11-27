@@ -149,6 +149,22 @@ pub struct RuntimeRawConfig {
     /// ```
     #[serde(default)]
     pub actrium: Option<RawActriumConfig>,
+
+    /// Packaged Service authorization for ordinary Actor traffic.
+    /// The path is relative to this runtime configuration.
+    /// ```toml
+    /// [service_authorization]
+    /// front_package = "dist/front.actr"
+    /// ```
+    #[serde(default)]
+    pub service_authorization: Option<RawServiceAuthorization>,
+}
+
+/// Ordinary Service policy derived from the signed Front package.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawServiceAuthorization {
+    pub front_package: std::path::PathBuf,
 }
 
 /// Actrium v1 Service-host settings.
@@ -235,6 +251,10 @@ pub struct RawHyperConfig {
     /// Maximum guest access to that directory. Defaults to read-write.
     #[serde(default)]
     pub wasi_data_access: crate::config::WasiDataAccess,
+
+    /// OCI execution settings supplied by the deployment.
+    #[serde(default)]
+    pub oci: Option<crate::OciRuntimeConfig>,
 
     /// Recognize the removed key so the parser can report its replacement.
     #[serde(default, rename = "storage_path_template")]

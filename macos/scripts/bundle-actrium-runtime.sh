@@ -67,6 +67,12 @@ if [[ ! "$TARGET" =~ ^system$ ]]; then
     exit 1
 fi
 
+for env_file in "$PROJECT_ROOT/.xcode.env" "$PROJECT_ROOT/.xcode.env.local"; do
+    if [ -f "$env_file" ]; then
+        source "$env_file"
+    fi
+done
+
 echo "📦 Bundling Actrium runtime apps..."
 echo "   Source: $ACTRIUM_RUNTIME_DIR"
 echo "   Output: $OUTPUT_DIR"
@@ -92,10 +98,6 @@ if [ ! -d "$ACTRIUM_RUNTIME_DIR/node_modules" ]; then
     fi
 fi
 
-# Create output directory if needed
-mkdir -p "$OUTPUT_DIR"
-rm -rf "$OUTPUT_DIR/.generated-assets" "$GENERATED_ASSETS_DIR"
-
 cd "$ACTRIUM_RUNTIME_DIR"
 
 # The shared runtime also contains the iOS/Android React Native package, whose
@@ -107,8 +109,23 @@ if [ ! -f "$REACT_NATIVE_CLI" ]; then
     exit 1
 fi
 
+NODE_BINARY="${NODE_BINARY:-node}"
+case "$NODE_BINARY" in
+    /*) NODE_EXECUTABLE="$NODE_BINARY" ;;
+    */*) NODE_EXECUTABLE="" ;;
+    *) NODE_EXECUTABLE="$(type -P -- "$NODE_BINARY")" || NODE_EXECUTABLE="" ;;
+esac
+if [[ ! -f "$NODE_EXECUTABLE" || ! -x "$NODE_EXECUTABLE" ]]; then
+    echo "Error: Invalid Node.js executable '$NODE_BINARY'. Set NODE_BINARY to an executable absolute path or a command on PATH in macos/.xcode.env.local or the calling environment." >&2
+    exit 1
+fi
+
+# Create output directory if needed
+mkdir -p "$OUTPUT_DIR"
+rm -rf "$OUTPUT_DIR/.generated-assets" "$GENERATED_ASSETS_DIR"
+
 # Apply the runtime log redaction even when dependency installation skipped lifecycle scripts.
-node scripts/patch-react-native-macos.js --runtime-props-only
+"$NODE_EXECUTABLE" scripts/patch-react-native-macos.js --runtime-props-only
 
 copy_assets_for_xcode() {
     local assets_dir="$GENERATED_ASSETS_DIR/assets"
@@ -136,7 +153,7 @@ bundle_target() {
     echo "   Output: $output_file"
 
     if [ "$DEV_MODE" = true ]; then
-        node "$REACT_NATIVE_CLI" bundle \
+        "$NODE_EXECUTABLE" "$REACT_NATIVE_CLI" bundle \
             --platform macos \
             --dev true \
             --entry-file "$entry_file" \
@@ -145,7 +162,7 @@ bundle_target() {
             --sourcemap-output "$output_file.map"
         echo "   ✅ Dev bundle created (with source map)"
     else
-        node "$REACT_NATIVE_CLI" bundle \
+        "$NODE_EXECUTABLE" "$REACT_NATIVE_CLI" bundle \
             --platform macos \
             --dev false \
             --entry-file "$entry_file" \

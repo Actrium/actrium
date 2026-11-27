@@ -12,7 +12,7 @@
 //! End-to-end build + package is a single top-level command: `actr build`.
 
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
@@ -195,6 +195,29 @@ fn execute_pack(args: &PkgPackArgs, config_keychain: Option<&str>) -> Result<()>
             args.payload_root.display()
         )
     })?;
+    if manifest.workload.profile == actr_pack::oci::OCI_PROFILE {
+        for entry in &manifest.files {
+            ensure!(
+                !same_output(&output, &canonical_root.join(&entry.path))?,
+                "package output must differ from payload {}",
+                entry.path
+            );
+        }
+        let mut staged = stage_output(&output, OutputPermissions::Package)?;
+        actr_pack::oci::pack_oci_package(
+            manifest,
+            &canonical_root,
+            &signing_key,
+            staged.as_file_mut(),
+            actr_pack::oci::OciLimits::default(),
+        )?;
+        staged.as_file().sync_all()?;
+        staged
+            .persist(&output)
+            .with_context(|| format!("Failed to write {}", output.display()))?;
+        println!("Actor package created: {}", args.output.display());
+        return Ok(());
+    }
     let mut payloads = BTreeMap::new();
     let mut remaining = actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES;
     for file in &manifest.files {
@@ -760,10 +783,25 @@ async fn execute_sign(args: &PkgSignArgs, config_keychain: Option<&str>) -> Resu
 
 // ── verify ───────────────────────────────────────────────────────────────────
 
-async fn execute_verify(args: &PkgVerifyArgs, config_keychain: Option<&str>) -> Result<()> {
-    let package_bytes = std::fs::read(&args.package)
-        .with_context(|| format!("Failed to read package: {}", args.package.display()))?;
+fn print_verified_actor_package(manifest: &actr_pack::ActorPackageManifest) {
+    println!("Package verification passed (single archive)");
+    println!();
+    println!("  publisher:   {}", manifest.actor.publisher);
+    println!("  type:        {}", manifest.actor_type());
+    println!("  workload_entry: {}", manifest.workload.entry);
+    println!("  profile:     {}", manifest.workload.profile);
+    println!("  signing_key: {}", manifest.signature.key_id);
+    println!("  files:       {}", manifest.files.len());
+}
 
+async fn execute_verify(args: &PkgVerifyArgs, config_keychain: Option<&str>) -> Result<()> {
+    let mut package = std::fs::File::open(&args.package)
+        .with_context(|| format!("Failed to read package: {}", args.package.display()))?;
+    ensure!(
+        package.metadata()?.is_file(),
+        "Failed to read package: {} is not a regular file",
+        args.package.display()
+    );
     let pubkey = if let Some(pubkey_path) = &args.pubkey {
         load_verifying_key(pubkey_path)?
     } else {
@@ -771,6 +809,38 @@ async fn execute_verify(args: &PkgVerifyArgs, config_keychain: Option<&str>) -> 
         load_verifying_key_from_dev_key(&key_path)?
     };
 
+    let (oci_manifest, package) = tokio::task::spawn_blocking(move || -> Result<_> {
+        let probe = actr_pack::oci::read_open_file_manifest(&mut package);
+        package.rewind()?;
+        if matches!(
+            probe,
+            Ok(actr_pack::RuntimePackageManifest::V2(manifest))
+                if manifest.workload.profile == actr_pack::oci::OCI_PROFILE
+        ) {
+            let archive = actr_pack::oci::OciArchive::snapshot(
+                &mut package,
+                actr_pack::oci::OciLimits::default(),
+            )?;
+            let verified = archive.verify(&pubkey, None)?;
+            return Ok((Some(verified.manifest().clone()), package));
+        }
+        Ok((None, package))
+    })
+    .await??;
+    if let Some(manifest) = oci_manifest {
+        print_verified_actor_package(&manifest);
+        return Ok(());
+    }
+
+    let limit = actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES + 8 * 1024 * 1024;
+    let mut package_bytes = Vec::new();
+    package
+        .take(limit as u64 + 1)
+        .read_to_end(&mut package_bytes)?;
+    ensure!(
+        package_bytes.len() <= limit,
+        "Non-OCI archive exceeds its size limit"
+    );
     let verified = actr_pack::verify_runtime_package_bounded(
         &package_bytes,
         &pubkey,
@@ -779,14 +849,7 @@ async fn execute_verify(args: &PkgVerifyArgs, config_keychain: Option<&str>) -> 
     let manifest = match verified.manifest {
         actr_pack::RuntimePackageManifest::V2(manifest) => {
             manifest.validate_workload_payload(&package_bytes)?;
-            println!("Package verification passed (single archive)");
-            println!();
-            println!("  publisher:   {}", manifest.actor.publisher);
-            println!("  type:        {}", manifest.actor_type());
-            println!("  workload_entry: {}", manifest.workload.entry);
-            println!("  profile:     {}", manifest.workload.profile);
-            println!("  signing_key: {}", manifest.signature.key_id);
-            println!("  files:       {}", manifest.files.len());
+            print_verified_actor_package(&manifest);
             return Ok(());
         }
         actr_pack::RuntimePackageManifest::Legacy(manifest) => *manifest,

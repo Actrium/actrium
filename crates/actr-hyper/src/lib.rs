@@ -70,7 +70,17 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub mod config;
-#[cfg(all(feature = "wasm-engine", not(target_arch = "wasm32")))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(
+        feature = "wasm-engine",
+        all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )
+    )
+))]
 pub mod egress;
 pub mod error;
 
@@ -189,6 +199,8 @@ pub(crate) use error::HyperResult;
 
 // Core protocol types
 pub use actr_protocol::{Acl, ActrId, ActrType, ServiceSpec};
+#[cfg(not(target_arch = "wasm32"))]
+pub use actr_relay_security::ACTOR_CHANNEL_AUTHENTICATION_ENABLED;
 
 // Re-export MediaSample and MediaType from framework (dependency inversion)
 pub use actr_framework::{MediaSample, MediaType};
@@ -222,6 +234,13 @@ pub use dispatch::{
 pub use storage::{ActorStore, SecureStorageRoot};
 #[cfg(not(target_arch = "wasm32"))]
 pub use verify::{ChainTrust, PublisherCertCache, RegistryTrust, StaticTrust, TrustProvider};
+
+#[cfg(all(
+    feature = "oci-engine",
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+pub mod oci;
 
 // Observability
 #[cfg(not(target_arch = "wasm32"))]
@@ -440,6 +459,7 @@ struct HyperInner {
     /// Private runtime gate for on-demand membership recovery. Keeping it out
     /// of public `HyperConfig` preserves existing external struct literals.
     membership_controller_enabled: bool,
+    oci_runtime: Option<actr_config::OciRuntimeConfig>,
     /// Locally unique ID generated and persisted on first startup
     instance_id: String,
     /// Optional platform provider for cross-platform abstraction
@@ -563,8 +583,28 @@ fn resolve_linked_dependency_metadata(
 pub enum BinaryKind {
     /// Execute the package binary with the WASM runtime.
     Wasm,
+    /// Execute a verified OCI workload.
+    Oci,
     /// Execute the package binary as a C-ABI dynamic library (`cdylib`).
     DynClib,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// An OCI package verified with a specific Hyper trust policy.
+pub struct VerifiedOciPackage {
+    hyper: Arc<HyperInner>,
+    package: actr_pack::oci::VerifiedOciPackage,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl VerifiedOciPackage {
+    pub fn archive_digest(&self) -> [u8; 32] {
+        self.package.archive_digest()
+    }
+
+    pub fn manifest(&self) -> &RuntimePackageManifest {
+        &self.package.verification().manifest
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -699,6 +739,7 @@ impl Hyper {
             inner: Arc::new(HyperInner {
                 config,
                 membership_controller_enabled: false,
+                oci_runtime: None,
                 instance_id,
                 platform,
                 secure_storage_root,
@@ -728,6 +769,46 @@ impl Hyper {
         package: &WorkloadPackage,
     ) -> HyperResult<VerifiedRuntimePackage> {
         verify_package_for_hyper(&self.inner, package.bytes()).await
+    }
+
+    /// Configure the OCI execution environment for Nodes built from this Hyper.
+    pub fn with_oci_runtime(mut self, config: actr_config::OciRuntimeConfig) -> HyperResult<Self> {
+        Arc::get_mut(&mut self.inner)
+            .ok_or_else(|| HyperError::Config("configure OCI before sharing Hyper".into()))?
+            .oci_runtime = Some(config);
+        Ok(self)
+    }
+
+    /// Verify a complete OCI package using a private file snapshot.
+    pub async fn verify_oci_package(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        limits: actr_pack::oci::OciLimits,
+    ) -> HyperResult<VerifiedOciPackage> {
+        let path = path.as_ref().to_path_buf();
+        let archive = tokio::task::spawn_blocking(move || {
+            actr_pack::oci::OciArchive::snapshot(std::fs::File::open(path)?, limits)
+        })
+        .await
+        .map_err(|error| HyperError::Runtime(format!("OCI package snapshot task failed: {error}")))?
+        .map_err(verify::pack_err_to_hyper)?;
+        let key = self
+            .inner
+            .config
+            .trust_provider
+            .verify_oci_metadata(archive.metadata())
+            .await?;
+        let staging = self.inner.config.data_dir.clone();
+        let package = tokio::task::spawn_blocking(move || archive.verify(&key, Some(&staging)))
+            .await
+            .map_err(|error| {
+                HyperError::Runtime(format!("OCI package validation task failed: {error}"))
+            })?
+            .map_err(verify::pack_err_to_hyper)?;
+        Ok(VerifiedOciPackage {
+            hyper: Arc::clone(&self.inner),
+            package,
+        })
     }
 
     /// Verify a package, select its execution backend, and prepare the workload.
@@ -851,6 +932,22 @@ impl Node {
             .start()
             .await
             .map_err(|e| HyperError::Runtime(format!("failed to start node: {e}")))
+    }
+
+    /// Verify and run a signed OCI archive from the host's runtime configuration.
+    pub async fn run_oci_from_config(
+        config: impl AsRef<std::path::Path>,
+        archive: impl AsRef<std::path::Path>,
+    ) -> HyperResult<ActrRef> {
+        let node = Self::from_config_file(config).await?;
+        let issuer_endpoint = node.runtime_config().issuer_endpoint.clone();
+        node.attach_oci(archive)
+            .await?
+            .register(&issuer_endpoint)
+            .await?
+            .start()
+            .await
+            .map_err(|error| HyperError::Runtime(format!("failed to start OCI Node: {error}")))
     }
 }
 
@@ -994,6 +1091,98 @@ impl Node<Init> {
     /// `Node<Attached>`.
     /// Attach a packaged workload (`wasm` / `dyn lib`) to this node.
     pub async fn attach(self, package: &WorkloadPackage) -> HyperResult<Node<Attached>> {
+        let runtime_config = self
+            .pending_runtime_config
+            .as_ref()
+            .expect("Node<Init> without pending runtime config");
+        let wasi_data_dir = self.hyper.config.wasi_data_dir.resolve(
+            runtime_config.wasi_data_dir.as_deref(),
+            runtime_config.wasi_data_access,
+        );
+        let loaded = load_workload_package_inner(&self.hyper, package, wasi_data_dir).await?;
+        self.finish_package_attach(loaded, package.bytes.clone())
+            .await
+    }
+
+    /// Verify a local OCI package and attach it to this Node.
+    pub async fn attach_oci(
+        self,
+        path: impl AsRef<std::path::Path>,
+    ) -> HyperResult<Node<Attached>> {
+        let config = self.oci_settings()?;
+        let hyper = Hyper {
+            inner: Arc::clone(&self.hyper),
+        };
+        let verified = hyper
+            .verify_oci_package(
+                path,
+                actr_pack::oci::OciLimits {
+                    archive_bytes: config.max_package_bytes,
+                    unpacked_layer_bytes: config.max_unpack_bytes,
+                },
+            )
+            .await?;
+        self.attach_verified_oci(verified).await
+    }
+
+    /// Attach an OCI package already verified with this Hyper instance.
+    pub async fn attach_verified_oci(
+        self,
+        verified: VerifiedOciPackage,
+    ) -> HyperResult<Node<Attached>> {
+        if !Arc::ptr_eq(&self.hyper, &verified.hyper) {
+            return Err(HyperError::Config(
+                "OCI package was verified by a different Hyper".into(),
+            ));
+        }
+        let config = self.oci_settings()?;
+        #[cfg(all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
+        {
+            let loaded = load_oci_workload(&self.hyper, config, verified.package).await?;
+            self.finish_package_attach(loaded, bytes::Bytes::new())
+                .await
+        }
+        #[cfg(not(all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )))]
+        {
+            let _ = (&verified.package, config);
+            unreachable!("OCI settings gate unsupported platforms")
+        }
+    }
+
+    fn oci_settings(&self) -> HyperResult<actr_config::OciRuntimeConfig> {
+        if !cfg!(feature = "oci-engine") {
+            return Err(HyperError::Config(
+                "OCI requires the oci-engine feature".into(),
+            ));
+        }
+        if !cfg!(all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )) {
+            return Err(HyperError::UnsupportedPlatform(
+                "OCI requires Linux x86_64 or aarch64",
+            ));
+        }
+        self.pending_runtime_config
+            .as_ref()
+            .and_then(|config| config.oci.clone())
+            .or_else(|| self.hyper.oci_runtime.clone())
+            .ok_or_else(|| HyperError::Config("OCI requires [hyper.oci] host configuration".into()))
+    }
+
+    async fn finish_package_attach(
+        self,
+        loaded: LoadedWorkload,
+        package_bytes: bytes::Bytes,
+    ) -> HyperResult<Node<Attached>> {
         let mut runtime_config = self
             .pending_runtime_config
             .expect("Node<Init> without pending runtime config");
@@ -1001,11 +1190,6 @@ impl Node<Init> {
         #[cfg(feature = "test-utils")]
         let test_faults = self.pending_test_faults;
         let hyper_inner = self.hyper;
-        let wasi_data_dir = hyper_inner.config.wasi_data_dir.resolve(
-            runtime_config.wasi_data_dir.as_deref(),
-            runtime_config.wasi_data_access,
-        );
-        let loaded = load_workload_package_inner(&hyper_inner, package, wasi_data_dir).await?;
         if matches!(&loaded.verified.manifest, RuntimePackageManifest::V2(_)) {
             let actor_type = loaded.verified.manifest.actor_type();
             runtime_config.package.name.clone_from(&actor_type.name);
@@ -1045,7 +1229,7 @@ impl Node<Init> {
                 node: node_inner,
                 verified: Some(loaded.verified),
                 v2_service_spec: loaded.v2_service_spec,
-                package_bytes: package.bytes.clone(),
+                package_bytes,
             }),
             pending_runtime_config: None,
             pending_linked_manifest: None,
@@ -1684,6 +1868,23 @@ impl Node<Attached> {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Node<Registered> {
+    /// Enforce the verified Front package's route and upload grants on an
+    /// ordinary Service. This does not install an Attach registry or lease.
+    pub fn with_ordinary_service_authorization(
+        self,
+        metadata: crate::actrium::FrontSessionMetadata,
+    ) -> Self {
+        let attachment = self
+            .attachment
+            .as_ref()
+            .expect("Node<Registered> without attachment");
+        let guard = crate::actrium::ordinary::OrdinaryServiceGuard::new(
+            metadata,
+            attachment.node.peer_types.clone(),
+        );
+        self.with_incoming_guard(Arc::new(guard))
+    }
+
     /// Install or replace the inbound delivery guard before startup.
     pub fn with_incoming_guard(mut self, guard: Arc<dyn crate::lifecycle::IncomingGuard>) -> Self {
         self.attachment
@@ -1957,6 +2158,56 @@ async fn verify_package_for_hyper(
 /// Free-function counterpart of [`Hyper::load_workload_package`] —
 /// shared by both [`Hyper::attach`] and `Node<Init>::attach` without
 /// needing a `Hyper` handle to own the call.
+#[cfg(all(
+    feature = "oci-engine",
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+async fn load_oci_workload(
+    inner: &HyperInner,
+    config: actr_config::OciRuntimeConfig,
+    verified: actr_pack::oci::VerifiedOciPackage,
+) -> HyperResult<LoadedWorkload> {
+    let manifest = verified.manifest();
+    let host_platform = if cfg!(target_arch = "aarch64") {
+        actr_pack::oci::OCI_ARM64_PLATFORM
+    } else {
+        actr_pack::oci::OCI_AMD64_PLATFORM
+    };
+    if !manifest
+        .workload
+        .oci
+        .as_ref()
+        .is_some_and(|oci| oci.platform == host_platform)
+    {
+        return Err(HyperError::InvalidManifest(format!(
+            "OCI workload platform must match the native host ({host_platform})"
+        )));
+    }
+    let lock = package_runtime::read_v2_lock_with(manifest, |path| {
+        verified
+            .read_metadata(path)
+            .map_err(verify::pack_err_to_hyper)
+    })?;
+    let (v2_service_spec, routes) = service_spec::calculate_oci_service_spec(&verified)?;
+    let workload = oci::OciWorkload::prepare(
+        Arc::new(config),
+        &verified,
+        lock.as_ref(),
+        routes,
+        inner.config.egress_policy.clone(),
+    )
+    .await
+    .map_err(|error| HyperError::Runtime(error.to_string()))?;
+    Ok(LoadedWorkload {
+        verified: verified.verification().clone(),
+        binary_kind: BinaryKind::Oci,
+        workload: crate::workload::Workload::Oci(workload),
+        packaged_lock: lock,
+        v2_service_spec,
+    })
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) async fn load_workload_package_inner(
     inner: &HyperInner,
@@ -1988,6 +2239,11 @@ pub(crate) async fn load_workload_package_inner(
                     load_wasm_workload_inner(inner, bytes, manifest).await?
                 }
                 BinaryKind::DynClib => load_dynclib_workload_inner(inner, bytes, manifest)?,
+                BinaryKind::Oci => {
+                    return Err(HyperError::InvalidManifest(
+                        "OCI requires a v2 file-backed package".into(),
+                    ));
+                }
             };
             (binary_kind, workload, packaged_lock, None)
         }

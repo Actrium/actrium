@@ -123,33 +123,116 @@ impl RunCommand {
         };
 
         // 1. Resolve package path from the runtime config.
-        let package_path = self.resolve_package_path(&config_path).await?;
+        let mut raw_config = actr_config::RuntimeRawConfig::from_file(&config_path)?;
+        let package_path = self.resolve_package_path(&config_path, &raw_config)?;
         info!("📦 Loading package: {}", package_path.display());
 
-        // 2. Load package bytes
-        let package_bytes = tokio::fs::read(&package_path).await.map_err(|e| {
-            ActrCliError::command_error(format!("Failed to read package file: {}", e))
-        })?;
-        // The Service package digest is part of the Attach compatibility tuple.
-        let service_package_digest = {
-            use sha2::Digest as _;
-            sha2::Sha256::digest(&package_bytes).to_vec()
+        let metadata_path = package_path.clone();
+        let probe =
+            tokio::task::spawn_blocking(move || actr_pack::oci::read_file_manifest(&metadata_path))
+                .await
+                .map_err(anyhow::Error::from)?;
+        let oci = matches!(&probe, Ok(actr_pack::RuntimePackageManifest::V2(manifest))
+            if manifest.workload.profile == actr_pack::oci::OCI_PROFILE);
+        let (mut manifest, package) = if oci {
+            if !cfg!(feature = "oci-engine") {
+                return Err(ActrCliError::command_error(
+                    "OCI requires the oci-engine feature",
+                ));
+            }
+            if !cfg!(all(
+                target_os = "linux",
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            )) {
+                return Err(ActrCliError::command_error(
+                    "OCI requires Linux x86_64 or aarch64",
+                ));
+            }
+            (probe.map_err(anyhow::Error::from)?, None)
+        } else {
+            use tokio::io::AsyncReadExt as _;
+            let package_file = tokio::fs::File::open(&package_path).await?;
+            let limit = actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES + 8 * 1024 * 1024;
+            let mut bytes = Vec::new();
+            package_file
+                .take(limit as u64 + 1)
+                .read_to_end(&mut bytes)
+                .await?;
+            if bytes.len() > limit {
+                return Err(ActrCliError::command_error(
+                    "Non-OCI archive exceeds its size limit",
+                ));
+            }
+            let package = WorkloadPackage::new(bytes);
+            (
+                package.manifest().map_err(anyhow::Error::from)?,
+                Some(package),
+            )
         };
-        let package = WorkloadPackage::new(package_bytes);
 
-        // 3. Parse package manifest
-        let manifest = package.manifest().map_err(|e| {
-            ActrCliError::command_error(format!("Failed to parse package manifest: {}", e))
-        })?;
         let package_info = self.build_package_info(&manifest);
 
         // 4. Load runtime configuration
-        let mut config = actr_config::ConfigParser::from_runtime_file(&config_path, package_info)?;
+        let authorization = raw_config.service_authorization.take();
+        let mut config =
+            actr_config::ConfigParser::parse_runtime(raw_config, &config_path, package_info)?;
+        if authorization.is_some() && config.actrium.is_some() {
+            return Err(ActrCliError::command_error(
+                "Configure either [service_authorization] or [actrium]",
+            ));
+        }
+        if config.actrium.is_some() && !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+            return Err(ActrCliError::command_error(
+                "[actrium] requires verified Attach, which is disabled in this build",
+            ));
+        }
+        if oci && config.trust.is_empty() {
+            return Err(ActrCliError::command_error(
+                "OCI requires explicit [[trust]] anchors",
+            ));
+        }
+        let _obs_guard = init_observability(&config.observability).map_err(|e| {
+            ActrCliError::command_error(format!("Failed to initialize observability: {}", e))
+        })?;
+        let trust = self.build_trust_provider(&config, &package_path).await?;
+        let hyper = self.init_hyper(&config, &hyper_dir, trust.clone()).await?;
+        let verified_oci = if oci {
+            let settings = config.oci.as_ref().ok_or_else(|| {
+                ActrCliError::command_error("OCI requires [hyper.oci] host configuration")
+            })?;
+            let verified = hyper
+                .verify_oci_package(
+                    &package_path,
+                    actr_pack::oci::OciLimits {
+                        archive_bytes: settings.max_package_bytes,
+                        unpacked_layer_bytes: settings.max_unpack_bytes,
+                    },
+                )
+                .await
+                .map_err(anyhow::Error::from)?;
+            if hex::encode(verified.archive_digest()) != settings.package_sha256 {
+                return Err(ActrCliError::command_error(
+                    "OCI archive does not match the host grant",
+                ));
+            }
+            manifest = verified.manifest().clone();
+            Some(verified)
+        } else {
+            None
+        };
+
+        // Attach and Open Join bind to the same exact archive digest.
+        let service_package_digest: [u8; 32] = if let Some(verified) = &verified_oci {
+            verified.archive_digest()
+        } else {
+            use sha2::Digest as _;
+            sha2::Sha256::digest(package.as_ref().expect("non-OCI package bytes").bytes()).into()
+        };
         if self.open_join {
             let (profile, key_path) = super::realm_members::join_open_service(
                 &config.realm,
                 &manifest.actor_type(),
-                package.bytes(),
+                &service_package_digest,
                 &hyper_dir,
             )
             .await?;
@@ -160,22 +243,27 @@ impl RunCommand {
         info!("📡 Signaling server: {}", config.signaling_url.as_str());
         info!("🔐 Trust anchors: {} configured", config.trust.len());
 
-        // 6. Initialize observability
-        let _obs_guard = init_observability(&config.observability).map_err(|e| {
-            ActrCliError::command_error(format!("Failed to initialize observability: {}", e))
-        })?;
-
-        // 7. Initialize Hyper
-        let trust = self.build_trust_provider(&config, &package_path).await?;
-        let hyper = self.init_hyper(&config, &hyper_dir, trust.clone()).await?;
-        info!("✅ Hyper initialized");
-
-        // 8. Node typestate chain: from_hyper → attach → register → start
+        let ordinary_policy = match authorization {
+            Some(authorization) => Some(
+                Self::verified_front_metadata(
+                    &resolve_against(&config.config_dir, &authorization.front_package),
+                    &manifest,
+                    &service_package_digest,
+                    &trust,
+                )
+                .await?,
+            ),
+            None => None,
+        };
         let issuer_endpoint = config.issuer_endpoint.clone();
-        let attached = actr_hyper::Node::from_hyper(hyper, config.clone())
-            .attach(&package)
-            .await
-            .map_err(|e| ActrCliError::command_error(format!("Failed to attach package: {}", e)))?;
+        let node = actr_hyper::Node::from_hyper(hyper, config.clone());
+        let attached = if let Some(verified) = verified_oci {
+            node.attach_verified_oci(verified).await
+        } else {
+            node.attach(package.as_ref().expect("non-OCI package bytes"))
+                .await
+        }
+        .map_err(|e| ActrCliError::command_error(format!("Failed to attach package: {}", e)))?;
         info!("✅ Package attached");
 
         let registration = if self.open_join {
@@ -196,15 +284,18 @@ impl RunCommand {
         })?;
         info!("✅ Issuer registration successful");
 
-        let registered = self
-            .install_actrium_service(
+        let registered = if let Some(policy) = ordinary_policy {
+            registered.with_ordinary_service_authorization(policy)
+        } else {
+            self.install_actrium_service(
                 registered,
                 &config,
                 &manifest,
                 &service_package_digest,
                 trust,
             )
-            .await?;
+            .await?
+        };
 
         let actr_ref = registered
             .start()
@@ -247,16 +338,15 @@ impl RunCommand {
         Ok(())
     }
 
-    async fn resolve_package_path(&self, config_path: &Path) -> Result<PathBuf> {
-        // Load runtime config to get the packaged workload path.
-        let config_content = tokio::fs::read_to_string(config_path).await?;
-        let raw_config: actr_config::RuntimeRawConfig = toml::from_str(&config_content)
-            .map_err(|e| ActrCliError::command_error(format!("Failed to parse config: {}", e)))?;
-
-        if let Some(package_config) = raw_config.package {
-            if let Some(path) = package_config.path {
+    fn resolve_package_path(
+        &self,
+        config_path: &Path,
+        raw_config: &actr_config::RuntimeRawConfig,
+    ) -> Result<PathBuf> {
+        if let Some(package_config) = &raw_config.package {
+            if let Some(path) = &package_config.path {
                 let base = config_path.parent().unwrap_or(Path::new("."));
-                return Ok(resolve_against(base, &path));
+                return Ok(resolve_against(base, path));
             }
         }
 
@@ -359,31 +449,16 @@ impl RunCommand {
         })
     }
 
-    /// Install the Actrium v1 Attach server on a packaged Service host when the
-    /// runtime config has an `[actrium]` section.
-    ///
-    /// v1 compatibility is exact: the Service accepts Attach from one Front
-    /// package. The configured Front archive is verified with the same trust
-    /// chain as the Service package, and its Guest digest, routes, Service
-    /// protocol fingerprint and Actor type become the Attach requirements.
-    /// Without `[actrium]`, the node behaves exactly as before and accepts no
-    /// Actrium sessions.
-    async fn install_actrium_service(
-        &self,
-        node: actr_hyper::Node<actr_hyper::Registered>,
-        config: &actr_config::RuntimeConfig,
+    async fn verified_front_metadata(
+        front_package: &Path,
         service_manifest: &actr_pack::RuntimePackageManifest,
         service_package_digest: &[u8],
-        trust: Arc<dyn actr_hyper::TrustProvider>,
-    ) -> Result<actr_hyper::Node<actr_hyper::Registered>> {
-        let Some(actrium) = config.actrium.as_ref() else {
-            return Ok(node);
-        };
-
-        let front_bytes = tokio::fs::read(&actrium.front_package).await.map_err(|e| {
+        trust: &Arc<dyn actr_hyper::TrustProvider>,
+    ) -> Result<actr_hyper::actrium::FrontSessionMetadata> {
+        let front_bytes = tokio::fs::read(front_package).await.map_err(|e| {
             ActrCliError::command_error(format!(
                 "Failed to read Actrium Front package {}: {}",
-                actrium.front_package.display(),
+                front_package.display(),
                 e
             ))
         })?;
@@ -398,15 +473,34 @@ impl RunCommand {
                 "The Actrium Front package must use the v2 actor package format".to_string(),
             ));
         };
-        let metadata = actr_hyper::actrium::front_session_metadata(
+        actr_hyper::actrium::front_session_metadata(
             &front_bytes,
             &front_manifest,
             &service_manifest.actor_type(),
             service_package_digest,
         )
-        .map_err(|e| {
-            ActrCliError::command_error(format!("Failed to derive Attach metadata: {e}"))
-        })?;
+        .map_err(|e| ActrCliError::command_error(format!("Failed to derive Front metadata: {e}")))
+    }
+
+    /// Install verified Attach using the configured signed Front package.
+    async fn install_actrium_service(
+        &self,
+        node: actr_hyper::Node<actr_hyper::Registered>,
+        config: &actr_config::RuntimeConfig,
+        service_manifest: &actr_pack::RuntimePackageManifest,
+        service_package_digest: &[u8],
+        trust: Arc<dyn actr_hyper::TrustProvider>,
+    ) -> Result<actr_hyper::Node<actr_hyper::Registered>> {
+        let Some(actrium) = config.actrium.as_ref() else {
+            return Ok(node);
+        };
+        let metadata = Self::verified_front_metadata(
+            &actrium.front_package,
+            service_manifest,
+            service_package_digest,
+            &trust,
+        )
+        .await?;
         let signing_key = node.actrium_actor_signing_key().map_err(|e| {
             ActrCliError::command_error(format!("Failed to load the node Actor key: {e}"))
         })?;
@@ -770,6 +864,11 @@ impl RunCommand {
         let config_content = tokio::fs::read_to_string(&config_path).await?;
         let raw_config: actr_config::RuntimeRawConfig = toml::from_str(&config_content)
             .map_err(|e| ActrCliError::command_error(format!("Failed to parse config: {}", e)))?;
+        if raw_config.service_authorization.is_some() {
+            return Err(ActrCliError::command_error(
+                "[service_authorization] requires a native packaged Service",
+            ));
+        }
 
         let config_dir = config_path.parent().unwrap_or(Path::new(".")).to_path_buf();
 
@@ -990,7 +1089,14 @@ impl RunCommand {
             .unwrap_or_else(|| format!("/packages/{}", package_filename));
         let runtime_wasm_url = web
             .and_then(|w| w.runtime_wasm_url.clone())
-            .unwrap_or_else(|| "/packages/actr_sw_host_bg.wasm".to_string());
+            .unwrap_or_else(|| {
+                use sha2::{Digest as _, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(crate::web_assets::RUNTIME_WASM);
+                hasher.update(crate::web_assets::RUNTIME_JS);
+                let digest = hasher.finalize();
+                format!("/packages/actr_sw_host_bg.wasm?v={digest:x}")
+            });
 
         // Browser verification cannot read host files. Resolve every static
         // `pubkey_file` here and send only inline base64 keys; the SW tries all

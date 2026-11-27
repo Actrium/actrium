@@ -30,6 +30,7 @@ export {
 } from '../guest/runtime/reconciler/sandbox-compat';
 // Web keyboard bridge (issue #139, L3)
 export type { KeelKeyEvent } from '../shared/keyboard';
+export type { ScrollRequest } from '../shared/style-types';
 // Component prop types and event types
 export type {
   ActivityIndicatorProps,

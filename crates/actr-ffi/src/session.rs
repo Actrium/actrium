@@ -409,6 +409,7 @@ pub(crate) mod tests {
                 profile: actr_pack::KEEL_GUEST_PROFILE_V1.to_owned(),
                 entry: "workload/guest.js".into(),
                 rpc_contract: None,
+                oci: None,
                 keel: Some(actr_pack::KeelGuestDescriptor {
                     runtime: "js".into(),
                     guest_api: actr_pack::KEEL_GUEST_PROFILE_V1.to_owned(),

@@ -5,8 +5,7 @@
 //! Its primary role is to provide the raw, generated Protobuf types and essential,
 //! stateless utilities for handling those types (e.g., ID and URI formatting).
 //!
-//! It strictly adheres to its role as a data definition layer and does not contain
-//! higher-level traits, business logic, or runtime-specific implementations.
+//! The optional `oci-ipc` feature adds versioned OCI Guest messages and frame I/O.
 
 /// Current schema version emitted by [`SignalingEnvelope`] writers.
 pub const SIGNALING_ENVELOPE_VERSION: u32 = 2;
@@ -36,6 +35,8 @@ pub mod authority;
 pub mod error;
 pub mod message;
 pub mod name;
+#[cfg(feature = "oci-ipc")]
+pub mod oci;
 pub mod realm_management;
 pub mod realm_membership;
 pub mod realm_profile;

@@ -63,16 +63,8 @@ target 'ActriumRenderer' do
   pod 'ExpoSpeechRecognition', :path => File.join(ACTRIUM_RUNTIME_RELATIVE_PATH, 'node_modules/@boomsi/rn-speech-recognition/ios')
   ENV['REACT_NATIVE_NODE_MODULES_DIR'] ||= File.join(ACTRIUM_RUNTIME_PATH, 'node_modules')
   pod 'RNSVG', :path => File.join(ACTRIUM_RUNTIME_RELATIVE_PATH, 'node_modules/react-native-svg')
-  if ENV['ACTRIUM_SUPRAMARK_DIR']
-    supramark_root = File.realpath(ENV.fetch('ACTRIUM_SUPRAMARK_DIR'))
-    selection_root = File.join(supramark_root, 'packages/renderers/rn-selection/native/macos')
-    if File.exist?(File.join(selection_root, 'SupramarkSelectionMetrics.podspec'))
-      pod 'SupramarkSelectionMetrics', :path => selection_root
-    else
-      Pod::UI.warn('SupramarkSelectionMetrics.podspec is missing from ACTRIUM_SUPRAMARK_DIR. Markdown selection will use React Native text metrics.')
-    end
-    pod 'SupramarkMarkdownNative', :path => File.join(supramark_root, 'crates/supramark-markdown/packages/react-native')
-  end
+  pod 'SupramarkMarkdownNative', :path => File.join(ACTRIUM_RUNTIME_RELATIVE_PATH, 'node_modules/@goaskaway/supramark-markdown-native-rn')
+  pod 'SupramarkSelectionMetrics', :path => File.join(ACTRIUM_RUNTIME_RELATIVE_PATH, 'node_modules/@goaskaway/supramark-rn-selection/native/macos')
 end
 
 post_install do |installer|
@@ -135,6 +127,11 @@ post_install do |installer|
     end
 
     target.build_configurations.each do |config|
+      # Keep SVG resources within the macOS deployment range supported by Xcode.
+      if target.name.start_with?('RNSVG')
+        config.build_settings['MACOSX_DEPLOYMENT_TARGET'] = '14.0'
+      end
+
       # Ensure REACT_NATIVE_PATH is available in shell script phases.
       # hermes-engine's "[Hermes] Replace Hermes" script references this var
       # but project-level build settings may not propagate to shell environments.

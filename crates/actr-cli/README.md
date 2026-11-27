@@ -4,12 +4,12 @@ Command-line tool for Actor-RTC projects. Handles project scaffolding, codegen,
 packaging (`.actr`), signing, installation of service dependencies, and runtime
 instance management.
 
-## Quick reference (21 top-level subcommands)
+## Quick reference
 
 ```
 Development (flat, 5):  actr init | gen | build | check | doc
 Runtime (flat, 7):      actr run | ps | logs | start | stop | restart | rm
-Resources (grouped, 6): actr deps | pkg | registry | dlq | realm | publisher
+Resources (grouped, 7): actr deps | pkg | oci | registry | dlq | realm | publisher
 Meta (3):               actr config | version | completion
 ```
 
@@ -226,6 +226,13 @@ Two TOML files, easily confused:
 |---|---|---|
 | `manifest.toml` | developer | Project metadata, service `[package]`, proto exports, dependencies. Signed as part of `.actr`. |
 | `actr.toml` | operator | Runtime config: package path, signaling URL, realm, data dir. Consumed by `actr run`. |
+
+### OCI workloads
+
+Use `actr oci doctor` to validate the Linux host and `actr oci gc` to
+reconcile abandoned containers and evict unused images. See the
+[OCI workload guide](../../docs/architecture/oci-workloads.md) for signed
+packages, runtime configuration, and capability grants.
 
 ### WASM workload data
 

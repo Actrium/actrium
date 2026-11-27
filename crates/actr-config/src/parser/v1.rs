@@ -110,6 +110,11 @@ impl ParserV1 {
         raw: RuntimeRawConfig,
         package: PackageInfo,
     ) -> Result<RuntimeConfig> {
+        if raw.service_authorization.is_some() {
+            return Err(ConfigError::InvalidConfig(
+                "[service_authorization] must be installed by the packaged Service host".into(),
+            ));
+        }
         // Validate required runtime fields
         let signaling_url_str = raw
             .signaling
@@ -268,6 +273,7 @@ impl ParserV1 {
             storage_root,
             wasi_data_dir,
             wasi_data_access: hyper.wasi_data_access,
+            oci: hyper.oci.map(|oci| oci.resolve_paths(&self.base_dir)),
             actrium,
         })
     }

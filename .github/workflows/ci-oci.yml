@@ -1,0 +1,58 @@
+name: CI (OCI Runtime)
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/actr-cli/**"
+      - "crates/actr-config/**"
+      - "crates/actr-framework/**"
+      - "crates/actr-hyper/**"
+      - "crates/actr-protocol/**"
+      - "crates/actr-pack/**"
+      - "tests/e2e/actr/oci/**"
+      - ".github/workflows/ci-oci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oci-linux:
+    name: Rootless Syd on Linux x86_64
+    # Syd links against the libseccomp 2.6 API.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      RUST_BACKTRACE: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap libcap-dev libseccomp-dev libprotobuf-dev protobuf-compiler umoci
+          cargo install syd --version 3.60.0 --locked --no-default-features --features oci,log --bin syd-oci --debug
+      - name: Verify package metadata and Guest IPC
+        run: cargo test --locked -p actr-pack -p actr-framework --features actr-pack/profile-validation,actr-framework/oci-guest
+      - name: Build a static OCI Guest and its layout
+        run: |
+          RUSTFLAGS="-C target-feature=+crt-static" cargo build --locked --target x86_64-unknown-linux-gnu -p actr-framework --features oci-guest --example oci_echo
+          python3 tests/e2e/actr/oci/make-layout.py target/x86_64-unknown-linux-gnu/debug/examples/oci_echo "$RUNNER_TEMP/actr-oci-layout"
+      - name: Build the native OCI integration test
+        run: |
+          set -o pipefail
+          cargo test --locked -p actr-hyper --features oci-engine,test-utils --test oci_runtime_e2e --no-run --message-format=json |
+            jq -r 'select(.target.name == "oci_runtime_e2e" and .executable != null) | "ACTR_OCI_TEST_BIN=" + .executable' >> "$GITHUB_ENV"
+      - name: Run the signed OCI package and verify repeated cleanup
+        env:
+          ACTR_OCI_TEST_RESTARTS: "100"
+          ACTR_OCI_TEST_CALLS: "1000"
+        run: |
+          export ACTR_OCI_TEST_LAYOUT="$RUNNER_TEMP/actr-oci-layout"
+          export ACTR_OCI_TEST_SYD="$(command -v syd-oci)"
+          bash tests/e2e/actr/oci/run.sh

@@ -234,6 +234,18 @@ importers:
       '@boomsi/rn-speech-recognition':
         specifier: 3.2.0
         version: 3.2.0(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)
+      '@goaskaway/supramark-core':
+        specifier: 0.1.0-rc.3
+        version: 0.1.0-rc.3
+      '@goaskaway/supramark-markdown-native-rn':
+        specifier: 0.1.0-rc.3
+        version: 0.1.0-rc.3(@goaskaway/supramark-core@0.1.0-rc.3)(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)
+      '@goaskaway/supramark-rn':
+        specifier: 0.1.0-rc.3
+        version: 0.1.0-rc.3(98541bceb842913aa1928d5f1da63ce2)
+      '@goaskaway/supramark-rn-selection':
+        specifier: 0.1.0-rc.3
+        version: 0.1.0-rc.3(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)
       askit:
         specifier: file:../actrium-app-sdk
         version: link:../actrium-app-sdk
@@ -301,6 +313,7 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
     optionalDependencies:
       '@react-native-macos/virtualized-lists':
         specifier: ^0.81.1
@@ -1133,6 +1146,84 @@ packages:
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
 
+  '@goaskaway/d2-little-web@0.7.1-0.rev.1.rc.3':
+    resolution: {integrity: sha512-VQvhRr7cP5RLBCBdpojCE+zLWW5+ozim309qLXbpMEqyvi2MMhAFxJnn0eZ9D3EkfOcDMhuGRDqQ/lMR2sbWoQ==}
+
+  '@goaskaway/graphviz-anywhere-rn@0.2.1-rc.3':
+    resolution: {integrity: sha512-0Sh6JWPRjq3prd8h+fCKMrVkPeh/JnF9Dft2Z7+u+tuMtqv5KPEPDu+bwOm04znQpllsx8NctGl8G32YXbVaog==}
+    peerDependencies:
+      react: '>=18.0.0'
+      react-native: '>=0.71.0'
+      react-native-macos: '>=0.71.0'
+      react-native-windows: '>=0.71.0'
+    peerDependenciesMeta:
+      react-native-macos:
+        optional: true
+      react-native-windows:
+        optional: true
+
+  '@goaskaway/graphviz-anywhere-web@0.2.1-rc.3':
+    resolution: {integrity: sha512-B5UMhRJwpvZlDXlSp+fZKFHNspfHazSBd8dawMNJ76fbVCdGU71xTNzplc0Kv4r5JkqiL1+hNhj/1Ytj7DZSSQ==}
+
+  '@goaskaway/mermaid-little-web@11.14.0-0.rev.1.rc.3':
+    resolution: {integrity: sha512-ZHXODaCny5N0hULNH/Og9pYYAN4NRapXJlB+aFNI+cppvUAmc1wJDNZcyzh0b0rFFvkr5cWxBgSqIU/3+TyoMg==}
+
+  '@goaskaway/plantuml-little-web@1.2026.2-0.rev.3.rc.3':
+    resolution: {integrity: sha512-2mjrfpohPqvFRh4aV0rV9Fk5U+wA86Rr4LWdECsShoLoTQkudmMeuF3G4stxMJGn6XDfKSvyA7GgmP4VP3MIMQ==}
+    peerDependencies:
+      '@goaskaway/graphviz-anywhere-web': 0.2.1-rc.3
+    peerDependenciesMeta:
+      '@goaskaway/graphviz-anywhere-web':
+        optional: true
+
+  '@goaskaway/supramark-core@0.1.0-rc.3':
+    resolution: {integrity: sha512-nSR7nxJVZaqXCQeFaQDYxIUVsDkz/GywDysg5MxwteQZI2zQ0ou0sXcbILwhuLO2Jp/sA/NWQ6ZwhlIYcjJkgQ==}
+
+  '@goaskaway/supramark-engines@0.1.0-rc.3':
+    resolution: {integrity: sha512-w1yJyGMeoUA994qL4wXDRull/8OxR+bXQhQDtw4FamwT0l7JABNafvwWDs3tlPLhJZQv1g5EEPoJKceLKgsF4A==}
+
+  '@goaskaway/supramark-markdown-native-rn@0.1.0-rc.3':
+    resolution: {integrity: sha512-NnXtevJcMONpjcVgTYjDJqVCUA7SC+JvO/uXktmxrkxcconyjhUKn9vKbokRTofkVG01spcCT8RpWqysMHQwZg==}
+    peerDependencies:
+      '@goaskaway/supramark-core': 0.1.0-rc.3
+      react: '*'
+      react-native: '*'
+      react-native-windows: '*'
+    peerDependenciesMeta:
+      react-native-windows:
+        optional: true
+
+  '@goaskaway/supramark-markdown-web@0.1.0-rc.3':
+    resolution: {integrity: sha512-Gqp51tN0VGTV9MjGOkK3qYcB93geCAuBTmBx0DbeSenkCzFW/o9+HYZr1J6bhnAG/I94vF21lFRoI/sc6O1r6w==}
+
+  '@goaskaway/supramark-rn-selection@0.1.0-rc.3':
+    resolution: {integrity: sha512-1FNHofnABaXly9epQ0VC4lSMWmswSI+u18YVAnBsWlFVBufL6mWBBdSijkrAcF5Nvaaz0h5vG2m1lfmiCmXlUA==}
+    peerDependencies:
+      react: '>=18.0.0'
+      react-native: '>=0.72.0'
+    peerDependenciesMeta:
+      react:
+        optional: true
+      react-native:
+        optional: true
+
+  '@goaskaway/supramark-rn@0.1.0-rc.3':
+    resolution: {integrity: sha512-9p7N/RgMFcbrnFiML8r2d2qNqxy4ZIqgCE5P/5+10u4YH8oCz/pfpfaxGzGOuc9yZi/wqKAhnn/wxSBBZ+1KDA==}
+    peerDependencies:
+      '@goaskaway/graphviz-anywhere-rn': 0.2.1-rc.3
+      react: '>=18.0.0'
+      react-native: '>=0.72.0'
+      react-native-svg: '>=13.0.0'
+    peerDependenciesMeta:
+      '@goaskaway/graphviz-anywhere-rn':
+        optional: true
+      react:
+        optional: true
+      react-native:
+        optional: true
+      react-native-svg:
+        optional: true
+
   '@hapi/hoek@9.3.0':
     resolution: {integrity: sha512-/c6rf4UJlmHlC9b5BaNvzAcFv7HZ2QHaV0D4/HNlBdvFnvQq8RI4kYdhyPCl7Xj+oWvTWQ8ujhqS53LIgAe6KQ==}
 
@@ -1628,6 +1719,9 @@ packages:
   '@types/geojson@7946.0.16':
     resolution: {integrity: sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg==}
 
+  '@types/geojson@7946.0.4':
+    resolution: {integrity: sha512-MHmwBtCb7OCv1DSivz2UNJXPGU/1btAWRKlqJ2saEhVJkpkvqHMMaOpKg0v4sAbDWSQekHGvPVMM8nQ+Jen03Q==}
+
   '@types/graceful-fs@4.1.9':
     resolution: {integrity: sha512-olP3sd1qOEe5dXTSaFvQG+02VdRXcdytWLAZsAq1PecU8uqQAhkrnbli7DagjtXKW/Bl7YJbUsa8MPcuc8LHEQ==}
 
@@ -1822,6 +1916,10 @@ packages:
 
   '@vscode/sudo-prompt@9.3.2':
     resolution: {integrity: sha512-gcXoCN00METUNFeQOFJ+C9xUI0DKB+0EGMVg7wbVYRHBw2Eq3fKisDZOkRdOz3kqXRKOENMfShPOmypw1/8nOw==}
+
+  '@xmldom/xmldom@0.9.12':
+    resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
+    engines: {node: '>=14.6'}
 
   '@yarnpkg/lockfile@1.1.0':
     resolution: {integrity: sha512-GpSwvyXOcOOlV70vbnzjj4fW5xW/FdUF6nQEt1ENy7m4ZCczi1+/buVUPAqmGfqznsORNFzUMjctTIp8a9tuCQ==}
@@ -2219,12 +2317,20 @@ packages:
     resolution: {integrity: sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==}
     engines: {node: '>=18'}
 
+  commander@13.1.0:
+    resolution: {integrity: sha512-/rFeCpNJQbhSZjGVwO9RFV3xPqbnERS8MmIQzCtD/zl6gpJuV/bMLuN92oG3F7d8oDEHHRrujSXNUr8fpjntKw==}
+    engines: {node: '>=18'}
+
   commander@2.20.3:
     resolution: {integrity: sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ==}
 
   commander@7.2.0:
     resolution: {integrity: sha512-QrWXB+ZQSVPmIWIhtEO9H+gwHaMGYiF5ChvoJ+K9ZGHG/sVsa6yiesAD1GC/x46sET00Xlwo1u49RVVVzvcSkw==}
     engines: {node: '>= 10'}
+
+  commander@8.3.0:
+    resolution: {integrity: sha512-OkTL9umf+He2DZkUq8f8J9of7yL6RJKI24dVITBmNfZBmri9zYZQrKkuXiKhyfPSu8tUhnVBB1iKXevvnlR4Ww==}
+    engines: {node: '>= 12'}
 
   commander@9.5.0:
     resolution: {integrity: sha512-KRs7WVDKg86PWiuAqhDrAQnTXZKraVcCc6vFdL14qrZ/DcWwuRo7VoiYXalXO7S5GKpqYiVEwCbgFDfxNHKJBQ==}
@@ -2503,6 +2609,9 @@ packages:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
     engines: {node: '>= 0.4'}
 
+  echarts@5.6.0:
+    resolution: {integrity: sha512-oTbVTsXfKuEhxftHqL5xprgLoc0k7uScAwtryCgWF6hPYFLRwOUHiFmHGCBKP5NPFNkDVopOieyUqYGH8Fa3kA==}
+
   echarts@6.0.0:
     resolution: {integrity: sha512-Tte/grDQRiETQP4xz3iZWSvoHrkCQtwqd6hs+mifXcjrCuo2iKWbajFObuLJVBlDIJlOzgQPd1hsaKt/3+OMkQ==}
 
@@ -2514,6 +2623,9 @@ packages:
 
   elkjs@0.11.1:
     resolution: {integrity: sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg==}
+
+  elkjs@0.8.2:
+    resolution: {integrity: sha512-L6uRgvZTH+4OF5NE/MBbzQx/WYpru1xCBE9respNj6qznEewGUIfhzmm7horWWxbNO2M0WckQypGctR8lH79xQ==}
 
   emittery@0.13.1:
     resolution: {integrity: sha512-DeWwawk6r5yR9jFgnDKYt4sLS0LmHJJi3ZOnb5/JdbYwj3nW+FxQnHIjhBKz8YLC7oRNPVM9NQ47I3CVx34eqQ==}
@@ -2711,6 +2823,10 @@ packages:
     peerDependenciesMeta:
       jiti:
         optional: true
+
+  esm@3.2.25:
+    resolution: {integrity: sha512-U1suiZ2oDVWv4zPO56S0NcR5QriEahGtdN2OR6FiOG4WJvcjBVFB0qI4+eKoWFH483PKGuLuu6V8Z4T5g63UVA==}
+    engines: {node: '>=6'}
 
   espree@10.4.0:
     resolution: {integrity: sha512-j6PAQ2uUr79PZhBjP5C5fhl8e39FmRnOjsD5lGnWrFU8i2G776tBK7+nP8KuQUTTyAZUwfQqXAgrVH5MbH9CYQ==}
@@ -3498,6 +3614,10 @@ packages:
     resolution: {integrity: sha512-ZZow9HBI5O6EPgSJLUb8n2NKgmVWTwCvHGwFuJlMjvLFqlGG6pjirPhtdsseaLZjSibD8eegzmYpUZwoIlj2cQ==}
     engines: {node: '>=4.0'}
 
+  katex@0.16.47:
+    resolution: {integrity: sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg==}
+    hasBin: true
+
   keel@file:packages/keel:
     resolution: {directory: packages/keel, type: directory}
     engines: {bun: '>=1.0.0', node: '>=18.0.0'}
@@ -3590,6 +3710,10 @@ packages:
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
+
+  mathjax-full@3.2.2:
+    resolution: {integrity: sha512-+LfG9Fik+OuI8SLwsiR02IVdjcnRCy5MufYLi0C3TdMT56L/pjB0alMVGgoWJF8pN9Rc7FESycZB9BMNWIid5w==}
+    deprecated: Version 4 replaces this package with the scoped package @mathjax/src
 
   mdn-data@2.0.14:
     resolution: {integrity: sha512-dn6wd0uw5GsdswPFfsgMp5NSB0/aDe6fK94YJV/AJDYXL6HVLWBsxeq7js7Ad+mU2K9LAlwpk6kN2D5mwCPVow==}
@@ -3731,6 +3855,9 @@ packages:
     engines: {node: '>=20.19.4'}
     hasBin: true
 
+  mhchemparser@4.2.1:
+    resolution: {integrity: sha512-kYmyrCirqJf3zZ9t/0wGgRZ4/ZJw//VwaRVGA75C4nhE60vtnIzhl9J9ndkX/h6hxSN7pjg/cE0VxbnNM+bnDQ==}
+
   micromatch@4.0.8:
     resolution: {integrity: sha512-PXwfBhYu0hBCPw8Dn0E+WDYb7af3dSLVWKi3HGv84IdF4TyFoC0ysxFd0Goxw7nSv4T/PzEJQxsYsEiFCKo2BA==}
     engines: {node: '>=8.6'}
@@ -3778,6 +3905,9 @@ packages:
 
   minimist@1.2.8:
     resolution: {integrity: sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==}
+
+  mj-context-menu@0.6.1:
+    resolution: {integrity: sha512-7NO5s6n10TIV96d4g2uDpG7ZDpIhMh0QNfGdJw/W47JswFcosz457wqz/b5sAKvl12sxINGFCn80NZHKwxQEXA==}
 
   mkdirp@1.0.4:
     resolution: {integrity: sha512-vVqVZQyf3WLx2Shd0qJ9xuvqgAyKPLAiqITEtqW0oIUjzo3PePDd6fW9iFz30ef7Ysp/oiWqbhszeGWW2T6Gzw==}
@@ -4549,6 +4679,10 @@ packages:
   spark-md5@3.0.2:
     resolution: {integrity: sha512-wcFzz9cDfbuqe0FZzfi2or1sgyIrsDwmPwfZC4hiNidPdPINjeUwNfv5kldczoEAcjl9Y1L3SM7Uz2PUEQzxQw==}
 
+  speech-rule-engine@4.1.5:
+    resolution: {integrity: sha512-Nx4d44Ca0FQ4ve9WS8Ja6w2zkI9q7JvH1+3nI9zh4aU/vICXTZWzzYR4MyYRkk/5vcF7OMkwjYkX3qrfahfOgg==}
+    hasBin: true
+
   sprintf-js@1.0.3:
     resolution: {integrity: sha512-D9cPgkvLlV3t3IzL0D0YLvGA9Ahk4PcvVwUbN0dSGr1aP0Nrt4AEnTUbuGvquEC0mA64Gqt1fzirlRs5ibXx8g==}
 
@@ -4866,20 +5000,41 @@ packages:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
     engines: {node: '>= 0.8'}
 
+  vega-canvas@1.2.7:
+    resolution: {integrity: sha512-OkJ9CACVcN9R5Pi9uF6MZBF06pO6qFpDYHWSKBJsdHP5o724KrsgR6UvbnXFH82FdsiTOff/HqjuaG8C7FL+9Q==}
+
   vega-canvas@2.0.0:
     resolution: {integrity: sha512-9x+4TTw/USYST5nx4yN272sy9WcqSRjAR0tkQYZJ4cQIeon7uVsnohvoPQK1JZu7K1QXGUqzj08z0u/UegBVMA==}
+
+  vega-crossfilter@4.1.4:
+    resolution: {integrity: sha512-5E/i60Y80CUt+4O+U89X8ZnauaFuq0ztq/Hx4i4sT/crk4Lfn1oplRAjNOo7dFEZ04TahyBbYiJKIhR0yvmHpw==}
 
   vega-crossfilter@5.1.3:
     resolution: {integrity: sha512-goGulwrrbmv9mY4Za8HQiiFk7WV1OTyrSVZzrMR0Keeiyzh9cnkxRGF1W2fAhMNA3HSaRaBoxWHGr7H9fvovuQ==}
 
+  vega-dataflow@5.7.8:
+    resolution: {integrity: sha512-jrllcIjSYU5Jh130RDR44o/SbUbJndLuoiM9IsKWW+a7HayKnfmbdHWm7MvCrj/YLupFZVojRaS1tTs53EXTdA==}
+
   vega-dataflow@6.1.3:
     resolution: {integrity: sha512-ac51FLdYT8XAcDaHt3bQtVAR3UFdKfPMQBhjvBMXp69mdeq2ERfM1u9CUyDQAVZJylkIbWEwDnsp72tIwenPUA==}
+
+  vega-encode@4.10.3:
+    resolution: {integrity: sha512-245ebBuN1TjwVVDFG7JZaZ/ExLAhZ4kDTK2zlIoXs/g2P5rRgL4Q6oRixr+Pgr43G7ISCEHrUBgUjRcSoG8eEA==}
 
   vega-encode@5.1.0:
     resolution: {integrity: sha512-q26oI7B+MBQYcTQcr5/c1AMsX3FvjZLQOBi7yI0vV+GEn93fElDgvhQiYrgeYSD4Exi/jBPeUXuN6p4bLz16kA==}
 
+  vega-event-selector@3.0.1:
+    resolution: {integrity: sha512-K5zd7s5tjr1LiOOkjGpcVls8GsH/f2CWCrWcpKy74gTCp+llCdwz0Enqo013ZlGaRNjfgD/o1caJRt3GSaec4A==}
+
   vega-event-selector@4.0.0:
     resolution: {integrity: sha512-CcWF4m4KL/al1Oa5qSzZ5R776q8lRxCj3IafCHs5xipoEHrkgu1BWa7F/IH5HrDNXeIDnqOpSV1pFsAWRak4gQ==}
+
+  vega-expression@5.1.2:
+    resolution: {integrity: sha512-fFeDTh4UtOxlZWL54jf1ZqJHinyerWq/ROiqrQxqLkNJRJ86RmxYTgXwt65UoZ/l4VUv9eAd2qoJeDEf610Umw==}
+
+  vega-expression@5.2.1:
+    resolution: {integrity: sha512-9KKbI2q9qTI55NSjD/dVWg3aeCtw+gwyWCiLMM47ha6iXrAN9pQ+EKRJfxOHuoDfCTlJJTaUfnnXgbqm0HEszg==}
 
   vega-expression@6.1.0:
     resolution: {integrity: sha512-hHgNx/fQ1Vn1u6vHSamH7lRMsOa/yQeHGGcWVmh8fZafLdwdhCM91kZD9p7+AleNpgwiwzfGogtpATFaMmDFYg==}
@@ -4887,11 +5042,20 @@ packages:
   vega-expression@6.2.2:
     resolution: {integrity: sha512-9yTpQBYDnl4yC27iGbUxDUnRAeO+la/lfzA5WSALB0INvA2A2NVxIorBakfqIkO7nwKM9bT3rmNRfj8Z3hjb7g==}
 
+  vega-force@4.2.3:
+    resolution: {integrity: sha512-7Yp1uOPy3eyzK/hnAIU0v/yQ9mIhtoJ+tq8AMaZiWqy67SUYsE3olmgdllY6R9M81D/n/rv8K+8JjbHMU5/sUA==}
+
   vega-force@5.1.3:
     resolution: {integrity: sha512-njBlnPeeMY0uz1Fbdqa5jnOsSUrUo2s3z/Eb4qo486hhrwNtNpmeCsN+4PBasoblf/4pOpbvKULzolZmG+R7QA==}
 
+  vega-format@1.1.4:
+    resolution: {integrity: sha512-+oz6UvXjQSbweW9P8q+1o2qFYyBYPFax94j6a9PQMnCIWMovFSss1wEElljOT8CEpnHyS15yiGlmz4qbWTQwnQ==}
+
   vega-format@2.1.3:
     resolution: {integrity: sha512-VK0yh3BtK5MUoG7aAXuwb678r2wDdykAUFIKHd9MWvXNo857UqNzZfYixfyXi8xXBK2AV38R4IiQmNKUrXBMUA==}
+
+  vega-functions@5.18.1:
+    resolution: {integrity: sha512-qEBAbo0jxGGebRvbX1zmxzmjwFz8/UtncRhzwk9/KcI0WudULNmCM1iTu+DGFRnNHdcKi6kUlwJBPIp7zDu3HQ==}
 
   vega-functions@6.1.3:
     resolution: {integrity: sha512-WOgWVxGg1T1tuICyylIppxXWXWEtl7P81Xnj0vQtoIn11VvQ0mrsBZr1aia4g8Sw0fEH1mUO7Dtj7v3o8BgBmQ==}
@@ -4899,14 +5063,30 @@ packages:
   vega-functions@6.2.0:
     resolution: {integrity: sha512-MRFL7RjVmsv6iYuRZVvrDPZbySLa5Dzd5hC+0LTubysy8OrPengKZEHeRnibvHH6odg3IsKUV44Wv8dN3XzYAw==}
 
+  vega-geo@4.4.4:
+    resolution: {integrity: sha512-jTLYrDvhXJinWQCfuVLP1nSlOdFlA9blVS6K7uOcBTJ4382Aw3ALGZKluUQyJkFdrkGfqxoDJo5MLHLu2zlc6g==}
+
   vega-geo@5.1.3:
     resolution: {integrity: sha512-UfTVPV+O+7elFyUsw8FLjiDOJkF0VZanC5tHLaSSue5h+xLzG6SDKQ7xEBIQSaTBE8nLSBtHm45Qve0SFjILVQ==}
+
+  vega-hierarchy@4.1.4:
+    resolution: {integrity: sha512-/iSh1YqdgsHFB20QxJ6IAVzRZQBKuMpZ/GsN5sZDP3bBJdVWl3we48L/r6w7FP9NU+JzFHcDUPJ0S0UzpMhaqg==}
 
   vega-hierarchy@5.1.3:
     resolution: {integrity: sha512-bDWDNGuUA4WcOD5CMh9Mahs3CwKxSU3W1XAnDGCpAwfJVoWp7vlVMt1paoTczPFTXtXGxIa3vJu94xWGmI3/og==}
 
+  vega-label@1.3.2:
+    resolution: {integrity: sha512-YlUCUZNsp1FHkpPjOpD+aVVmVLFw6xa+bFQGBCECuY1DuRyN6l8oCRmUOjBrr70ip8fbqfGk+czHw543J1PJgg==}
+
   vega-label@2.1.3:
     resolution: {integrity: sha512-UcaGgrVr2Gb0sUj4j3L5tZuL6GOn7tyauYsfXsS0hURoIbHCfQI4SnRq89vl5ub5DL1SEWaJTKag4GdAm1hcGw==}
+
+  vega-lite@5.23.0:
+    resolution: {integrity: sha512-l4J6+AWE3DIjvovEoHl2LdtCUkfm4zs8Xxx7INwZEAv+XVb6kR6vIN1gt3t2gN2gs/y4DYTs/RPoTeYAuEg6mA==}
+    engines: {node: '>=18'}
+    hasBin: true
+    peerDependencies:
+      vega: ^5.24.0
 
   vega-lite@6.4.2:
     resolution: {integrity: sha512-Mv2PaRIpijz256LM0NdOJd9Md8cqyrXina54xW6Qp865YfY502zlXGUst+W/XznVwISGfatt0yLZuDqCUbBDuw==}
@@ -4915,23 +5095,44 @@ packages:
     peerDependencies:
       vega: ^6.0.0
 
+  vega-loader@4.5.4:
+    resolution: {integrity: sha512-AOJPsDVz009aTdD9hzigUaO/NFmuN1o83rzvZu/g37TJfhU+3DOvgnO0rnqJbnSOfcBkLWER6XghlKS3j77w4A==}
+
   vega-loader@5.1.3:
     resolution: {integrity: sha512-gJGoI262B5EEUGRFRY2mH+SJbVc+b4MTQfASNYpyIBqGxHqmjvNQqTyB+7bjReRYJjExjXL/MnKJmJHL6dAOwA==}
+
+  vega-parser@6.6.1:
+    resolution: {integrity: sha512-FIez+huStzgjsxLqOkxDAooTkDC2XruYCIFWhd3HuM/QrqKtj9JKGuIUJjpVVkE7by7S5ejrucpRzVVgQfbzSg==}
 
   vega-parser@7.1.3:
     resolution: {integrity: sha512-bT0pmzPF79ECFilKotgo92OUi25MGGgrEj9M0piiIpJZXQwcF2xsCf+5YRND1R0zd4zodNpqpJtIw0sl6TaqMg==}
 
+  vega-projection@1.6.3:
+    resolution: {integrity: sha512-vusyaPi3EFIHrBVs0chNv2bCqxw4X+XgI1m3+yOgUD/dutsIGTcqy+PjlNlspPQvMI9JjTeIUTGt8u1V7oDwAA==}
+
   vega-projection@2.1.3:
     resolution: {integrity: sha512-IYGBnT+8a3ZH2bOM48c2qSZAnuPyyYTua/kMeXjwxFKI1/BjzlchQ9QCKxGeBqJGdG2pp9YMW2oS/F1dw/IQXw==}
+
+  vega-regression@1.3.2:
+    resolution: {integrity: sha512-DtGToopuJGmxeoymaOXTDKlWkkYiDVvZFV1IWQNuRlChTBI6YBpil4WmA3U+ECePDQuk2+/mWlw+vafrbgF8Tg==}
 
   vega-regression@2.1.3:
     resolution: {integrity: sha512-qssCjc6KEV8pUQEEliZSTRv4cuhl5D2MgyfbKnIYbJM7B/lW/vubCPBr8oGzxVEGJd3D5kxEtXJORPipawdVEA==}
 
+  vega-runtime@6.2.2:
+    resolution: {integrity: sha512-5c+i7y5XBw5phIA1mBeqF/gtOQcDjUzroUAQ0g3y3weNx0K4mzj7V360yZiBLNcuHv65xgTlijstbKQttxeY/g==}
+
   vega-runtime@7.1.3:
     resolution: {integrity: sha512-27id9NGfnGh0u/NpQMagAmS5wDa7ELKDv1SYysiJp05HOYPuLD9XT3NSblPjZhDhyk1eApzWJAoegUoosJJtkA==}
 
+  vega-scale@7.4.3:
+    resolution: {integrity: sha512-f7SSN2YJowtrdkt7nJIR6YYhjDk8oB37q5So2/OxXQv5CBHipFPQSHS1ZVw9vD3V5wLnrZCxC4Ji27gmsTefgA==}
+
   vega-scale@8.1.3:
     resolution: {integrity: sha512-6Tx/1XMz2EtjOZm2zEONqJfYGfUWwSauhEyMCH5XWpnqoGjHQfDzDCFtBUFDs/6N+nNi3ldxCshraMiC4XCXLg==}
+
+  vega-scenegraph@4.13.2:
+    resolution: {integrity: sha512-eCutgcLzdUg23HLc6MTZ9pHCdH0hkqSmlbcoznspwT0ajjATk6M09JNyJddiaKR55HuQo03mBWsPeRCd5kOi0g==}
 
   vega-scenegraph@5.1.0:
     resolution: {integrity: sha512-4gA89CFIxkZX+4Nvl8SZF2MBOqnlj9J5zgdPh/HPx+JOwtzSlUqIhxFpFj7GWYfwzr/PyZnguBLPihPw1Og/cA==}
@@ -4939,11 +5140,20 @@ packages:
   vega-scenegraph@5.3.0:
     resolution: {integrity: sha512-sJbrDxGhyw8KFgC8NIEPBsZBZaOHAO4YtFcjw71bqIwVy6kIHlzc5I+buvJkEcBKkSTbsIdKRT1jUOHPDbBEKw==}
 
+  vega-selections@5.6.3:
+    resolution: {integrity: sha512-DXd+XVKcIjBAtSCcgtPx7cXuqG/7L98SWoFh6GKNu26EBUyn3zm0GAlZxNLPoI01Jz9Fb3YpSsewk2aIAbM68g==}
+
   vega-selections@6.1.5:
     resolution: {integrity: sha512-evYoCV1wuE0kuiDrKH2dVVweMUuz0pNN7rYTYKBSNDqa7TBjDU4+tbWFm/CgowoaAqjC6Omd+jEZz9lwpgeE3w==}
 
+  vega-statistics@1.9.0:
+    resolution: {integrity: sha512-GAqS7mkatpXcMCQKWtFu1eMUKLUymjInU0O8kXshWaQrVWjPIO2lllZ1VNhdgE0qGj4oOIRRS11kzuijLshGXQ==}
+
   vega-statistics@2.0.0:
     resolution: {integrity: sha512-dGPfDXnBlgXbZF3oxtkb8JfeRXd5TYHx25Z/tIoaa9jWua4Vf/AoW2wwh8J1qmMy8J03/29aowkp1yk4DOPazQ==}
+
+  vega-time@2.1.4:
+    resolution: {integrity: sha512-DBMRps5myYnSAlvQ+oiX8CycJZjGQNqyGE04xaZrpOgHll7vlvezpET2FnGZC7wS3DsqMcPjnpnI1h7+qJox1Q==}
 
   vega-time@3.1.0:
     resolution: {integrity: sha512-G93mWzPwNa6UYQRkr8Ujur9uqxbBDjDT/WpXjbDY0yygdSkRT+zXF+Sb4gjhW0nPaqdiwkn0R6kZcSPMj1bMNA==}
@@ -4951,26 +5161,50 @@ packages:
   vega-time@3.3.0:
     resolution: {integrity: sha512-bm9uMPrGIPQ52jD3Ltr6gUspogDtO0G8pEzLKvLySX84reeShHTH6jOd9YXwISNfuS4LT+cmPr9Ct6TMgvPMOA==}
 
+  vega-transforms@4.12.2:
+    resolution: {integrity: sha512-VuNLzB0DavFn5GIkFvR2XvwPavjY7VXl2oPUOFvNgSfyQywmCoC7VOX+iHeOdxoZdoy+XEOGAqRs9imxVo2HVA==}
+
   vega-transforms@5.1.0:
     resolution: {integrity: sha512-mj/sO2tSuzzpiXX8JSl4DDlhEmVwM/46MTAzTNQUQzJPMI/n4ChCjr/SdEbfEyzlD4DPm1bjohZGjLc010yuMg==}
+
+  vega-typings@1.5.1:
+    resolution: {integrity: sha512-40kRoG/jG8+4cd3kT5yw08iTlIGe57F7Go/ileSCtRtgU8RZ7tpPaE6GgYvF/HTPlCKMk9/pOdp62+o5sulhvQ==}
 
   vega-typings@2.1.0:
     resolution: {integrity: sha512-zdis4Fg4gv37yEvTTSZEVMNhp8hwyEl7GZ4X4HHddRVRKxWFsbyKvZx/YW5Z9Ox4sjxVA2qHzEbod4Fdx+SEJA==}
 
+  vega-util@1.17.4:
+    resolution: {integrity: sha512-+y3ZW7dEqM8Ck+KRsd+jkMfxfE7MrQxUyIpNjkfhIpGEreym+aTn7XUw1DKXqclr8mqTQvbilPo16B3lnBr0wA==}
+
   vega-util@2.1.3:
     resolution: {integrity: sha512-Znj01Gj5XVUw/U7QvwjMhl+XCGs09UF5KDyMXZz9NtjhoKP04anWjcbA7hqoVH+eEigO92KlTi+Yai6Roo1n0A==}
+
+  vega-view-transforms@4.6.2:
+    resolution: {integrity: sha512-udnYutgX7T7E0crqKWSs4hcxTdUmZHR2F4rKj0+3nN9+CfYMWbGgUkCkP2pMu7j2OH0ETX2uDn5xL8+YJWeXSg==}
 
   vega-view-transforms@5.1.0:
     resolution: {integrity: sha512-fpigh/xn/32t+An1ShoY3MLeGzNdlbAp2+HvFKzPpmpMTZqJEWkk/J/wHU7Swyc28Ta7W1z3fO+8dZkOYO5TWQ==}
 
+  vega-view@5.16.1:
+    resolution: {integrity: sha512-YyG4i2JDkRCacHd9xNAwyov2cELxwzPGY224PA2o0gEhkoOjPkVElTmo9QHJvKeVxMoyad6wvoq+Jj+TB6zhLw==}
+
   vega-view@6.1.2:
     resolution: {integrity: sha512-BG/Kqd1csdK4uKdJ4hv72msgQX3Ry5SzCV1ngbytkn6QwuQPpFWzya/f0OSWyMQP9S79avdHXqdLCxjSeiDQRw==}
+
+  vega-voronoi@4.2.5:
+    resolution: {integrity: sha512-u0TLSQboiLyoM6V9S0E6cc77EfWati+ApZ6zE+NhH3h/zZRzYZmElnDn46hUof2o9jNyh09xFXTXykVHmt7IGg==}
 
   vega-voronoi@5.1.3:
     resolution: {integrity: sha512-1EYf2KFE/otZmjyQSw2xisnT6QDXouyofHBI9o9C1zOfNM284+wmJ0qbvL46wX9jEauH+RKG5qnx0eDWQHVjYw==}
 
+  vega-wordcloud@4.1.7:
+    resolution: {integrity: sha512-xdMykDXdWEp3/7Hil7Yx8uNVmjvqxwGibHJLSfiubNNO9OErrH3ZUgcxWv5hLe9wdK+KSGP94SSqTOAaqH7r/A==}
+
   vega-wordcloud@5.1.3:
     resolution: {integrity: sha512-DxghqU1U9VPSKWmvatyQiDNShz1XfKv/XnIGlRWYdfTMnZvD3Y46mdrxPBhqFMF6TQKjZKyeqz5GtukA/RaH5Q==}
+
+  vega@5.33.1:
+    resolution: {integrity: sha512-1fArfVDUqVbb5z8n+/nVQb+VNBzx8svY6CrsyTK4Ujm4yrd9I1auoKxBAPXLCavY1LcrbHUskQbGUP8gXOzyQw==}
 
   vega@6.2.0:
     resolution: {integrity: sha512-BIwalIcEGysJdQDjeVUmMWB3e50jPDNAMfLJscjEvpunU9bSt7X1OYnQxkg3uBwuRRI4nWfFZO9uIW910nLeGw==}
@@ -5023,6 +5257,9 @@ packages:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
     engines: {node: '>= 8'}
     hasBin: true
+
+  wicked-good-xpath@1.3.0:
+    resolution: {integrity: sha512-Gd9+TUn5nXdwj/hFsPVx5cuHHiF5Bwuc30jZ4+ronF1qHK5O7HD0sgmXWSEgwKquT3ClLoKPVbO6qGwVwLzvAw==}
 
   word-wrap@1.2.5:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
@@ -5116,6 +5353,9 @@ packages:
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
+
+  zrender@5.6.1:
+    resolution: {integrity: sha512-OFXkDJKcrlx5su2XbzJvj/34Q3m6PvyCZkVPHGYpcCJ52ek4U/ymZyfuV1nKE23AyBJ51E/6Yr0mhZ7xGTO4ag==}
 
   zrender@6.0.0:
     resolution: {integrity: sha512-41dFXEEXuJpNecuUQq6JlbybmnHaqqpGlbH1yxnA5V9MMP4SbohSVZsJIwz+zdjQXSSlR1Vc34EgH1zxyTDvhg==}
@@ -6095,6 +6335,77 @@ snapshots:
     dependencies:
       '@eslint/core': 0.17.0
       levn: 0.4.1
+
+  '@goaskaway/d2-little-web@0.7.1-0.rev.1.rc.3': {}
+
+  '@goaskaway/graphviz-anywhere-rn@0.2.1-rc.3(react-native-macos@0.81.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@react-native/metro-config@0.81.5(@babel/core@7.29.7))(@types/react@19.0.0)(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0))(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)':
+    dependencies:
+      react: 19.0.0
+      react-native: 0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0)
+    optionalDependencies:
+      react-native-macos: 0.81.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@react-native/metro-config@0.81.5(@babel/core@7.29.7))(@types/react@19.0.0)(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)
+
+  '@goaskaway/graphviz-anywhere-web@0.2.1-rc.3': {}
+
+  '@goaskaway/mermaid-little-web@11.14.0-0.rev.1.rc.3': {}
+
+  '@goaskaway/plantuml-little-web@1.2026.2-0.rev.3.rc.3(@goaskaway/graphviz-anywhere-web@0.2.1-rc.3)':
+    optionalDependencies:
+      '@goaskaway/graphviz-anywhere-web': 0.2.1-rc.3
+
+  '@goaskaway/supramark-core@0.1.0-rc.3':
+    dependencies:
+      '@goaskaway/supramark-markdown-web': 0.1.0-rc.3
+      katex: 0.16.47
+
+  '@goaskaway/supramark-engines@0.1.0-rc.3(react-native-macos@0.81.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@react-native/metro-config@0.81.5(@babel/core@7.29.7))(@types/react@19.0.0)(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0))(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)':
+    dependencies:
+      '@goaskaway/d2-little-web': 0.7.1-0.rev.1.rc.3
+      '@goaskaway/graphviz-anywhere-rn': 0.2.1-rc.3(react-native-macos@0.81.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@react-native/metro-config@0.81.5(@babel/core@7.29.7))(@types/react@19.0.0)(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0))(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)
+      '@goaskaway/graphviz-anywhere-web': 0.2.1-rc.3
+      '@goaskaway/mermaid-little-web': 11.14.0-0.rev.1.rc.3
+      '@goaskaway/plantuml-little-web': 1.2026.2-0.rev.3.rc.3(@goaskaway/graphviz-anywhere-web@0.2.1-rc.3)
+      echarts: 5.6.0
+      elkjs: 0.8.2
+      mathjax-full: 3.2.2
+      vega: 5.33.1
+      vega-lite: 5.23.0(vega@5.33.1)
+    transitivePeerDependencies:
+      - encoding
+      - react
+      - react-native
+      - react-native-macos
+      - react-native-windows
+
+  '@goaskaway/supramark-markdown-native-rn@0.1.0-rc.3(@goaskaway/supramark-core@0.1.0-rc.3)(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)':
+    dependencies:
+      '@goaskaway/supramark-core': 0.1.0-rc.3
+      react: 19.0.0
+      react-native: 0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0)
+
+  '@goaskaway/supramark-markdown-web@0.1.0-rc.3': {}
+
+  '@goaskaway/supramark-rn-selection@0.1.0-rc.3(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)':
+    dependencies:
+      '@goaskaway/supramark-core': 0.1.0-rc.3
+    optionalDependencies:
+      react: 19.0.0
+      react-native: 0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0)
+
+  '@goaskaway/supramark-rn@0.1.0-rc.3(98541bceb842913aa1928d5f1da63ce2)':
+    dependencies:
+      '@goaskaway/supramark-core': 0.1.0-rc.3
+      '@goaskaway/supramark-engines': 0.1.0-rc.3(react-native-macos@0.81.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@react-native/metro-config@0.81.5(@babel/core@7.29.7))(@types/react@19.0.0)(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0))(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)
+      '@goaskaway/supramark-rn-selection': 0.1.0-rc.3(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)
+    optionalDependencies:
+      '@goaskaway/graphviz-anywhere-rn': 0.2.1-rc.3(react-native-macos@0.81.1(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@react-native/metro-config@0.81.5(@babel/core@7.29.7))(@types/react@19.0.0)(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0))(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)
+      react: 19.0.0
+      react-native: 0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0)
+      react-native-svg: 15.15.3(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@20.2.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0)
+    transitivePeerDependencies:
+      - encoding
+      - react-native-macos
+      - react-native-windows
 
   '@hapi/hoek@9.3.0': {}
 
@@ -7082,6 +7393,8 @@ snapshots:
 
   '@types/geojson@7946.0.16': {}
 
+  '@types/geojson@7946.0.4': {}
+
   '@types/graceful-fs@4.1.9':
     dependencies:
       '@types/node': 22.20.1
@@ -7347,6 +7660,8 @@ snapshots:
   '@ungap/structured-clone@1.4.0': {}
 
   '@vscode/sudo-prompt@9.3.2': {}
+
+  '@xmldom/xmldom@0.9.12': {}
 
   '@yarnpkg/lockfile@1.1.0': {}
 
@@ -7823,9 +8138,13 @@ snapshots:
 
   commander@12.1.0: {}
 
+  commander@13.1.0: {}
+
   commander@2.20.3: {}
 
   commander@7.2.0: {}
+
+  commander@8.3.0: {}
 
   commander@9.5.0: {}
 
@@ -8117,6 +8436,11 @@ snapshots:
       es-errors: 1.3.0
       gopd: 1.2.0
 
+  echarts@5.6.0:
+    dependencies:
+      tslib: 2.3.0
+      zrender: 5.6.1
+
   echarts@6.0.0:
     dependencies:
       tslib: 2.3.0
@@ -8127,6 +8451,8 @@ snapshots:
   electron-to-chromium@1.5.418: {}
 
   elkjs@0.11.1: {}
+
+  elkjs@0.8.2: {}
 
   emittery@0.13.1: {}
 
@@ -8445,6 +8771,8 @@ snapshots:
       optionator: 0.9.4
     transitivePeerDependencies:
       - supports-color
+
+  esm@3.2.25: {}
 
   espree@10.4.0:
     dependencies:
@@ -9447,6 +9775,10 @@ snapshots:
       object.assign: 4.1.7
       object.values: 1.2.1
 
+  katex@0.16.47:
+    dependencies:
+      commander: 8.3.0
+
   keel@file:packages/keel(react-dom@19.2.8(react@19.0.0))(react-native-web@0.21.2(react-dom@19.2.8(react@19.0.0))(react@19.0.0))(react-native@0.79.6(@babel/core@7.29.7)(@react-native-community/cli@18.0.0(typescript@5.9.3))(@types/react@19.0.0)(react@19.0.0))(react@19.0.0):
     dependencies:
       '@babel/runtime': 7.29.7
@@ -9542,6 +9874,13 @@ snapshots:
   marky@1.3.0: {}
 
   math-intrinsics@1.1.0: {}
+
+  mathjax-full@3.2.2:
+    dependencies:
+      esm: 3.2.25
+      mhchemparser: 4.2.1
+      mj-context-menu: 0.6.1
+      speech-rule-engine: 4.1.5
 
   mdn-data@2.0.14: {}
 
@@ -9906,6 +10245,8 @@ snapshots:
       - supports-color
       - utf-8-validate
 
+  mhchemparser@4.2.1: {}
+
   micromatch@4.0.8:
     dependencies:
       braces: 3.0.3
@@ -9943,6 +10284,8 @@ snapshots:
 
   minimist@1.2.8: {}
 
+  mj-context-menu@0.6.1: {}
+
   mkdirp@1.0.4: {}
 
   ms@2.0.0: {}
@@ -9971,7 +10314,6 @@ snapshots:
   node-fetch@2.7.0:
     dependencies:
       whatwg-url: 5.0.0
-    optional: true
 
   node-int64@0.4.0: {}
 
@@ -10903,6 +11245,12 @@ snapshots:
 
   spark-md5@3.0.2: {}
 
+  speech-rule-engine@4.1.5:
+    dependencies:
+      '@xmldom/xmldom': 0.9.12
+      commander: 13.1.0
+      wicked-good-xpath: 1.3.0
+
   sprintf-js@1.0.3: {}
 
   stack-utils@2.0.6:
@@ -11071,8 +11419,7 @@ snapshots:
     dependencies:
       commander: 2.20.3
 
-  tr46@0.0.3:
-    optional: true
+  tr46@0.0.3: {}
 
   ts-api-utils@1.4.3(typescript@5.9.3):
     dependencies:
@@ -11225,7 +11572,17 @@ snapshots:
 
   vary@1.1.2: {}
 
+  vega-canvas@1.2.7: {}
+
   vega-canvas@2.0.0: {}
+
+  vega-crossfilter@4.1.4:
+    dependencies:
+      d3-array: 3.2.4
+      vega-dataflow: 5.7.8
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
 
   vega-crossfilter@5.1.3:
     dependencies:
@@ -11233,11 +11590,29 @@ snapshots:
       vega-dataflow: 6.1.3
       vega-util: 2.1.3
 
+  vega-dataflow@5.7.8:
+    dependencies:
+      vega-format: 1.1.4
+      vega-loader: 4.5.4
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
+
   vega-dataflow@6.1.3:
     dependencies:
       vega-format: 2.1.3
       vega-loader: 5.1.3
       vega-util: 2.1.3
+
+  vega-encode@4.10.3:
+    dependencies:
+      d3-array: 3.2.4
+      d3-interpolate: 3.0.1
+      vega-dataflow: 5.7.8
+      vega-scale: 7.4.3
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
 
   vega-encode@5.1.0:
     dependencies:
@@ -11247,7 +11622,19 @@ snapshots:
       vega-scale: 8.1.3
       vega-util: 2.1.3
 
+  vega-event-selector@3.0.1: {}
+
   vega-event-selector@4.0.0: {}
+
+  vega-expression@5.1.2:
+    dependencies:
+      '@types/estree': 1.0.9
+      vega-util: 1.17.4
+
+  vega-expression@5.2.1:
+    dependencies:
+      '@types/estree': 1.0.9
+      vega-util: 1.17.4
 
   vega-expression@6.1.0:
     dependencies:
@@ -11259,11 +11646,27 @@ snapshots:
       '@types/estree': 1.0.9
       vega-util: 2.1.3
 
+  vega-force@4.2.3:
+    dependencies:
+      d3-force: 3.0.0
+      vega-dataflow: 5.7.8
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
+
   vega-force@5.1.3:
     dependencies:
       d3-force: 3.0.0
       vega-dataflow: 6.1.3
       vega-util: 2.1.3
+
+  vega-format@1.1.4:
+    dependencies:
+      d3-array: 3.2.4
+      d3-format: 3.1.2
+      d3-time-format: 4.1.0
+      vega-time: 2.1.4
+      vega-util: 1.17.4
 
   vega-format@2.1.3:
     dependencies:
@@ -11272,6 +11675,22 @@ snapshots:
       d3-time-format: 4.1.0
       vega-time: 3.3.0
       vega-util: 2.1.3
+
+  vega-functions@5.18.1:
+    dependencies:
+      d3-array: 3.2.4
+      d3-color: 3.1.0
+      d3-geo: 3.1.1
+      vega-dataflow: 5.7.8
+      vega-expression: 5.2.1
+      vega-scale: 7.4.3
+      vega-scenegraph: 4.13.2
+      vega-selections: 5.6.3
+      vega-statistics: 1.9.0
+      vega-time: 2.1.4
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
 
   vega-functions@6.1.3:
     dependencies:
@@ -11302,6 +11721,19 @@ snapshots:
       vega-time: 3.3.0
       vega-util: 2.1.3
 
+  vega-geo@4.4.4:
+    dependencies:
+      d3-array: 3.2.4
+      d3-color: 3.1.0
+      d3-geo: 3.1.1
+      vega-canvas: 1.2.7
+      vega-dataflow: 5.7.8
+      vega-projection: 1.6.3
+      vega-statistics: 1.9.0
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
+
   vega-geo@5.1.3:
     dependencies:
       d3-array: 3.2.4
@@ -11313,11 +11745,28 @@ snapshots:
       vega-statistics: 2.0.0
       vega-util: 2.1.3
 
+  vega-hierarchy@4.1.4:
+    dependencies:
+      d3-hierarchy: 3.1.2
+      vega-dataflow: 5.7.8
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
+
   vega-hierarchy@5.1.3:
     dependencies:
       d3-hierarchy: 3.1.2
       vega-dataflow: 6.1.3
       vega-util: 2.1.3
+
+  vega-label@1.3.2:
+    dependencies:
+      vega-canvas: 1.2.7
+      vega-dataflow: 5.7.8
+      vega-scenegraph: 4.13.2
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
 
   vega-label@2.1.3:
     dependencies:
@@ -11325,6 +11774,16 @@ snapshots:
       vega-dataflow: 6.1.3
       vega-scenegraph: 5.3.0
       vega-util: 2.1.3
+
+  vega-lite@5.23.0(vega@5.33.1):
+    dependencies:
+      json-stringify-pretty-compact: 4.0.0
+      tslib: 2.8.1
+      vega: 5.33.1
+      vega-event-selector: 3.0.1
+      vega-expression: 5.1.2
+      vega-util: 1.17.4
+      yargs: 17.7.3
 
   vega-lite@6.4.2(vega@6.2.0):
     dependencies:
@@ -11336,12 +11795,32 @@ snapshots:
       vega-util: 2.1.3
       yargs: 18.0.0
 
+  vega-loader@4.5.4:
+    dependencies:
+      d3-dsv: 3.0.1
+      node-fetch: 2.7.0
+      topojson-client: 3.1.0
+      vega-format: 1.1.4
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
+
   vega-loader@5.1.3:
     dependencies:
       d3-dsv: 3.0.1
       topojson-client: 3.1.0
       vega-format: 2.1.3
       vega-util: 2.1.3
+
+  vega-parser@6.6.1:
+    dependencies:
+      vega-dataflow: 5.7.8
+      vega-event-selector: 3.0.1
+      vega-functions: 5.18.1
+      vega-scale: 7.4.3
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
 
   vega-parser@7.1.3:
     dependencies:
@@ -11351,11 +11830,26 @@ snapshots:
       vega-scale: 8.1.3
       vega-util: 2.1.3
 
+  vega-projection@1.6.3:
+    dependencies:
+      d3-geo: 3.1.1
+      d3-geo-projection: 4.0.0
+      vega-scale: 7.4.3
+
   vega-projection@2.1.3:
     dependencies:
       d3-geo: 3.1.1
       d3-geo-projection: 4.0.0
       vega-scale: 8.1.3
+
+  vega-regression@1.3.2:
+    dependencies:
+      d3-array: 3.2.4
+      vega-dataflow: 5.7.8
+      vega-statistics: 1.9.0
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
 
   vega-regression@2.1.3:
     dependencies:
@@ -11364,10 +11858,26 @@ snapshots:
       vega-statistics: 2.0.0
       vega-util: 2.1.3
 
+  vega-runtime@6.2.2:
+    dependencies:
+      vega-dataflow: 5.7.8
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
+
   vega-runtime@7.1.3:
     dependencies:
       vega-dataflow: 6.1.3
       vega-util: 2.1.3
+
+  vega-scale@7.4.3:
+    dependencies:
+      d3-array: 3.2.4
+      d3-interpolate: 3.0.1
+      d3-scale: 4.0.2
+      d3-scale-chromatic: 3.1.0
+      vega-time: 2.1.4
+      vega-util: 1.17.4
 
   vega-scale@8.1.3:
     dependencies:
@@ -11377,6 +11887,17 @@ snapshots:
       d3-scale-chromatic: 3.1.0
       vega-time: 3.3.0
       vega-util: 2.1.3
+
+  vega-scenegraph@4.13.2:
+    dependencies:
+      d3-path: 3.1.0
+      d3-shape: 3.2.0
+      vega-canvas: 1.2.7
+      vega-loader: 4.5.4
+      vega-scale: 7.4.3
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
 
   vega-scenegraph@5.1.0:
     dependencies:
@@ -11396,15 +11917,31 @@ snapshots:
       vega-scale: 8.1.3
       vega-util: 2.1.3
 
+  vega-selections@5.6.3:
+    dependencies:
+      d3-array: 3.2.4
+      vega-expression: 5.2.1
+      vega-util: 1.17.4
+
   vega-selections@6.1.5:
     dependencies:
       d3-array: 3.2.4
       vega-expression: 6.2.2
       vega-util: 2.1.3
 
+  vega-statistics@1.9.0:
+    dependencies:
+      d3-array: 3.2.4
+
   vega-statistics@2.0.0:
     dependencies:
       d3-array: 3.2.4
+
+  vega-time@2.1.4:
+    dependencies:
+      d3-array: 3.2.4
+      d3-time: 3.1.0
+      vega-util: 1.17.4
 
   vega-time@3.1.0:
     dependencies:
@@ -11418,6 +11955,16 @@ snapshots:
       d3-time: 3.1.0
       vega-util: 2.1.3
 
+  vega-transforms@4.12.2:
+    dependencies:
+      d3-array: 3.2.4
+      vega-dataflow: 5.7.8
+      vega-statistics: 1.9.0
+      vega-time: 2.1.4
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
+
   vega-transforms@5.1.0:
     dependencies:
       d3-array: 3.2.4
@@ -11426,6 +11973,13 @@ snapshots:
       vega-time: 3.1.0
       vega-util: 2.1.3
 
+  vega-typings@1.5.1:
+    dependencies:
+      '@types/geojson': 7946.0.4
+      vega-event-selector: 3.0.1
+      vega-expression: 5.2.1
+      vega-util: 1.17.4
+
   vega-typings@2.1.0:
     dependencies:
       '@types/geojson': 7946.0.16
@@ -11433,13 +11987,36 @@ snapshots:
       vega-expression: 6.1.0
       vega-util: 2.1.3
 
+  vega-util@1.17.4: {}
+
   vega-util@2.1.3: {}
+
+  vega-view-transforms@4.6.2:
+    dependencies:
+      vega-dataflow: 5.7.8
+      vega-scenegraph: 4.13.2
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
 
   vega-view-transforms@5.1.0:
     dependencies:
       vega-dataflow: 6.1.3
       vega-scenegraph: 5.1.0
       vega-util: 2.1.3
+
+  vega-view@5.16.1:
+    dependencies:
+      d3-array: 3.2.4
+      d3-timer: 3.0.1
+      vega-dataflow: 5.7.8
+      vega-format: 1.1.4
+      vega-functions: 5.18.1
+      vega-runtime: 6.2.2
+      vega-scenegraph: 4.13.2
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
 
   vega-view@6.1.2:
     dependencies:
@@ -11452,11 +12029,29 @@ snapshots:
       vega-scenegraph: 5.3.0
       vega-util: 2.1.3
 
+  vega-voronoi@4.2.5:
+    dependencies:
+      d3-delaunay: 6.0.4
+      vega-dataflow: 5.7.8
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
+
   vega-voronoi@5.1.3:
     dependencies:
       d3-delaunay: 6.0.4
       vega-dataflow: 6.1.3
       vega-util: 2.1.3
+
+  vega-wordcloud@4.1.7:
+    dependencies:
+      vega-canvas: 1.2.7
+      vega-dataflow: 5.7.8
+      vega-scale: 7.4.3
+      vega-statistics: 1.9.0
+      vega-util: 1.17.4
+    transitivePeerDependencies:
+      - encoding
 
   vega-wordcloud@5.1.3:
     dependencies:
@@ -11465,6 +12060,38 @@ snapshots:
       vega-scale: 8.1.3
       vega-statistics: 2.0.0
       vega-util: 2.1.3
+
+  vega@5.33.1:
+    dependencies:
+      vega-crossfilter: 4.1.4
+      vega-dataflow: 5.7.8
+      vega-encode: 4.10.3
+      vega-event-selector: 3.0.1
+      vega-expression: 5.2.1
+      vega-force: 4.2.3
+      vega-format: 1.1.4
+      vega-functions: 5.18.1
+      vega-geo: 4.4.4
+      vega-hierarchy: 4.1.4
+      vega-label: 1.3.2
+      vega-loader: 4.5.4
+      vega-parser: 6.6.1
+      vega-projection: 1.6.3
+      vega-regression: 1.3.2
+      vega-runtime: 6.2.2
+      vega-scale: 7.4.3
+      vega-scenegraph: 4.13.2
+      vega-statistics: 1.9.0
+      vega-time: 2.1.4
+      vega-transforms: 4.12.2
+      vega-typings: 1.5.1
+      vega-util: 1.17.4
+      vega-view: 5.16.1
+      vega-view-transforms: 4.6.2
+      vega-voronoi: 4.2.5
+      vega-wordcloud: 4.1.7
+    transitivePeerDependencies:
+      - encoding
 
   vega@6.2.0:
     dependencies:
@@ -11510,8 +12137,7 @@ snapshots:
     dependencies:
       defaults: 1.0.4
 
-  webidl-conversions@3.0.1:
-    optional: true
+  webidl-conversions@3.0.1: {}
 
   whatwg-fetch@3.6.20: {}
 
@@ -11519,7 +12145,6 @@ snapshots:
     dependencies:
       tr46: 0.0.3
       webidl-conversions: 3.0.1
-    optional: true
 
   which-boxed-primitive@1.1.1:
     dependencies:
@@ -11567,6 +12192,8 @@ snapshots:
   which@2.0.2:
     dependencies:
       isexe: 2.0.0
+
+  wicked-good-xpath@1.3.0: {}
 
   word-wrap@1.2.5: {}
 
@@ -11654,6 +12281,10 @@ snapshots:
       yargs-parser: 22.0.0
 
   yocto-queue@0.1.0: {}
+
+  zrender@5.6.1:
+    dependencies:
+      tslib: 2.3.0
 
   zrender@6.0.0:
     dependencies:

@@ -11,6 +11,7 @@ readme = "README.md"
 
 [features]
 default = []
+oci-ipc = ["dep:tokio"]
 uniffi = ["dep:uniffi"]
 
 [lints]
@@ -20,6 +21,9 @@ workspace = true
 # Protocol buffer support (using prost with proto2)
 prost = "0.14.1"
 prost-types = "0.14.1"
+
+# Async framing for the optional OCI IPC protocol.
+tokio = { version = "1.48", default-features = false, features = ["io-util"], optional = true }
 
 # Exact version pins in Realm package references.
 semver = "1"

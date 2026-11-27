@@ -197,6 +197,7 @@ fn runtime_config(
         storage_root: None,
         wasi_data_dir: None,
         wasi_data_access: actr_config::WasiDataAccess::default(),
+        oci: None,
         actrium: None,
     }
 }
@@ -382,6 +383,9 @@ fn read_public_key(path: &std::path::Path) -> [u8; 32] {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn counterapp_front_attaches_to_the_real_service_package() {
+    if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+        return;
+    }
     let (Some(front_path), Some(service_path), Some(key_path)) = (
         std::env::var_os("COUNTERAPP_FRONT"),
         std::env::var_os("COUNTERAPP_SERVICE"),
@@ -524,6 +528,19 @@ async fn counterapp_front_attaches_to_the_real_service_package() {
         runtime: metadata.runtime.clone(),
         requested_capabilities: vec![SERVICE_CAPABILITY.to_string()],
     };
+    if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+        assert!(matches!(
+            front_ref.attach_actrium(&discovered, attach_params).await,
+            Err(actr_protocol::ActrError::PermissionDenied(message))
+                if message.contains("no verified Actor channel")
+        ));
+        front_ref.shutdown();
+        front_ref.wait_for_shutdown().await;
+        service_ref.shutdown();
+        service_ref.wait_for_shutdown().await;
+        server.shutdown().await;
+        return;
+    }
     let session = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             match front_ref

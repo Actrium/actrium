@@ -329,6 +329,7 @@ final class RendererProcessController {
     private var serviceEventTabs: [UUID: String] = [:]
     private var cancelledServiceEventSubscriptions: Set<UUID> = []
     private var fileImports: [String: (id: UUID, reloadKey: Int, reply: (GuestFileImportReply) -> Void)] = [:]
+    private lazy var fileExport = GuestFileExportClient(connection: connection)
     private var guestMenus: [String: (call: GuestMenuCall, reply: (GuestMenuReply) -> Void)] = [:]
     private let attachmentStorage: (cache: RendererAttachmentCache, lock: FileHandle)?
     private var attachmentCache: RendererAttachmentCache? { attachmentStorage?.cache }
@@ -393,6 +394,17 @@ final class RendererProcessController {
         } catch {
             reply(GuestFileImportReply(id: call.id, error: "Could not contact the file picker."))
         }
+    }
+
+    static func saveFile(
+        _ call: GuestFileExportCall, tabId: String, reply: @escaping (GuestFileExportReply) -> Void
+    ) {
+        guard let controller = RendererProcessLifetime.shared.controller,
+              controller.surfaces[tabId] != nil else {
+            reply(GuestFileExportReply(id: call.id, error: "The export tab is unavailable."))
+            return
+        }
+        controller.fileExport.send(call, tabId: tabId, reply: reply)
     }
 
     static func callRealmService(
@@ -707,6 +719,10 @@ final class RendererProcessController {
                 receiveFileImport(json, tabId: tabId)
                 return
             }
+            if name == GuestFileExportCall.responseEvent {
+                fileExport.receive(json: json, tabId: tabId)
+                return
+            }
             if name == GuestMenuCall.responseEvent {
                 receiveGuestMenu(json, tabId: tabId)
                 return
@@ -869,6 +885,10 @@ final class RendererProcessController {
             DispatchQueue.main.async {
                 reply(self?.surfaces[tabId]?.accessibilityTree() ?? Actrium_Ipc_AccessibilityTree())
             }
+        }
+
+        connection.onAccessibilitySnapshotRefresh = { [weak self] in
+            self?.refreshAccessibilitySnapshots()
         }
 
         connection.onAccessibilityAction = { [weak self] request, reply in
@@ -1058,11 +1078,24 @@ final class RendererProcessController {
 
     func publishAccessibilityTree(tabId: String) {
         guard let surface = surfaces[tabId] else { return }
-        try? connection.sendAccessibilityTree(surface.accessibilityTree())
+        do {
+            try connection.sendAccessibilityTree(surface.accessibilityTree(), delivery: surface.accessibilityDelivery)
+        } catch IPCError.notConnected {
+            // The connection's disconnect handler owns teardown.
+        } catch {
+            NSLog("Renderer accessibility snapshot failed: %@", error.localizedDescription)
+        }
+    }
+
+    private func refreshAccessibilitySnapshots() {
+        for surface in surfaces.values where surface.accessibilityDelivery.takeRefreshRequest() {
+            publishAccessibilityTree(tabId: surface.tabId)
+        }
     }
 
     private func destroyTab(_ tabId: String) {
         cancelFileImport(tabId)
+        fileExport.close(tabId: tabId)
         cancelGuestMenu(tabId)
         attachmentCache?.close(tabId: tabId)
         failPendingAttachmentCalls(tabId: tabId)
@@ -1262,6 +1295,7 @@ private final class TextSelectionGesture {
 private final class RendererTabSurface {
 
     let tabId: String
+    let accessibilityDelivery = AccessibilitySnapshotDelivery()
     let entry: TabViewControllerEntry
     let container: ResizableContainerView
     let window: RendererWindow
@@ -1272,6 +1306,7 @@ private final class RendererTabSurface {
     private var accessibilityPublishWork: DispatchWorkItem?
     private let mouseTracking = RendererMouseTracking()
     private let hoverTracking = RendererHoverTracking(tracksHover: ActriumRendererTracksHover)
+    private var mousePressEventNumbers: [UInt32: Int] = [:]
     private var textInputPresses: Set<UInt32> = []
     /// The active drag and the anchor a later Shift gesture extends from;
     /// every invalidation path funnels through this one object.
@@ -1433,6 +1468,7 @@ private final class RendererTabSurface {
         if !focused {
             ServiceReactNativeHost.shared.sendDocumentSelectionCommand("clear", tabId: tabId)
             mouseTracking.cancel()
+            mousePressEventNumbers.removeAll()
             textInputPresses.removeAll()
             // Reset the gesture so a stale phase cannot block anchor retirement.
             selectionGesture.invalidate()
@@ -1444,6 +1480,7 @@ private final class RendererTabSurface {
 
     func close() {
         mouseTracking.cancel()
+        mousePressEventNumbers.removeAll()
         undoHistories.removeAllObjects()
         accessibilityPublishWork?.cancel()
         accessibilityPublishWork = nil
@@ -1553,6 +1590,19 @@ private final class RendererTabSurface {
         switch input.type {
         case .mouseDown, .mouseUp, .mouseMove, .mouseDragged:
             guard let type = RendererMouseTracking.eventType(for: input) else { return }
+            let originalEventNumber = input.hasEventNumber ? Int(input.eventNumber) : Int(input.button) + 1
+            let eventNumber: Int
+            if input.type == .mouseDown {
+                mousePressEventNumbers[input.button] = originalEventNumber
+                eventNumber = originalEventNumber
+            } else if input.type == .mouseUp {
+                eventNumber = mousePressEventNumbers.removeValue(forKey: input.button) ?? originalEventNumber
+            } else if input.type == .mouseDragged {
+                // React Native identifies a press by its mouse-down event number.
+                eventNumber = mousePressEventNumbers[input.button] ?? originalEventNumber
+            } else {
+                eventNumber = originalEventNumber
+            }
             guard let event = NSEvent.mouseEvent(
                 with: type,
                 location: location,
@@ -1560,7 +1610,7 @@ private final class RendererTabSurface {
                 timestamp: timestamp,
                 windowNumber: window.windowNumber,
                 context: nil,
-                eventNumber: input.hasEventNumber ? Int(input.eventNumber) : Int(input.button) + 1,
+                eventNumber: eventNumber,
                 clickCount: input.hasClickCount ? Int(input.clickCount) : (input.type == .mouseMove ? 0 : 1),
                 pressure: input.type == .mouseDown || input.type == .mouseDragged ? 1 : 0
             ) else {

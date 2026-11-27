@@ -424,6 +424,16 @@ impl RuntimeContext {
             .await
     }
 
+    pub(crate) async fn prepare_peer_rpc(&self, peer: &ActrId, timeout_ms: i64) -> ActorResult<()> {
+        let deadline = crate::transport::RpcDeadline::from_timeout_ms(timeout_ms)?;
+        self.ensure_session_ready_until(crate::timer::ids::RUNTIME_CALL_PREFLIGHT, deadline)
+            .await?;
+        let Gate::Peer(gate) = self.select_gate(&Dest::Peer(peer.clone()))? else {
+            return Err(ActrError::Unavailable("Peer gate is unavailable".into()));
+        };
+        gate.prepare_rpc_peer(peer, deadline).await
+    }
+
     pub(crate) async fn call_raw_with_deadline(
         &self,
         target: &Dest,
@@ -555,10 +565,22 @@ impl RuntimeContext {
         payload_type: PayloadType,
         payload: Bytes,
     ) -> ActorResult<()> {
-        crate::outbound::ensure_rpc_payload_type(payload_type)?;
-
         let deadline =
             crate::transport::RpcDeadline::from_duration(crate::transport::TELL_SEND_TIMEOUT);
+        self.tell_raw_with_deadline(target, route_key, payload_type, payload, deadline, None)
+            .await
+    }
+
+    pub(crate) async fn tell_raw_with_deadline(
+        &self,
+        target: &Dest,
+        route_key: String,
+        payload_type: PayloadType,
+        payload: Bytes,
+        deadline: crate::transport::RpcDeadline,
+        scoped_dispatch_id: Option<&OnceLock<String>>,
+    ) -> ActorResult<()> {
+        crate::outbound::ensure_rpc_payload_type(payload_type)?;
         self.ensure_session_ready_until(crate::timer::ids::RUNTIME_TELL_PREFLIGHT, deadline)
             .await?;
         deadline.ensure_remaining()?;
@@ -585,8 +607,14 @@ impl RuntimeContext {
 
         let gate = self.select_gate(target)?;
         let target_id = self.extract_target_id(target);
-        gate.send_message_with_type(target_id, payload_type, envelope, deadline)
-            .await
+        gate.send_message_with_type(
+            target_id,
+            payload_type,
+            envelope,
+            deadline,
+            scoped_dispatch_id,
+        )
+        .await
     }
 
     /// Send DataChunk with an explicit payload type (lane selection).
@@ -1073,7 +1101,7 @@ impl Context for RuntimeContext {
         let target_id = self.extract_target_id(target);
 
         // 5. Dispatch through the Gate enum while preserving payload type.
-        gate.send_message_with_type(target_id, R::payload_type(), envelope, deadline)
+        gate.send_message_with_type(target_id, R::payload_type(), envelope, deadline, None)
             .await
     }
 
@@ -1089,9 +1117,11 @@ impl Context for RuntimeContext {
             "📊 Registering DataChunk callback for stream_id: {}",
             stream_id
         );
-        self.data_chunk_registry
-            .register(stream_id, Arc::new(callback));
-        Ok(())
+        self.data_chunk_registry.register_for_caller(
+            stream_id,
+            Arc::new(callback),
+            self.caller_id.as_ref(),
+        )
     }
 
     async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
@@ -1099,8 +1129,8 @@ impl Context for RuntimeContext {
             "🚫 Unregistering DataChunk callback for stream_id: {}",
             stream_id
         );
-        self.data_chunk_registry.unregister(stream_id);
-        Ok(())
+        self.data_chunk_registry
+            .unregister_for_caller(stream_id, self.caller_id.as_ref())
     }
 
     async fn send_data_chunk(

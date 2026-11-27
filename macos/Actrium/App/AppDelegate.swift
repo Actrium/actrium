@@ -79,7 +79,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             self?.documentController(tabId: tabId, reloadKey: reloadKey)?.window
         }
         RendererProcessPool.shared.fileImportWindow = { [weak self] tabId, reloadKey in
-            self?.fileImportWindow(tabId: tabId, reloadKey: reloadKey)
+            self?.guestFileWindow(
+                tabId: tabId, reloadKey: reloadKey, capability: GuestFileImportCall.capability,
+                isDeclared: RendererFileImport.isDeclared
+            )
+        }
+        RendererProcessPool.shared.fileExportWindow = { [weak self] tabId, reloadKey in
+            self?.guestFileWindow(
+                tabId: tabId, reloadKey: reloadKey, capability: GuestFileExportCall.capability,
+                isDeclared: RendererFileExport.isDeclared
+            )
         }
         Task { @MainActor in
             _ = RendererProcessPool.shared.verifyRendererHelper()
@@ -106,14 +115,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
-    private func fileImportWindow(tabId: UUID, reloadKey: Int) -> NSWindow? {
+    private func guestFileWindow(
+        tabId: UUID, reloadKey: Int, capability: String, isDeclared: @MainActor (String?, [String]) -> Bool
+    ) -> NSWindow? {
         guard let controller = documentController(tabId: tabId, reloadKey: reloadKey),
               controller.viewModel.currentTabId == tabId,
               controller.viewModel.actriumMode == .focus(tabId: tabId),
               let tab = controller.viewModel.currentTab,
-              RendererFileImport.isDeclared(manifest: tab.capabilityManifestJSON, permissions: tab.permissions),
+              isDeclared(tab.capabilityManifestJSON, tab.permissions),
               CapabilityPermissionStore.shared.hasGrant(
-                tabId: tabId, appId: tab.appId, capability: GuestFileImportCall.capability
+                tabId: tabId, appId: tab.appId, capability: capability
               ) else { return nil }
         return controller.window
     }
