@@ -27,6 +27,7 @@ mock.module('react-native', () => ({ Text: 'text' }));
 mock.module('@goaskaway/supramark-markdown-native-rn', () => ({}));
 mock.module('@goaskaway/supramark-core/rn', () => ({ parse }));
 mock.module('@goaskaway/supramark-rn', () => ({ Supramark: Renderer }));
+mock.module('keel/host/preset', () => ({ InitialScrollContent: ({ children }) => children }));
 mock.module('./DocumentSelectionSurface', () => ({ DocumentSelectionContext }));
 
 const { Supramark } = await import('./guest-markdown-renderer.supramark');
@@ -93,6 +94,59 @@ test('parses again when returning from error mode with the same text', async () 
   expect(renderer.toJSON()).toBeNull();
   await act(async () => finishParse({ type: 'root', children: [paragraph('Reparsed: ' + markdown)] }));
   expect(renderer.root.findByType('paragraph').props.children).toBe('Reparsed: ' + markdown);
+});
+
+test('keeps the current document visible and selectable until the appended Markdown is parsed', async () => {
+  const surface = createDocumentSelection();
+  const copy = mock();
+  const first = 'First paragraph';
+  const markdown = first + '\n\nSecond paragraph';
+  await render({ markdown: first }, surface);
+  const previous = renderer.root.findByType(Renderer).props;
+
+  let finishParse;
+  parse.mockImplementationOnce(() => new Promise((resolve) => { finishParse = resolve; }));
+  await render({ markdown }, surface);
+  expect(renderer.root.findByType(Renderer).props).toMatchObject({ markdown: first, ast: previous.ast });
+  renderer.root.findByType('paragraph').props.onSelect();
+  surface.copy(copy);
+  expect(copy.mock.calls).toEqual([['Parsed: ' + first]]);
+
+  const children = [...previous.ast.children, paragraph('Second paragraph')];
+  await act(async () => finishParse({ type: 'root', children }));
+  const updated = renderer.root.findByType(Renderer).props;
+  expect(updated).toMatchObject({ markdown, ast: { children } });
+  expect(updated.selection).toBe(previous.selection);
+  expect(renderer.root.findByType('paragraph').props.children).toBe('Parsed: ' + first);
+});
+
+test('ignores a parse that finishes after a newer Markdown revision', async () => {
+  await render({ markdown: 'First' });
+  let finishOlder;
+  let finishLatest;
+  parse.mockImplementationOnce(() => new Promise((resolve) => { finishOlder = resolve; }));
+  await render({ markdown: 'First second' });
+  parse.mockImplementationOnce(() => new Promise((resolve) => { finishLatest = resolve; }));
+  await render({ markdown: 'First second third' });
+  expect(renderer.root.findByType(Renderer).props.markdown).toBe('First');
+  await act(async () => finishLatest({ type: 'root', children: [paragraph('Latest')] }));
+  await act(async () => finishOlder({ type: 'root', children: [paragraph('Older')] }));
+  expect(renderer.root.findByType(Renderer).props.markdown).toBe('First second third');
+  expect(renderer.root.findByType('paragraph').props.children).toBe('Latest');
+});
+
+test('reports a failed parse and keeps the last successful result during recovery', async () => {
+  await render({ markdown: 'First' });
+  parse.mockRejectedValueOnce(new Error('Parse failed'));
+  await render({ markdown: 'Invalid revision' });
+  expect(renderer.root.findByType('text').props.children).toBe('Could not parse Markdown.');
+
+  let finishParse;
+  parse.mockImplementationOnce(() => new Promise((resolve) => { finishParse = resolve; }));
+  await render({ markdown: 'Recovered revision' });
+  expect(renderer.root.findByType(Renderer).props.markdown).toBe('First');
+  await act(async () => finishParse({ type: 'root', children: [paragraph('Recovered')] }));
+  expect(renderer.root.findByType('paragraph').props.children).toBe('Recovered');
 });
 
 test('reports the new selection to the Host after error text changes', async () => {
