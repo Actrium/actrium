@@ -41,12 +41,13 @@ export interface TestContext {
  * Create test context
  */
 // biome-ignore lint/suspicious/noExportsInTest: Shared test utilities exported for use across E2E tests
-export function createTestContext(): TestContext {
+export function createTestContext(reportRootRenderErrors = false): TestContext {
   // Create engine with mock JS engine provider
   // Use silent logger to prevent expected error logs from cluttering test output
   const engine = new Engine({
     sandbox: 'node-vm',
     debug: false,
+    reportRootRenderErrors,
     logger: {
       log: () => {}, // Silent in tests
       warn: () => {}, // Silent in tests

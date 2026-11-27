@@ -1415,6 +1415,9 @@ final class ServiceReactNativeHost {
         if let systemAppType = config["systemAppType"] as? String {
             tabDict["systemAppType"] = systemAppType
         }
+        if let actrOpenError = config["actrOpenError"] as? String {
+            tabDict["actrOpenError"] = actrOpenError
+        }
 
         // Scripts
         if let s = resolvedGuestScript(fromConfig: config) { tabDict["unifiedScript"] = s }
@@ -1974,6 +1977,9 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
     ]
     if let systemAppType = systemAppType {
         tabDict["systemAppType"] = systemAppType
+    }
+    if let actrOpenError = config["actrOpenError"] as? String {
+        tabDict["actrOpenError"] = actrOpenError
     }
     if let unifiedScript = resolvedGuestScript(fromConfig: config) {
         tabDict["unifiedScript"] = unifiedScript

@@ -2139,7 +2139,7 @@ struct UnifiedReactNativeLayer: View {
 
     // XPC Status
     @State private var isLoading = true
-    @State private var errorMessage: String?
+    @State private var rendererFailed = false
     @State private var hasValidConfigSent = false
     /// 🔑 Trigger SwiftUI Rendering state (%2)coordinator Change does not automatically trigger)
     @State private var serviceAllocated = false
@@ -2149,11 +2149,6 @@ struct UnifiedReactNativeLayer: View {
 
     // Debug Mode Switches
     private static let showDebugGrid = false
-
-    /// Inspection service Distribution (used) @State Trigger SwiftUI Rendering)
-    private var isServiceAllocated: Bool {
-        serviceAllocated && coordinator.allocatedServiceId != nil
-    }
 
     var body: some View {
         // 🔍 Debug Log
@@ -2165,9 +2160,8 @@ struct UnifiedReactNativeLayer: View {
                       currentPosition.x, currentPosition.y)
 
         ZStack(alignment: .topLeading) {
-            // Renderer surface stays mounted while Focus/Overview only changes
-            // its viewport and placement.
-            if isServiceAllocated, coordinator.allocatedServiceId != nil {
+            // Keep the surface during layout changes and renderer recovery.
+            if serviceAllocated {
                 PersistentRendererProcessView(
                     tabId: tab.id,
                     fingerprint: fingerprint,
@@ -2181,9 +2175,11 @@ struct UnifiedReactNativeLayer: View {
                     isLoading = false
                     coordinator.hasConnection = true
                 }
-            } else if let error = errorMessage {
-                Text(error)
-                    .foregroundColor(.red)
+            } else if rendererFailed {
+                Text(RendererSurfaceHostView.failureMessage)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.center)
+                    .padding()
                     .frame(width: currentSize.width, height: currentSize.height)
             } else {
                 ProgressView("Allocating process...")
@@ -2316,6 +2312,7 @@ struct UnifiedReactNativeLayer: View {
             sendTabConfigIfReady()
         }
         .onChange(of: tab.reloadNonce) { _, _ in
+            if rendererFailed { allocateServiceIfNeeded() }
             // 🔑 Reload Trigger: Force new sending config(includes reloadKey)
             coordinator.tabConfig = XPCTabConfig(
                 tabId: tab.id,
@@ -2376,6 +2373,10 @@ struct UnifiedReactNativeLayer: View {
             "reloadKey": tab.reloadNonce
         ]
         for (key, value) in libraryData { config[key] = value }
+        if let failure = tab.actrOpenFailure {
+            config["actrOpenError"] = failure.rawValue
+            return config
+        }
         if let systemAppType = tab.systemTabType?.rawValue {
             config[RuntimeBridgeContract.systemAppType] = systemAppType
         }
@@ -2453,13 +2454,13 @@ struct UnifiedReactNativeLayer: View {
                 fingerprint: fingerprint
             )
             coordinator.allocatedServiceId = serviceId
+            rendererFailed = false
             // 🔑 Trigger SwiftUI Render
             serviceAllocated = true
             checkPrewarmStatusAndSetReady()
-        } catch let error as RendererProcessPoolError {
-            errorMessage = error.localizedDescription
         } catch {
-            errorMessage = error.localizedDescription
+            AppLogger.reactNative.error("Could not allocate renderer for \(tab.id): \(error)")
+            rendererFailed = true
         }
     }
 

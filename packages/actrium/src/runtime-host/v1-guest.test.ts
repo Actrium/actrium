@@ -34,6 +34,15 @@ test('checks a signed manifest against the linkage before loading a Guest', () =
   expect(verifyV1RuntimeGuest('module.exports = {};', JSON.stringify(manifest), declarations).ok).toBe(false);
 });
 
+test('retains the error code for a Guest component that the Host cannot load', () => {
+  const unsupported: V1Linkage = { ...linkage, links: [['keel/guest', 'Modal']] };
+  const bundle = writeV1Bundle(unsupported, 'module.exports = {};');
+  expect(verifyV1RuntimeGuest(bundle, JSON.stringify(manifest), declarations)).toMatchObject({
+    ok: false,
+    code: 'component_not_allowed',
+  });
+});
+
 test('requires the package declaration for a linked file import picker', () => {
   const linked: V1Linkage = { ...linkage, links: [['host:file-import', 'pick']] };
   const profile = JSON.stringify(createV1CapabilityManifest(linked, contract));

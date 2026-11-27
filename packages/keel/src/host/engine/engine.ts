@@ -121,6 +121,7 @@ export class Engine implements IEngine {
   private options: {
     timeout: number;
     debug: boolean;
+    reportRootRenderErrors: boolean;
     logger: NonNullable<EngineOptions['logger']>;
     requireWhitelist: ReadonlySet<string>;
     /** Whether the receiver rejects operations outside the component registry. */
@@ -237,6 +238,7 @@ export class Engine implements IEngine {
             debug: () => {},
           };
     this.options = {
+      reportRootRenderErrors: options.reportRootRenderErrors ?? false,
       timeout: options.timeout ?? 5000,
       debug: options.debug ?? false,
       logger: options.logger ?? defaultLogger,
@@ -1339,6 +1341,13 @@ export class Engine implements IEngine {
 
     // __keel_getConfig: Get initial configuration
     this.context.inject('__keel_getConfig', () => this.config);
+
+    if (this.options.reportRootRenderErrors) {
+      // The Guest reconciler invokes this hook only for uncaught root errors.
+      this.context.inject('__keel_reportRootRenderError', (message: string) => {
+        if (typeof message === 'string') this.emit('rootRenderError', new Error(message));
+      });
+    }
 
     // __keel_emitEvent: Send event to host
     // Reason: Event payload can be any serializable type

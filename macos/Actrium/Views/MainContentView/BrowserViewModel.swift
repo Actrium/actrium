@@ -82,11 +82,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// Package link awaiting user confirmation (confirm sheet is presented).
     @Published var pendingPackageDownload: PendingPackageDownload?
 
-    /// In-flight or failed package download (progress sheet is presented).
+    /// In-flight package download (progress sheet is presented).
     @Published var activePackageDownload: ActivePackageDownload?
-
-    /// Notice for formal actr:// addresses (realm resolution pending in prototype).
-    @Published var actrUriNotice: ActrUriNotice?
 
     @Published private var pendingInviteRedeems: [UUID: PendingInviteRedeem] = [:]
 
@@ -183,7 +180,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     private let joinOpenRealm: @MainActor (RealmJoinService.VerifiedProfile) async throws -> Void
     private let inviteMembershipExchange: RealmJoinService.InviteExchange?
     private let confirmRealmMembership: @MainActor (RealmJoinService.VerifiedProfile) async throws -> Bool
-    private let downloadRealmArchive: @MainActor (URL) async throws -> URL
+    private let downloadArchive: @MainActor (URL) async throws -> URL
     private let guestStorageDatabase: GuestStorageDatabase
 
     var currentTab: Tab? {
@@ -204,7 +201,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         joinOpenRealm: (@MainActor (RealmJoinService.VerifiedProfile) async throws -> Void)? = nil,
         inviteMembershipExchange: RealmJoinService.InviteExchange? = nil,
         confirmRealmMembership: (@MainActor (RealmJoinService.VerifiedProfile) async throws -> Bool)? = nil,
-        downloadRealmArchive: (@MainActor (URL) async throws -> URL)? = nil,
+        downloadArchive: (@MainActor (URL) async throws -> URL)? = nil,
         saveBrowserSession: @escaping ([Tab], UUID?) -> Void = { tabs, currentTabId in
             BrowserDataRepository.shared.saveSession(tabs: tabs, currentTabId: currentTabId)
         }
@@ -222,7 +219,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         self.confirmRealmMembership = confirmRealmMembership ?? {
             try await RealmJoinService.hasConfirmedMembership($0, preferences: realmPreferences)
         }
-        self.downloadRealmArchive = downloadRealmArchive ?? { try await ActrPackageDownloadService.download(from: $0) }
+        self.downloadArchive = downloadArchive ?? { try await ActrPackageDownloadService.download(from: $0) }
         self.saveBrowserSession = saveBrowserSession
         if let appRepository { self.appRepository = appRepository }
         // Initialize slot positions first
@@ -376,6 +373,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     }
 
     private func releaseTabRuntime(_ id: UUID, preserveRealmLoad: Bool = false) {
+        cancelPackageDownload(for: id)
         localFrontApprovals.removeValue(forKey: id)
         if !preserveRealmLoad {
             cancelRealmRefresh(id)
@@ -389,6 +387,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         RealmServiceBindings.shared.remove(id)
         RendererLifecycleManager.shared.tabDidClose(id)
         CapabilityPermissionStore.shared.clearSessionGrants(tabId: id)
+    }
+
+    private func detachRealmFront(from tabId: UUID) {
+        loadedRealmFronts.removeValue(forKey: tabId)
+        RealmServiceBindings.shared.remove(tabId)
     }
 
     func closeTab(id: UUID) {
@@ -540,7 +543,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     func insertTabFromCrossWindow(_ tab: Tab, at index: Int, groupId: UUID?, select: Bool = true) {
         var newTab = tab
         newTab.groupId = groupId
-        if let address = newTab.url, address.scheme?.lowercased() == "actr" {
+        if newTab.actrOpenFailure == nil, let address = newTab.url, address.scheme?.lowercased() == "actr" {
             let linkAddress = ActrLinkInvite.strippingInviteArgs(from: address.absoluteString)
             newTab.url = linkAddress.flatMap { URL(string: $0) }
             let link = newTab.url.flatMap {
@@ -961,6 +964,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         deferredRealmLinks.removeValue(forKey: tabId)
         pendingInviteRedeems.removeValue(forKey: tabId)
         cancelRealmRefresh(tabId)
+        cancelPackageDownload(for: tabId)
     }
 
     /// Update background color for a specific tab
@@ -978,10 +982,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         if url.scheme?.lowercased() == "actr",
            let code = ActrLinkInvite.invite(from: url.absoluteString), hasPendingInvite(code) { return }
         // These flows manage their own tabs when they recover an instance or import a package.
-        if !ActrInstanceAddress.isLocalInstanceURL(url), !ActrPackageLinkPolicy.isPackageDownloadURL(url) {
+        let opensPackage = ActrPackageLinkPolicy.isPackageDownloadURL(url)
+        if !ActrInstanceAddress.isLocalInstanceURL(url), !opensPackage {
             addNewTab(focusAddressBar: false)
         }
-        navigateCurrentTab(to: url.absoluteString)
+        navigateCurrentTab(to: url.absoluteString, packageOpensInNewTab: opensPackage)
     }
 
     /// Unified navigation portal - Process all types of input
@@ -990,7 +995,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     /// - If the input is http/https URL, as Web Load
     /// - Load if input is a local file path ACTR Apply
     /// - Otherwise, as app id Process
-    func navigateCurrentTab(to input: String, fromAddressBar: Bool = false) {
+    func navigateCurrentTab(to input: String, fromAddressBar: Bool = false, packageOpensInNewTab: Bool = false) {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let isStandaloneInvite = trimmed.hasPrefix("ri_")
         let isRealmAddress = trimmed.lowercased().hasPrefix("actr://")
@@ -1010,6 +1015,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         }
 
         cancelRealmRefresh(currentTabId)
+        cancelPackageDownload(for: currentTabId)
         localFrontApprovals.removeValue(forKey: currentTabId)
         deferredRealmLinks.removeValue(forKey: currentTabId)
         pendingInviteRedeems.removeValue(forKey: currentTabId)
@@ -1020,7 +1026,8 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 let address = try RealmJoinService.address(forInvite: trimmed)
                 openRealmAddress(address, tabIndex: index, inviteText: trimmed)
             } catch {
-                presentRealmLinkError(error)
+                logger.warning("Actr invitation address could not be resolved: \(error)")
+                showActrOpenFailure(.invalidLink, at: index, address: nil)
             }
             return
         }
@@ -1044,6 +1051,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 return
             } else {
                 logger.warning("⚠️ [navigateCurrentTab] File does not exist: \(fileURL.path)")
+                if fileURL.pathExtension.lowercased() == "actr" {
+                    showActrOpenFailure(.packageNotFound, at: index, address: fileURL)
+                }
                 return
             }
         }
@@ -1053,10 +1063,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             // Check if it's an about: URL for system apps
             if let systemType = SystemTabType.from(url: url) {
                 logger.notice("📱 [navigateCurrentTab] Navigation to System Application: \(url.absoluteString)")
-                RealmServiceBindings.shared.remove(currentTabId)
+                detachRealmFront(from: currentTabId)
                 tabs[index].reloadNonce &+= 1
                 // Update Tab to system app
                 tabs[index].systemTabType = systemType
+                tabs[index].actrOpenFailure = nil
                 tabs[index].url = url
                 tabs[index].title = systemType.title
                 // Clear web/RN content
@@ -1089,6 +1100,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                         appRepository.updateLastUsed(bundleId: bundleId)
                     } else {
                         logger.warning("⚠️ [navigateCurrentTab] No applications found: \(bundleId)")
+                        showActrOpenFailure(.packageNotFound, at: index, address: url)
                         return
                     }
                 } else {
@@ -1108,24 +1120,31 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             // it as a web page (15-B B1).
             if ActrPackageLinkPolicy.isPackageDownloadURL(url) {
                 logger.notice("📦 [navigateCurrentTab] Package direct link: \(url.absoluteString)")
+                let request = PendingPackageDownload(
+                    url: url, tabId: currentTabId, reloadKey: tabs[index].reloadNonce, opensInNewTab: packageOpensInNewTab
+                )
                 // Cache hit for a previously downloaded link (15-B B2): the same
                 // package reopens without downloading or re-extracting.
                 if let digest = ActrPackageCache.cachedDigest(forDownloadURL: url) {
                     logger.notice("📦 [navigateCurrentTab] Cache hit, sha256=\(digest)")
-                    importACTRPackage(
+                    if importACTRPackage(
                         from: ActrPackageCache.archiveURL(forDigest: digest),
-                        knownDigest: digest)
-                } else {
-                    pendingPackageDownload = PendingPackageDownload(url: url)
+                        knownDigest: digest,
+                        download: request,
+                        reportFailure: false
+                    ) != nil { return }
+                    ActrPackageCache.forgetDownloadURL(url, matchingDigest: digest)
                 }
+                pendingPackageDownload = request
                 return
             }
 
             logger.notice("🌐 [navigateCurrentTab] Navigator to URL: \(url.absoluteString)")
-            RealmServiceBindings.shared.remove(currentTabId)
+            detachRealmFront(from: currentTabId)
             tabs[index].reloadNonce &+= 1
             // Update Tab Yes Web Contents
             tabs[index].url = url
+            tabs[index].actrOpenFailure = nil
             tabs[index].title = url.host ?? url.absoluteString
             // Clear RN Relevant
             tabs[index].unifiedScript = nil
@@ -1161,6 +1180,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
     func confirmPendingPackageDownload() {
         guard let pending = pendingPackageDownload else { return }
         pendingPackageDownload = nil
+        guard tabs.contains(where: pending.matches) else { return }
         beginPackageDownload(pending)
     }
 
@@ -1174,11 +1194,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         activePackageDownload = nil
     }
 
-    func retryActivePackageDownload() {
-        guard let active = activePackageDownload else { return }
-        let pending = active.pending
-        activePackageDownload = nil
-        beginPackageDownload(pending)
+    private func cancelPackageDownload(for tabId: UUID) {
+        if pendingPackageDownload?.tabId == tabId { cancelPendingPackageDownload() }
+        if activePackageDownload?.pending.tabId == tabId { cancelActivePackageDownload() }
     }
 
     private func beginPackageDownload(_ pending: PendingPackageDownload) {
@@ -1319,7 +1337,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
     private func performPackageDownload(_ active: ActivePackageDownload) async {
         do {
-            let localURL = try await ActrPackageDownloadService.download(from: active.pending.url)
+            let localURL = try await downloadArchive(active.pending.url)
             defer { try? FileManager.default.removeItem(at: localURL) }
             if activePackageDownload?.id == active.id {
                 activePackageDownload?.phase = .verifying
@@ -1327,26 +1345,25 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             let digest = try await ActrPackageDownloadService.sha256Digest(of: localURL)
             // User cancelled while verifying — keep the cancelled state.
             guard activePackageDownload?.id == active.id else { return }
+            guard tabs.contains(where: active.pending.matches) else {
+                activePackageDownload = nil
+                return
+            }
             logger.notice("✅ [PackageDownload] \(active.pending.filename) downloaded, sha256=\(digest)")
 
-            // Keep the archive in the digest-addressed cache (15-B B2, 05 §15) and
-            // remember the link → digest mapping so re-opening the same link skips
-            // the download; the import pipeline reuses the cached extraction.
+            // The import verifies the package before the link can reuse this digest.
             let cachedArchiveURL = try ActrPackageCache.installArchive(at: localURL, digest: digest)
-            ActrPackageCache.rememberDownloadURL(active.pending.url, digest: digest)
-
-            // Hand over to the existing import pipeline (manifest → runtime tab).
-            // ed25519 verification (15-B B3) hooks into this chain next.
             activePackageDownload = nil
-            importACTRPackage(from: cachedArchiveURL, knownDigest: digest)
+            if importACTRPackage(from: cachedArchiveURL, knownDigest: digest, download: active.pending) != nil {
+                ActrPackageCache.rememberDownloadURL(active.pending.url, digest: digest)
+            }
         } catch {
             // Download already cancelled/replaced by the user — keep the new state.
             guard activePackageDownload?.id == active.id else { return }
-            let message = (error as? ActrPackageDownloadError)?.errorDescription
-                ?? error.localizedDescription
-            logger.error("❌ [PackageDownload] failed: \(message)")
-            activePackageDownload?.phase = .failed
-            activePackageDownload?.errorMessage = message
+            logger.error("Package download failed: \(error)")
+            activePackageDownload = nil
+            showPackageImportFailure(.init(error, fallback: .downloadFailed), at: active.pending.url,
+                                     replacingTabId: nil, download: active.pending)
         }
     }
 
@@ -1358,6 +1375,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: resolvedURL.path, isDirectory: &isDirectory) else {
             logger.error("❌ [loadActrPackageIntoCurrentTab] Path does not exist: \(resolvedURL.path)")
+            showActrOpenFailure(.packageNotFound, at: tabIndex, address: resolvedURL)
             return
         }
 
@@ -1374,6 +1392,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 }
             } catch {
                 logger.error("❌ [loadActrPackageIntoCurrentTab] Unpressure failed: \(error.localizedDescription)")
+                showActrOpenFailure(.init(error, fallback: .invalidPackage), at: tabIndex, address: resolvedURL)
                 return
             }
         }
@@ -1423,7 +1442,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 appURL = ActriumAppURLScheme.appURL(filePath: resolvedURL.path) ?? resolvedURL
             }
 
-            RealmServiceBindings.shared.remove(tabs[tabIndex].id)
+            detachRealmFront(from: tabs[tabIndex].id)
             tabs[tabIndex].reloadNonce &+= 1
             // Update current tab in-place (like about: URL handling)
             logger.notice("📱 [loadActrPackageIntoCurrentTab] Update Current Tab: \(tabTitle), url=\(appURL.absoluteString)")
@@ -1437,6 +1456,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             }
             tabs[tabIndex].legacyActorBridge = ActriumApp.isLegacyActorBridgePackage(resolvedURL)
             tabs[tabIndex].systemTabType = nil
+            tabs[tabIndex].actrOpenFailure = nil
             tabs[tabIndex].htmlContent = nil
 
             // Set scripts based on available content
@@ -1488,26 +1508,28 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
         } catch {
             logger.error("❌ [loadActrPackageIntoCurrentTab] Loading failed: \(error.localizedDescription)")
+            showActrOpenFailure(.init(error, fallback: .invalidPackage), at: tabIndex, address: resolvedURL)
         }
     }
 
     private func openRealmAddress(_ input: String, tabIndex: Int, inviteText: String? = nil) {
+        let sanitizedAddress = ActrLinkInvite.strippingInviteArgs(from: input)
         do {
-            guard let linkAddress = ActrLinkInvite.strippingInviteArgs(from: input) else {
-                throw RealmServiceError(message: "The Realm address is invalid.")
+            guard let linkAddress = sanitizedAddress else {
+                throw ActrOpenFailure.invalidLink
             }
             let info = try ActriumCore.parseActrUri(
                 uri: linkAddress, installationId: InstallationIdProvider.getOrCreate()
             )
             guard inviteText == nil || !info.isLocal else {
-                throw RealmServiceError(message: "Local Realms do not accept invitations.")
+                throw ActrOpenFailure.invalidLink
             }
             let invite = info.isLocal ? nil : (inviteText.map(RealmJoinService.Invite.explicit)
                 ?? ActrLinkInvite.invite(from: input).map(RealmJoinService.Invite.sharedLink))
             handleResolvedRealmLink(info, input: linkAddress, tabIndex: tabIndex, invite: invite)
         } catch {
             logger.warning("⚠️ [navigateCurrentTab] actr:// input rejected: \(error)")
-            presentRealmLinkError(error)
+            showActrOpenFailure(.init(error), at: tabIndex, address: sanitizedAddress.flatMap(URL.init(string:)))
         }
     }
 
@@ -1536,7 +1558,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         // 04 §3: a local instance address opens the same instance — focus it
         // when already open, otherwise recover it through the instance store.
         if info.isLocal {
-            if let existing = tabs.first(where: { $0.url?.absoluteString == linkAddress }) {
+            if let existing = tabs.first(where: { $0.actrOpenFailure == nil && $0.url?.absoluteString == linkAddress }) {
                 switchToTab(id: existing.id)
                 return
             }
@@ -1545,11 +1567,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 restoreInstanceTab(address: address, title: realmDisplay, isActiveTab: true)
             } else {
                 logger.error("❌ [navigateCurrentTab] local instance not found for \(realmDisplay)")
-                actrUriNotice = ActrUriNotice(
-                    uri: linkAddress,
-                    domain: info.domain,
-                    detail: "The local instance was not found or has been cleared (SERVICE_NOT_FOUND); the address cannot be opened."
-                )
+                showActrOpenFailure(.instanceNotFound, at: tabIndex, address: address, title: realmDisplay)
             }
             return
         }
@@ -1576,7 +1594,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         tab.preparedLocalStorage = nil
         tab.reloadNonce &+= 1
         tab.appId = nil
+        tab.verifiedAppName = nil
         tab.systemTabType = nil
+        tab.actrOpenFailure = nil
         tab.htmlContent = nil
         tab.unifiedScript = nil
         tab.leftPanelScript = nil
@@ -1603,7 +1623,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                   ), !link.isLocal, let realmId = link.realmId else { return false }
             return "\(realmId)@\(link.domain)" == realmName
         }
-        stopRealmRuntimes(affected)
+        stopRealmRuntimes(affected, failure: .realmRetired)
     }
 
     private func stopRevokedRealmRuntimes(domain: String, trustedKeys: Set<String>) {
@@ -1616,12 +1636,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         stopRealmRuntimes(affected, preserveRealmLoad: true)
     }
 
-    private func stopRealmRuntimes(_ affected: [Int], preserveRealmLoad: Bool = false) {
+    private func stopRealmRuntimes(
+        _ affected: [Int], preserveRealmLoad: Bool = false, failure: ActrOpenFailure? = nil
+    ) {
         guard !affected.isEmpty else { return }
         for index in affected {
             let tabId = tabs[index].id
             releaseTabRuntime(tabId, preserveRealmLoad: preserveRealmLoad)
             Self.clearRealmContent(&tabs[index])
+            tabs[index].actrOpenFailure = failure
         }
         objectWillChange.send()
         persistBrowserPageSession()
@@ -1631,6 +1654,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         guard let refresh = realmRefreshes.removeValue(forKey: id) else { return }
         pendingRealmInvites.cancelBeforeExchange(refresh.id)
         refresh.task.cancel()
+    }
+
+    private func hasRunningRealmFront(_ tab: Tab, address: URL) -> Bool {
+        guard tab.url == address, tab.actrOpenFailure == nil,
+              case .reactNative = tab.contentType else { return false }
+        return loadedRealmFronts[tab.id]?.address == address
     }
 
     /// Realm discovery (verification-funnel layer 1) followed by Realm
@@ -1783,8 +1812,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     if let retired = verifiedUpdate, retired.profile == nil {
                         try saveRealmTrust(retired.stateJson, .profile, name: realmName)
                     }
-                    presentRealmLinkError(CoreError.RealmRetired(message: name))
-                    return
+                    throw CoreError.RealmRetired(message: name)
                 }
                 guard let initial = verifiedUpdate, initial.profile != nil else { return }
                 try saveRealmTrust(initial.stateJson, .profile, name: realmName)
@@ -1839,7 +1867,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 // The signed Profile names this Realm instance; the Front manifest
                 // names the application package and must not replace the instance title.
                 let instanceTitle = profile.displayName.isEmpty ? title : profile.displayName
-                let isLoadingTab = tab.url != address || loadedRealmFronts[replacingTabId]?.address != address
+                let isLoadingTab = !hasRunningRealmFront(tabs[index], address: address)
                 if isLoadingTab, localFrontApprovals[replacingTabId] == nil {
                     unloadRealmFront(at: index)
                     tabs[index].title = deferredTitle ?? instanceTitle
@@ -1948,17 +1976,12 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                                 "The package location is invalid.",
                                 comment: "Actr package URL error")])
                     }
-                    let downloadedURL = try await downloadRealmArchive(packageURL)
+                    let downloadedURL = try await downloadArchive(packageURL)
                     defer { try? FileManager.default.removeItem(at: downloadedURL) }
                     let actualDigest = try await ActrPackageDownloadService.sha256Digest(of: downloadedURL)
                     guard actualDigest == digest else {
-                        throw NSError(
-                            domain: "ActrDiscovery", code: 25,
-                            userInfo: [NSLocalizedDescriptionKey: String(
-                                format: NSLocalizedString(
-                                    "The downloaded package does not match the digest in the Realm Profile (PACKAGE_DIGEST_MISMATCH): expected %@…, got %@…",
-                                    comment: "Actr package digest mismatch"),
-                                String(digest.prefix(12)), String(actualDigest.prefix(12)))])
+                        logger.warning("Realm \(realmName): the Front archive does not match the signed digest.")
+                        throw ActrOpenFailure.digestMismatch
                     }
                     verified = try Self.verifyRealmFront(at: downloadedURL, profile: profile, publisherKeys: publisherKeys)
                     _ = try ActrPackageCache.installArchive(at: downloadedURL, digest: digest, replacingRejectedArchive: true)
@@ -2075,13 +2098,15 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     persistBrowserPageSession()
                     schedulePackageCacheEviction()
                 }
+            } catch is CancellationError {
+                return
             } catch {
                 guard !Task.isCancelled, let index = tabIndex() else { return }
                 logger.warning("Realm \(realmName): Front refresh failed: \(error)")
-                if case CoreError.RealmRetired = error, tabs[index].url == address {
-                    unloadRealmFront(at: index)
+                let failure = ActrOpenFailure(error)
+                if failure == .realmRetired || !hasRunningRealmFront(tabs[index], address: address) {
+                    showActrOpenFailure(failure, at: index, address: address, title: deferredTitle ?? title)
                 }
-                presentRealmLinkError(error)
             }
         }
         realmRefreshes[replacingTabId] = (refreshId, task, invite?.code)
@@ -2397,15 +2422,17 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         guard let key = publisherKeys.first(where: {
             (try? ActriumCore.verifyRealmFrontPackage(archive: bytes, trustedPublicKey: $0, profile: profile)) != nil
         }) else {
-            throw NSError(
-                domain: "ActrDiscovery", code: 26,
-                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
-                    "The Front package could not be verified.", comment: "Actr Front verification error")])
+            throw ActrOpenFailure.verificationFailed
         }
-        let serviceType = try ActrBindings.verifyRealmFront(
-            frontArchive: bytes, trustedPublicKey: key, frontType: profile.packageType, serviceType: profile.serviceType
-        )
-        return VerifiedRealmFront(bytes: bytes, trustedKey: key, serviceType: serviceType)
+        do {
+            let serviceType = try ActrBindings.verifyRealmFront(
+                frontArchive: bytes, trustedPublicKey: key, frontType: profile.packageType, serviceType: profile.serviceType
+            )
+            return VerifiedRealmFront(bytes: bytes, trustedKey: key, serviceType: serviceType)
+        } catch {
+            logger.warning("Realm Front verification failed: \(error)")
+            throw ActrOpenFailure.verificationFailed
+        }
     }
 
     private func readRealmTrust(_ kind: RealmFrontTrustStore.Kind, name: String) throws -> String? {
@@ -2438,72 +2465,13 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         return data
     }
 
-    /// Surface a rejected actr:// link with variant-specific copy.
-    private func presentRealmLinkError(_ error: Error) {
-        let message: String
-        switch error {
-        case GuestLocalStorageError.IdentityChanged:
-            message = NSLocalizedString(
-                "The Publisher's identity changed without a trusted connection to its previous identity. Saved app data has not been shared.",
-                comment: "Publisher identity change error")
-        case GuestLocalStorageError.InvalidPublisher:
-            message = NSLocalizedString(
-                "The Publisher information could not be verified. The application was not opened.",
-                comment: "Publisher verification error")
-        case GuestLocalStorageError.DatabaseFailure:
-            message = NSLocalizedString(
-                "Saved Publisher verification information could not be read or updated. Existing app data has been preserved.",
-                comment: "Publisher trust storage error")
-        case GuestStorageDatabaseError.busy:
-            message = NSLocalizedString(
-                "Storage is busy. Try opening the application again shortly.",
-                comment: "Publisher storage busy error")
-        case CoreError.AuthorityDescriptorInvalid:
-            message = NSLocalizedString(
-                "The authority information for this domain is invalid.",
-                comment: "Actr authority descriptor error")
-        case CoreError.RealmProfileInvalid:
-            message = NSLocalizedString(
-                "The Realm Profile for this instance is invalid.",
-                comment: "Actr realm profile error")
-        case CoreError.RealmRetired:
-            message = NSLocalizedString(
-                "This Realm instance has been retired.",
-                comment: "Actr realm retired error")
-        case CoreError.UriSchemeInvalid:
-            message = NSLocalizedString(
-                "Only actr:// links are supported here.",
-                comment: "Actr URI scheme error")
-        case CoreError.UriDomainInvalid:
-            message = NSLocalizedString(
-                "The domain in this link is not a valid Realm domain.",
-                comment: "Actr URI domain error")
-        case CoreError.UriLabelInvalid:
-            message = NSLocalizedString(
-                "The RealmId or ActorId in this link is missing or invalid.",
-                comment: "Actr URI label error")
-        case CoreError.UriLegacyForm:
-            message = NSLocalizedString(
-                "This link uses an outdated address format that is no longer supported.",
-                comment: "Actr URI legacy form error")
-        case CoreError.UriLocalRealmForeign:
-            message = NSLocalizedString(
-                "This local Realm belongs to a different installation.",
-                comment: "Actr URI foreign local Realm error")
-        case let error as RealmServiceError:
-            message = error.localizedDescription
-        default:
-            message = "\(error)"
-        }
-        presentRealmLinkMessage(message)
-    }
-
-    private func presentRealmLinkMessage(_ message: String) {
-        let alert = NSAlert()
-        alert.messageText = NSLocalizedString("Invalid Actr Link", comment: "Actr URI error title")
-        alert.informativeText = message
-        alert.alertStyle = .warning
-        alert.runModal()
+    private func showActrOpenFailure(_ failure: ActrOpenFailure, at index: Int, address: URL?, title: String? = nil) {
+        unloadRealmFront(at: index)
+        tabs[index].actrOpenFailure = failure
+        tabs[index].url = address
+        tabs[index].title = title ?? NSLocalizedString("Could Not Open Application", comment: "ACTR error tab title")
+        objectWillChange.send()
+        persistBrowserPageSession()
     }
 
     /// Checks whether input is a local file path
@@ -2610,6 +2578,20 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             return
         }
 
+        if tabs[index].actrOpenFailure != nil {
+            if sourceURL.isFileURL {
+                importACTRPackage(from: sourceURL, replacingTabId: id)
+            } else {
+                navigateCurrentTab(to: sourceURL.absoluteString, fromAddressBar: true)
+            }
+            return
+        }
+
+        if tabs[index].systemTabType != nil {
+            tabs[index].reloadNonce &+= 1
+            return
+        }
+
         // For web content (http/https), use WebView's reload
         if sourceURL.scheme == "http" || sourceURL.scheme == "https" {
             logger.notice("🔄 [reloadCurrentTab] Web Content, Call WebView reload")
@@ -2620,7 +2602,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         if sourceURL.scheme?.lowercased() == "actr",
            let info = try? ActriumCore.parseActrUri(
                uri: sourceURL.absoluteString, installationId: InstallationIdProvider.getOrCreate()
-           ), !info.isLocal {
+           ) {
+            if tabs[index].bundleFingerprint != nil {
+                tabs[index].reloadNonce &+= 1
+            }
+            if info.isLocal { return }
             if localFrontApprovals[id] != nil {
                 handleResolvedRealmLink(info, input: sourceURL.absoluteString, tabIndex: index)
             } else {
@@ -2635,6 +2621,9 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         let resolvedURL = sourceURL.standardizedFileURL
         guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
             logger.error(" [reloadCurrentTab] Source file does not exist:\(resolvedURL.path)")
+            if resolvedURL.pathExtension.lowercased() == "actr" {
+                showActrOpenFailure(.packageNotFound, at: index, address: sourceURL)
+            }
             return
         }
 
@@ -2657,6 +2646,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 }
             } catch {
                 logger.error(" [reloadCurrentTab] Depression failed:\(error.localizedDescription)")
+                showActrOpenFailure(.init(error, fallback: .invalidPackage), at: index, address: sourceURL)
                 return
             }
         }
@@ -2717,6 +2707,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
 
         } catch {
             logger.error(" [reloadCurrentTab] Synchronising: \(error.localizedDescription)")
+            showActrOpenFailure(.init(error, fallback: .invalidPackage), at: index, address: sourceURL)
         }
     }
 
@@ -2786,11 +2777,21 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         publisherStorageIdentity: String? = nil,
         preparedLocalStorage: PreparedLocalStorage? = nil,
         replacingTabId: UUID? = nil,
-        realmAddress: URL? = nil
+        realmAddress: URL? = nil,
+        download: PendingPackageDownload? = nil,
+        reportFailure: Bool = true
     ) -> Tab? {
         let resolvedURL = fileURL.standardizedFileURL
+        let showImportFailure = reportFailure && realmAddress == nil
+        let replacingTabId = replacingTabId ?? download.flatMap { request in
+            guard !request.opensInNewTab else { return nil }
+            return tabs.first { request.matches($0) && $0.actrOpenFailure != nil && $0.url == request.url }?.id
+        }
         guard FileManager.default.fileExists(atPath: resolvedURL.path) else {
             logger.error(" Not found .actr Documents:\(resolvedURL.path)")
+            if showImportFailure {
+                showPackageImportFailure(.packageNotFound, at: resolvedURL, replacingTabId: replacingTabId, download: download)
+            }
             return nil
         }
 
@@ -2823,6 +2824,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 cachedArchiveURL = archiveURL
             } catch {
                 logger.error(" .actr Loading failed:\(error.localizedDescription)")
+                if showImportFailure {
+                    showPackageImportFailure(.init(error, fallback: .invalidPackage), at: resolvedURL,
+                                             replacingTabId: replacingTabId, download: download)
+                }
                 return nil
             }
         }
@@ -2985,99 +2990,32 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                 return newTab
             }
         } catch {
-            if realmAddress != nil {
-                logger.error("Verified Front could not be loaded: \(error.localizedDescription)")
-                return nil
+            logger.error("ACTR package could not be loaded: \(error)")
+            if showImportFailure {
+                showPackageImportFailure(.init(error, fallback: .invalidPackage), at: resolvedURL,
+                                         replacingTabId: replacingTabId, download: download)
             }
-            // 15-B B8: signature failures get a dedicated, actionable error page
-            // (04 §7 PACKAGE_SIGNATURE_INVALID) — never a generic "cannot connect".
-            if let signatureError = error as? AppleActrPackageSignatureError {
-                logger.error("🔒 [importACTRPackage] \(signatureError.stableCode): \(signatureError.localizedDescription)")
-                let errorHTML = renderSignatureErrorHTML(signatureError, sourcePath: resolvedURL.path)
-                return appendRuntimeTab(
-                    title: resolvedURL.deletingPathExtension().lastPathComponent,
-                    sourceURL: resolvedURL,
-                    htmlContent: errorHTML,
-                    guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
-                    replacingTabId: replacingTabId
-                )
-            }
-            logger.error(" .actr Loading failed:\(error.localizedDescription)")
-            let fallbackHTML = renderACTRInfoHTML(
-                name: resolvedURL.deletingPathExtension().lastPathComponent,
-                version: "unknown",
-                description: "Loading failed:\(error.localizedDescription)",
-                sourcePath: resolvedURL.path
-            )
-            return appendRuntimeTab(
-                title: resolvedURL.deletingPathExtension().lastPathComponent,
-                sourceURL: resolvedURL,
-                htmlContent: fallbackHTML,
-                guestExtractedPath: isDirectory.boolValue ? nil : rootDir.path,
-                replacingTabId: replacingTabId
-            )
+            return nil
         }
     }
 
-    /// Dedicated signature-verification error page (15-B B8, 04 §7): shows the
-    /// stable code and an actionable suggestion per failure mode.
-    private func renderSignatureErrorHTML(_ error: AppleActrPackageSignatureError, sourcePath: String) -> String {
-        let suggestion: String
-        switch error {
-        case .signatureMissing:
-            suggestion = "The package is missing its manifest.sig signature. Re-download it; for a local package, re-pack it with actr pkg pack."
-        case .noTrustedKeys:
-            suggestion = "No trusted public keys are available. Run actr pkg keygen to generate a key, or configure trusted public keys in Actrium/trusted-keys.json and retry."
-        case .signatureInvalid:
-            suggestion = "Signature verification failed: the package may be tampered with or signed by another key. Re-download it or contact the publisher."
+    private func showPackageImportFailure(
+        _ failure: ActrOpenFailure,
+        at source: URL,
+        replacingTabId: UUID?,
+        download: PendingPackageDownload?
+    ) {
+        let tabId: UUID
+        if let download {
+            guard tabs.contains(where: download.matches) else { return }
+            tabId = download.opensInNewTab ? addNewTab(focusAddressBar: false).id : download.tabId
+        } else if let replacingTabId {
+            tabId = replacingTabId
+        } else {
+            tabId = addNewTab(focusAddressBar: false).id
         }
-        return """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <style>
-                body {
-                    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-                    padding: 48px; margin: 0; min-height: 100vh;
-                    color: #e6e8ee;
-                    background: linear-gradient(135deg, #1b0f0f 0%, #111827 60%, #0b1220 100%);
-                }
-                .card {
-                    max-width: 640px; margin: 0 auto; padding: 32px;
-                    background: rgba(255, 255, 255, 0.04);
-                    border: 1px solid rgba(239, 108, 96, 0.35);
-                    border-radius: 16px;
-                }
-                .code {
-                    display: inline-block; padding: 6px 10px; margin-bottom: 14px;
-                    border-radius: 10px; background: rgba(239, 108, 96, 0.14);
-                    color: #f8b4ae; font-family: monospace; font-size: 12px;
-                }
-                h1 { margin: 0 0 10px 0; font-size: 24px; }
-                .message { color: #d1d5db; line-height: 1.6; margin-bottom: 18px; }
-                .suggestion {
-                    line-height: 1.6; color: #e5e7eb;
-                    background: rgba(255,255,255,0.05); padding: 14px 16px;
-                    border-radius: 10px; margin-bottom: 16px;
-                }
-                .path {
-                    font-family: 'Menlo', ui-monospace, monospace; font-size: 11px;
-                    color: #9ca3af; word-break: break-all;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="card">
-                <div class="code">PACKAGE_SIGNATURE_INVALID</div>
-                <h1>Package signature verification failed</h1>
-                <div class="message">\(error.localizedDescription)</div>
-                <div class="suggestion">\(suggestion)</div>
-                <div class="path">\(escapeHTML(sourcePath))</div>
-            </div>
-        </body>
-        </html>
-        """
+        guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        showActrOpenFailure(failure, at: index, address: download?.url ?? source)
     }
 
     // MARK: - Restart Restore (15-B B7)
@@ -3449,6 +3387,7 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             tabs[index].legacyActorBridge = ActriumApp.isLegacyActorBridgePackage(sourceURL)
             tabs[index].htmlContent = htmlContent
             tabs[index].systemTabType = nil
+            tabs[index].actrOpenFailure = nil
             tabs[index].guestScript = guestScript
             tabs[index].leftPanelScript = leftPanelScript
             tabs[index].rightPanelScript = rightPanelScript

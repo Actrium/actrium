@@ -779,14 +779,8 @@ struct WorkspaceMainView: View {
         .sheet(item: $viewModel.activePackageDownload) { active in
             ActivePackageDownloadSheet(
                 active: active,
-                onRetry: { viewModel.retryActivePackageDownload() },
                 onCancel: { viewModel.cancelActivePackageDownload() }
             )
-        }
-        .sheet(item: $viewModel.actrUriNotice) { notice in
-            ActrUriNoticeSheet(notice: notice) {
-                viewModel.actrUriNotice = nil
-            }
         }
         // Show only the active tab's invite prompt. Other tabs keep their own requests.
         .sheet(item: Binding(get: { viewModel.pendingInviteRedeem }, set: { _ in })) { pending in

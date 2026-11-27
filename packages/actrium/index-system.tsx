@@ -30,6 +30,7 @@ try {
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform, StyleSheet, DeviceEventEmitter, LayoutChangeEvent } from 'react-native';
 import { StandaloneGuestApp } from './src/runtime-host/StandaloneGuestApp';
+import { ActrErrorPage } from './src/runtime-host/ActrErrorPage';
 import { LibraryPage } from './src/runtime-host/LibraryPage';
 import type { BookmarkData, HistoryGroupData, HistoryItemData, HistoryPageData, SystemAppType } from './src/runtime-host/types';
 
@@ -54,7 +55,7 @@ const LoadingFallback = () => <View style={styles.loading} />;
 
 // Error boundary
 class ErrorBoundary extends React.Component<
-  { children: React.ReactNode },
+  { children: React.ReactNode; fallback?: React.ReactNode },
   { error: Error | null; componentStack: string | null }
 > {
   state: { error: Error | null; componentStack: string | null } = { error: null, componentStack: null };
@@ -74,6 +75,7 @@ class ErrorBoundary extends React.Component<
 
   render() {
     if (!this.state.error) return this.props.children;
+    if (this.props.fallback) return this.props.fallback;
     return (
       <View style={styles.errorContainer}>
         <Text style={styles.errorTitle}>Render Error</Text>
@@ -98,6 +100,7 @@ interface SystemAppProps {
     legacyActorBridge?: boolean;
     title: string;
     systemAppType?: SystemAppType;
+    actrOpenError?: string;
     unifiedScript?: string;  // ACTR app script
     leftPanelScript?: string;
     rightPanelScript?: string;
@@ -210,12 +213,20 @@ const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
   const hasActrScript = !!(tab?.unifiedScript || tab?.leftPanelScript || tab?.rightPanelScript || tab?.guestScript);
   nlog(`[SystemAppRouter] render: systemAppType=${tab?.systemAppType}, hasActrScript=${hasActrScript}, tabId=${tab?.id?.substring(0, 8)}, isOverviewMode=${isOverviewMode}, size=${containerWidth}x${containerHeight}`);
 
+  if (tab?.actrOpenError !== undefined) {
+    return (
+      <View style={styles.container} onLayout={handleLayout}>
+        <ActrErrorPage code={tab.actrOpenError} />
+      </View>
+    );
+  }
+
   // 🔑 ACTR app: has script but no systemAppType
   if (!tab?.systemAppType && hasActrScript && tab) {
     nlog(`[SystemAppRouter] Rendering RuntimeApp for tab=${tab.id?.substring(0, 8)}`);
     return (
       <View style={styles.container} onLayout={handleLayout}>
-        <ErrorBoundary>
+        <ErrorBoundary key={tab.reloadKey} fallback={<ActrErrorPage code="GUEST_ROOT_CRASHED" />}>
           <React.Suspense fallback={<LoadingFallback />}>
             <StandaloneGuestApp
               key={tab.id}

@@ -18,6 +18,167 @@ final class RealmNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testMalformedRealmLinkShowsHostErrorInTheTargetTab() throws {
+        let view = BrowserViewModel(saveBrowserSession: { _, _ in })
+        let tabId = try XCTUnwrap(view.currentTabId)
+        let input = "actr://realm.example"
+        view.navigateCurrentTab(to: input, fromAddressBar: true)
+
+        let failed = try XCTUnwrap(view.tabs.first { $0.id == tabId })
+        XCTAssertEqual(view.currentTabId, tabId)
+        XCTAssertEqual(failed.url?.absoluteString, input)
+        XCTAssertEqual(failed.actrOpenFailure, .invalidLink)
+        XCTAssertEqual(failed.contentType, .reactNative(bundleFingerprint: "system.actr-error"))
+        XCTAssertNil(failed.unifiedScript)
+        XCTAssertNil(failed.guestEntry)
+
+        view.navigateCurrentTab(to: "https://example.org/")
+        let replaced = try XCTUnwrap(view.tabs.first { $0.id == tabId })
+        XCTAssertNil(replaced.actrOpenFailure)
+        XCTAssertEqual(replaced.contentType, .web(url: try XCTUnwrap(URL(string: "https://example.org/"))))
+    }
+
+    @MainActor
+    func testRealmDiscoveryFailureStaysInTheOriginatingTab() async throws {
+        let fetch = NavigationGate()
+        defer { fetch.release() }
+        let view = BrowserViewModel(
+            realmPreferences: try makePreferences(),
+            realmTrustDirectory: realmTrustDirectory,
+            fetchRealmDocument: { _, _ in
+                await fetch.wait()
+                throw URLError(.notConnectedToInternet)
+            },
+            saveBrowserSession: { _, _ in }
+        )
+        let origin = try XCTUnwrap(view.currentTabId)
+        view.navigateCurrentTab(to: realmURI)
+        try await waitUntil { fetch.waiting }
+        let other = view.addNewTab(focusAddressBar: false).id
+
+        fetch.release()
+        try await waitUntil { view.tabs.first { $0.id == origin }?.actrOpenFailure == .downloadFailed }
+        XCTAssertEqual(view.currentTabId, other)
+        XCTAssertNil(view.tabs.first { $0.id == other }?.actrOpenFailure)
+    }
+
+    @MainActor
+    func testMissingLocalPackageShowsHostErrorWithoutGuestContent() throws {
+        let view = BrowserViewModel(saveBrowserSession: { _, _ in })
+        let missing = realmTrustDirectory.appendingPathComponent("missing.actr")
+        XCTAssertNil(view.importACTRPackage(from: missing))
+
+        let failed = try XCTUnwrap(view.currentTab)
+        XCTAssertEqual(failed.url, missing.standardizedFileURL)
+        XCTAssertEqual(failed.actrOpenFailure, .packageNotFound)
+        XCTAssertEqual(failed.contentType, .reactNative(bundleFingerprint: "system.actr-error"))
+        XCTAssertNil(failed.unifiedScript)
+    }
+
+    @MainActor
+    func testReopeningRealmAfterLeavingItShowsDiscoveryFailure() async throws {
+        let directory = realmTrustDirectory.appendingPathComponent("reopen", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fixture = try makeFrontArchive(in: directory)
+        let frontDigest = try digest(Data(contentsOf: fixture.archive))
+        var documents = try discoveryDocuments(membership: "open", frontDigest: frontDigest)
+        documents["https://publisher.example/.well-known/actr"] = try publisherDescriptor(
+            keyId: fixture.keyId, publicKey: fixture.publicKey
+        )
+        var offline = false
+        let view = BrowserViewModel(
+            realmPreferences: try makePreferences(), realmTrustDirectory: realmTrustDirectory,
+            appRepository: AppRepository(database: DatabaseManager(path: ":memory:")),
+            guestStorageDatabase: GuestStorageDatabase(database: GuestLocalStorage(path: ":memory:")),
+            fetchRealmDocument: { url, _ in
+                if offline { throw URLError(.notConnectedToInternet) }
+                return try XCTUnwrap(documents[url.absoluteString])
+            },
+            joinOpenRealm: { _ in }, downloadArchive: { _ in fixture.archive },
+            saveBrowserSession: { _, _ in }
+        )
+        let tabId = try XCTUnwrap(view.currentTabId)
+        defer { RealmServiceBindings.shared.remove(tabId) }
+        ActrPackageCache.$rootOverrideForTesting.withValue(directory.appendingPathComponent("cache")) {
+            ActrPackageTrustStore.$supportDirectoryOverrideForTesting.withValue(directory) {
+                view.navigateCurrentTab(to: realmURI)
+            }
+        }
+        try await waitUntil { view.currentTab?.unifiedScript == fixture.script }
+
+        offline = true
+        view.navigateCurrentTab(to: "https://other.example/")
+        XCTAssertEqual(view.currentTab?.url?.host, "other.example")
+        view.navigateCurrentTab(to: realmURI)
+        try await waitUntil { view.currentTab?.actrOpenFailure == .downloadFailed }
+        XCTAssertEqual(view.currentTabId, tabId)
+        XCTAssertEqual(view.currentTab?.url?.absoluteString, realmURI)
+    }
+
+    @MainActor
+    func testBadDirectDownloadIsNotMemoizedAndOldBadMappingCanBeRetried() async throws {
+        let directory = realmTrustDirectory.appendingPathComponent("direct", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fixture = try makeFrontArchive(in: directory)
+        let bad = directory.appendingPathComponent("bad.actr")
+        let badBytes = Data("Not an ACTR archive".utf8)
+        try badBytes.write(to: bad)
+        let goodDigest = try digest(Data(contentsOf: fixture.archive))
+        let link = try XCTUnwrap(URL(string: "https://publisher.example/download.actr"))
+        try JSONSerialization.data(withJSONObject: [["public_key": fixture.publicKey.base64EncodedString()]])
+            .write(to: directory.appendingPathComponent("trusted-keys.json"))
+        var downloads = 0
+        let view = BrowserViewModel(
+            appRepository: AppRepository(database: DatabaseManager(path: ":memory:")),
+            downloadArchive: { _ in
+                downloads += 1
+                return downloads == 1 ? bad : fixture.archive
+            },
+            saveBrowserSession: { _, _ in }
+        )
+
+        try await ActrPackageCache.$rootOverrideForTesting.withValue(directory.appendingPathComponent("cache")) {
+            try await ActrPackageTrustStore.$supportDirectoryOverrideForTesting.withValue(directory) {
+                view.navigateCurrentTab(to: link.absoluteString)
+                view.confirmPendingPackageDownload()
+                try await waitUntil { view.currentTab?.actrOpenFailure != nil }
+                XCTAssertNil(ActrPackageCache.cachedDigest(forDownloadURL: link))
+
+                ActrPackageCache.rememberDownloadURL(link, digest: digest(badBytes))
+                view.reloadCurrentTab()
+                XCTAssertEqual(view.pendingPackageDownload?.url, link)
+                XCTAssertNil(ActrPackageCache.cachedDigest(forDownloadURL: link))
+                XCTAssertEqual(downloads, 1)
+
+                view.confirmPendingPackageDownload()
+                try await waitUntil { view.currentTab?.unifiedScript == fixture.script }
+                XCTAssertEqual(ActrPackageCache.cachedDigest(forDownloadURL: link), goodDigest)
+                XCTAssertEqual(downloads, 2)
+            }
+        }
+    }
+
+    @MainActor
+    func testOfflineRestoredRealmKeepsItsSavedAddress() async throws {
+        let preferences = try makePreferences()
+        preferences.set([realmName], forKey: "actr.redeemedRealms")
+        let restoredId = UUID()
+        var savedTab: Tab?
+        let view = BrowserViewModel(
+            realmPreferences: preferences, realmTrustDirectory: realmTrustDirectory,
+            fetchRealmDocument: { _, _ in throw URLError(.notConnectedToInternet) },
+            saveBrowserSession: { tabs, _ in savedTab = tabs.first { $0.id == restoredId } }
+        )
+        view.restoreSessionIfNeeded {
+            .init(tabs: [.init(id: restoredId, title: "Echo", address: realmURI)], activeTabIndex: 0)
+        }
+        try await waitUntil { savedTab?.actrOpenFailure == .downloadFailed }
+        let failedTab = try XCTUnwrap(savedTab)
+        XCTAssertEqual(BrowserDataRepository.sessionAddress(for: failedTab)?.absoluteString, realmURI)
+        XCTAssertEqual(view.currentTabId, restoredId)
+    }
+
+    @MainActor
     func testBackgroundInviteSurvivesThePreviousWebPageChangingURL() async throws {
         let documents = try discoveryDocuments(membership: "invite-only")
         let profile = NavigationGate()
@@ -220,7 +381,7 @@ final class RealmNavigationTests: XCTestCase {
                 try XCTUnwrap(documents[url.absoluteString])
             },
             joinOpenRealm: { _ in },
-            downloadRealmArchive: { _ in fixture.archive },
+            downloadArchive: { _ in fixture.archive },
             saveBrowserSession: { tabs, _ in savedTitles.append(contentsOf: tabs.map(\.title)) }
         )
         let restoredTabId = UUID()
@@ -239,13 +400,14 @@ final class RealmNavigationTests: XCTestCase {
         XCTAssertEqual(view.currentTab?.id, restoredTabId)
         XCTAssertEqual(view.currentTab?.title, "Saved Runtime Title")
         try await waitUntil {
-            view.tabs.first { $0.id == restoredTabId }?.appId != nil || view.actrUriNotice != nil
-        }
-        if let notice = view.actrUriNotice {
-            XCTFail("Realm activation failed: \(notice.detail ?? "Unknown error")")
-            return
+            guard let tab = view.tabs.first(where: { $0.id == restoredTabId }) else { return false }
+            return tab.appId != nil || tab.actrOpenFailure != nil
         }
         let realmTab = try XCTUnwrap(view.tabs.first { $0.id == restoredTabId })
+        if let failure = realmTab.actrOpenFailure {
+            XCTFail("Realm activation failed: \(failure.rawValue)")
+            return
+        }
         XCTAssertEqual(realmTab.unifiedScript, fixture.script)
         XCTAssertEqual(realmTab.title, "Saved Runtime Title")
         XCTAssertEqual(savedTitles.last, "Saved Runtime Title")
@@ -312,7 +474,7 @@ final class RealmNavigationTests: XCTestCase {
                 return #"{"member_id":"member","role":"editor","key_id":"key"}"#
             },
             confirmRealmMembership: { _ in false },
-            downloadRealmArchive: { url in
+            downloadArchive: { url in
                 XCTAssertEqual(url.absoluteString, "https://publisher.example/echo-front.actr")
                 XCTAssertTrue(joined)
                 downloads += 1
@@ -731,7 +893,7 @@ final class RealmNavigationTests: XCTestCase {
                 throw CancellationError()
             },
             confirmRealmMembership: { _ in false },
-            downloadRealmArchive: { _ in
+            downloadArchive: { _ in
                 unwantedWork.fulfill()
                 throw CancellationError()
             },

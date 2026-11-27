@@ -80,7 +80,6 @@ struct PackageDownloadConfirmSheet: View {
 /// Progress sheet: downloading → SHA-256 verifying, or failed with retry.
 struct ActivePackageDownloadSheet: View {
     let active: ActivePackageDownload
-    let onRetry: () -> Void
     let onCancel: () -> Void
 
     var body: some View {
@@ -89,14 +88,12 @@ struct ActivePackageDownloadSheet: View {
                 Text("Downloading: \(active.pending.filename)")
                     .font(.headline)
                 Spacer()
-                if active.phase != .failed {
-                    Button(action: onCancel) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title2)
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
+                Button(action: onCancel) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.secondary)
                 }
+                .buttonStyle(.plain)
             }
             .padding()
 
@@ -123,17 +120,6 @@ struct ActivePackageDownloadSheet: View {
                         Text("Computing SHA-256 checksum…")
                             .foregroundColor(.secondary)
                     }
-                case .failed:
-                    Label {
-                        Text(active.errorMessage ?? "Download failed")
-                            .foregroundColor(.primary)
-                    } icon: {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
-                    }
-                    Text("Check the network and address, then retry.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -143,15 +129,8 @@ struct ActivePackageDownloadSheet: View {
 
             HStack {
                 Spacer()
-                if active.phase == .failed {
-                    Button("Cancel", action: onCancel)
-                        .keyboardShortcut(.cancelAction)
-                    Button("Retry", action: onRetry)
-                        .keyboardShortcut(.defaultAction)
-                } else {
-                    Button("Cancel Download", action: onCancel)
-                        .keyboardShortcut(.cancelAction)
-                }
+                Button("Cancel Download", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
             }
             .padding()
         }

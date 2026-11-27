@@ -20,6 +20,7 @@ import {
 } from 'keel/host/preset';
 
 import { GuestTextInput } from './GuestTextInput';
+import { ActrErrorPage } from './ActrErrorPage';
 import { hasDeclaredCapability } from './capabilities';
 import {
   capabilitiesFromSnapshotJSON,
@@ -265,13 +266,17 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     setContent(null);
     setPreview(null);
 
+    const fail = (code: string, detail: unknown) => {
+      logToNative(`[StandaloneGuestApp] ${code}: ${String(detail)}`);
+      setError(code);
+    };
     if (!guestScript) {
-      setError('The application does not contain a Keel guest bundle.');
+      fail('PACKAGE_INVALID', 'The application does not contain a Keel guest bundle.');
       return;
     }
     const capabilityManifestJSON = tab.capabilityManifestJSON;
     if (!capabilityManifestJSON) {
-      setError('The package does not contain a capability manifest.');
+      fail('PACKAGE_INVALID', 'The package does not contain a capability manifest.');
       return;
     }
     // Only the Host-designated Echo demo may use the earlier Guest bundle format.
@@ -284,31 +289,27 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       tab.permissions ?? []
     );
     if (!verification.ok) {
-      const details = verification.details.join(' ');
-      logToNative(
-        `[StandaloneGuestApp] capability verification failed: ${details}`
-      );
-      setError(`Capability manifest verification failed: ${details}`);
+      fail(verification.code ?? 'capability_mismatch', verification.details.join(' '));
       return;
     }
     if (v1?.ok && v1.manifest.components.includes('Supramark') && !Supramark) {
-      setError('Supramark rendering is unavailable in this Host build.');
+      fail('ACTR_HOST_FEATURE_MISSING', 'Supramark rendering is unavailable.');
       return;
     }
     if (v1?.ok && v1.manifest.components.includes('Svg') && !Svg) {
-      setError('SVG rendering is unavailable in this Host build.');
+      fail('ACTR_HOST_FEATURE_MISSING', 'SVG rendering is unavailable.');
       return;
     }
     const menus = createGuestMenuComponents(tab.id, tab.reloadKey ?? 0, (error) => {
       logToNative(`[StandaloneGuestApp] Guest menu failed: ${String(error)}`);
     });
     if (v1?.ok && !menus && guestMenuNames.some((name) => v1.manifest.components.includes(name))) {
-      setError('Native menus are unavailable in this Host build.');
+      fail('ACTR_HOST_FEATURE_MISSING', 'Native menus are unavailable.');
       return;
     }
     const authorizer = authorizerRef.current;
     if (!authorizer) {
-      setError('The Native capability authorization snapshot is unavailable.');
+      fail('GUEST_START_FAILED', 'The Native capability authorization snapshot is unavailable.');
       return;
     }
 
@@ -333,7 +334,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       NativeModules.GuestLocalStorage, tab.id, tab.localStorageDocumentId
     );
     if (v1?.ok && v1.linkage.links.some(([id]) => id === 'host:local-storage') && !localStorage) {
-      setError('Local storage is unavailable for this application.');
+      fail('ACTR_HOST_FEATURE_MISSING', 'Local storage is unavailable.');
       return;
     }
 
@@ -377,12 +378,12 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     const nativePick = fileImport?.pick?.bind(fileImport, tab.id, tab.reloadKey ?? 0);
     const nativePickCached = fileImport?.pickCached?.bind(fileImport, tab.id, tab.reloadKey ?? 0);
     if (v1?.ok && v1.linkage.links.some(([id]) => id === 'host:file-import') && !nativePick) {
-      setError('File import is unavailable for this application.');
+      fail('ACTR_HOST_FEATURE_MISSING', 'File import is unavailable.');
       return;
     }
     const speechAvailable = isGuestSpeechAvailable();
     if (v1?.ok && v1.linkage.links.some(([id]) => id === 'host:speech') && !speechAvailable) {
-      setError('Speech recognition is unavailable for this application.');
+      fail('ACTR_HOST_FEATURE_MISSING', 'Speech recognition is unavailable.');
       return;
     }
     const ttsBridge = NativeModules.GuestTTS as GuestTTSBridge | undefined;
@@ -399,7 +400,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
         })
       : undefined;
     if (ttsLinked && !tts) {
-      setError('Text-to-speech is unavailable for this application.');
+      fail('ACTR_HOST_FEATURE_MISSING', 'Text-to-speech is unavailable.');
       return;
     }
     // The fixed upload transport is native-only through the per-tab
@@ -436,7 +437,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
         }
         if (!uploadAvailable) {
           attachmentUploader.dispose();
-          setError('Attachment upload is unavailable for this application.');
+          fail('ACTR_HOST_FEATURE_MISSING', 'Attachment upload is unavailable.');
           return;
         }
       }
@@ -495,6 +496,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     const engine = linked
       ? new Engine({
           debug: false,
+          reportRootRenderErrors: true,
           ...bindV1HostModules(linked.linkage, hostModules, (capability) =>
             authorizer.authorize(capability)
           ),
@@ -503,7 +505,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
           // Implicit text needs a renderer even when Text is absent from the manifest.
           textNodeRenderer: Text,
         })
-      : new Engine({ debug: false, contract, hostModules });
+      : new Engine({ debug: false, reportRootRenderErrors: true, contract, hostModules });
     engine.register(
       linked
         ? Object.fromEntries(
@@ -521,6 +523,9 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       setContent(next as React.ReactElement | null);
     };
     const unsubscribeUpdate = engine.on('update', update);
+    const unsubscribeRootError = engine.on('rootRenderError', (cause) => {
+      if (!disposed) fail('GUEST_ROOT_CRASHED', cause);
+    });
     // The legacy bridge is confined to the host-designated demo package. The
     // designation comes from launch configuration, never from package data.
     // Every other package must use the per-tab host:service path.
@@ -584,29 +589,19 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     })
       : () => {};
 
-    void engine
-      .loadBundle(guestScript, { containerHeight, containerWidth })
-      .then(() => {
-        const stats = engine.getReceiver()?.getStats();
-        logToNative(
-          `[StandaloneGuestApp] guest loaded: roots=${stats?.rootChildrenCount ?? 0}, nodes=${stats?.nodeCount ?? 0}`,
-        );
-        update();
-        setTimeout(update, 0);
-      })
-      .catch((cause) => {
-        if (!disposed) {
-          setError(cause instanceof Error ? cause.message : String(cause));
-        }
-      });
-
       stopEngine = () => {
         unsubscribeEvents();
         unsubscribeUpdate();
+        unsubscribeRootError();
         engine.destroy();
       };
+      await engine.loadBundle(guestScript, { containerHeight, containerWidth });
+      update();
+      setTimeout(update, 0);
     };
-    void start();
+    void start().catch((cause) => {
+      if (!disposed) fail('GUEST_START_FAILED', cause);
+    });
 
     return () => {
       disposed = true;
@@ -639,13 +634,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
   ]);
 
   if (error) {
-    return (
-      <NativeView
-        style={{ flex: 1, padding: 24, backgroundColor: '#2b0b0b' }}
-      >
-        <NativeText style={{ color: '#fda4af' }}>{error}</NativeText>
-      </NativeView>
-    );
+    return <ActrErrorPage code={error} />;
   }
 
   const body = (
