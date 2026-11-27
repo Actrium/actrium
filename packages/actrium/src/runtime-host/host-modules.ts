@@ -9,6 +9,7 @@ import type {
   FileImportPickInput,
   FileImportPickOutput,
   ServiceCallInput,
+  ServiceConnection,
   ServiceEvent,
   ServiceStreamSendInput,
   ServiceTellInput,
@@ -31,6 +32,7 @@ export type ServiceCallRequest = ServiceCallInput;
 export type ServiceCallResult = {
   success: boolean;
   payloadBase64?: string;
+  connectionId?: string;
   message?: string;
 };
 
@@ -39,6 +41,7 @@ export type ActorCall = (request: {
   route: string;
   payloadBase64: string;
   timeoutMs: number;
+  connection?: ServiceConnection;
 }) => Promise<ServiceCallResult>;
 
 /**
@@ -159,13 +162,17 @@ export function createHostModules(options: {
             route: input.route,
             payloadBase64: input.payloadBase64,
             timeoutMs,
+            ...(input.connection ? { connection: input.connection } : {}),
           }),
           timeoutMs
         );
         if (!result.success || typeof result.payloadBase64 !== 'string') {
           throw new Error(result.message ?? 'Service call failed');
         }
-        return { payloadBase64: result.payloadBase64 };
+        return {
+          payloadBase64: result.payloadBase64,
+          ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+        };
       },
       tell: async (_input: ServiceTellInput) => {
         throw notImplemented('host:service', 'tell');

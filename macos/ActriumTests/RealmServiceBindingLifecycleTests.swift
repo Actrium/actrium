@@ -11,9 +11,11 @@ private actor ControlledRealmServiceBinding: RealmServiceBindingHandle {
     private var completesSubscribeImmediately = false
     private(set) var suspendCount = 0
 
-    func call(_ request: RealmServiceCall) async throws -> Data {
-        Data()
+    func call(_ request: RealmServiceCall, scope: UUID?) async throws -> RealmServiceReply {
+        RealmServiceReply(id: request.id, payload: Data())
     }
+
+    func retireConnectionScope(_ scope: UUID) {}
 
     func setCompletesSubscribeImmediately() {
         completesSubscribeImmediately = true

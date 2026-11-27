@@ -10,6 +10,22 @@ public struct RealmServiceCall: Codable, Sendable {
     public let payload: Data
     public let timeoutMs: Int
     public let streamChunk: StreamChunk?
+    public let connection: Connection?
+    public let reloadKey: Int?
+
+    public struct Connection: Codable, Sendable {
+        public enum Action: String, Codable, Sendable {
+            case retain, use, release
+        }
+
+        public let action: Action
+        public let id: UUID?
+
+        public init(action: Action, id: UUID? = nil) {
+            self.action = action
+            self.id = id
+        }
+    }
 
     public struct StreamChunk: Codable, Sendable {
         public let id: String
@@ -21,12 +37,17 @@ public struct RealmServiceCall: Codable, Sendable {
         }
     }
 
-    public init(id: UUID, route: String, payload: Data, timeoutMs: Int, streamChunk: StreamChunk? = nil) {
+    public init(
+        id: UUID, route: String, payload: Data, timeoutMs: Int, streamChunk: StreamChunk? = nil,
+        connection: Connection? = nil, reloadKey: Int? = nil
+    ) {
         self.id = id
         self.route = route
         self.payload = payload
         self.timeoutMs = timeoutMs
         self.streamChunk = streamChunk
+        self.connection = connection
+        self.reloadKey = reloadKey
     }
 }
 
@@ -55,12 +76,14 @@ public struct RealmServiceReply: Codable, Sendable {
     public let payload: Data?
     public let error: String?
     public let failure: RealmServiceFailure?
+    public let connectionId: UUID?
 
-    public init(id: UUID, payload: Data? = nil, error: String? = nil) {
+    public init(id: UUID, payload: Data? = nil, error: String? = nil, connectionId: UUID? = nil) {
         self.id = id
         self.payload = payload
         self.error = error
         self.failure = nil
+        self.connectionId = connectionId
     }
 
     public init(id: UUID, failure: RealmServiceFailure) {
@@ -68,5 +91,6 @@ public struct RealmServiceReply: Codable, Sendable {
         self.payload = nil
         self.error = failure.message
         self.failure = failure
+        self.connectionId = nil
     }
 }

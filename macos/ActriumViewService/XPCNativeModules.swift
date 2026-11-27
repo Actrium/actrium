@@ -96,14 +96,16 @@ final class RealmService: RCTEventEmitter {
         submit(tabId, call: call, resolve: { _ in resolve(nil) }, reject: reject)
     }
 
-    private func submit(
+    func submit(
         _ tabId: String, call: RealmServiceCall,
         resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
     ) {
         DispatchQueue.main.async {
             RendererProcessController.callRealmService(tabId: tabId, call: call) { response in
                 if let payload = response.payload {
-                    resolve(["payloadBase64": payload.base64EncodedString()])
+                    var result = ["payloadBase64": payload.base64EncodedString()]
+                    result["connectionId"] = response.connectionId?.uuidString
+                    resolve(result)
                 } else {
                     let error = response.failure.map { failure in
                         var userInfo: [String: Any] = [

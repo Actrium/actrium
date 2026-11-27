@@ -326,7 +326,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       // The global echo gateway is legacy-bridge only. New service calls must
       // target the tab's attached Service actor.
       if (!tab.serviceCallUrl) {
-        return callNativeService(NativeModules.RealmService, tab.id, request);
+        return callNativeService(NativeModules.RealmService, tab.id, request, tab.reloadKey ?? 0);
       }
       logToNative(`[StandaloneGuestApp] service call ${request.route}`);
       return callHttpService(tab.serviceCallUrl, request);
@@ -461,7 +461,14 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       serviceStreams,
       sendServiceStreamChunk: streamBridge?.sendServiceStreamChunk ? async (chunk) => {
         if (disposed) throw new Error('The Service DataStream sender has ended.');
-        await streamBridge.sendServiceStreamChunk(tab.id, chunk.route, chunk.streamId, chunk.sequence, chunk.payloadBase64);
+        if (chunk.connectionId) {
+          if (!streamBridge.sendBoundServiceStreamChunk) throw new Error('The native Service stream cannot bind a connection.');
+          await streamBridge.sendBoundServiceStreamChunk(
+            tab.id, chunk.route, chunk.streamId, chunk.sequence, chunk.payloadBase64, tab.reloadKey ?? 0, chunk.connectionId,
+          );
+        } else {
+          await streamBridge.sendServiceStreamChunk(tab.id, chunk.route, chunk.streamId, chunk.sequence, chunk.payloadBase64);
+        }
       } : undefined,
       authorizeCapability: (capability) => authorizer.authorize(capability),
       onCapabilityRevoked: (capability, listener) =>

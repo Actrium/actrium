@@ -43,7 +43,8 @@ extension RealmServiceFailure {
 protocol RealmServiceBindingHandle: AnyObject, Sendable {
     var id: UUID { get }
     var attachmentUploadAvailable: Bool { get async }
-    func call(_ request: RealmServiceCall) async throws -> Data
+    func call(_ request: RealmServiceCall, scope: UUID?) async throws -> RealmServiceReply
+    func retireConnectionScope(_ scope: UUID) async
     func subscribe(events: [String], generation: UInt64) async throws
     func suspendEvents(ifGeneration generation: UInt64) async
     func prepareAttachmentUpload(
@@ -198,7 +199,25 @@ final class RealmServiceBindings {
         guard let binding = bindings[tabId] else {
             throw RealmServiceError(message: "The tab has no Realm Service.")
         }
-        return try await binding.call(request)
+        let reply = try await binding.call(request, scope: nil)
+        return reply.payload ?? Data()
+    }
+
+    func callBound(_ request: RealmServiceCall, tabId: UUID, scope: UUID) async throws -> RealmServiceReply {
+        guard let binding = bindings[tabId] else {
+            throw RealmServiceError(message: "The tab has no Realm Service.")
+        }
+        let reply = try await binding.call(request, scope: scope)
+        guard bindings[tabId] === binding else {
+            await binding.retireConnectionScope(scope)
+            throw CancellationError()
+        }
+        return reply
+    }
+
+    func retireConnectionScope(_ scope: UUID, tabId: UUID) {
+        guard let binding = bindings[tabId] else { return }
+        Task { await binding.retireConnectionScope(scope) }
     }
 
     func subscribe(_ request: RealmServiceEventSubscription, tabId: UUID) async throws {
@@ -671,6 +690,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     /// replacement attaches. Ordinary calls stay blocked until commit/rollback.
     private var localFrontHandoff: RuntimeConnection?
     private var stopped = false
+    private var connectionPins = RealmServiceConnectionPins<RuntimeConnection>()
 
     init(
         profile: RealmProfileInfo,
@@ -790,39 +810,98 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         try Task.checkCancellation()
     }
 
-    func call(_ request: RealmServiceCall) async throws -> Data {
+    func call(_ request: RealmServiceCall, scope: UUID?) async throws -> RealmServiceReply {
         guard !stopped, routes.contains(request.route),
               (1...300_000).contains(request.timeoutMs) else {
             throw RealmServiceError(message: "The Service call is outside this tab's declared capabilities.")
         }
+        if let affinity = request.connection {
+            guard let scope else { throw invalidConnectionPin() }
+            return try await callWithConnection(request, affinity: affinity, scope: scope)
+        }
         if let chunk = request.streamChunk {
             try await sendStreamChunk(chunk, request: request)
-            return Data()
+            return RealmServiceReply(id: request.id, payload: Data())
         }
+        let connection = try await resolveRPCConnection(request)
+        return try await callRPC(request, using: connection)
+    }
+
+    private func callWithConnection(
+        _ request: RealmServiceCall, affinity: RealmServiceCall.Connection, scope: UUID
+    ) async throws -> RealmServiceReply {
+        switch affinity.action {
+        case .retain:
+            guard affinity.id == nil, request.streamChunk == nil else { throw invalidConnectionPin() }
+            let connection = try await resolveRPCConnection(request)
+            guard let id = connectionPins.retain(connection, scope: scope) else {
+                throw RealmServiceError(message: "Too many bound Service connections.")
+            }
+            do {
+                let reply = try await callRPC(request, using: connection, connectionId: id)
+                guard !stopped else { throw CancellationError() }
+                return reply
+            } catch {
+                connectionPins.release(id: id, scope: scope)
+                throw error
+            }
+        case .use:
+            guard let id = affinity.id, let connection = connectionPins.connection(id: id, scope: scope)
+            else { throw invalidConnectionPin() }
+            if let chunk = request.streamChunk {
+                try await sendStreamChunk(chunk, request: request, pinned: connection)
+                return RealmServiceReply(id: request.id, payload: Data())
+            }
+            return try await callRPC(request, using: connection)
+        case .release:
+            guard let id = affinity.id, request.streamChunk == nil, request.payload.isEmpty
+            else { throw invalidConnectionPin() }
+            connectionPins.release(id: id, scope: scope)
+            return RealmServiceReply(id: request.id, payload: Data())
+        }
+    }
+
+    func retireConnectionScope(_ scope: UUID) {
+        connectionPins.retire(scope: scope)
+    }
+
+    private func invalidConnectionPin() -> RealmServiceError {
+        RealmServiceError(message: "The bound Service connection is no longer available. Start a new upload.")
+    }
+
+    private func resolveRPCConnection(_ request: RealmServiceCall) async throws -> RuntimeConnection {
         guard request.payload.count <= 1_048_576 else {
             throw RealmServiceError(message: "The Service call payload exceeds the limit.")
         }
         let eventGeneration = await eventPeers.activeGeneration()
-        let connection = try await readyConnection(
-            resolveTargetForCall: true,
-            eventGeneration: eventGeneration
-        )
-        guard !stopped else { throw CancellationError() }
-        return try await connection.call(
-            route: request.route,
-            capability: routeCapabilities[request.route] ?? "service",
-            payload: request.payload,
-            timeoutMs: UInt64(request.timeoutMs)
-        )
+        return try await readyConnection(resolveTargetForCall: true, eventGeneration: eventGeneration)
     }
 
-    private func sendStreamChunk(_ chunk: RealmServiceCall.StreamChunk, request: RealmServiceCall) async throws {
+    private func callRPC(
+        _ request: RealmServiceCall, using connection: RuntimeConnection, connectionId: UUID? = nil
+    ) async throws -> RealmServiceReply {
+        guard !stopped else { throw CancellationError() }
+        guard request.payload.count <= 1_048_576 else {
+            throw RealmServiceError(message: "The Service call payload exceeds the limit.")
+        }
+        let payload = try await connection.call(
+            route: request.route, capability: routeCapabilities[request.route] ?? "service",
+            payload: request.payload, timeoutMs: UInt64(request.timeoutMs)
+        )
+        return RealmServiceReply(id: request.id, payload: payload, connectionId: connectionId)
+    }
+
+    private func sendStreamChunk(
+        _ chunk: RealmServiceCall.StreamChunk, request: RealmServiceCall, pinned: RuntimeConnection? = nil
+    ) async throws {
         guard streamSendAllowed, chunk.sequence > 0, !request.payload.isEmpty,
               request.payload.count <= RealmServiceCall.maxStreamChunkBytes,
               chunk.id.range(of: #"\A[A-Za-z0-9_-]{1,128}\z"#, options: .regularExpression) != nil else {
             throw RealmServiceError(message: "The Service DataStream send is outside this tab's declared capabilities.")
         }
-        let connection = try await readyConnection()
+        let connection: RuntimeConnection
+        if let pinned { connection = pinned }
+        else { connection = try await readyConnection() }
         guard !stopped else { throw CancellationError() }
         let dataChunk = ActrBindings.DataChunk(
             streamId: chunk.id, sequence: chunk.sequence, payload: request.payload, metadata: [],
@@ -1651,6 +1730,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
 
     func stop() async {
         stopped = true
+        connectionPins = RealmServiceConnectionPins()
         await clearEventPeer()
         let startup = self.startup
         let recovery = self.recovery

@@ -186,6 +186,7 @@ final class RendererProcessPool: ObservableObject {
     /// released or replaced, so late attachment results and queued Service
     /// event subscriptions can never belong to a replacement renderer.
     private var rendererEpoch: [UUID: Int] = [:]
+    private var serviceConnectionScopes: [UUID: (reloadKey: Int, id: UUID)] = [:]
 
     init(localStorage: RendererLocalStorage) {
         self.localStorage = localStorage
@@ -268,6 +269,7 @@ final class RendererProcessPool: ObservableObject {
         // invalidate late attachment results and cancel the tab's sessions
         // without touching any other tab.
         rendererEpoch[tabId, default: 0] &+= 1
+        retireServiceConnectionScope(for: tabId)
         RealmServiceBindings.shared.cancelAttachmentUploads(tabId)
         RealmServiceBindings.shared.retireSubscriptions(for: tabId)
         guard let workerId = tabWorkerMap.removeValue(forKey: tabId),
@@ -343,6 +345,10 @@ final class RendererProcessPool: ObservableObject {
         guestMenu.update(tabId: tabId, reloadKey: reloadKey)
         fileImport.update(tabId: tabId, reloadKey: reloadKey)
         fileExport.update(tabId: tabId, reloadKey: reloadKey)
+        if serviceConnectionScopes[tabId]?.reloadKey != reloadKey {
+            retireServiceConnectionScope(for: tabId)
+            serviceConnectionScopes[tabId] = (reloadKey, UUID())
+        }
 
         let config = localStorage.prepare(tabId: tabId, config: resolvedConfig)
         guard JSONSerialization.isValidJSONObject(config),
@@ -870,16 +876,23 @@ final class RendererProcessPool: ObservableObject {
                       let request = try? JSONDecoder().decode(RealmServiceCall.self, from: Data(userInfoJSON.utf8)) else {
                     return
                 }
+                let current = self.serviceConnectionScopes[tabId]
+                let scope = request.reloadKey == current?.reloadKey ? current?.id : nil
                 Task { [weak self, weak worker] in
+                    guard let self, let worker, self.worker(for: tabId) === worker else { return }
                     let response: RealmServiceReply
                     do {
-                        let payload = try await RealmServiceBindings.shared.call(request, tabId: tabId)
-                        response = RealmServiceReply(id: request.id, payload: payload)
+                        let activeScope = scope == self.serviceConnectionScopes[tabId]?.id ? scope : nil
+                        response = try await self.serviceReply(request, tabId: tabId, scope: activeScope)
                     } catch {
                         AppLogger.reactNative.warning("Realm Service call failed: \(error.localizedDescription)")
                         response = RealmServiceReply(id: request.id, failure: RealmServiceFailure(serviceError: error))
                     }
-                    guard let self, let worker, self.worker(for: tabId) === worker,
+                    if let scope, self.worker(for: tabId) !== worker || self.serviceConnectionScopes[tabId]?.id != scope {
+                        RealmServiceBindings.shared.retireConnectionScope(scope, tabId: tabId)
+                        return
+                    }
+                    guard self.worker(for: tabId) === worker,
                           let data = try? JSONEncoder().encode(response) else { return }
                     try? worker.connection.sendHostEvent(
                         name: RealmServiceCall.responseEvent,
@@ -1106,6 +1119,7 @@ final class RendererProcessPool: ObservableObject {
             fileImport.cancel(tabId: tabId)
             fileExport.cancel(tabId: tabId)
             rendererEpoch[tabId, default: 0] &+= 1
+            retireServiceConnectionScope(for: tabId)
             RealmServiceBindings.shared.cancelAttachmentUploads(tabId)
             RealmServiceBindings.shared.retireSubscriptions(for: tabId)
             tabWorkerMap.removeValue(forKey: tabId)
@@ -1179,6 +1193,22 @@ final class RendererProcessPool: ObservableObject {
                 )
             }
         )
+    }
+
+    private func retireServiceConnectionScope(for tabId: UUID) {
+        guard let scope = serviceConnectionScopes.removeValue(forKey: tabId) else { return }
+        RealmServiceBindings.shared.retireConnectionScope(scope.id, tabId: tabId)
+    }
+
+    private func serviceReply(_ request: RealmServiceCall, tabId: UUID, scope: UUID?) async throws -> RealmServiceReply {
+        if request.connection != nil {
+            guard let scope else {
+                throw RealmServiceError(message: "This renderer generation has no bound Service connection.")
+            }
+            return try await RealmServiceBindings.shared.callBound(request, tabId: tabId, scope: scope)
+        }
+        let payload = try await RealmServiceBindings.shared.call(request, tabId: tabId)
+        return RealmServiceReply(id: request.id, payload: payload)
     }
 
     private func worker(for tabId: UUID) -> Worker? {

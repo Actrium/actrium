@@ -85,3 +85,16 @@ test('keeps the native rejection code and upstream details', async () => {
     userInfo,
   });
 });
+
+test('carries the native connection binding through a pinned RPC', async () => {
+  const id = '88c42cbb-085e-48d3-abbf-efd5621c688a';
+  const connection = { action: 'use' as const, id };
+  const result = await callNativeService({
+    callBound: async (tabId, route, payload, timeout, reloadKey, affinity) => {
+      expect([tabId, route, payload, timeout, reloadKey, affinity])
+        .toEqual(['tab-1', request.route, request.payloadBase64, request.timeoutMs, 7, connection]);
+      return { payloadBase64: 'AAEC', connectionId: id };
+    },
+  }, 'tab-1', { ...request, connection }, 7);
+  expect(result).toEqual({ success: true, payloadBase64: 'AAEC', connectionId: id });
+});

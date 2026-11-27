@@ -1,12 +1,17 @@
 import { HostHttpHandler } from 'askit/host-events';
 
+import type { ServiceCallOutput, ServiceConnection } from './contract';
 import type { ActorCall, ServiceCallResult } from './host-modules';
 
 type ActorCallRequest = Parameters<ActorCall>[0];
 
 type NativeService = {
   call?: (tabId: string, route: string, payloadBase64: string, timeoutMs: number) =>
-    Promise<{ payloadBase64: string }>;
+    Promise<ServiceCallOutput>;
+  callBound?: (
+    tabId: string, route: string, payloadBase64: string, timeoutMs: number,
+    reloadKey: number, connection: ServiceConnection,
+  ) => Promise<ServiceCallOutput>;
 };
 
 function serializeServiceError(error: unknown): string {
@@ -29,8 +34,11 @@ function serializeServiceError(error: unknown): string {
 
 export async function callHttpService(
   url: string,
-  { requestId, route, payloadBase64, timeoutMs }: ActorCallRequest
+  { requestId, route, payloadBase64, timeoutMs, connection }: ActorCallRequest
 ): Promise<ServiceCallResult> {
+  if (connection) {
+    return { success: false, message: 'The HTTP Service transport cannot bind a connection.' };
+  }
   const result = await HostHttpHandler.handleRequest<{ success?: boolean; payloadBase64?: string }>({
     requestId,
     url,
@@ -51,14 +59,16 @@ export async function callHttpService(
 export async function callNativeService(
   service: NativeService | undefined,
   tabId: string,
-  { route, payloadBase64, timeoutMs }: ActorCallRequest
+  { route, payloadBase64, timeoutMs, connection }: ActorCallRequest,
+  reloadKey = 0,
 ): Promise<ServiceCallResult> {
-  if (!service?.call) {
-    return { success: false, message: 'The native Realm Service bridge is unavailable.' };
-  }
   try {
-    const response = await service.call(tabId, route, payloadBase64, timeoutMs);
-    return { success: true, payloadBase64: response.payloadBase64 };
+    const response = connection
+      ? await service?.callBound?.(tabId, route, payloadBase64, timeoutMs, reloadKey, connection)
+      : await service?.call?.(tabId, route, payloadBase64, timeoutMs);
+    if (!response) return { success: false, message: 'The requested native Realm Service bridge is unavailable.' };
+    return { success: true, payloadBase64: response.payloadBase64,
+      ...(response.connectionId ? { connectionId: response.connectionId } : {}) };
   } catch (error) {
     return { success: false, message: serializeServiceError(error) || 'Service call failed' };
   }
