@@ -84,11 +84,14 @@ export const ScrollView = React.forwardRef<NativeScrollView, ScrollViewProps>(
   ) => {
     const initial = useInitialScroll(initialScrollPosition, horizontal, onInitialScrollComplete);
     const nativeRef = React.useRef<NativeScrollView>(null);
-    const attachNativeRef = React.useCallback((view: NativeScrollView | null) => {
-      nativeRef.current = view;
-      if (typeof ref === 'function') ref(view);
-      else if (ref) ref.current = view;
-    }, [ref]);
+    const attachNativeRef = React.useCallback(
+      (view: NativeScrollView | null) => {
+        nativeRef.current = view;
+        if (typeof ref === 'function') ref(view);
+        else if (ref) ref.current = view;
+      },
+      [ref]
+    );
     useScrollRequest(nativeRef, scrollRequest, initial.hidden, horizontal);
     const followLayout = scrollToEndOnLayout === true && !initial.hidden;
     const scheduleLayoutScroll = useScrollToEndOnLayout(nativeRef, followLayout);
@@ -226,10 +229,7 @@ function useScrollRequest(
   }, [horizontal, initializing, nativeRef, request]);
 }
 
-function useScrollToEndOnLayout(
-  view: React.RefObject<NativeScrollView | null>,
-  enabled: boolean
-) {
+function useScrollToEndOnLayout(view: React.RefObject<NativeScrollView | null>, enabled: boolean) {
   const active = React.useRef(enabled);
   const frame = React.useRef<number | undefined>(undefined);
   React.useLayoutEffect(() => {
