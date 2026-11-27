@@ -110,7 +110,7 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             reasons.append(f"full_trigger:{path}")
             continue
 
-        if path.startswith("macos/") or path in (
+        if path.startswith(("macos/", "crates/actrium-core/")) or path in (
             "package.json",
             "scripts/actrium/filter-xcodebuild-output.sh",
         ):

@@ -1205,6 +1205,16 @@ jobs:
           python-version: "3.11"
       - name: Test renderer hosting and complete bundle signing
         run: bash macos/scripts/test-host.sh
+      - name: Set up Rust for SQLCipher tests
+        uses: dtolnay/rust-toolchain@1.99.0
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION || '29.3' }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Test SQLCipher guest storage
+        run: cargo test --locked -p actrium-core --features guest-storage-sqlcipher --lib --test guest_local_storage_encryption
 
   kotlin_native:
     name: Kotlin Android

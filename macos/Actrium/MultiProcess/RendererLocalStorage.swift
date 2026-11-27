@@ -128,6 +128,11 @@ final class RendererLocalStorage {
             return GuestLocalStorageReply(id: call.id, error: "Too many pending local storage operations.")
         } catch GuestLocalStorageError.InvalidPublisher, GuestLocalStorageError.IdentityChanged {
             return GuestLocalStorageReply(id: call.id, error: "Local storage access was denied.")
+        } catch let error as GuestStorageKeyError {
+            return GuestLocalStorageReply(id: call.id, error: error.localizedDescription)
+        } catch GuestLocalStorageError.DatabaseUnlockFailed(let message),
+                GuestLocalStorageError.EncryptionUnavailable(let message) {
+            return GuestLocalStorageReply(id: call.id, error: message)
         } catch GuestLocalStorageError.InvalidKey(let message),
                 GuestLocalStorageError.InvalidValue(let message),
                 GuestLocalStorageError.QuotaExceeded(let message) {

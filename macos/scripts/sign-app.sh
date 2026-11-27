@@ -12,6 +12,7 @@ die() {
 if [ "$#" -ne 1 ] || [ "$1" = "--help" ]; then
   echo "Usage: IDENTITY_NAME='<signing identity>' $0 <Actrium.app>"
   echo "Optional: KEYCHAIN_PATH, CODESIGN_TIMESTAMP (default: secure; none for development)."
+  echo "APP_PROVISIONING_PROFILE adds the Host's private Keychain identity."
   echo "IDENTITY_NAME=- is for signature verification fixtures only; its identity changes on rebuild."
   [ "$#" -eq 1 ] && [ "$1" = "--help" ] && exit 0
   exit 64
@@ -67,9 +68,35 @@ HELPER_APP="${APP_PATH}/Contents/Helpers/ActriumRenderer.app"
 validate_executable "${APP_PATH}"
 [ -d "${HELPER_APP}" ] || die "missing renderer helper: ${HELPER_APP}"
 validate_executable "${HELPER_APP}"
+
+if [ -n "${APP_PROVISIONING_PROFILE:-}" ]; then
+  [ -s "${APP_PROVISIONING_PROFILE}" ] || die "Host provisioning profile does not exist or is empty"
+  [ "${IDENTITY_NAME}" != - ] || die "a provisioned Host requires an Apple signing identity"
+  host_signing_dir="$(mktemp -d "${TMPDIR:-/tmp}/actrium-host-signing.XXXXXX")"
+  trap 'rm -rf "${host_signing_dir}"' EXIT
+  security cms -D -i "${APP_PROVISIONING_PROFILE}" -o "${host_signing_dir}/profile.plist"
+  python3 "${SCRIPT_DIR}/prepare-host-entitlements.py" "${host_signing_dir}/profile.plist" \
+    "${APP_PATH}/Contents/Info.plist" "${APP_ENTITLEMENTS}" "${host_signing_dir}/entitlements.plist"
+  APP_ENTITLEMENTS="${host_signing_dir}/entitlements.plist"
+  cp "${APP_PROVISIONING_PROFILE}" "${APP_PATH}/Contents/embedded.provisionprofile"
+fi
+
 sign_nested_code "${HELPER_APP}/Contents/Frameworks"
 codesign "${CODESIGN_ARGS[@]}" --entitlements "${RENDERER_ENTITLEMENTS}" "${HELPER_APP}"
 
 sign_nested_code "${APP_PATH}/Contents/Frameworks"
 codesign "${CODESIGN_ARGS[@]}" --entitlements "${APP_ENTITLEMENTS}" "${APP_PATH}"
 codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
+
+if [ -n "${APP_PROVISIONING_PROFILE:-}" ]; then
+  codesign --display --extract-certificates="${host_signing_dir}/cert-" "${APP_PATH}"
+  python3 - "${host_signing_dir}/profile.plist" "${host_signing_dir}/cert-0" <<'PY'
+import plistlib
+from pathlib import Path
+import sys
+
+profile, leaf = map(Path, sys.argv[1:])
+if leaf.read_bytes() not in plistlib.loads(profile.read_bytes()).get("DeveloperCertificates", []):
+    sys.exit("ERROR: Host signing certificate is not authorized by its provisioning profile")
+PY
+fi

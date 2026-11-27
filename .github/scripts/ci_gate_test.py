@@ -54,6 +54,8 @@ def test_macos_host_checks_are_affected_only_and_gate_failures() -> None:
     assert "if: needs.determine.outputs.macos_host == 'true'" in job
     assert "runs-on: macos-15" in job
     assert "bash macos/scripts/test-host.sh" in job
+    assert "arduino/setup-protoc@v3" in job
+    assert "cargo test --locked -p actrium-core --features guest-storage-sqlcipher --lib --test guest_local_storage_encryption" in job
     assert "      - macos_host\n" in gate
     assert "MACOS_HOST_RESULT: ${{ needs.macos_host.result }}" in gate
     assert '"macos_host": os.environ["MACOS_HOST_RESULT"]' in gate
@@ -385,6 +387,21 @@ def test_release_train_has_valid_publish_steps() -> None:
         "publish-typescript",
     ):
         assert f"- name: Run {stage} stage" in workflow
+
+
+def test_macos_release_checks_signed_delivery_and_supports_a_signed_dry_run() -> None:
+    workflow = (ROOT / ".github/workflows/_actrium-macos-release.yml").read_text(encoding="utf-8")
+    snapshot = (ROOT / ".github/workflows/release-actrium-macos.yml").read_text(encoding="utf-8")
+    verifier = (ROOT / ".github/scripts/verify_macos_dmg.sh").read_text(encoding="utf-8")
+    assert "SIGN_DMG: ${{ inputs.publish || inputs.signed_dry_run }}" in workflow
+    assert "if: inputs.publish || inputs.signed_dry_run" in workflow
+    assert 'export APP_PROVISIONING_PROFILE="$signing_dir/host.provisionprofile"' in workflow
+    assert "if: '!inputs.publish && !inputs.signed_dry_run'" in workflow
+    assert '"$GITHUB_RUN_NUMBER" "$SIGN_DMG"' in workflow
+    assert "signed_dry_run: ${{ !inputs.publish }}" in snapshot
+    assert "codesign --verify --deep --strict" in verifier
+    assert "xcrun stapler validate" in verifier
+    assert '"com.apple.application-identifier"' in verifier
 
 
 def test_release_train_verifies_ci_gate_triggered() -> None:
@@ -1111,6 +1128,7 @@ if __name__ == "__main__":
     test_python_template_keeps_project_and_abi_versions_distinct()
     test_pr_gate_swift_uses_macos_only_xcframework()
     test_release_train_has_valid_publish_steps()
+    test_macos_release_checks_signed_delivery_and_supports_a_signed_dry_run()
     test_release_train_verifies_ci_gate_triggered()
     test_only_release_prepare_can_write_pull_requests()
     test_pull_request_permission_scanner_handles_supported_syntax()

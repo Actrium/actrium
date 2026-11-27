@@ -2450,7 +2450,11 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             message = NSLocalizedString(
                 "The Publisher information could not be verified. The application was not opened.",
                 comment: "Publisher verification error")
-        case GuestLocalStorageError.DatabaseFailure:
+        case let error as GuestStorageKeyError:
+            message = error.localizedDescription
+        case GuestLocalStorageError.DatabaseFailure,
+             GuestLocalStorageError.DatabaseUnlockFailed,
+             GuestLocalStorageError.EncryptionUnavailable:
             message = NSLocalizedString(
                 "Saved Publisher verification information could not be read or updated. Existing app data has been preserved.",
                 comment: "Publisher trust storage error")
