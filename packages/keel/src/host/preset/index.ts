@@ -37,6 +37,7 @@ export {
   TouchableOpacity,
   View,
 } from './components';
+export { InitialScrollContent } from './components/initial-scroll-content';
 // EngineView component
 export type { EngineViewProps } from './engine-view';
 export { EngineView } from './engine-view';
