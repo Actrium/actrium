@@ -2,7 +2,13 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type React from 'react';
+import { ScrollView as NativeScrollView } from 'react-native';
+import { act, create } from 'react-test-renderer';
 import { defineKeelContract, rpc } from '../contract';
+import { Engine } from '../host/engine';
+import { waitFor } from '../host/__tests__/e2e/helpers/test-utils';
+import { ScrollView } from '../host/preset/components/scroll-view';
 import { readV1Linkage } from '../v1';
 import { build } from './build';
 
@@ -67,6 +73,42 @@ test.each([false, true])('builds a v1 linkage and manifest (minify=%s)', async (
     },
   });
   expect(script).not.toContain('require("host:service/');
+});
+
+test('a packaged v1 Guest requests a scroll through ScrollView props', async () => {
+  await buildGuest(
+    `import { useState } from 'react';
+    import { ScrollView } from 'keel/guest';
+    export default function App() {
+      const [request, setRequest] = useState();
+      return <ScrollView testID="conversation" scrollRequest={request} onContentSizeChange={() =>
+        setRequest({ id: 1, target: 'end' })} />;
+    }`,
+    true
+  );
+
+  const engine = new Engine({ sandbox: 'node-vm', restrictToRegisteredComponents: true });
+  engine.register({ ScrollView });
+  const receiver = engine.createReceiver();
+  const calls: unknown[] = [];
+  let renderer: ReturnType<typeof create> | undefined;
+  try {
+    await engine.loadBundle(await Bun.file('workload/guest.js').text());
+    await waitFor(() => receiver.findByTestId('conversation') !== undefined, 1500);
+    const node = receiver.findByTestId('conversation')!;
+    await act(async () => {
+      renderer = create(receiver.render() as React.ReactElement, {
+        createNodeMock: () => ({ scrollToEnd: (options: unknown) => { calls.push(options); } }),
+      });
+    });
+    renderer!.root.findByType(NativeScrollView).props.onContentSizeChange(320, 600);
+    await waitFor(() => node.props.scrollRequest?.target === 'end', 1500);
+    await act(async () => { renderer!.update(receiver.render() as React.ReactElement); });
+    expect(calls).toEqual([{ animated: false }]);
+  } finally {
+    await act(async () => { renderer?.unmount(); });
+    await engine.destroy();
+  }
 });
 
 test.each([

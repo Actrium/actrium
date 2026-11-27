@@ -319,6 +319,14 @@ export interface ScrollEvent {
   };
 }
 
+export interface ScrollRequest {
+  /** Increase for each request on the same ScrollView. */
+  id: number;
+  /** Vertical content offset, or the end of the scrollable content. */
+  target: number | 'end';
+  animated?: boolean;
+}
+
 /**
  * Image Source
  */
