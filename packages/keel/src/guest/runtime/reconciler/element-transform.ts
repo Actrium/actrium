@@ -166,7 +166,9 @@ function getOrCreateWrappedComponent(
           globalState.__keelCurrentInstanceId = prevInstanceId;
         }
       } catch (err) {
-        if (typeof (globalThis as Record<string, unknown>).__keel_reportRootRenderError === 'function') {
+        if (
+          typeof (globalThis as Record<string, unknown>).__keel_reportRootRenderError === 'function'
+        ) {
           throw err;
         }
         // Surface error as simple strings to avoid JSI circular ref traversal
