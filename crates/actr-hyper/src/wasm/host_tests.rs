@@ -425,6 +425,37 @@ fn deferred_reply_invocation_expires_at_inflight_ttl() {
 }
 
 #[test]
+fn stream_callback_can_finish_the_original_deferred_reply() {
+    let mut state = HostState::new(&WasmRuntimeLimits::default());
+    let delivered = CaptureDeliver::default();
+    let outcomes = Arc::clone(&delivered.0);
+    let prompt = state.alloc_invocation_with_reply(
+        invocation_context("prompt"),
+        noop_host_abi(),
+        Some(Arc::new(delivered)),
+        true,
+        Some(Arc::new(std::sync::atomic::AtomicBool::new(true))),
+        None,
+        None,
+    );
+    state.register_stream_context("result-stream".into(), prompt);
+    state.finish_invocation(prompt, true);
+    let callback = state.alloc_invocation(invocation_context("data-chunk"), noop_host_abi());
+    let captured = state.begin_stream_callback("result-stream", callback);
+    assert_eq!(captured, Some(prompt));
+
+    assert!(state.deliver_reply(prompt, Ok(bytes::Bytes::from_static(b"answer"))));
+    assert!(!state.invocation_exists(prompt));
+    assert!(state.invocation_exists(callback));
+    state.end_stream_callback(captured, callback);
+
+    let outcomes = outcomes.lock().unwrap();
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].request_id, "prompt");
+    assert_eq!(outcomes[0].result.as_ref().unwrap().as_ref(), b"answer");
+}
+
+#[test]
 fn running_invocation_is_not_expired_by_deferred_reply_sweep() {
     let limits = WasmRuntimeLimits::default();
     let mut state = HostState::new(&limits);
