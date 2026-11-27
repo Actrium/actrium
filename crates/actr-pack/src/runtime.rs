@@ -94,11 +94,15 @@ fn is_v2_manifest(source: &str) -> Result<bool, PackError> {
 /// before any legacy fields can be interpreted.
 pub fn read_runtime_manifest(bytes: &[u8]) -> Result<RuntimePackageManifest, PackError> {
     let source = read_manifest_raw(bytes)?;
-    if is_v2_manifest(&source)? {
-        ActorPackageManifest::from_toml(&source)
+    parse_runtime_manifest(&source)
+}
+
+pub(crate) fn parse_runtime_manifest(source: &str) -> Result<RuntimePackageManifest, PackError> {
+    if is_v2_manifest(source)? {
+        ActorPackageManifest::from_toml(source)
             .map(|manifest| RuntimePackageManifest::V2(Box::new(manifest)))
     } else {
-        PackageManifest::from_toml(&source)
+        PackageManifest::from_toml(source)
             .map(|manifest| RuntimePackageManifest::Legacy(Box::new(manifest)))
     }
 }

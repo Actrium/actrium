@@ -127,21 +127,49 @@ impl RunCommand {
         let package_path = self.resolve_package_path(&config_path, &raw_config)?;
         info!("📦 Loading package: {}", package_path.display());
 
-        // 2. Load package bytes
-        let package_bytes = tokio::fs::read(&package_path).await.map_err(|e| {
-            ActrCliError::command_error(format!("Failed to read package file: {}", e))
-        })?;
-        // The Service package digest is part of the Attach compatibility tuple.
-        let service_package_digest = {
-            use sha2::Digest as _;
-            sha2::Sha256::digest(&package_bytes).to_vec()
+        let metadata_path = package_path.clone();
+        let probe =
+            tokio::task::spawn_blocking(move || actr_pack::oci::read_file_manifest(&metadata_path))
+                .await
+                .map_err(anyhow::Error::from)?;
+        let oci = matches!(&probe, Ok(actr_pack::RuntimePackageManifest::V2(manifest))
+            if manifest.workload.profile == actr_pack::oci::OCI_PROFILE);
+        let (mut manifest, package) = if oci {
+            if !cfg!(feature = "oci-engine") {
+                return Err(ActrCliError::command_error(
+                    "OCI requires the oci-engine feature",
+                ));
+            }
+            if !cfg!(all(
+                target_os = "linux",
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            )) {
+                return Err(ActrCliError::command_error(
+                    "OCI requires Linux x86_64 or aarch64",
+                ));
+            }
+            (probe.map_err(anyhow::Error::from)?, None)
+        } else {
+            use tokio::io::AsyncReadExt as _;
+            let package_file = tokio::fs::File::open(&package_path).await?;
+            let limit = actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES + 8 * 1024 * 1024;
+            let mut bytes = Vec::new();
+            package_file
+                .take(limit as u64 + 1)
+                .read_to_end(&mut bytes)
+                .await?;
+            if bytes.len() > limit {
+                return Err(ActrCliError::command_error(
+                    "Non-OCI archive exceeds its size limit",
+                ));
+            }
+            let package = WorkloadPackage::new(bytes);
+            (
+                package.manifest().map_err(anyhow::Error::from)?,
+                Some(package),
+            )
         };
-        let package = WorkloadPackage::new(package_bytes);
 
-        // 3. Parse package manifest
-        let manifest = package.manifest().map_err(|e| {
-            ActrCliError::command_error(format!("Failed to parse package manifest: {}", e))
-        })?;
         let package_info = self.build_package_info(&manifest);
 
         // 4. Load runtime configuration
@@ -158,11 +186,53 @@ impl RunCommand {
                 "[actrium] requires verified Attach, which is disabled in this build",
             ));
         }
+        if oci && config.trust.is_empty() {
+            return Err(ActrCliError::command_error(
+                "OCI requires explicit [[trust]] anchors",
+            ));
+        }
+        let _obs_guard = init_observability(&config.observability).map_err(|e| {
+            ActrCliError::command_error(format!("Failed to initialize observability: {}", e))
+        })?;
+        let trust = self.build_trust_provider(&config, &package_path).await?;
+        let hyper = self.init_hyper(&config, &hyper_dir, trust.clone()).await?;
+        let verified_oci = if oci {
+            let settings = config.oci.as_ref().ok_or_else(|| {
+                ActrCliError::command_error("OCI requires [hyper.oci] host configuration")
+            })?;
+            let verified = hyper
+                .verify_oci_package(
+                    &package_path,
+                    actr_pack::oci::OciLimits {
+                        archive_bytes: settings.max_package_bytes,
+                        unpacked_layer_bytes: settings.max_unpack_bytes,
+                    },
+                )
+                .await
+                .map_err(anyhow::Error::from)?;
+            if hex::encode(verified.archive_digest()) != settings.package_sha256 {
+                return Err(ActrCliError::command_error(
+                    "OCI archive does not match the host grant",
+                ));
+            }
+            manifest = verified.manifest().clone();
+            Some(verified)
+        } else {
+            None
+        };
+
+        // Attach and Open Join bind to the same exact archive digest.
+        let service_package_digest: [u8; 32] = if let Some(verified) = &verified_oci {
+            verified.archive_digest()
+        } else {
+            use sha2::Digest as _;
+            sha2::Sha256::digest(package.as_ref().expect("non-OCI package bytes").bytes()).into()
+        };
         if self.open_join {
             let (profile, key_path) = super::realm_members::join_open_service(
                 &config.realm,
                 &manifest.actor_type(),
-                package.bytes(),
+                &service_package_digest,
                 &hyper_dir,
             )
             .await?;
@@ -173,13 +243,6 @@ impl RunCommand {
         info!("📡 Signaling server: {}", config.signaling_url.as_str());
         info!("🔐 Trust anchors: {} configured", config.trust.len());
 
-        // 6. Initialize observability
-        let _obs_guard = init_observability(&config.observability).map_err(|e| {
-            ActrCliError::command_error(format!("Failed to initialize observability: {}", e))
-        })?;
-
-        // 7. Initialize Hyper
-        let trust = self.build_trust_provider(&config, &package_path).await?;
         let ordinary_policy = match authorization {
             Some(authorization) => Some(
                 Self::verified_front_metadata(
@@ -192,15 +255,15 @@ impl RunCommand {
             ),
             None => None,
         };
-        let hyper = self.init_hyper(&config, &hyper_dir, trust.clone()).await?;
-        info!("✅ Hyper initialized");
-
-        // 8. Node typestate chain: from_hyper → attach → register → start
         let issuer_endpoint = config.issuer_endpoint.clone();
-        let attached = actr_hyper::Node::from_hyper(hyper, config.clone())
-            .attach(&package)
-            .await
-            .map_err(|e| ActrCliError::command_error(format!("Failed to attach package: {}", e)))?;
+        let node = actr_hyper::Node::from_hyper(hyper, config.clone());
+        let attached = if let Some(verified) = verified_oci {
+            node.attach_verified_oci(verified).await
+        } else {
+            node.attach(package.as_ref().expect("non-OCI package bytes"))
+                .await
+        }
+        .map_err(|e| ActrCliError::command_error(format!("Failed to attach package: {}", e)))?;
         info!("✅ Package attached");
 
         let registration = if self.open_join {

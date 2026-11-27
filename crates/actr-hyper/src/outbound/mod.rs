@@ -22,7 +22,7 @@ pub(crate) use peer_gate::data_stream_operation_id;
 
 use actr_framework::{Bytes, MediaSample};
 use actr_protocol::{ActorResult, ActrError, ActrId, PayloadType, RpcEnvelope};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::transport::{PayloadTypeExt, RpcDeadline};
 
@@ -120,15 +120,31 @@ impl Gate {
         payload_type: PayloadType,
         envelope: RpcEnvelope,
         deadline: RpcDeadline,
+        dispatch_id: Option<&OnceLock<String>>,
     ) -> ActorResult<()> {
         match self {
             Gate::Host(gate) => {
-                gate.send_message_with_type_until(target, payload_type, None, envelope, deadline)
-                    .await
+                let request_id = dispatch_id.map(|_| envelope.request_id.clone());
+                let result = gate
+                    .send_message_with_type_until(target, payload_type, None, envelope, deadline)
+                    .await;
+                if let (Some(dispatch_id), Some(request_id)) = (dispatch_id, request_id) {
+                    if result.is_ok() || matches!(result, Err(ActrError::DeliveryUncertain { .. }))
+                    {
+                        let _ = dispatch_id.set(request_id);
+                    }
+                }
+                result
             }
             Gate::Peer(gate) => {
-                gate.send_tell_with_type_until(target, payload_type, envelope, deadline)
-                    .await
+                gate.send_scoped_tell_with_type_until(
+                    target,
+                    payload_type,
+                    envelope,
+                    deadline,
+                    dispatch_id,
+                )
+                .await
             }
         }
     }

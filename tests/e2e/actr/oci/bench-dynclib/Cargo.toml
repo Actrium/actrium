@@ -1,0 +1,21 @@
+[workspace]
+
+[package]
+name = "oci-benchmark-dynclib"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = ["cdylib"]
+cdylib = ["actr-framework/cdylib"]
+web = []
+
+[dependencies]
+actr-framework = { path = "../../../../../crates/actr-framework" }
+actr-protocol = { path = "../../../../../crates/actr-protocol" }
+async-trait = "0.1"
+bytes = "1"

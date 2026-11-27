@@ -218,8 +218,12 @@ fn stalled_guest_file_io_does_not_block_mount_free_attach() {
         } else {
             false
         };
+        // Probe the caller's sole blocking worker independently of cold
+        // Wasmtime compilation. Compilation time varies on shared runners.
+        let compiler_available =
+            tokio::time::timeout(Duration::from_secs(5), tokio::task::spawn_blocking(|| ())).await;
         let attached = tokio::time::timeout(
-            Duration::from_secs(20),
+            Duration::from_secs(60),
             attach_wasi_fixture(&other_root, None, WasiDataDir::Inherit, None),
         )
         .await;
@@ -237,8 +241,12 @@ fn stalled_guest_file_io_does_not_block_mount_free_attach() {
             release_error.is_none(),
             "failed to release the FIFO reader: {release_error:?}"
         );
+        assert!(
+            matches!(compiler_available, Ok(Ok(()))),
+            "guest file I/O occupied the caller's blocking worker"
+        );
         let other = attached
-            .expect("mount-free attach was blocked by guest file I/O")
+            .expect("mount-free attach exceeded its compilation budget")
             .unwrap();
         other
             .attachment
@@ -690,6 +698,7 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
         storage_root: None,
         wasi_data_dir: None,
         wasi_data_access: actr_config::WasiDataAccess::default(),
+        oci: None,
         actrium: None,
     }
 }

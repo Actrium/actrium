@@ -47,7 +47,15 @@ fn top_level_has_expected_commands() {
         );
     }
     // Resource groups
-    for name in ["deps", "pkg", "registry", "dlq", "realm", "publisher"] {
+    for name in [
+        "deps",
+        "pkg",
+        "oci",
+        "registry",
+        "dlq",
+        "realm",
+        "publisher",
+    ] {
         assert!(names.contains(&name.to_string()), "missing group `{name}`");
     }
     // Meta
@@ -75,6 +83,13 @@ fn deps_group_has_install() {
         subs.contains(&"install".to_string()),
         "deps.install missing"
     );
+}
+
+#[test]
+fn oci_group_exposes_doctor_and_gc() {
+    let mut subcommands = subcommand_names("oci");
+    subcommands.sort();
+    assert_eq!(subcommands, ["doctor", "gc"]);
 }
 
 #[test]

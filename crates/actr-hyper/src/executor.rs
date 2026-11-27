@@ -126,6 +126,7 @@ pub(crate) enum ActorCmd {
     },
     Hook {
         event: PackageHookEvent,
+        context: Option<RuntimeContext>,
         invocation: InvocationContext,
         host_abi: HostAbiFn,
         span: tracing::Span,
@@ -183,6 +184,18 @@ impl ActorCmd {
 pub(crate) struct ActorHandle {
     #[cfg(feature = "wasm-engine")]
     egress_broker: Option<Arc<crate::egress::EgressBroker>>,
+    #[cfg(all(
+        feature = "oci-engine",
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    oci: Option<Arc<crate::oci::Admission>>,
+    #[cfg(all(
+        feature = "oci-engine",
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    oci_observations: Option<mpsc::Sender<ActorCmd>>,
     tx: mpsc::Sender<ActorCmd>,
     join: std::sync::Mutex<Option<JoinHandle<()>>>,
     abort: tokio::task::AbortHandle,
@@ -200,6 +213,52 @@ impl std::fmt::Debug for ActorHandle {
 }
 
 impl ActorHandle {
+    #[cfg(all(
+        feature = "oci-engine",
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    pub(crate) fn oci_admission(&self) -> Option<&Arc<crate::oci::Admission>> {
+        self.oci.as_ref()
+    }
+
+    #[cfg(all(
+        feature = "oci-engine",
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    pub(crate) fn queue_oci_observation(
+        &self,
+        event: PackageHookEvent,
+        context: RuntimeContext,
+        invocation: InvocationContext,
+        host_abi: HostAbiFn,
+    ) -> bool {
+        let Some(queue) = &self.oci_observations else {
+            return false;
+        };
+        let (reply, receiver) = oneshot::channel();
+        if queue
+            .try_send(ActorCmd::Hook {
+                event,
+                context: Some(context),
+                invocation,
+                host_abi,
+                span: tracing::Span::current(),
+                reply,
+            })
+            .is_ok()
+        {
+            // The runner skips work with a closed reply channel.
+            tokio::spawn(async move {
+                let _ = receiver.await;
+            });
+        } else {
+            tracing::warn!("OCI observation queue is full or closed");
+        }
+        true
+    }
+
     #[cfg(feature = "wasm-engine")]
     pub(crate) fn egress_broker(&self) -> Option<&Arc<crate::egress::EgressBroker>> {
         self.egress_broker.as_ref()
@@ -311,6 +370,7 @@ impl ActorHandle {
         let span = tracing::Span::current();
         self.call_admitted(move |reply| ActorCmd::Hook {
             event,
+            context: None,
             invocation,
             host_abi,
             span,
@@ -485,6 +545,41 @@ pub(crate) fn spawn_runner_with_mode(
     dispatch_timeout: Option<std::time::Duration>,
 ) -> ActorHandle {
     let (tx, rx) = mpsc::channel(RUNNER_QUEUE_CAPACITY);
+    #[cfg(all(
+        feature = "oci-engine",
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    let oci = workload.oci_admission().cloned();
+    #[cfg(all(
+        feature = "oci-engine",
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    let oci_observations = oci.as_ref().map(|admission| {
+        let (send, mut receive) = mpsc::channel(128);
+        let mut status = admission.status();
+        let dispatch = tx.clone();
+        tokio::spawn(async move {
+            if status
+                .wait_for(|phase| *phase != crate::oci::Status::Starting)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            while *status.borrow() == crate::oci::Status::Ready {
+                let Some(event) = receive.recv().await else {
+                    break;
+                };
+                if dispatch.send(event).await.is_err() {
+                    break;
+                }
+            }
+        });
+        send
+    });
+
     #[cfg(feature = "wasm-engine")]
     let egress_broker = match &workload {
         Workload::Wasm(v2) => v2.egress_broker().cloned(),
@@ -504,6 +599,18 @@ pub(crate) fn spawn_runner_with_mode(
     ActorHandle {
         #[cfg(feature = "wasm-engine")]
         egress_broker,
+        #[cfg(all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
+        oci,
+        #[cfg(all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
+        oci_observations,
         tx,
         join: std::sync::Mutex::new(Some(join)),
         abort,
@@ -553,16 +660,31 @@ async fn run_loop(mut workload: Workload, mut rx: mpsc::Receiver<ActorCmd>) {
                 span,
                 mut reply,
             } => {
-                let Some(result) = run_until_reply_closed(
-                    guarded(
-                        "dispatch",
-                        workload.dispatch_envelope(envelope, ctx, invocation, &host_abi),
-                    )
-                    .instrument(span),
-                    &mut reply,
+                #[cfg(all(
+                    feature = "oci-engine",
+                    target_os = "linux",
+                    any(target_arch = "x86_64", target_arch = "aarch64")
+                ))]
+                let settle_oci = workload.oci_admission().is_some();
+                #[cfg(not(all(
+                    feature = "oci-engine",
+                    target_os = "linux",
+                    any(target_arch = "x86_64", target_arch = "aarch64")
+                )))]
+                let settle_oci = false;
+                let dispatch = guarded(
+                    "dispatch",
+                    workload.dispatch_envelope(envelope, ctx, invocation, &host_abi),
                 )
-                .await
-                else {
+                .instrument(span);
+                // Once an OCI dispatch may have written to the socket, let the
+                // invocation scope settle or tear down the session.
+                let outcome = if settle_oci {
+                    Some(dispatch.await)
+                } else {
+                    run_until_reply_closed(dispatch, &mut reply).await
+                };
+                let Some(result) = outcome else {
                     break;
                 };
                 let _ = reply.send(result);
@@ -591,6 +713,7 @@ async fn run_loop(mut workload: Workload, mut rx: mpsc::Receiver<ActorCmd>) {
             }
             ActorCmd::Hook {
                 event,
+                context,
                 invocation,
                 host_abi,
                 span,
@@ -599,7 +722,7 @@ async fn run_loop(mut workload: Workload, mut rx: mpsc::Receiver<ActorCmd>) {
                 let Some(result) = run_until_reply_closed(
                     guarded(
                         "hook",
-                        workload.dispatch_hook_event(event, invocation, &host_abi),
+                        workload.dispatch_hook_event(event, context, invocation, &host_abi),
                     )
                     .instrument(span),
                     &mut reply,

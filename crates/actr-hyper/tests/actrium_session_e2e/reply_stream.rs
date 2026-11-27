@@ -203,12 +203,14 @@ async fn start_ordinary_service(server: &TestSignalingServer, dir: &TempDir) -> 
             guest_digest: params.guest_digest,
             protocol_fingerprint: params.protocol_fingerprint,
             runtime: params.runtime,
-            program_capabilities: BTreeSet::from([READ.to_owned()]),
+            program_capabilities: BTreeSet::from([
+                READ.to_owned(),
+                "host:service-stream.send".to_owned(),
+            ]),
             routes: BTreeMap::from([
                 (ROUTE.to_owned(), BTreeSet::from([READ.to_owned()])),
                 (UPLOAD_ROUTE.to_owned(), BTreeSet::from([READ.to_owned()])),
             ]),
-            stream_send_allowed: true,
         })
         .start()
         .await

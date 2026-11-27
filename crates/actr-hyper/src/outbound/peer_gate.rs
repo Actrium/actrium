@@ -1673,6 +1673,18 @@ impl PeerGate {
         envelope: RpcEnvelope,
         deadline: RpcDeadline,
     ) -> ActorResult<()> {
+        self.send_scoped_tell_with_type_until(target, payload_type, envelope, deadline, None)
+            .await
+    }
+
+    pub(crate) async fn send_scoped_tell_with_type_until(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+        deadline: RpcDeadline,
+        dispatch_id: Option<&std::sync::OnceLock<String>>,
+    ) -> ActorResult<()> {
         deadline.ensure_remaining()?;
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
         let dest = Self::actr_id_to_dest(target);
@@ -1704,6 +1716,9 @@ impl PeerGate {
                 // the minimal slice left makes a mid-write expiry (terminal
                 // `DeliveryUncertain`) likelier than a safe pre-send refusal.
                 deadline.ensure_min_remaining(MIN_ONE_SHOT_SEND_SLICE)?;
+                if let (Some(dispatch_id), Some(request_id)) = (dispatch_id, &operation_id) {
+                    let _ = dispatch_id.set(request_id.clone());
+                }
                 self.send_once_with_admission(
                     &dest,
                     payload_type,
@@ -3456,10 +3471,12 @@ mod tests {
             gate_with_projection(SendProjection::Blocked);
         let gate = Arc::new(gate);
         let target = test_actor_id(2);
+        let dispatch_id = Arc::new(std::sync::OnceLock::new());
         let request = {
             let gate = Arc::clone(&gate);
+            let dispatch_id = Arc::clone(&dispatch_id);
             tokio::spawn(async move {
-                gate.send_tell_with_type_until(
+                gate.send_scoped_tell_with_type_until(
                     &target,
                     PayloadType::RpcReliable,
                     RpcEnvelope {
@@ -3467,6 +3484,7 @@ mod tests {
                         ..RpcEnvelope::default()
                     },
                     RpcDeadline::from_duration(Duration::from_secs(1)),
+                    Some(&dispatch_id),
                 )
                 .await
             })
@@ -3477,6 +3495,7 @@ mod tests {
             !request.is_finished(),
             "Tell should wait while sends are blocked"
         );
+        assert!(dispatch_id.get().is_none());
         projection_tx.send_replace(SendProjection::Normal);
 
         request
@@ -3484,6 +3503,7 @@ mod tests {
             .expect("Tell task must not panic")
             .expect("Tell should submit after the route becomes ready");
         assert_eq!(sends.load(Ordering::SeqCst), 1);
+        assert_eq!(dispatch_id.get().map(String::as_str), Some("waited-tell"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3710,12 +3730,14 @@ mod tests {
             ..envelope_with_direction(None)
         };
 
+        let dispatch_id = std::sync::OnceLock::new();
         let err = gate
-            .send_tell_with_type_until(
+            .send_scoped_tell_with_type_until(
                 &target,
                 PayloadType::RpcReliable,
                 envelope,
                 RpcDeadline::from_duration(Duration::from_millis(250)),
+                Some(&dispatch_id),
             )
             .await
             .unwrap_err();
@@ -3734,6 +3756,7 @@ mod tests {
             "got {err:?}"
         );
         assert!(!err.is_retryable());
+        assert_eq!(dispatch_id.get().map(String::as_str), Some("tell-timeout"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

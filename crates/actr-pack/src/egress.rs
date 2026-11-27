@@ -98,7 +98,10 @@ pub(crate) fn validate_privacy_contract<B: AsRef<[u8]>>(
         .files
         .iter()
         .find(|entry| entry.path == PRIVACY_CONTRACT_PATH);
-    let component = manifest.workload.profile == "actr.component/1";
+    let scoped_profile = matches!(
+        manifest.workload.profile.as_str(),
+        "actr.component/1" | crate::oci::OCI_PROFILE
+    );
     let mut privacy = None;
     if let Some(entry) = entry {
         if entry.role != "contract" {
@@ -119,8 +122,10 @@ pub(crate) fn validate_privacy_contract<B: AsRef<[u8]>>(
             return Err(invalid("Privacy Contract does not match selected Service"));
         }
         let egress = contract.into_permissions()?;
-        if !egress.is_empty() && !component {
-            return Err(invalid("scoped egress requires actr.component/1"));
+        if !egress.is_empty() && !scoped_profile {
+            return Err(invalid(
+                "scoped egress requires actr.component/1 or actr.oci/1",
+            ));
         }
         let mut dependency_digests = BTreeMap::new();
         if !egress.actor.is_empty() {
@@ -149,7 +154,7 @@ pub(crate) fn validate_privacy_contract<B: AsRef<[u8]>>(
             dependency_digests,
         });
     }
-    if component {
+    if scoped_profile {
         for (capability, rules_present) in [
             (
                 ACTOR_CALL_CAPABILITY,

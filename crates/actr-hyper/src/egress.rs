@@ -18,6 +18,7 @@ const MAX_RESPONSE: usize = 256 * 1024;
 const MAX_DURATION: Duration = Duration::from_secs(5);
 
 /// A host-owned request. All invocation identities come from the runtime.
+#[derive(Clone, Copy)]
 pub struct EgressRequest<'a> {
     pub invocation: &'a InvocationContext,
     pub source_package_sha256: &'a str,
@@ -29,6 +30,7 @@ pub struct EgressRequest<'a> {
 }
 
 /// Operations that the embedding Host must authorize against current policy.
+#[derive(Clone, Copy)]
 pub enum EgressOperation<'a> {
     Actor {
         route: &'a str,
@@ -57,6 +59,7 @@ pub struct EgressPermit {
 pub trait EgressPolicy: Send + Sync {
     fn authorize(&self, request: EgressRequest<'_>) -> ActorResult<EgressPermit>;
     /// Check authenticated inbound caller, route and current source state.
+    /// OCI supplies an empty privacy digest if the package has no Privacy Contract.
     fn authorize_inbound(
         &self,
         invocation: &InvocationContext,
@@ -71,6 +74,7 @@ pub(crate) struct EgressBroker {
     digest: String,
     contract_sha256: String,
     permissions: EgressPermissions,
+    #[cfg_attr(not(feature = "wasm-engine"), allow(dead_code))]
     locks: BTreeMap<String, actr_config::lock::LockedDependency>,
     concurrency: Semaphore,
     #[cfg(test)]
@@ -101,6 +105,7 @@ impl EgressBroker {
         }
     }
 
+    #[cfg_attr(not(feature = "wasm-engine"), allow(dead_code))]
     pub(crate) fn authorize_inbound(
         &self,
         invocation: &InvocationContext,
@@ -110,6 +115,7 @@ impl EgressBroker {
             .authorize_inbound(invocation, &self.digest, &self.contract_sha256, route)
     }
 
+    #[cfg_attr(not(feature = "wasm-engine"), allow(dead_code))]
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn actor_call(
         &self,
@@ -275,7 +281,7 @@ impl EgressBroker {
     }
 }
 
-async fn run_permitted<T>(
+pub(crate) async fn run_permitted<T>(
     permit: &EgressPermit,
     deadline: Instant,
     scope: Option<&RequestScope>,
@@ -819,5 +825,5 @@ files = []
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "wasm-engine"))]
 mod notebook_test;

@@ -19,6 +19,7 @@ use owo_colors::OwoColorize;
 use url::Url;
 
 use crate::commands::discovery::StandaloneDiscoverConfig;
+use crate::commands::oci::OciArgs;
 use crate::commands::{
     BuildCommand, CheckCommand, CompletionCommand, ConfigCommand, DepsArgs, DlqArgs, DocCommand,
     GenCommand, InitCommand, LogsCommand, PkgArgs, PsCommand, PublisherArgs, RealmArgs,
@@ -90,6 +91,8 @@ pub enum Commands {
     Deps(DepsArgs),
     /// Local package operations (sign, verify, keygen)
     Pkg(PkgArgs),
+    /// Inspect and reconcile the OCI execution environment
+    Oci(OciArgs),
     /// Remote Actor Registry (discover, fingerprint)
     Registry(RegistryArgs),
     /// Dead Letter Queue inspection and remediation
@@ -126,6 +129,7 @@ impl Commands {
             Commands::Rm(c) => c,
             Commands::Deps(c) => c,
             Commands::Pkg(c) => c,
+            Commands::Oci(c) => c,
             Commands::Registry(c) => c,
             Commands::Dlq(c) => c,
             Commands::Realm(c) => c,

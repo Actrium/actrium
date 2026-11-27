@@ -305,6 +305,10 @@ impl HostTransport {
 
     // ========== High-level APIs ==========
 
+    pub(crate) async fn close_reliable_receive(&self) {
+        self.reliable_rx.lock().await.close();
+    }
+
     /// Shared scope handoff registry for this transport direction (#390).
     pub(crate) fn scope_registry(&self) -> &crate::request_scope::ScopeHandoffRegistry {
         &self.scope_registry

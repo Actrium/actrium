@@ -473,7 +473,7 @@ pub async fn join(args: &JoinArgs) -> Result<Value> {
 pub(super) async fn join_open_service(
     realm: &str,
     actor_type: &ActrType,
-    archive: &[u8],
+    archive_digest: &[u8; 32],
     hyper_dir: &Path,
 ) -> Result<(RealmProfile, PathBuf)> {
     let discovery = discovery_client()?;
@@ -493,7 +493,7 @@ pub(super) async fn join_open_service(
         .context("the Realm has no package selection")?;
     let (_, front) = selection.selected().map_err(anyhow::Error::msg)?;
     let actor_type = actor_type.to_string_repr();
-    let digest = hex::encode(Sha256::digest(archive));
+    let digest = hex::encode(archive_digest);
     ensure!(
         front.r#type != actor_type
             && selection.packages.values().any(|entry| {

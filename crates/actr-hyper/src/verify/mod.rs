@@ -11,3 +11,5 @@ mod trust;
 pub use cert_cache::PublisherCertCache;
 #[cfg(not(target_arch = "wasm32"))]
 pub use trust::{ChainTrust, RegistryTrust, StaticTrust, TrustProvider};
+
+pub(crate) use trust::pack_err_to_hyper;

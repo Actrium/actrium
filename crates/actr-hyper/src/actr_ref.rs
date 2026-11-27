@@ -61,6 +61,12 @@ pub(crate) struct ActrRefShared {
     pub(crate) session_state: Option<SessionState>,
     /// Shutdown signal
     pub(crate) shutdown_token: CancellationToken,
+    #[cfg(all(
+        feature = "oci-engine",
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    pub(crate) oci: Option<Arc<crate::oci::Admission>>,
     /// Background task handles (receive loops, WebRTC coordinator, etc.)
     pub(crate) task_handles: Mutex<Vec<JoinHandle<()>>>,
     /// RTC connection manager backing the status query/list/subscribe APIs.
@@ -316,6 +322,7 @@ impl ActrRef {
             tokio::select! {
                 _ = sigint.recv() => tracing::info!("📡 Received SIGINT (Ctrl+C) signal"),
                 _ = sigterm.recv() => tracing::info!("📡 Received SIGTERM signal"),
+                _ = self.shared.shutdown_token.cancelled() => {}
             }
         }
 
@@ -329,6 +336,14 @@ impl ActrRef {
 
         self.shutdown();
         self.wait_for_shutdown().await;
+        #[cfg(all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
+        if let Some(error) = self.shared.oci.as_ref().and_then(|oci| oci.failure_error()) {
+            return Err(error);
+        }
         Ok(())
     }
 }

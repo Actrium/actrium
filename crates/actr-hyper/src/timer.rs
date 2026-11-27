@@ -104,6 +104,72 @@ macro_rules! timer_inventory {
 }
 
 timer_inventory! {
+    OCI_IMAGE_UNPACK => {
+        id: "oci.image.unpack", owner: "oci_image", category: FailureDeadline,
+        duration: "60s", arm: "start the isolated image extractor",
+        success: "extractor exits", interrupt: "attach cancellation",
+        expiry: "drop the extractor process", reset: "next operation only", external: false
+    },
+    OCI_RUNTIME_VERSION => {
+        id: "oci.runtime.version", owner: "oci_runtime", category: FailureDeadline,
+        duration: "5s", arm: "probe the configured runtime",
+        success: "version command exits", interrupt: "host validation cancellation",
+        expiry: "drop the probe process", reset: "next operation only", external: false
+    },
+    OCI_EXIT_REPORT => {
+        id: "oci.runtime.exit_report", owner: "oci_runtime", category: FailureDeadline,
+        duration: "EXIT_REPORT_GRACE", arm: "the Guest IPC disconnects",
+        success: "supervisor reports the Guest exit", interrupt: "supervisor pipe closes",
+        expiry: "classify the Guest as disconnected", reset: "next operation only", external: false
+    },
+    OCI_CONTAINER_START => {
+        id: "oci.runtime.container_start", owner: "oci_runtime", category: FailureDeadline,
+        duration: "START_TIMEOUT", arm: "start the supervisor and wait for the Guest socket",
+        success: "authenticated Guest connects", interrupt: "startup cancellation or Guest exit",
+        expiry: "stop the partial container", reset: "next operation only", external: false
+    },
+    OCI_CONTAINER_STOP => {
+        id: "oci.runtime.container_stop", owner: "oci_runtime", category: FailureDeadline,
+        duration: "15s", arm: "close the supervisor control pipe",
+        success: "supervisor exits", interrupt: "teardown cancellation",
+        expiry: "leave cleanup pending for reconciliation", reset: "next operation only", external: false
+    },
+    OCI_WORKLOAD_START => {
+        id: "oci.workload.start", owner: "oci_workload", category: FailureDeadline,
+        duration: "absolute START_TIMEOUT", arm: "start the container and IPC session",
+        success: "Guest handshake completes", interrupt: "startup cancellation",
+        expiry: "fail startup", reset: "next operation only", external: false
+    },
+    OCI_WORKLOAD_INVOKE => {
+        id: "oci.workload.invoke", owner: "oci_workload", category: FailureDeadline,
+        duration: "host execution deadline", arm: "send an OCI invocation",
+        success: "matching invocation result", interrupt: "IPC failure or host shutdown",
+        expiry: "fail the invocation and stop an unsettled session", reset: "next operation only", external: false
+    },
+    OCI_CALLER_SCOPE => {
+        id: "oci.workload.caller_scope", owner: "oci_workload", category: FailureDeadline,
+        duration: "invocation request scope deadline", arm: "send an OCI invocation",
+        success: "matching invocation result", interrupt: "parent scope cancellation",
+        expiry: "cancel scoped host operations while IPC settles", reset: "next invocation", external: false
+    },
+    OCI_WORKLOAD_SHUTDOWN_ACK => {
+        id: "oci.workload.shutdown_ack", owner: "oci_workload", category: FailureDeadline,
+        duration: "remaining hook deadline", arm: "send the Guest shutdown frame",
+        success: "matching shutdown acknowledgement", interrupt: "Guest exit or teardown cancellation",
+        expiry: "return a shutdown timeout", reset: "next operation only", external: false
+    },
+    OCI_REPLY_DRAIN => {
+        id: "oci.node.reply_drain", owner: "node", category: FailureDeadline,
+        duration: "5s", arm: "Guest fails and request intake closes",
+        success: "queued replies and SCTP sends drain", interrupt: "node shutdown",
+        expiry: "finish node teardown", reset: "next operation only", external: false
+    },
+    OCI_RTC_SEND_DRAIN_POLL => {
+        id: "oci.rtc.send_drain_poll", owner: "rtc_manager", category: CompatibilityPolling,
+        duration: "10ms", arm: "a closing node has outstanding reliable RPC bytes",
+        success: "SCTP queue drains", interrupt: "lane cancellation or node drain deadline",
+        expiry: "check outstanding bytes again", reset: "while reliable sends remain queued", external: false
+    },
     ACTR_REF_TASK_SHUTDOWN => {
         id: "actr_ref.task_shutdown", owner: "actr_ref", category: FailureDeadline,
         duration: "recovery teardown deadline + fixed 5s margin", arm: "actor shutdown begins",
@@ -1034,6 +1100,10 @@ mod tests {
             (
                 "lifecycle/recovery_policy/translate_bench.rs",
                 "benchmark harness throughput measurement; must observe real elapsed time",
+            ),
+            (
+                "oci/supervisor.rs",
+                "standalone supervisor process uses blocking subprocess waits and has no Hyper Tokio clock",
             ),
             (
                 "transport/lane.rs",

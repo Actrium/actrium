@@ -61,10 +61,13 @@ dependencies = [
  "actr-service-compat",
  "base64",
  "ed25519-dalek",
+ "flate2",
  "hex",
  "semver",
  "serde",
+ "serde_json",
  "sha2",
+ "tempfile",
  "thiserror 2.0.19",
  "toml 1.1.4+spec-1.1.0",
  "tracing",
@@ -858,6 +861,7 @@ version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
+ "crc32fast",
  "miniz_oxide",
  "zlib-rs",
 ]

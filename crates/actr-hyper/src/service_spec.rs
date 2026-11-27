@@ -28,9 +28,8 @@ pub(crate) fn calculate_v2_service_spec(
     manifest: &ActorPackageManifest,
     max_bytes: usize,
 ) -> HyperResult<Option<ServiceSpec>> {
-    // Also reject workload.rpc-contract on non-Component profiles.
     let selected = manifest
-        .component_rpc_contract()
+        .rpc_contract()
         .map_err(|e| HyperError::InvalidManifest(e.to_string()))?;
     let spec = if manifest.workload.profile == "actr.native/1" {
         let proto_files = manifest
@@ -50,6 +49,40 @@ pub(crate) fn calculate_v2_service_spec(
     };
     spec.map(Some)
         .map_err(|e| HyperError::InvalidManifest(format!("build v2 service spec: {e}")))
+}
+
+#[cfg(all(
+    feature = "oci-engine",
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+pub(crate) fn calculate_oci_service_spec(
+    verified: &actr_pack::oci::VerifiedOciPackage,
+) -> HyperResult<(Option<ServiceSpec>, std::collections::BTreeSet<String>)> {
+    let manifest = verified.manifest();
+    let Some(path) = manifest
+        .rpc_contract()
+        .map_err(crate::verify::pack_err_to_hyper)?
+    else {
+        return Ok((None, Default::default()));
+    };
+    let bytes = verified
+        .read_metadata(path)
+        .map_err(crate::verify::pack_err_to_hyper)?;
+    let content = String::from_utf8(bytes)
+        .map_err(|error| HyperError::InvalidManifest(format!("OCI Proto is not UTF-8: {error}")))?;
+    let routes = actr_service_compat::spec_builder::validate_oci_rpc_routes(&content)
+        .map_err(|error| HyperError::InvalidManifest(format!("OCI Proto routes: {error}")))?;
+    let spec = build_self_contained_service_spec(
+        &manifest.actor.name,
+        ProtoFile {
+            name: path.rsplit('/').next().unwrap_or(path).to_owned(),
+            content,
+            path: None,
+        },
+    )
+    .map_err(|error| HyperError::InvalidManifest(format!("OCI service spec: {error}")))?;
+    Ok((Some(spec), routes))
 }
 
 fn read_v2_rpc_proto(

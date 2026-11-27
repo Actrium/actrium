@@ -593,10 +593,22 @@ impl RuntimeContext {
         payload_type: PayloadType,
         payload: Bytes,
     ) -> ActorResult<()> {
-        crate::outbound::ensure_rpc_payload_type(payload_type)?;
-
         let deadline =
             crate::transport::RpcDeadline::from_duration(crate::transport::TELL_SEND_TIMEOUT);
+        self.tell_raw_with_deadline(target, route_key, payload_type, payload, deadline, None)
+            .await
+    }
+
+    pub(crate) async fn tell_raw_with_deadline(
+        &self,
+        target: &Dest,
+        route_key: String,
+        payload_type: PayloadType,
+        payload: Bytes,
+        deadline: crate::transport::RpcDeadline,
+        scoped_dispatch_id: Option<&OnceLock<String>>,
+    ) -> ActorResult<()> {
+        crate::outbound::ensure_rpc_payload_type(payload_type)?;
         self.ensure_session_ready_until(crate::timer::ids::RUNTIME_TELL_PREFLIGHT, deadline)
             .await?;
         deadline.ensure_remaining()?;
@@ -623,8 +635,14 @@ impl RuntimeContext {
 
         let gate = self.select_gate(target)?;
         let target_id = self.extract_target_id(target);
-        gate.send_message_with_type(target_id, payload_type, envelope, deadline)
-            .await
+        gate.send_message_with_type(
+            target_id,
+            payload_type,
+            envelope,
+            deadline,
+            scoped_dispatch_id,
+        )
+        .await
     }
 
     /// Send DataChunk with an explicit payload type (lane selection).
@@ -1084,7 +1102,7 @@ impl Context for RuntimeContext {
         let target_id = self.extract_target_id(target);
 
         // 5. Dispatch through the Gate enum while preserving payload type.
-        gate.send_message_with_type(target_id, R::payload_type(), envelope, deadline)
+        gate.send_message_with_type(target_id, R::payload_type(), envelope, deadline, None)
             .await
     }
 

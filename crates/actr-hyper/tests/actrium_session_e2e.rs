@@ -147,6 +147,7 @@ fn runtime_config(
         storage_root: None,
         wasi_data_dir: None,
         wasi_data_access: actr_config::WasiDataAccess::default(),
+        oci: None,
         actrium: None,
     }
 }
@@ -409,7 +410,6 @@ async fn two_fronts_use_the_same_service_over_ordinary_relay() {
         runtime: params.runtime,
         program_capabilities: BTreeSet::from([READ.to_owned()]),
         routes: BTreeMap::from([("echo".to_owned(), BTreeSet::from([READ.to_owned()]))]),
-        stream_send_allowed: false,
     })
     .start()
     .await

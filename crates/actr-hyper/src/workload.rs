@@ -438,6 +438,19 @@ impl PackageHookObserver {
         };
         let call_executor =
             crate::lifecycle::node::lifecycle_host_abi(ctx.clone(), self.workload_dispatch.clone());
+        #[cfg(all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
+        if self.workload_dispatch.queue_oci_observation(
+            event.clone(),
+            ctx.clone(),
+            invocation.clone(),
+            call_executor.clone(),
+        ) {
+            return;
+        }
         // Serialized behind the runner's command channel, still awaited to
         // completion — equivalent to the old "hold the lock, await the hook".
         if let Err(e) = self
@@ -597,6 +610,12 @@ pub(crate) enum Workload {
     Wasm(crate::wasm::WasmWorkloadV2),
     #[cfg(feature = "dynclib-engine")]
     DynClib(crate::dynclib::DynClibWorkload),
+    #[cfg(all(
+        feature = "oci-engine",
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    Oci(crate::oci::OciWorkload),
 }
 
 impl std::fmt::Debug for Workload {
@@ -607,11 +626,29 @@ impl std::fmt::Debug for Workload {
             Workload::Wasm(w) => f.debug_tuple("Workload::Wasm").field(w).finish(),
             #[cfg(feature = "dynclib-engine")]
             Workload::DynClib(w) => f.debug_tuple("Workload::DynClib").field(w).finish(),
+            #[cfg(all(
+                feature = "oci-engine",
+                target_os = "linux",
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            ))]
+            Workload::Oci(w) => f.debug_tuple("Workload::Oci").field(w).finish(),
         }
     }
 }
 
 impl Workload {
+    #[cfg(all(
+        feature = "oci-engine",
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    pub(crate) fn oci_admission(&self) -> Option<&Arc<crate::oci::Admission>> {
+        match self {
+            Self::Oci(oci) => Some(&oci.admission),
+            _ => None,
+        }
+    }
+
     /// Whether this workload delivers inbound replies through the explicit
     /// host boundary instead of returning dispatch bytes to the pump.
     pub(crate) fn uses_explicit_reply_boundary(&self) -> bool {
@@ -636,6 +673,12 @@ impl Workload {
                 .shutdown()
                 .await
                 .map_err(|error| ActrError::Internal(format!("workload shutdown failed: {error}"))),
+            #[cfg(all(
+                feature = "oci-engine",
+                target_os = "linux",
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            ))]
+            Workload::Oci(workload) => workload.shutdown().await,
             _ => Ok(()),
         }
     }
@@ -651,6 +694,12 @@ impl Workload {
             let _ = (&invocation, host_abi);
             match self {
                 Workload::Linked(handle) => handle.on_start(&ctx).await,
+                #[cfg(all(
+                    feature = "oci-engine",
+                    target_os = "linux",
+                    any(target_arch = "x86_64", target_arch = "aarch64")
+                ))]
+                Workload::Oci(workload) => workload.on_start(ctx, invocation).await,
                 #[cfg(feature = "wasm-engine")]
                 Workload::Wasm(workload) => workload
                     .call_on_start(invocation, host_abi)
@@ -676,6 +725,12 @@ impl Workload {
             let _ = (&invocation, host_abi);
             match self {
                 Workload::Linked(handle) => handle.on_ready(&ctx).await,
+                #[cfg(all(
+                    feature = "oci-engine",
+                    target_os = "linux",
+                    any(target_arch = "x86_64", target_arch = "aarch64")
+                ))]
+                Workload::Oci(workload) => workload.on_ready(ctx, invocation).await,
                 #[cfg(feature = "wasm-engine")]
                 Workload::Wasm(workload) => workload
                     .call_on_ready(invocation, host_abi)
@@ -701,6 +756,12 @@ impl Workload {
             let _ = (&invocation, host_abi);
             match self {
                 Workload::Linked(handle) => handle.on_stop(&ctx).await,
+                #[cfg(all(
+                    feature = "oci-engine",
+                    target_os = "linux",
+                    any(target_arch = "x86_64", target_arch = "aarch64")
+                ))]
+                Workload::Oci(workload) => workload.on_stop(ctx, invocation).await,
                 #[cfg(feature = "wasm-engine")]
                 Workload::Wasm(workload) => workload
                     .call_on_stop(invocation, host_abi)
@@ -730,6 +791,12 @@ impl Workload {
             normalize_legacy_route_key(&mut envelope.route_key);
             match self {
                 Workload::Linked(handle) => handle.dispatch(envelope, Arc::new(ctx)).await,
+                #[cfg(all(
+                    feature = "oci-engine",
+                    target_os = "linux",
+                    any(target_arch = "x86_64", target_arch = "aarch64")
+                ))]
+                Workload::Oci(workload) => workload.dispatch(envelope, ctx, invocation).await,
                 #[cfg(feature = "wasm-engine")]
                 Workload::Wasm(workload) => {
                     let request_bytes = envelope.encode_to_vec();
@@ -783,6 +850,14 @@ impl Workload {
             let _ = (&chunk, &sender, host_abi);
             let _ = &invocation;
             match self {
+                #[cfg(all(
+                    feature = "oci-engine",
+                    target_os = "linux",
+                    any(target_arch = "x86_64", target_arch = "aarch64")
+                ))]
+                Workload::Oci(_) => Err(ActrError::NotImplemented(
+                    "OCI streaming is unavailable".into(),
+                )),
                 Workload::Linked(_) => {
                     let _ = (&chunk, &sender, host_abi);
                     Err(ActrError::NotImplemented(
@@ -816,13 +891,20 @@ impl Workload {
     pub(crate) fn dispatch_hook_event<'a>(
         &'a mut self,
         event: PackageHookEvent,
+        context: Option<RuntimeContext>,
         invocation: InvocationContext,
         host_abi: &'a HostAbiFn,
     ) -> Pin<Box<dyn Future<Output = ActorResult<()>> + Send + 'a>> {
         Box::pin(async move {
-            let _ = (&event, &invocation, host_abi);
+            let _ = (&event, &context, &invocation, host_abi);
             match self {
                 Workload::Linked(_) => Ok(()),
+                #[cfg(all(
+                    feature = "oci-engine",
+                    target_os = "linux",
+                    any(target_arch = "x86_64", target_arch = "aarch64")
+                ))]
+                Workload::Oci(workload) => workload.observe(event, context, invocation).await,
                 #[cfg(feature = "wasm-engine")]
                 Workload::Wasm(workload) => workload
                     .call_hook_event(event, invocation, host_abi)

@@ -15,6 +15,7 @@ use zip::write::SimpleFileOptions;
 
 use crate::egress::PackagePrivacyContract;
 use crate::error::PackError;
+use crate::oci::{OCI_PROFILE, OciWorkloadDescriptor, validate_oci_manifest};
 use crate::util::{read_zip_entry_bounded, sha256_hex, sha256_zip_entry_bounded};
 use crate::verify::{DEFAULT_MAX_VERIFIED_ENTRIES, DEFAULT_MAX_VERIFIED_ENTRY_BYTES};
 
@@ -66,6 +67,8 @@ pub struct WorkloadDescriptor {
     pub rpc_contract: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keel: Option<KeelGuestDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oci: Option<OciWorkloadDescriptor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +224,23 @@ impl ActorPackageManifest {
                     self.workload.entry
                 ))
             })
+    }
+
+    /// Select the signed RPC Proto for a single-contract workload profile.
+    pub fn rpc_contract(&self) -> Result<Option<&str>, PackError> {
+        if self.workload.profile != OCI_PROFILE {
+            return self.component_rpc_contract();
+        }
+        let Some(path) = self.workload.rpc_contract.as_deref() else {
+            return Ok(None);
+        };
+        if self.local_rpc_contracts().any(|file| file.path == path) {
+            Ok(Some(path))
+        } else {
+            Err(PackError::InvalidPackage(format!(
+                "workload.rpc-contract `{path}` must name a declared local Proto contract"
+            )))
+        }
     }
 
     /// Select the signed RPC Proto exported by a native Component.
@@ -456,7 +476,8 @@ impl ActorPackageManifest {
         for dependency in self.dependencies.values() {
             require_role(dependency.contract.as_deref(), "contract")?;
         }
-        self.component_rpc_contract()?;
+        self.rpc_contract()?;
+        validate_oci_manifest(self)?;
         Ok(())
     }
 }
@@ -499,6 +520,11 @@ pub struct ActorPackOptions {
 
 pub fn pack_actor_package(options: &ActorPackOptions) -> Result<Vec<u8>, PackError> {
     let mut manifest = options.manifest.clone();
+    if manifest.workload.profile == OCI_PROFILE {
+        return Err(PackError::InvalidPackage(
+            "OCI requires the file-backed packer".into(),
+        ));
+    }
     let declared: BTreeSet<_> = manifest
         .files
         .iter()
@@ -584,6 +610,11 @@ pub fn inspect_actor_package_bounded(
     let manifest_source = std::str::from_utf8(&manifest_raw)
         .map_err(|error| PackError::ManifestParseError(error.to_string()))?;
     let manifest = ActorPackageManifest::from_toml(manifest_source)?;
+    if manifest.workload.profile == OCI_PROFILE {
+        return Err(PackError::InvalidPackage(
+            "OCI requires file-backed verification".into(),
+        ));
+    }
     if archive.len() != manifest.files.len() + 2 {
         return Err(PackError::InvalidPackage(
             "ZIP payload entries do not exactly match manifest files".into(),
@@ -709,7 +740,8 @@ pub(crate) fn verify_actor_package_bounded(
 }
 
 impl InspectedActorPackage {
-    pub(crate) fn verify_signature(&self, public_key: &VerifyingKey) -> Result<(), PackError> {
+    /// Authenticate the exact manifest bytes with a trusted publisher key.
+    pub fn verify_signature(&self, public_key: &VerifyingKey) -> Result<(), PackError> {
         let signature_bytes: [u8; 64] = self.signature_raw.as_slice().try_into().map_err(|_| {
             PackError::SignatureVerificationFailed("manifest.sig has invalid length".to_string())
         })?;
@@ -792,6 +824,7 @@ mod tests {
                 profile: KEEL_GUEST_PROFILE_V1.to_string(),
                 entry: "workload/guest.js".to_string(),
                 rpc_contract: None,
+                oci: None,
                 keel: Some(KeelGuestDescriptor {
                     runtime: "js".to_string(),
                     guest_api: KEEL_GUEST_PROFILE_V1.to_string(),

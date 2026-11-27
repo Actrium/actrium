@@ -252,6 +252,10 @@ pub struct RawHyperConfig {
     #[serde(default)]
     pub wasi_data_access: crate::config::WasiDataAccess,
 
+    /// OCI execution settings supplied by the deployment.
+    #[serde(default)]
+    pub oci: Option<crate::OciRuntimeConfig>,
+
     /// Recognize the removed key so the parser can report its replacement.
     #[serde(default, rename = "storage_path_template")]
     pub removed_storage_path_template: Option<String>,

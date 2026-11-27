@@ -35,6 +35,9 @@
 pub mod dynclib_abi;
 pub mod vtable;
 
+#[cfg(all(unix, feature = "oci-guest"))]
+pub mod oci;
+
 /// Component Model contract used by the guest bindings and package validation.
 pub const WASM_WORKLOAD_WIT: &str = include_str!("../../wit-v2/actr-workload.wit");
 
@@ -117,7 +120,7 @@ pub fn unavailable_reason_from_v1(reason: u32) -> Option<crate::WebRtcUnavailabl
 #[cfg(all(target_arch = "wasm32", not(feature = "web")))]
 pub mod wasm;
 
-#[cfg(feature = "cdylib")]
+#[cfg(all(feature = "cdylib", not(target_arch = "wasm32")))]
 pub mod dynclib;
 
 // Re-exports used by the `entry!` macro so macro expansions under a
