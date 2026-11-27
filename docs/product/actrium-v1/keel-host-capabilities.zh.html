@@ -454,6 +454,7 @@ details.fold .fold-body { padding: 4px 18px 16px; border-top: 1px dashed var(--l
         <tr><td><code>host:local-storage.getItem</code></td><td><code>host:local-storage.getItem</code></td><td>RPC</td><td>读取字符串；不存在时返回 <code>null</code>。</td></tr>
         <tr><td><code>host:local-storage.setItem</code></td><td><code>host:local-storage.setItem</code></td><td>RPC</td><td>写入字符串值。</td></tr>
         <tr><td><code>host:local-storage.removeItem</code></td><td><code>host:local-storage.removeItem</code></td><td>RPC</td><td>删除指定 key。</td></tr>
+        <tr><td><code>host:local-storage.replaceItems</code></td><td><code>host:local-storage.replaceItems</code></td><td>RPC</td><td>在旧值匹配时原子应用整批删除和写入。</td></tr>
         <tr><td><code>host:speech.recognize</code></td><td><code>host:speech.recognize</code></td><td>RPC</td><td>启动语音识别并返回最终文本。</td></tr>
         <tr><td><code>host:speech.onInterimResult</code></td><td><code>host:speech.onInterimResult</code></td><td>订阅</td><td>监听识别中的临时文本。</td></tr>
         <tr><td><code>host:speech.stop</code></td><td><code>host:speech.stop</code></td><td>RPC</td><td>停止当前识别会话。</td></tr>
@@ -505,11 +506,14 @@ const raw = await getItem({ key: 'draft' });
 const draft = raw === null ? null : JSON.parse(raw);
 
 await removeItem({ key: 'old-draft' });</pre></div>
+  <p><code>replaceItems({ key, replacement: { expected, remove, set } })</code> 先比较 <code>key</code> 的当前值与 <code>expected</code>。<code>expected: null</code> 表示该 key 必须不存在。匹配后，Host 先删除 <code>remove</code> 中的 key，再写入 <code>set</code> 中的 <code>{ key, value }</code> 项，最后校验配额。整批改动一次提交。</p>
+  <p>在 macOS 上，Guest 可以读取 <code>error.code</code>。<code>local_storage_conflict</code> 表示当前值已变化，Guest 可读回最新值，再决定如何处理。<code>local_storage_quota_exceeded</code> 表示更新后的存储超出配额。遇到这两种错误时，整批改动都不会生效。</p>
   <div class="table-wrap"><table>
     <thead><tr><th>边界</th><th>当前限制</th></tr></thead>
     <tbody>
       <tr><td>key</td><td>UTF-8 编码后最多 1024 字节。</td></tr>
       <tr><td>value</td><td>字符串，UTF-8 编码后最多 64 KiB。</td></tr>
+      <tr><td><code>replaceItems</code> 参数</td><td><code>expected</code> 为 <code>null</code> 或 UTF-8 编码后最多 64 KiB 的字符串。<code>remove</code> 和 <code>set</code> 各最多 1024 项。</td></tr>
       <tr><td>读取缺失 key</td><td>返回 <code>null</code>。</td></tr>
       <tr><td>原生分区参数</td><td>Host 调用原生桥时携带 <code>tabId</code> 和 <code>documentId</code>；缺少桥或 documentId 时能力不可用。</td></tr>
     </tbody>
