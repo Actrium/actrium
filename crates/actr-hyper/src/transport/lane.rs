@@ -32,7 +32,10 @@
 
 use super::error::{NetworkError, NetworkResult, is_tungstenite_closed};
 use actr_protocol::PayloadType;
+use actr_relay_security::flow_control::Class;
 use async_trait::async_trait;
+use bytes::Bytes;
+
 use futures_util::Sink;
 use futures_util::SinkExt;
 use std::collections::HashMap;
@@ -747,6 +750,13 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
         }
     }
 
+    /// Report the actual start of lane submission to a caller enforcing a deadline.
+    #[doc(hidden)]
+    async fn send_tracked(&self, data: Bytes, on_write: &(dyn Fn() + Sync)) -> SendAttemptResult {
+        on_write();
+        self.send_with_progress(data).await
+    }
+
     /// Receive raw bytes (blocking until available).
     ///
     /// Default implementation returns `InvalidOperation` error.
@@ -897,6 +907,8 @@ pub(crate) struct WebSocketDataLane<S = WsWrite> {
     payload_type: PayloadType,
     /// Direct-session retirement cancels writers before the sink is dropped.
     session: Option<super::SecureCell>,
+    relay_flow: Option<Arc<crate::wire::relay_flow::RelayFlow>>,
+    recovery: Option<Arc<crate::wire::relay_recovery::RecoveryChannel>>,
 
     /// Receive channel (independent, routed by dispatcher, uses Bytes for zero-copy)
     rx: Arc<Mutex<mpsc::Receiver<bytes::Bytes>>>,
@@ -909,6 +921,8 @@ impl<S> Clone for WebSocketDataLane<S> {
             sink: Arc::clone(&self.sink),
             payload_type: self.payload_type,
             session: self.session.clone(),
+            relay_flow: self.relay_flow.clone(),
+            recovery: self.recovery.clone(),
             rx: Arc::clone(&self.rx),
         }
     }
@@ -921,6 +935,22 @@ impl<S> std::fmt::Debug for WebSocketDataLane<S> {
 }
 
 impl<S> WebSocketDataLane<S> {
+    pub(crate) fn with_relay_flow(
+        mut self,
+        flow: Option<Arc<crate::wire::relay_flow::RelayFlow>>,
+    ) -> Self {
+        self.relay_flow = flow;
+        self
+    }
+
+    pub(crate) fn with_recovery(
+        mut self,
+        recovery: Option<Arc<crate::wire::relay_recovery::RecoveryChannel>>,
+    ) -> Self {
+        self.recovery = recovery;
+        self
+    }
+
     #[cfg(test)]
     pub(crate) fn with_session(mut self, session: super::SecureCell) -> Self {
         self.session = Some(session);
@@ -938,6 +968,8 @@ impl<S> WebSocketDataLane<S> {
             sink,
             payload_type,
             session: None,
+            relay_flow: None,
+            recovery: None,
             rx: Arc::new(Mutex::new(rx)),
         }
     }
@@ -978,8 +1010,31 @@ where
     }
 
     async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
+        self.send_tracked(data, &|| {}).await
+    }
+
+    async fn send_tracked(&self, data: Bytes, on_write: &(dyn Fn() + Sync)) -> SendAttemptResult {
         let mut write_started = false;
         let write = async {
+            if self.payload_type == PayloadType::StreamReliable
+                && let Some(recovery) = &self.recovery
+                && let Err(error) = recovery.await_replay().await
+            {
+                return SendAttemptResult::failed_pre_send(error);
+            }
+            let mut credit = if let Some(flow) = &self.relay_flow {
+                let Some(class) = Class::from_payload_tag(self.payload_type as u8) else {
+                    return SendAttemptResult::failed_pre_send(NetworkError::InvalidArgument(
+                        "Relay does not carry this payload type".into(),
+                    ));
+                };
+                match flow.reserve(class, data.len().saturating_add(5)).await {
+                    Ok(credit) => credit,
+                    Err(error) => return SendAttemptResult::failed_pre_send(error.into()),
+                }
+            } else {
+                None
+            };
             // 1. Encapsulate message (add PayloadType header)
             let mut buf = Vec::with_capacity(5 + data.len());
 
@@ -998,10 +1053,17 @@ where
             if let Some(s) = sink_opt.as_mut() {
                 // Only entering the sink send can make delivery ambiguous.
                 // Waiting for the shared writer lock is still proven pre-send.
+                if let Some(credit) = &mut credit {
+                    credit.commit();
+                }
                 write_started = true;
+                on_write();
                 let attempt =
                     map_websocket_send_result(s.send(WsMessage::Binary(buf.into())).await);
                 if attempt.result.is_ok() {
+                    if let Some(credit) = &mut credit {
+                        credit.submitted();
+                    }
                     tracing::trace!(
                         "WebSocket sent {} bytes (type={:?})",
                         data.len(),

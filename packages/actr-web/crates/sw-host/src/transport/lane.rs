@@ -58,6 +58,7 @@ pub enum DataLane {
     Relay {
         send: Arc<js_sys::Function>,
         connected: Arc<Mutex<bool>>,
+        flow: Option<crate::runtime::relay_security::RelayFlowSender>,
         payload_type: PayloadType,
     },
     /// WebSocket Lane
@@ -79,6 +80,7 @@ pub enum DataLane {
         payload_type: PayloadType,
         rx: Arc<Mutex<mpsc::UnboundedReceiver<Bytes>>>,
         failure_notifier: Option<PortFailureNotifier>,
+        flow: Option<std::rc::Rc<super::rtc_flow::RtcFlow>>,
     },
 }
 
@@ -89,16 +91,50 @@ impl DataLane {
             DataLane::Relay {
                 send,
                 connected,
+                flow,
                 payload_type,
             } => {
                 if !*connected.lock() {
                     return Err(WebError::Transport("Relay channel closed".into()));
                 }
+                let mut credit = if let Some(flow) = flow {
+                    let class = actr_relay_security::flow_control::Class::from_payload_tag(
+                        *payload_type as u8,
+                    )
+                    .ok_or_else(|| WebError::Transport("Invalid Relay payload class".into()))?;
+                    let total = data.len().saturating_add(5);
+                    let cipher = actr_relay_security::encrypted_bytes(total)
+                        .map_err(|err| WebError::Transport(err.to_string()))?;
+                    let credit = flow
+                        .flow
+                        .reserve(class, total)
+                        .await
+                        .map_err(|err| WebError::Transport(err.to_string()))?;
+                    // Each Noise record is carried in an eight-byte Relay header.
+                    let records = (cipher - total) / 38;
+                    flow.writable(cipher + records * 8, false)
+                        .await
+                        .map_err(|_| {
+                            WebError::Transport("Relay channel closed before submission".into())
+                        })?;
+                    if !*connected.lock() {
+                        return Err(WebError::Transport("Relay channel closed".into()));
+                    }
+                    credit
+                } else {
+                    None
+                };
                 let header = construct_message_header(*payload_type as u8, data.len());
                 let message = construct_message_zero_copy(&header, &data);
                 let bytes = js_sys::Uint8Array::from(message.as_ref());
+                if let Some(credit) = &mut credit {
+                    credit.commit();
+                }
                 send.call1(&JsValue::NULL, &bytes.into())
                     .map_err(|_| WebError::Transport("Relay submission failed".into()))?;
+                if let Some(credit) = &mut credit {
+                    credit.submitted();
+                }
                 Ok(())
             }
             DataLane::WebSocket {
@@ -125,18 +161,48 @@ impl DataLane {
                 port,
                 payload_type,
                 failure_notifier,
+                flow,
                 ..
             } => {
-                // Build the message with zero-copy helper functions.
-                let header = construct_message_header(*payload_type as u8, data.len());
+                let class = match payload_type {
+                    PayloadType::RpcReliable => Some(actr_relay_security::flow_control::Class::Rpc),
+                    PayloadType::StreamReliable => {
+                        Some(actr_relay_security::flow_control::Class::Stream)
+                    }
+                    _ => None,
+                };
+                let mut credit = if let (Some(flow), Some(class)) = (flow, class) {
+                    flow.peer
+                        .reserve(class, data.len())
+                        .await
+                        .map_err(|error| WebError::Transport(error.to_string()))?
+                } else {
+                    None
+                };
+                if flow.as_ref().is_some_and(|flow| flow.is_closed()) {
+                    return Err(WebError::Transport("WebRTC connection closed".into()));
+                }
+                let tag = *payload_type as u8
+                    | if credit.is_some() {
+                        super::rtc_flow::CREDITED_TAG
+                    } else {
+                        0
+                    };
+                let header = construct_message_header(tag, data.len());
                 let msg = construct_message_zero_copy(&header, &data);
 
                 // Zero-copy send by creating a WASM memory view.
                 let js_view = send_zero_copy(&msg);
 
-                // Attempt the send and capture failures.
+                // postMessage is the existing local submission boundary.
+                if let Some(credit) = &mut credit {
+                    credit.commit();
+                }
                 match port.post_message(&js_view.into()) {
                     Ok(_) => {
+                        if let Some(credit) = &mut credit {
+                            credit.submitted();
+                        }
                         log::trace!(
                             "PostMessage lane sent message: payload_type={:?}, size={} bytes",
                             payload_type,
@@ -184,8 +250,12 @@ impl DataLane {
                 port,
                 payload_type,
                 failure_notifier,
+                flow,
                 ..
             } => {
+                if flow.is_some() {
+                    return self.send(data).await;
+                }
                 // Build the message with zero-copy helper functions.
                 let header = construct_message_header(*payload_type as u8, data.len());
                 let msg = construct_message_zero_copy(&header, &data);
@@ -354,6 +424,7 @@ mod tests {
         let lane = DataLane::Relay {
             send: Arc::new(sender.as_ref().unchecked_ref::<js_sys::Function>().clone()),
             connected: Arc::new(Mutex::new(true)),
+            flow: None,
             payload_type: PayloadType::StreamReliable,
         };
         lane.send(Bytes::new()).await.unwrap();
@@ -427,6 +498,7 @@ mod tests {
             payload_type: PayloadType::StreamReliable,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: None,
+            flow: None,
         };
 
         assert_eq!(lane.payload_type(), PayloadType::StreamReliable);
@@ -496,6 +568,7 @@ mod tests {
             payload_type: PayloadType::MediaRtp,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: None,
+            flow: None,
         };
 
         let lane2 = lane1.clone();
@@ -546,6 +619,7 @@ mod tests {
             payload_type: PayloadType::StreamLatencyFirst,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: None,
+            flow: None,
         };
 
         let debug_str = format!("{:?}", lane);
@@ -573,6 +647,7 @@ mod tests {
             payload_type: PayloadType::MediaRtp,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: Some(notifier),
+            flow: None,
         };
 
         match lane {
@@ -598,6 +673,7 @@ mod tests {
             payload_type: PayloadType::RpcReliable,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: None,
+            flow: None,
         };
 
         match lane {
@@ -646,6 +722,7 @@ mod tests {
             payload_type: PayloadType::MediaRtp,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: None,
+            flow: None,
         };
 
         match lane {
@@ -702,6 +779,7 @@ mod tests {
                 payload_type: pt,
                 rx: Arc::new(Mutex::new(rx)),
                 failure_notifier: None,
+                flow: None,
             };
 
             assert_eq!(lane.payload_type(), pt);

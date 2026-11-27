@@ -32,6 +32,7 @@ pub struct WebRtcConnection {
     /// DataLane cache keyed by `PayloadType` to avoid rebuilding lanes.
     lane_cache: Arc<DashMap<PayloadType, DataLane>>,
     relayed: Arc<Mutex<Option<bool>>>,
+    flow: Option<std::rc::Rc<super::rtc_flow::RtcFlow>>,
 }
 
 impl WebRtcConnection {
@@ -44,6 +45,7 @@ impl WebRtcConnection {
             connected: Arc::new(parking_lot::Mutex::new(false)),
             lane_cache: Arc::new(DashMap::new()),
             relayed: Arc::new(Mutex::new(None)),
+            flow: None,
         }
     }
 
@@ -65,6 +67,10 @@ impl WebRtcConnection {
         );
     }
 
+    pub(crate) fn set_flow(&mut self, flow: std::rc::Rc<super::rtc_flow::RtcFlow>) {
+        self.flow = Some(flow);
+    }
+
     /// Connect the handle.
     pub async fn connect(&self) -> WebResult<()> {
         // The DOM side creates the WebRTC connection. The SW only waits for it.
@@ -80,7 +86,7 @@ impl WebRtcConnection {
 
     /// Check whether the connection is ready.
     pub fn is_connected(&self) -> bool {
-        *self.connected.lock()
+        *self.connected.lock() && self.flow.as_ref().is_none_or(|flow| !flow.is_closed())
     }
 
     /// Get or create a cached `DataLane`.
@@ -126,6 +132,7 @@ impl WebRtcConnection {
             payload_type,
             rx: Arc::new(Mutex::new(rx)),
             failure_notifier: None,
+            flow: self.flow.clone(),
         };
 
         // 4. Cache the lane.
@@ -143,6 +150,9 @@ impl WebRtcConnection {
     /// Close the connection.
     pub async fn close(&self) -> WebResult<()> {
         *self.connected.lock() = false;
+        if let Some(flow) = &self.flow {
+            flow.close();
+        }
         self.lane_cache.clear();
         log::info!("[WebRtcConnection] Closed: {}", self.peer_id);
         Ok(())
@@ -197,6 +207,7 @@ pub enum WireHandle {
 pub struct RelayConnection {
     send: Arc<js_sys::Function>,
     connected: Arc<Mutex<bool>>,
+    flow: Option<crate::runtime::relay_security::RelayFlowSender>,
 }
 impl std::fmt::Debug for RelayConnection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -210,8 +221,18 @@ impl RelayConnection {
         Self {
             send: Arc::new(send),
             connected: Arc::new(Mutex::new(true)),
+            flow: None,
         }
     }
+
+    pub(crate) fn with_flow(
+        mut self,
+        flow: Option<crate::runtime::relay_security::RelayFlowSender>,
+    ) -> Self {
+        self.flow = flow;
+        self
+    }
+
     async fn get_lane(&self, payload_type: PayloadType) -> WebResult<DataLane> {
         if payload_type == PayloadType::MediaRtp {
             return Err(WebError::Transport("Native media requires WebRTC".into()));
@@ -219,6 +240,7 @@ impl RelayConnection {
         Ok(DataLane::Relay {
             send: self.send.clone(),
             connected: self.connected.clone(),
+            flow: self.flow.clone(),
             payload_type,
         })
     }

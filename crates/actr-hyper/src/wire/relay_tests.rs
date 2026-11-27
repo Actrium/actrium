@@ -161,6 +161,7 @@ fn one_record(records: Vec<Vec<u8>>) -> Vec<u8> {
 
 struct Fixture {
     client: Arc<RelayClient>,
+    streams: Arc<DataChunkRegistry>,
     transport: Transport,
     captured: mpsc::UnboundedReceiver<Message>,
     local: ActrId,
@@ -183,9 +184,10 @@ impl Fixture {
         let local_identity = identity(&local.to_string_repr(), now);
         let remote_identity = identity(&remote.to_string_repr(), now);
         let issuer = local_identity.issued.issuer.clone();
+        let streams = Arc::new(DataChunkRegistry::new());
         let gate = Arc::new(WebSocketGate::new_relay(
             Arc::new(RpcCorrelation::new()),
-            Arc::new(DataChunkRegistry::new()),
+            streams.clone(),
             PeerTypes::default(),
         ));
         if publish_mailbox {
@@ -208,7 +210,7 @@ impl Fixture {
         );
         client.issuers.write().await.insert(1, issuer.clone());
         let (tx, mut outgoing) =
-            mpsc::channel::<Outgoing>(OUTGOING_QUEUE_SLOTS + CLOSE_QUEUE_SLOTS);
+            mpsc::channel::<Outgoing>(OUTGOING_QUEUE_SLOTS + CLOSE_QUEUE_SLOTS + FLOW_QUEUE_SLOTS);
         let (captured_tx, captured) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             while let Some(out) = outgoing.recv().await {
@@ -226,6 +228,9 @@ impl Fixture {
             budget: Arc::new(Semaphore::new(QUEUE_BYTES)),
             outgoing_slots: Arc::new(Semaphore::new(OUTGOING_QUEUE_SLOTS)),
             close_slots: Arc::new(Semaphore::new(CLOSE_QUEUE_SLOTS)),
+            flow_slots: Arc::new(Semaphore::new(FLOW_QUEUE_SLOTS)),
+            flow_windows: Arc::new(Semaphore::new(MAX_CHANNELS)),
+            flow_wait_bytes: Arc::new(Semaphore::new(QUEUE_BYTES)),
             pending_closes: Arc::new(std::sync::Mutex::new(HashSet::new())),
             encryption_budget: Arc::new(Semaphore::new(QUEUE_BYTES)),
             cancel: shutdown.child_token(),
@@ -235,6 +240,7 @@ impl Fixture {
         client.status.send_replace(Status::Ready(transport.clone()));
         Self {
             client,
+            streams,
             transport,
             captured,
             local,
@@ -1177,3 +1183,219 @@ async fn capacity_eviction_preserves_active_and_dialing_peers() {
 
 #[path = "relay_actor_enrollment_tests.rs"]
 mod actor_enrollment;
+
+async fn recovery_fixture_channel(
+    fixture: &mut Fixture,
+    channel: u64,
+    identity: &ActorChannelIdentity,
+) -> (WebSocketConnection, SecureSession, Arc<Semaphore>) {
+    let client = fixture.client.clone();
+    let peer = fixture.remote.clone();
+    let dial = tokio::spawn(async move { client.connect_peer(peer).await });
+    // A window update from the preceding channel can already be queued.
+    let request = loop {
+        if let Message::Text(text) = fixture.next_message().await
+            && let ClientControl::Connect { request, peer } = serde_json::from_str(&text).unwrap()
+        {
+            assert_eq!(peer, fixture.remote.to_string_repr());
+            break request;
+        }
+    };
+    fixture
+        .client
+        .handle_control(
+            ServerControl::Connected {
+                channel,
+                request: Some(request),
+                peer: fixture.remote.to_string_repr(),
+                metadata: String::new(),
+            },
+            &fixture.transport,
+        )
+        .await
+        .unwrap();
+    let budget = Arc::new(Semaphore::new(QUEUE_BYTES));
+    let mut remote = ActorChannelSession::new_service(
+        identity,
+        &fixture.local.to_string_repr(),
+        &channel.to_string(),
+        fixture.now,
+    )
+    .unwrap()
+    .into_inner()
+    .with_flow_control()
+    .with_delivery_recovery();
+    assert!(remote.start().unwrap().is_none());
+    let mut ready = false;
+    while !ready {
+        let frame = fixture.next_binary_on(channel).await;
+        let record = remote
+            .receive(&frame, Some(&fixture.issuer), fixture.now)
+            .unwrap();
+        ready = record.became_ready;
+        for reply in record.outbound {
+            fixture
+                .client
+                .receive_secure(channel, Bytes::from(reply), &fixture.transport, &budget)
+                .await
+                .unwrap();
+        }
+    }
+    assert!(remote.delivery_recovery());
+    let confirm_window = fixture.next_binary_on(channel).await;
+    assert!(
+        remote
+            .receive(&confirm_window, None, fixture.now)
+            .unwrap()
+            .flow_control
+            .is_some()
+    );
+    let window = remote
+        .send_flow_control(
+            actr_relay_security::flow_control::Control::Window(
+                [actr_relay_security::peer_flow::WINDOW; 2],
+            ),
+            fixture.now,
+        )
+        .unwrap();
+    fixture
+        .client
+        .receive_secure(channel, Bytes::from(window), &fixture.transport, &budget)
+        .await
+        .unwrap();
+    let (_, connection) = tokio::time::timeout(Duration::from_secs(3), dial)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    (connection, remote, budget)
+}
+
+#[tokio::test]
+async fn verified_relay_replays_unacknowledged_stream_data_without_another_send() {
+    let mut fixture = Fixture::new().await;
+    let identity = actor_identity(&fixture.remote, "example/Service@1.0.0", fixture.now);
+    fixture.transport.actor_identity = Some(Arc::new(actor_identity(
+        &fixture.local,
+        "example/Front@1.0.0",
+        fixture.now,
+    )));
+    let (connection, mut remote, _) = recovery_fixture_channel(&mut fixture, 42, &identity).await;
+    let lane = connection
+        .get_lane(PayloadType::StreamReliable)
+        .await
+        .unwrap();
+    let chunk = actr_protocol::DataChunk {
+        stream_id: "replay".into(),
+        sequence: 7,
+        payload: Bytes::from_static(b"in flight"),
+        ..Default::default()
+    }
+    .encode_to_vec();
+    lane.send(Bytes::from(chunk.clone())).await.unwrap();
+    let first_marker = fixture.next_binary_on(42).await;
+    let Some(RecoveryControl::Message { epoch, id: 1 }) = remote
+        .receive(&first_marker, None, fixture.now)
+        .unwrap()
+        .recovery_control
+    else {
+        panic!("expected a marked recoverable stream message");
+    };
+    let first_data = fixture.next_binary_on(42).await;
+    assert_eq!(
+        &remote
+            .receive(&first_data, None, fixture.now)
+            .unwrap()
+            .application
+            .unwrap()[5..],
+        chunk.as_slice()
+    );
+
+    // The Relay lost this socket without confirming receiver admission.
+    fixture.client.close_channel(42).await;
+    let (_, mut remote, mut budget) = recovery_fixture_channel(&mut fixture, 43, &identity).await;
+    let replay_marker = fixture.next_binary_on(43).await;
+    assert_eq!(
+        remote
+            .receive(&replay_marker, None, fixture.now)
+            .unwrap()
+            .recovery_control,
+        Some(RecoveryControl::Message { epoch, id: 1 })
+    );
+    let replay_data = fixture.next_binary_on(43).await;
+    assert_eq!(
+        &remote
+            .receive(&replay_data, None, fixture.now)
+            .unwrap()
+            .application
+            .unwrap()[5..],
+        chunk.as_slice()
+    );
+    let receipt = remote
+        .send_recovery_control(RecoveryControl::Received { epoch, id: 1 }, fixture.now)
+        .unwrap();
+    fixture
+        .client
+        .receive_secure(43, Bytes::from(receipt), &fixture.transport, &budget)
+        .await
+        .unwrap();
+    let entry = fixture.client.channels.read().await[&43].clone();
+    assert!(entry.recovery.journal.get().unwrap().replay().is_empty());
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    fixture.streams.register(
+        "replay".into(),
+        Arc::new(move |chunk, _| {
+            let tx = tx.clone();
+            Box::pin(async move {
+                tx.send(chunk.sequence).unwrap();
+                Ok(())
+            })
+        }),
+    );
+    let mut framed = Vec::with_capacity(chunk.len() + 5);
+    framed.push(PayloadType::StreamReliable as u8);
+    framed.extend_from_slice(&(chunk.len() as u32).to_be_bytes());
+    framed.extend_from_slice(&chunk);
+
+    for channel in [43, 44] {
+        if channel == 44 {
+            fixture.client.close_channel(43).await;
+            let (_, replacement, replacement_budget) =
+                recovery_fixture_channel(&mut fixture, 44, &identity).await;
+            remote = replacement;
+            budget = replacement_budget;
+        }
+        let tag = remote
+            .send_recovery_control(RecoveryControl::Message { epoch: 11, id: 12 }, fixture.now)
+            .unwrap();
+        let data = one_record(remote.send(&framed, fixture.now).unwrap());
+        for record in [tag, data] {
+            fixture
+                .client
+                .receive_secure(channel, Bytes::from(record), &fixture.transport, &budget)
+                .await
+                .unwrap();
+        }
+        loop {
+            let frame = fixture.next_binary_on(channel).await;
+            let received = remote.receive(&frame, None, fixture.now).unwrap();
+            if received.recovery_control == Some(RecoveryControl::Received { epoch: 11, id: 12 }) {
+                break;
+            }
+        }
+        if channel == 43 {
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(3), rx.recv())
+                    .await
+                    .unwrap(),
+                Some(7)
+            );
+        } else {
+            assert!(
+                rx.try_recv().is_err(),
+                "a replay must not invoke the callback twice"
+            );
+        }
+    }
+}

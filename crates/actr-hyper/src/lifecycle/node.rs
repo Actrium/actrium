@@ -3791,10 +3791,13 @@ impl Inner {
                     rtc::manager::RtcConnectionManager::with_inbound_config(
                         factory.clone(),
                         signaling_tx,
-                        Arc::new(rtc::inbound::InboundRouter::new_with_config(
-                            inbound_handler,
-                            buffer_config.clone(),
-                        )),
+                        Arc::new(
+                            rtc::inbound::InboundRouter::new_with_config(
+                                inbound_handler,
+                                buffer_config.clone(),
+                            )
+                            .with_flow_control(),
+                        ),
                         buffer_config,
                     )
                     .with_media_registry(media_frame_registry.clone()),

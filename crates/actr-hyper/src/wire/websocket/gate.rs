@@ -70,7 +70,12 @@ pub(crate) struct WsAuthContext {
 /// a reverse WebRTC/WebSocket dial which would fail in test environments.
 /// The cell travels with the sink so this raw-sink send path is gated on the
 /// same secure-session state as the wrapped `SecureDataLane`s (RFC-0563).
-type InboundSinkMap = Arc<RwLock<HashMap<ActrId, (WsSink, SecureCell)>>>;
+type InboundSink = (
+    WsSink,
+    SecureCell,
+    Option<Arc<crate::wire::relay_flow::RelayFlow>>,
+);
+type InboundSinkMap = Arc<RwLock<HashMap<ActrId, InboundSink>>>;
 
 /// WebSocketGate - receives and routes inbound WebSocket messages
 pub(crate) struct WebSocketGate {
@@ -201,6 +206,7 @@ impl WebSocketGate {
             (
                 sink,
                 SecureCell::new(crate::transport::SecureChannelState::Verified),
+                None,
             ),
         );
     }
@@ -229,7 +235,7 @@ impl WebSocketGate {
             map.get(peer).cloned()
         };
 
-        let (sink, secure) = match entry_opt {
+        let (sink, secure, flow) = match entry_opt {
             Some(entry) => entry,
             None => return Ok(false),
         };
@@ -243,7 +249,7 @@ impl WebSocketGate {
             let mut sinks = self.inbound_sinks.write().await;
             if sinks
                 .get(peer)
-                .is_some_and(|(current, _)| Arc::ptr_eq(current, &sink))
+                .is_some_and(|(current, ..)| Arc::ptr_eq(current, &sink))
             {
                 sinks.remove(peer);
             }
@@ -271,6 +277,18 @@ impl WebSocketGate {
 
         let mut write_started = false;
         let write = async {
+            let mut credit = if let Some(flow) = &flow {
+                match flow
+                    .reserve(actr_relay_security::flow_control::Class::Rpc, frame.len())
+                    .await
+                {
+                    Ok(credit) => credit,
+                    Err(actr_relay_security::peer_flow::FlowError::Closed) => return Ok(false),
+                    Err(error) => return Err(ActrError::Unavailable(error.to_string())),
+                }
+            } else {
+                None
+            };
             let mut sink_guard = sink.lock().await;
             match sink_guard.as_mut() {
                 Some(s) => {
@@ -279,10 +297,16 @@ impl WebSocketGate {
                     if !secure.is_io_sendable() {
                         return Ok(false);
                     }
+                    if let Some(credit) = &mut credit {
+                        credit.commit();
+                    }
                     write_started = true;
                     s.send(WsMessage::Binary(frame.into())).await.map_err(|e| {
                         ActrError::Unavailable(format!("WebSocketGate: send_response failed: {e}"))
                     })?;
+                    if let Some(credit) = &mut credit {
+                        credit.submitted();
+                    }
                     tracing::debug!(
                         peer = %peer,
                         request_id = %envelope.request_id,
@@ -479,7 +503,7 @@ impl WebSocketGate {
                 peer_types.connection_closed(peer);
                 if !sinks
                     .get(peer)
-                    .is_some_and(|(sink, _)| Arc::ptr_eq(sink, &expected_sink))
+                    .is_some_and(|(sink, ..)| Arc::ptr_eq(sink, &expected_sink))
                 {
                     return;
                 }
@@ -658,7 +682,7 @@ impl WebSocketGate {
             inbound_sinks
                 .write()
                 .await
-                .insert(peer.clone(), (sink, secure));
+                .insert(peer.clone(), (sink, secure, conn.relay_flow()));
             // Counted until the last lane exits (`finish_lane_task`).
             peer_types.record(peer.clone(), actor_type.clone());
             peer_types.connection_opened(peer);
@@ -690,6 +714,7 @@ impl WebSocketGate {
             let peer_types_for_lane = peer_types.clone();
             let actor_type = actor_type.clone();
             let secure = conn_clone.secure_cell();
+            let recovery = conn_clone.recovery();
 
             tokio::spawn(async move {
                 // get_lane lazily creates the mpsc channel and registers in router
@@ -757,7 +782,49 @@ impl WebSocketGate {
                                     }
                                     PayloadType::StreamReliable
                                     | PayloadType::StreamLatencyFirst => {
-                                        match DataChunk::decode(&data[..]) {
+                                        let marked = recovery.as_ref().and_then(|recovery| {
+                                            let journal = recovery.journal.get()?;
+                                            let (epoch, id, frame) =
+                                                crate::wire::relay_recovery::marked_chunk(&data)?;
+                                            Some((recovery, journal, epoch, id, frame))
+                                        });
+                                        let frame = marked
+                                            .map_or(data.as_ref(), |(_, _, _, _, frame)| frame);
+                                        let mut receipts = if let Some((
+                                            recovery,
+                                            journal,
+                                            epoch,
+                                            id,
+                                            _,
+                                        )) = marked
+                                        {
+                                            let mut receipts = journal.inbound.lock().await;
+                                            let Some(known) =
+                                                crate::wire::relay_recovery::admission_epoch(
+                                                    &mut receipts,
+                                                    epoch,
+                                                )
+                                            else {
+                                                tracing::warn!(
+                                                    "Relay recovery sender epoch capacity exhausted"
+                                                );
+                                                continue;
+                                            };
+                                            if known.contains(id) {
+                                                recovery.receipt(epoch, id);
+                                                continue;
+                                            }
+                                            if !known.has_space(id) {
+                                                tracing::warn!(
+                                                    "Relay recovery receipt capacity exhausted"
+                                                );
+                                                continue;
+                                            }
+                                            Some(receipts)
+                                        } else {
+                                            None
+                                        };
+                                        match DataChunk::decode(frame) {
                                             Ok(chunk) => {
                                                 tracing::debug!(
                                                     "📦 WS Received DataChunk: stream_id={}, seq={}",
@@ -794,14 +861,27 @@ impl WebSocketGate {
                                                         // queue blocks only this stream lane, not
                                                         // the RPC lanes (unlike the WebRTC single
                                                         // receive loop).
-                                                        registry
-                                                            .dispatch_with_context(
+                                                        let admitted = registry
+                                                            .dispatch_with_capacity(
                                                                 chunk,
                                                                 sender_id,
                                                                 peer_context,
                                                                 pt,
+                                                                Some(data_bytes),
                                                             )
                                                             .await;
+                                                        if admitted
+                                                            && let Some((recovery, _, epoch, id, _)) =
+                                                                marked
+                                                            && let Some(receipts) = &mut receipts
+                                                        {
+                                                            receipts
+                                                                .get_mut(&epoch)
+                                                                .expect("admission epoch installed")
+                                                                .ranges
+                                                                .insert(id);
+                                                            recovery.receipt(epoch, id);
+                                                        }
                                                     }
                                                     Err(e) => {
                                                         tracing::error!(

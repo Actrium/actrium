@@ -7,6 +7,8 @@
 //! **Note**: For intra-process communication, use `crate::transport::HostTransport`
 
 pub(crate) mod relay;
+pub(crate) mod relay_flow;
+pub(crate) mod relay_recovery;
 pub mod webrtc;
 pub(crate) mod websocket;
 

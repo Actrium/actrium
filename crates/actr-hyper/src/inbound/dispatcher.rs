@@ -116,7 +116,7 @@ impl InboundDispatcher {
                     &self.data_chunk_registry,
                     self.handover.get(),
                     &from_bytes,
-                    &data,
+                    data,
                     peer_context,
                     payload_type,
                 )
@@ -261,11 +261,11 @@ impl InboundDispatcher {
         registry: &DataChunkRegistry,
         handover: Option<&Arc<HandoverBook>>,
         from_bytes: &[u8],
-        data: &[u8],
+        data: Bytes,
         peer_context: Option<Arc<VerifiedPeerContext>>,
         payload_type: PayloadType,
     ) {
-        let chunk = match DataChunk::decode(data) {
+        let chunk = match DataChunk::decode(&data[..]) {
             Ok(c) => c,
             Err(e) => {
                 tracing::error!("Failed to deserialize DataChunk: {:?}", e);
@@ -301,7 +301,7 @@ impl InboundDispatcher {
             return;
         }
         registry
-            .dispatch_with_context(chunk, sender_id, peer_context, payload_type)
+            .dispatch_with_capacity(chunk, sender_id, peer_context, payload_type, Some(data))
             .await;
     }
 

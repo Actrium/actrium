@@ -10,6 +10,8 @@ use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
 
 pub mod actor;
+pub mod flow_control;
+pub mod peer_flow;
 pub use actor::{
     ACTOR_CHANNEL_AUDIENCE, ACTOR_CHANNEL_CERTIFICATE_DOMAIN, ActorChannelCertificate,
     ActorChannelClaims, ActorChannelEnrollment, ActorChannelIdentity, ActorChannelSession,
@@ -300,6 +302,40 @@ pub struct Received {
     pub outbound: Vec<Vec<u8>>,
     pub application: Option<Vec<u8>>,
     pub became_ready: bool,
+    pub flow_control: Option<flow_control::Control>,
+    pub recovery_control: Option<RecoveryControl>,
+}
+
+/// Delivery controls for a persistent, mutually authenticated Actor pair.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecoveryControl {
+    Message { epoch: u64, id: u64 },
+    Received { epoch: u64, id: u64 },
+}
+
+impl RecoveryControl {
+    fn encode(self) -> [u8; 18] {
+        let (kind, epoch, id) = match self {
+            Self::Message { epoch, id } => (0, epoch, id),
+            Self::Received { epoch, id } => (1, epoch, id),
+        };
+        let mut plain = [0; 18];
+        plain[0] = 3;
+        plain[1] = kind;
+        plain[2..10].copy_from_slice(&epoch.to_be_bytes());
+        plain[10..].copy_from_slice(&id.to_be_bytes());
+        plain
+    }
+
+    fn decode(plain: &[u8]) -> Option<Self> {
+        let epoch = u64::from_be_bytes(plain.get(2..10)?.try_into().ok()?);
+        let id = u64::from_be_bytes(plain.get(10..)?.try_into().ok()?);
+        match (plain.get(1)?, epoch, id) {
+            (0, 1.., 1..) => Some(Self::Message { epoch, id }),
+            (1, 1.., 1..) => Some(Self::Received { epoch, id }),
+            _ => None,
+        }
+    }
 }
 
 pub struct SecureSession {
@@ -315,6 +351,10 @@ pub struct SecureSession {
     expires_at: u64,
     partial: Vec<u8>,
     partial_total: Option<usize>,
+    offer_flow_control: bool,
+    flow_control: bool,
+    offer_recovery: bool,
+    recovery: bool,
 }
 
 /// Only a key identifier is exposed in the untrusted framing. Resolve it from
@@ -343,7 +383,7 @@ impl SecureSession {
     pub fn close(&mut self) {
         self.state = None;
         self.ready = false;
-        self.partial.clear();
+        self.partial = Vec::new();
         self.partial_total = None;
     }
     pub fn new(local: &LocalIdentity, peer: &str, channel: u64, now: u64) -> Result<Self> {
@@ -405,8 +445,32 @@ impl SecureSession {
             expires_at,
             partial: Vec::new(),
             partial_total: None,
+            offer_flow_control: false,
+            flow_control: false,
+            offer_recovery: false,
+            recovery: false,
         })
     }
+    /// Advertise support as part of the encrypted key confirmation.
+    pub fn with_flow_control(mut self) -> Self {
+        self.offer_flow_control = true;
+        self
+    }
+
+    /// Recovery is offered only on an Actor-authenticated channel.
+    pub fn with_delivery_recovery(mut self) -> Self {
+        self.offer_recovery = self.actor.is_some();
+        self
+    }
+
+    pub fn delivery_recovery(&self) -> bool {
+        self.is_ready() && self.recovery
+    }
+
+    pub fn flow_control(&self) -> bool {
+        self.is_ready() && self.flow_control
+    }
+
     pub fn is_ready(&self) -> bool {
         self.ready && self.state.is_some()
     }
@@ -448,15 +512,26 @@ impl SecureSession {
         issuer: Option<&IssuerKey>,
         now: u64,
     ) -> Result<Received> {
+        self.receive_with_admission(frame, issuer, now, |_, _| true)
+    }
+
+    /// Admit a complete application message before allocating its reassembly buffer.
+    pub fn receive_with_admission(
+        &mut self,
+        frame: &[u8],
+        issuer: Option<&IssuerKey>,
+        now: u64,
+        admit: impl FnOnce(usize, Option<u8>) -> bool,
+    ) -> Result<Received> {
         let state = self.state.take().ok_or(SecurityError("session closed"))?;
-        match self.receive_inner(state, frame, issuer, now) {
+        match self.receive_inner(state, frame, issuer, now, admit) {
             Ok((state, received)) => {
                 self.state = Some(state);
                 Ok(received)
             }
             Err(error) => {
                 self.ready = false;
-                self.partial.clear();
+                self.partial = Vec::new();
                 self.partial_total = None;
                 Err(error)
             }
@@ -468,6 +543,7 @@ impl SecureSession {
         frame: &[u8],
         issuer: Option<&IssuerKey>,
         now: u64,
+        admit: impl FnOnce(usize, Option<u8>) -> bool,
     ) -> Result<(State, Received)> {
         let id = signing_key_id(frame)?;
         if now >= self.expires_at || !self.started {
@@ -544,9 +620,12 @@ impl SecureSession {
                                 .outbound
                                 .push(self.actor_local_proof(&mut transport)?);
                         }
-                        received
-                            .outbound
-                            .push(encrypt(&mut transport, CONFIRM_RESPONDER)?);
+                        received.outbound.push(confirm(
+                            &mut transport,
+                            CONFIRM_RESPONDER,
+                            self.offer_flow_control,
+                            self.offer_recovery,
+                        )?);
                     }
                     Ok((State::Transport(transport), received))
                 } else {
@@ -574,9 +653,14 @@ impl SecureSession {
                     } else {
                         CONFIRM_INITIATOR
                     };
-                    if plain != expected {
-                        return Err(SecurityError("missing mutual key confirmation"));
-                    }
+                    let (peer_flow, peer_recovery) = match plain.strip_prefix(expected) {
+                        Some([]) => (false, false),
+                        Some([1]) => (true, false),
+                        Some([1, 1]) => (true, true),
+                        _ => return Err(SecurityError("missing mutual key confirmation")),
+                    };
+                    self.flow_control = self.offer_flow_control && peer_flow;
+                    self.recovery = self.flow_control && self.offer_recovery && peer_recovery;
                     if self.initiator {
                         if self.actor.is_some() {
                             // The initiator's Actor proof is the final handshake
@@ -588,9 +672,12 @@ impl SecureSession {
                                 .outbound
                                 .push(self.actor_local_proof(&mut transport)?);
                         }
-                        received
-                            .outbound
-                            .push(encrypt(&mut transport, CONFIRM_INITIATOR)?);
+                        received.outbound.push(confirm(
+                            &mut transport,
+                            CONFIRM_INITIATOR,
+                            self.flow_control,
+                            self.recovery,
+                        )?);
                     }
                     if let Some(actor) = self.actor.as_mut() {
                         if !actor.can_be_ready() {
@@ -600,6 +687,16 @@ impl SecureSession {
                     }
                     self.ready = true;
                     received.became_ready = true;
+                } else if self.flow_control && plain.first() == Some(&2) {
+                    received.flow_control = Some(
+                        flow_control::Control::decode(&plain[1..])
+                            .ok_or(SecurityError("invalid flow control record"))?,
+                    );
+                } else if self.recovery && plain.first() == Some(&3) {
+                    received.recovery_control = Some(
+                        RecoveryControl::decode(plain)
+                            .ok_or(SecurityError("invalid delivery recovery record"))?,
+                    );
                 } else {
                     if plain.len() < 9 || plain[0] != 1 {
                         return Err(SecurityError("invalid application record"));
@@ -614,6 +711,14 @@ impl SecureSession {
                     {
                         return Err(SecurityError("invalid application fragmentation"));
                     }
+                    if offset == 0 {
+                        if !admit(total, plain.get(9).copied()) {
+                            return Err(SecurityError("application exceeded its receive credit"));
+                        }
+                        if self.flow_control {
+                            self.partial = Vec::with_capacity(total);
+                        }
+                    }
                     self.partial_total = Some(total);
                     self.partial.extend_from_slice(&plain[9..]);
                     if self.partial.len() == total {
@@ -625,6 +730,32 @@ impl SecureSession {
             }
         }
     }
+    pub fn send_flow_control(
+        &mut self,
+        control: flow_control::Control,
+        now: u64,
+    ) -> Result<Vec<u8>> {
+        if !self.flow_control() || now >= self.expires_at {
+            return Err(SecurityError("flow control channel not ready"));
+        }
+        let Some(State::Transport(transport)) = self.state.as_mut() else {
+            return Err(SecurityError("session closed"));
+        };
+        let mut plain = vec![2];
+        plain.extend(control.encode());
+        encrypt(transport, &plain)
+    }
+
+    pub fn send_recovery_control(&mut self, control: RecoveryControl, now: u64) -> Result<Vec<u8>> {
+        if !self.delivery_recovery() || now >= self.expires_at {
+            return Err(SecurityError("delivery recovery channel not ready"));
+        }
+        let Some(State::Transport(transport)) = self.state.as_mut() else {
+            return Err(SecurityError("session closed"));
+        };
+        encrypt(transport, &control.encode())
+    }
+
     pub fn send(&mut self, application: &[u8], now: u64) -> Result<Vec<Vec<u8>>> {
         if !self.is_ready() || now >= self.expires_at {
             return Err(SecurityError("session not authenticated or expired"));
@@ -648,6 +779,22 @@ impl SecureSession {
         Ok(records)
     }
 }
+fn confirm(
+    state: &mut TransportState,
+    expected: &[u8],
+    flow_control: bool,
+    recovery: bool,
+) -> Result<Vec<u8>> {
+    let mut plain = expected.to_vec();
+    if flow_control {
+        plain.push(1);
+        if recovery {
+            plain.push(1);
+        }
+    }
+    encrypt(state, &plain)
+}
+
 fn encrypt(state: &mut TransportState, plain: &[u8]) -> Result<Vec<u8>> {
     let mut bytes = vec![0; plain.len() + 16];
     let len = noise(state.write_message(plain, &mut bytes))?;

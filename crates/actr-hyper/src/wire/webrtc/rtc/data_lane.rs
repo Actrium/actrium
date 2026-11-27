@@ -90,11 +90,18 @@ impl DataLane for RtcDataLane {
     }
 
     async fn send_with_progress(&self, data: bytes::Bytes) -> SendAttemptResult {
-        let result = if self.non_blocking {
-            self.handle.send_with_progress(self.lane, data, true).await
-        } else {
-            self.handle.send_with_progress(self.lane, data, false).await
-        };
+        self.send_tracked(data, &|| {}).await
+    }
+
+    async fn send_tracked(
+        &self,
+        data: bytes::Bytes,
+        on_write: &(dyn Fn() + Sync),
+    ) -> SendAttemptResult {
+        let result = self
+            .handle
+            .send_tracked(self.lane, data, self.non_blocking, on_write)
+            .await;
         let progress = result.progress;
         let proven_pre_send = result.proven_pre_send;
         match result.result {

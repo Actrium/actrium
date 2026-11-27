@@ -110,6 +110,7 @@ struct QueuedChunk {
     sender_id: ActrId,
     peer_context: Option<Arc<VerifiedPeerContext>>,
     callback: DataChunkCallback,
+    capacity: Option<bytes::Bytes>,
 }
 
 /// Per-stream serial executor: a bounded queue plus the worker task draining it.
@@ -547,6 +548,7 @@ impl DataChunkRegistry {
             .await;
     }
 
+    #[cfg(test)]
     pub(crate) async fn dispatch_with_context(
         &self,
         chunk: DataChunk,
@@ -554,6 +556,18 @@ impl DataChunkRegistry {
         peer_context: Option<Arc<VerifiedPeerContext>>,
         payload_type: PayloadType,
     ) {
+        self.dispatch_with_capacity(chunk, sender_id, peer_context, payload_type, None)
+            .await;
+    }
+
+    pub(crate) async fn dispatch_with_capacity(
+        &self,
+        chunk: DataChunk,
+        sender_id: ActrId,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
+        payload_type: PayloadType,
+        capacity: Option<bytes::Bytes>,
+    ) -> bool {
         let stream_id = self
             .inner
             .incoming_guard
@@ -565,18 +579,19 @@ impl DataChunkRegistry {
 
         let (tx, callback) = match self.worker_tx(&stream_id, &sender_id).await {
             Some(worker) => worker,
-            None => return,
+            None => return false,
         };
         let queued = QueuedChunk {
             chunk,
             sender_id,
             peer_context,
             callback,
+            capacity,
         };
 
         match payload_type {
             PayloadType::StreamLatencyFirst => match tx.try_send(queued) {
-                Ok(()) => {}
+                Ok(()) => true,
                 Err(mpsc::error::TrySendError::Full(_)) => {
                     let dropped = self.inner.dropped_count.fetch_add(1, Ordering::Relaxed) + 1;
                     tracing::warn!(
@@ -584,35 +599,33 @@ impl DataChunkRegistry {
                         dropped_total = dropped,
                         "⚠️ LatencyFirst queue full; dropping chunk"
                     );
+                    false
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
                     tracing::debug!(
                         stream_id = %stream_id,
                         "stream worker closed (unregistered/shutdown); dropping chunk"
                     );
+                    false
                 }
             },
             // StreamReliable (and any non-stream misroute defaults to reliable):
             // block on a full queue to apply stop-read backpressure.
             _ => match tx.try_send(queued) {
-                Ok(()) => {}
+                Ok(()) => true,
                 Err(mpsc::error::TrySendError::Full(queued)) => {
                     tracing::warn!(
                         stream_id = %stream_id,
                         "backpressure engaged, inbound stalled"
                     );
-                    if tx.send(queued).await.is_err() {
-                        tracing::debug!(
-                            stream_id = %stream_id,
-                            "stream worker closed during backpressure; dropping chunk"
-                        );
-                    }
+                    tx.send(queued).await.is_ok()
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
                     tracing::debug!(
                         stream_id = %stream_id,
                         "stream worker closed (unregistered/shutdown); dropping chunk"
                     );
+                    false
                 }
             },
         }
@@ -879,6 +892,7 @@ impl DataChunkRegistry {
             chunk,
             sender_id,
             callback,
+            capacity: _capacity,
             ..
         } = queued;
         let sequence = chunk.sequence;

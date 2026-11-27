@@ -348,6 +348,15 @@ pub async fn build_register_ok(
     req: &RegisterRequest,
     state: &Arc<MockState>,
 ) -> register_response::RegisterOk {
+    build_register_ok_for_client(req, state, None).await
+}
+
+pub(crate) async fn build_register_ok_for_client(
+    req: &RegisterRequest,
+    state: &Arc<MockState>,
+    client: Option<(&str, &str)>,
+) -> register_response::RegisterOk {
+    let (provider, client_key) = client.unwrap_or(("provider.example", "0000000000000000"));
     let req = &ensure_actor_key_proof(req.clone());
     let serial = state.next_serial.fetch_add(1, Ordering::SeqCst);
 
@@ -360,7 +369,7 @@ pub async fn build_register_ok(
         realm: req.realm.clone(),
         protocol_version: 1,
         issuer: req.realm.clone(),
-        provider: "provider.example".to_string(),
+        provider: provider.to_owned(),
         audience: "actr.signaling".to_string(),
         // Use the full ActrId string representation so WebSocketGate's
         // credential verifier can match it against the X-Actr-Source-ID header.
@@ -368,7 +377,7 @@ pub async fn build_register_ok(
         expires_at: chrono::Utc::now().timestamp() as u64 + 86400,
         actor_type: req.actr_type.clone(),
         member: "member-1".to_string(),
-        client_key: "0000000000000000".to_string(),
+        client_key: client_key.to_owned(),
         role: actr_protocol::MemberRole::Owner as i32,
         development: None,
         actor_public_key: req.actor_public_key.clone(),
@@ -386,7 +395,7 @@ pub async fn build_register_ok(
     let turn_credential = TurnCredential {
         protocol_version: 1,
         realm: req.realm.clone(),
-        provider: "provider.example".to_string(),
+        provider: provider.to_owned(),
         audience: "actr.turn".to_string(),
         username: format!("{}:{}", chrono::Utc::now().timestamp() + 86400, serial),
         password: format!("mock-turn-{serial:016x}"),

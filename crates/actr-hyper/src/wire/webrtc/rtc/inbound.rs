@@ -48,15 +48,17 @@ struct InboundBudget {
 /// value until asynchronous dispatch finishes, so the bound covers queued and
 /// in-flight work rather than only the synchronous callback invocation.
 pub(crate) struct InboundLease {
-    budget: Arc<InboundBudget>,
+    budget: Option<Arc<InboundBudget>>,
     bytes: usize,
 }
 
 impl Drop for InboundLease {
     fn drop(&mut self) {
-        let mut state = self.budget.state.lock().expect("RTC inbound budget lock");
-        state.messages = state.messages.saturating_sub(1);
-        state.bytes = state.bytes.saturating_sub(self.bytes);
+        if let Some(budget) = &self.budget {
+            let mut state = budget.state.lock().expect("RTC inbound budget lock");
+            state.messages = state.messages.saturating_sub(1);
+            state.bytes = state.bytes.saturating_sub(self.bytes);
+        }
     }
 }
 
@@ -64,6 +66,18 @@ impl Drop for InboundLease {
 pub(crate) struct InboundRouter {
     handler: InboundHandler,
     budget: Arc<InboundBudget>,
+    pub(super) flow: Option<super::flow::Pools>,
+}
+
+struct ReservedPayload {
+    data: bytes::Bytes,
+    _credit: actr_relay_security::peer_flow::ReceiveCredit,
+}
+
+impl AsRef<[u8]> for ReservedPayload {
+    fn as_ref(&self) -> &[u8] {
+        &self.data
+    }
 }
 
 impl InboundRouter {
@@ -80,6 +94,7 @@ impl InboundRouter {
             .expect("InboundRouter requires validated finite RTC resource limits");
         Self {
             handler,
+            flow: None,
             budget: Arc::new(InboundBudget {
                 state: std::sync::Mutex::new(InboundBudgetState::default()),
                 max_messages: config.max_inbound_dispatch_messages,
@@ -88,6 +103,29 @@ impl InboundRouter {
                 dropped_messages: AtomicU64::new(0),
             }),
         }
+    }
+
+    pub(crate) fn with_flow_control(mut self) -> Self {
+        self.flow = Some(super::flow::Pools::default());
+        self
+    }
+
+    pub(super) fn route_reserved(
+        &self,
+        mut message: InboundMessage,
+        credit: actr_relay_security::peer_flow::ReceiveCredit,
+    ) {
+        message.payload = bytes::Bytes::from_owner(ReservedPayload {
+            data: message.payload,
+            _credit: credit,
+        });
+        (self.handler)(
+            message,
+            InboundLease {
+                budget: None,
+                bytes: 0,
+            },
+        );
     }
 
     /// A router that drops messages (used when no business sink is wired yet,
@@ -115,7 +153,7 @@ impl InboundRouter {
             state.messages += 1;
             state.bytes += bytes;
             InboundLease {
-                budget: self.budget.clone(),
+                budget: Some(self.budget.clone()),
                 bytes,
             }
         };

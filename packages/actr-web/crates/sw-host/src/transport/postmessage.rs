@@ -122,6 +122,7 @@ impl PostMessageLaneBuilder {
             payload_type: self.payload_type,
             rx,
             failure_notifier,
+            flow: None,
         })
     }
 }

@@ -29,6 +29,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
+use actr_protocol::ActrId;
 use actr_protocol::prost::Message as ProstMessage;
 use actr_runtime_mailbox::Mailbox;
 use tokio::sync::RwLock;
@@ -46,14 +47,8 @@ use super::status::LaneKind;
 /// holds a slot that is filled when the mailbox becomes available.
 pub(crate) type MailboxSlot = Arc<RwLock<Option<Arc<dyn Mailbox>>>>;
 
-/// The FIFO scope of one inbound dispatch worker.
-///
-/// The pre-v0.20 gate kept three long-lived sequential receive loops:
-/// `RpcReliable` and `RpcSignal` were read from the same `receive_rpc_message()`
-/// queue, `StreamReliable` had its own loop, and `StreamLatencyFirst` had an
-/// independent one. Keying queues by traffic class — instead of by peer,
-/// generation, and lane — restores that contract, so a class stays FIFO across
-/// peers and generations even though the three classes run concurrently.
+/// Ordering is local to one peer and traffic class. A paused peer must
+/// not serialize admissions for any other peer in that class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum DispatchClass {
     /// `RpcReliable` and `RpcSignal` share one FIFO worker.
@@ -84,8 +79,8 @@ struct DispatchItem {
 #[derive(Default)]
 struct DispatchTaskState {
     closed: bool,
-    queues: HashMap<DispatchClass, VecDeque<DispatchItem>>,
-    running: HashSet<DispatchClass>,
+    queues: HashMap<(ActrId, DispatchClass), VecDeque<DispatchItem>>,
+    running: HashSet<(ActrId, DispatchClass)>,
 }
 
 #[derive(Clone)]
@@ -96,7 +91,7 @@ struct DispatchTasks {
 
 fn spawn_dispatch_worker(
     tasks: &DispatchTasks,
-    class: DispatchClass,
+    key: (ActrId, DispatchClass),
     dispatcher: Arc<InboundDispatcher>,
     mailbox_slot: MailboxSlot,
     shutdown: CancellationToken,
@@ -109,10 +104,10 @@ fn spawn_dispatch_worker(
                 if state.closed {
                     return;
                 }
-                let item = state.queues.get_mut(&class).and_then(VecDeque::pop_front);
+                let item = state.queues.get_mut(&key).and_then(VecDeque::pop_front);
                 if item.is_none() {
-                    state.queues.remove(&class);
-                    state.running.remove(&class);
+                    state.queues.remove(&key);
+                    state.running.remove(&key);
                 }
                 item
             };
@@ -172,7 +167,7 @@ pub(crate) fn dispatcher_bridge(
     let handler_tasks = tasks.clone();
     let dispatch_shutdown = shutdown.clone();
     let handler: InboundHandler = std::sync::Arc::new(move |msg: InboundMessage, lease| {
-        let class = DispatchClass::from_lane(msg.lane);
+        let key = (msg.peer.clone(), DispatchClass::from_lane(msg.lane));
         // Keep admission and worker registration atomic with shutdown.
         // TaskTracker::close() does not prevent spawning new tasks, so the
         // worker must be tracked before the monitor can close and wait.
@@ -185,16 +180,16 @@ pub(crate) fn dispatcher_bridge(
         }
         state
             .queues
-            .entry(class)
+            .entry(key.clone())
             .or_default()
             .push_back(DispatchItem {
                 message: msg,
                 lease,
             });
-        if state.running.insert(class) {
+        if state.running.insert(key.clone()) {
             spawn_dispatch_worker(
                 &handler_tasks,
-                class,
+                key,
                 dispatcher.clone(),
                 mailbox_slot.clone(),
                 dispatch_shutdown.clone(),

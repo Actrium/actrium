@@ -14,7 +14,7 @@ export type MessageToSW =
   | { type: 'webrtc_event'; payload: WebRtcEventPayload }
   | { type: 'control'; payload: ControlCommandPayload }
   | { type: 'unregister_client' }
-  | { type: 'register_datachannel_port'; payload: { peerId: string; connectionId: string; port: MessagePort } };
+  | { type: 'register_datachannel_port'; payload: { peerId: string; connectionId: string; port: MessagePort; flowControl?: true } };
 
 /**
  * Control command payload
@@ -264,7 +264,7 @@ export class ServiceWorkerBridge {
    * using it as DataLane::PostMessage(port2).
    */
   sendDataChannelPort(peerId: string, connectionId: string, port: MessagePort): void {
-    this.sendToSW({ type: 'register_datachannel_port', payload: { peerId, connectionId, port } }, [port]);
+    this.sendToSW({ type: 'register_datachannel_port', payload: { peerId, connectionId, port, flowControl: true } }, [port]);
   }
 
   /**

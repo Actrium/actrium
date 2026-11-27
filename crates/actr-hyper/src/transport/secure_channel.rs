@@ -427,6 +427,10 @@ impl DataLane for SecureDataLane {
     }
 
     async fn send_with_progress(&self, data: Bytes) -> SendAttemptResult {
+        self.send_tracked(data, &|| {}).await
+    }
+
+    async fn send_tracked(&self, data: Bytes, on_write: &(dyn Fn() + Sync)) -> SendAttemptResult {
         // The gate check is provably pre-send (it inspects session state
         // before touching `inner`), so gate failures stay `NotAttempted`:
         // the bounded readiness-wait → lane re-acquisition self-heal trip is
@@ -436,7 +440,7 @@ impl DataLane for SecureDataLane {
         if let Err(error) = self.gate() {
             return SendAttemptResult::failed_pre_send(error);
         }
-        self.inner.send_with_progress(data).await
+        self.inner.send_tracked(data, on_write).await
     }
 
     async fn recv(&self) -> NetworkResult<Bytes> {
