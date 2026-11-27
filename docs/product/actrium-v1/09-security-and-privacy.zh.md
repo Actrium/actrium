@@ -79,7 +79,7 @@ flowchart LR
 - 恶意 Keel Guest；
 - 恶意 Service workload；
 - 恶意或失陷的 Marketplace；
-- 恶意 Realm、signaling 或 TURN Actr Facility Provider；
+- 恶意的 Actr Facility Provider，例如负责分配 Realm、运营信令或提供 TURN 服务的一方。
 - 同设备其他进程；
 - 有本机权限的攻击者；
 - 被盗设备；

@@ -29,8 +29,8 @@ What is really missing are product-level invariants and several key semantics:
 
 ### Realm package selection
 
-Implement the schema and SDK first, then AFP and CLI management, followed by Host deployment and
-client support. Verify Profile validation, Service loading and application readiness separately.
+Implement the schema and SDK first, then the AFP's Realm management interface and the corresponding
+CLI commands, followed by Host deployment and client support. Verify Profile validation, Service loading and application readiness separately.
 
 ## 2. Key dependency graph
 
@@ -101,7 +101,7 @@ Turn this document's product semantics into a cross-repository, testable contrac
 8. the Realm signing key, the Realm Profile it signs, and Realm issuer key discovery;
 9. the Actor credential binds a public key, and holding the private key is proven with a transcript/SDP challenge;
 10. a one-time signaling ticket/header;
-11. Actr Facility Provider delegation and failover; one Actr Facility Provider hosts multiple Realms, and Realm creation is authorized by a Realm signing key signature;
+11. Realm delegation and endpoint failover. An AFP serving networked Realms can allocate and host multiple Realms with authorization from the Realm signing key holder.
 12. per-Realm/TURN-pool key id and rotation;
 13. Publisher DNS length and normalization;
 14. the Actor store namespace accepts instance identity;
@@ -262,7 +262,7 @@ Turn this document's product semantics into a cross-repository, testable contrac
 
 - domain trust and creating a networked Realm per instance;
 - joining an instance's Realm via a Realm invitation and obtaining Realm membership;
-- signaling Actr Facility Provider failover;
+- signaling endpoint failover within the same AFP.
 - P2P/TURN;
 - resolving the Realm name from the Realm link and obtaining the Realm Profile;
 - Actor/peer handshake;
@@ -277,7 +277,7 @@ Turn this document's product semantics into a cross-repository, testable contrac
 - knowing the ActorId alone, without permission, cannot establish a connection;
 - signaling cannot impersonate an Actor;
 - TURN uses a short-lived credential;
-- Actr Facility Provider failover never changes the ActorId.
+- signaling endpoint failover within the same AFP preserves the ActorId.
 
 ## 10. P4: Hardening and public beta
 
@@ -388,7 +388,7 @@ The following are no longer open questions:
 - whether signaling is "powerless": no;
 - whether a Realm is bound one-to-one to a physical signaling server: no;
 - whether a Realm corresponds to an application instance: yes, creating an instance always creates a new Realm;
-- whether one Actr Facility Provider hosts multiple Realms: yes.
+- an AFP serving networked Realms can allocate and host multiple Realms.
 
 ## 14. Minimum vertical slice
 

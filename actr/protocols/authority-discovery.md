@@ -142,7 +142,7 @@ Version 1 defines these core relations:
 | `ice-config` | Obtain ICE server configuration and, after authorization, short-lived TURN credentials as defined by [Actr ICE Configuration](ice-configuration.md). |
 | `contracts` | Obtain public Actor contract and interface descriptions. |
 | `realms` | Retrieve signed Realm Profiles for Realms named under this domain from where they are stored, as defined by [Actr Realm Profile](realm-profile.md). The protocol value is `actr-realm-profile/1`. |
-| `realm-management` | Accept Realm management requests (`POST`) for Realms this authority serves as an Actr Facility Provider, as defined by [Actr Realm Profile](realm-profile.md), Section 8. The protocol value is `actr-realm-management/1`. |
+| `realm-management` | Accept Realm allocation and management requests (`POST`) in this authority's role as the Actr Facility Provider serving those Realms. The protocol value is `actr-realm-management/1`. See Section 8 of [Actr Realm Profile](realm-profile.md). |
 
 Extension relation values **MUST** be absolute URIs controlled by the extension
 author. This avoids collisions with short core relation names.

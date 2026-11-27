@@ -121,7 +121,7 @@ Realm 名 = <realm_id>@<domain>                      # 联网，如 k7m2q9xh@acm
   伪域名 `<installation-id>.actr.alt`（安装时随机生成，永不经 DNS 解析），归该 Actrium 安装；
 - 域名的 Realm 签名 key 是该域名下 Realm Profile 的长期信任根，签署每个实例的包选择。
 - RealmId 在域名内唯一、创建后不可修改、退役后永不复用；
-- 一个 Actr Facility Provider（信令、TURN、Issuer）承载大量 Realm；Realm 在创建时绑定一个 Actr Facility Provider，此后不可更换；
+- 为联网 Realm 提供服务的 Actr Facility Provider（AFP）可以分配和承载多个 Realm。每个联网 Realm 在创建时绑定一个 AFP，Realm Profile 的 `provider.id` 在其生命周期内固定。
 - 联网 Realm 的成员由 Actr Facility Provider 记录：恰好一个 owner（创建者，可转让），其余为 editor 或 viewer；成员凭一次性 Realm 邀请加入，每个客户端登记一把 Realm 客户端 key。本机 Realm 没有成员。
 
 Publisher 域名命名程序（谁发布），Realm 域名命名部署（谁运营）；同一 Program

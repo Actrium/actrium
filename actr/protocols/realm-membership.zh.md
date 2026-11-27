@@ -9,8 +9,9 @@
 
 ## 1. 范围与模型
 
-Realm 与 Realm Profile 见 [Actr Realm Profile](realm-profile.zh.md)。本文只适用于 DNS 域名下的
-Realm；本机 Realm 没有成员与邀请。
+Realm 与 Realm Profile 见 [Actr Realm Profile](realm-profile.zh.md)。本文所称某个 Realm 的 Actr Facility Provider（AFP），
+指 Realm Profile 以 `provider.id` 标识、负责为该 Realm 提供服务的一方。本文只适用于 DNS 域名下的
+Realm，本机 Realm 没有成员与邀请。
 
 - **成员**：Actr Facility Provider 为某个 Realm 记录的一方，有 `member_id` 与一个角色。
 - **角色**：`owner`、`editor`、`viewer`。每个 Realm 恰好一个 owner：它同时持有该 Realm 的成员管理权与

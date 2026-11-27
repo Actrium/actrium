@@ -59,7 +59,7 @@ Tab
 | D-010 | Publisher 身份是无端口的规范化域名。Publisher Profile 提供验证包签名的受信公钥。 |
 | D-011 | Marketplace 是发现、审核与撤销信息源，不是 Publisher 命名权威；域名与包签名才是来源链。 |
 | D-012 | v1 ActorId 必须包含可验证的 Realm 名（`<realm_id>@<domain>`，如 `notes@acme.com`），程序类型不在 ActorId 中；它是公开地址和密码学身份，不是 bearer token，知道地址不等于有权连接。 |
-| D-013 | Realm 是逻辑信任域，对应一个应用实例，可委派多个信令/TURN 服务；Realm 与某个物理信令进程不是一回事，一个 Actr Facility Provider 承载多个 Realm；Realm 在创建时绑定一个 Actr Facility Provider，此后不可更换。 |
+| D-013 | Realm 是一个应用实例的逻辑信任域，可委派多个信令/TURN 端点。为联网 Realm 提供服务的 Actr Facility Provider（AFP）可以分配和承载多个 Realm。每个联网 Realm 在创建时绑定一个 AFP，其 Realm Profile 的 `provider.id` 在生命周期内固定。 |
 | D-014 | Service 实例固定到精确版本与包 digest；v1 升级通过显式迁移创建新 Actor，而不是原地替换 workload。 |
 | D-015 | Actor credential 证明 Actor key、身份和 claims，不证明对端实际运行的代码。应用如何据此授权属于应用写法，见[应用开发建议](app-development-guidance.zh.md)。 |
 | D-016 | Service manifest 的 `[workspace]` 声明必需性、申请的访问级别和支持的 Provider。部署或实例创建流程决定准备方式，Host 按实例保存实际绑定和授权。 |

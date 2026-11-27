@@ -129,7 +129,7 @@ request 时使用的 authority 一致。redirect 不改变此绑定关系。
 | `ice-config` | 按 [Actr ICE Configuration](ice-configuration.zh.md) 获取 ICE server 配置，并在授权后取得短期 TURN credential。 |
 | `contracts` | 获取公开的 Actor contract 和 interface description。 |
 | `realms` | 从存放位置获取以该域名命名的各 Realm 的签名 Realm Profile，见 [Actr Realm Profile](realm-profile.zh.md)。protocol 值为 `actr-realm-profile/1`。 |
-| `realm-management` | 接受该 authority 作为 Actr Facility Provider 所服务 Realm 的 Realm 管理请求（`POST`），见 [Actr Realm Profile](realm-profile.zh.md) 第 8 节。protocol 值为 `actr-realm-management/1`。 |
+| `realm-management` | 该 authority 作为服务 Realm 的 Actr Facility Provider，接受 Realm 分配和管理请求（`POST`）。protocol 值为 `actr-realm-management/1`。见 [Actr Realm Profile](realm-profile.zh.md) 第 8 节。 |
 
 extension relation 值 **MUST** 是由扩展作者控制的 absolute URI，以避免与短 core
 relation name 冲突。

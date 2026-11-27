@@ -35,10 +35,11 @@ flowchart TB
 - Realm 以「RealmId + Realm 域名」命名，一个域名下可以有多个 Realm；
 - Realm 与信令通常强绑定，但这种绑定是「信任和配置委派」，不是「一个 Realm 等于一台信令服务器」；
 - 一个 Realm 可以委派多个信令集群；
-- 一个 Actr Facility Provider（AFP）提供信令、STUN/TURN、Issuer 等共享基础设施，承载大量 Realm。
-- Realm 在创建时绑定一个 Actr Facility Provider，此后不可更换；同一 Actr Facility Provider 内部的机器与端点可以替换，Realm 身份和 ActorId 不变。
+- **AFP（Actr Facility Provider，Actr 设施提供方）**泛指 Actr 生态中承担平台职责的各类提供方和运营方。平台职责包括提供基础设施、分配 Realm／应用实例等。
+- 为联网 Realm 提供服务的 AFP 执行 Realm 分配，可以为多个 Realm 提供信令、STUN/TURN、Issuer 等共享设施。
+- 每个联网 Realm 在创建时绑定一个 AFP，Realm Profile 中的 `provider.id` 在其生命周期内固定。该 AFP 可以替换机器和端点，Realm 身份和 ActorId 保持不变。
 
-v1 中多个 signaling endpoint 必须属于同一个逻辑控制面，使用共享/复制的 presence，或按确定规则让所有 Actor 使用同一 active primary。它们是副本与故障切换入口，不是任意相互联邦的独立 Actr Facility Provider；跨 Actr Facility Provider federation 是后续协议。
+v1 中多个 signaling endpoint 必须属于同一个逻辑控制面，使用共享或复制的 presence，或按确定规则让所有 Actor 使用同一 active primary。这些端点是同一 AFP 内的副本与故障切换入口。服务 Realm 的 AFP 之间的 federation 属于后续协议。
 
 ## 2. Realm 的定义
 
@@ -80,15 +81,15 @@ Realm 名 = <realm_id>@<domain>
 
 ### 2.3 Realm、Publisher 与 Actr Facility Provider
 
-| | Publisher | Realm | Actr Facility Provider |
+| | Publisher | Realm | 为 Realm 提供服务的 AFP |
 |---|---|---|---|
-| 是什么 | 程序的发布者 | 一个应用实例的信任域 | 共享基础设施 |
-| 标识 | 规范化 DNS 域名 | Realm 名 `<realm_id>@<domain>` | Actr Facility Provider ID（Actr Facility Provider 的域名） |
+| 是什么 | 程序的发布者 | 一个应用实例的信任域 | 负责分配和管理 Realm，并提供该 Realm 所需设施的运营方 |
+| 标识 | 规范化 DNS 域名 | Realm 名 `<realm_id>@<domain>` | Realm Profile 的 `provider.id`，即该 Realm 所绑定 AFP 的规范化 DNS authority |
 | 长期信任根 | Publisher key | Realm 签名 key | 无；持有 Realm 签名 key 时（其域名下的 Realm，或受托代持）即为信任根 |
 
-每个 Realm 在创建时绑定一个 Actr Facility Provider，此后不可更换。需要换运营方时，在新 Actr Facility Provider 上新建实例并做应用层数据迁移，旧实例退役。
+Realm 签名 key 持有方授权创建联网 Realm，由选定的 AFP 执行分配。需要换运营方时，在新的 AFP 上新建 Realm 并迁移应用数据，随后退役旧 Realm。见 [Realm Profile 协议](../../../actr/protocols/realm-profile.zh.md)。
 
-Publisher 域名命名程序（谁发布），Realm 域名命名部署（谁运营）。同一个包可以运行在 `notes@acme.com`，也可以运行在 `notes@foo.org`。一个 Actr Facility Provider（如一套 Loran 部署）承载来自多个域名的大量 Realm。
+Publisher 域名命名程序（谁发布），Realm 域名命名部署（谁运营）。同一个包可以运行在 `notes@acme.com`，也可以运行在 `notes@foo.org`。Loran 是提供部分 Actr 平台基础设施的示例软件，一套部署可以服务多个域名下的 Realm。见 [Loran](../../../loran/README.md)。
 
 Realm 不是：
 
@@ -228,7 +229,7 @@ ActorId 类似进程 ID，只回答「哪个 Realm 里的哪个 Actor」。程�
 - 类型发现与候选排序；
 - WebRTC offer/answer/ICE 交换；
 - 连接 ACL 初筛；
-- Actr Facility Provider failover；
+- 同一 AFP 内的信令端点故障切换。
 - 网络状态事件。
 
 它不负责保存 Service 业务状态。
@@ -498,7 +499,7 @@ Realm Profile 可以声明多个 endpoint：
 - Realm Profile 的存放位置不影响其有效性；
 - 非默认端口允许；
 - endpoint 切换不改变 Realm 或 ActorId；
-- failover 不能跳到未声明 Actr Facility Provider；
+- 故障切换只能使用 Realm Profile 授权的同一 AFP 的端点。
 - Actr Facility Provider 证书和 ticket audience 必须匹配。
 
 ## 11. 端口政策

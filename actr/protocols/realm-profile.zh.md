@@ -4,20 +4,24 @@
 
 状态：初始草案。
 
-本文定义 Actr Host 或 Actr Facility Provider（AFP）如何把 Realm 名解析为经过验证的 Realm Profile、
-`actr.realm/v1` Realm Profile 格式，以及 Actr Facility Provider 接受的 Realm 管理请求。
+本文定义 Actr Host 或为 Realm 提供服务的一方如何把 Realm 名解析为经过验证的 Realm Profile，
+以及 `actr.realm/v1` 格式和该提供方接受的 Realm 管理请求。
 
 ## 1. 范围
 
 Realm 是一个应用实例的信任边界。创建一个应用实例就创建一个新的 Realm。Realm 名写作
 `<realm_id>@<domain>`，例如 `k7m2q9xh@acme.com`，语法见 [Actr URI](uri.zh.md) 第 5.1 节。
 
-Realm Profile 是一份签名的公开文档，公布实例选定的 Service、Front 和辅助包，以及服务该 Realm 的 Issuer 和 Actr Facility Provider。它由该 Realm 域名的 Realm 签名 key 签署，因此可以存放在任何地方：域名自己的静态
-托管、Actr Facility Provider，或内嵌在 Realm 邀请中。取得它的位置不影响其有效性。
+**AFP（Actr Facility Provider，Actr 设施提供方）**泛指 Actr 生态中承担平台职责的各类提供方和运营方。
+平台职责包括提供基础设施、分配 Realm／应用实例等。
 
-Realm 在整个生命周期内只由一个 Actr Facility Provider 服务。Actr Facility Provider 是由某个运营方运行的
-部署，为 Realm 提供 signaling、TURN 与 Issuer。把应用迁到另一个运营方，意味着在那里新建
-Realm 并迁移应用数据，旧 Realm 退役。
+本文所称某个联网 Realm 的 AFP，指负责分配和管理该 Realm、提供 Issuer 及 Realm Profile 所列信令和
+ICE 端点的一方。每个联网 Realm 在整个生命周期内绑定同一个 AFP，由 Realm Profile 的 `provider.id`
+标识。换用另一家 AFP 时，在那里新建 Realm 并迁移应用数据，随后退役旧 Realm。
+
+Realm Profile 是一份签名的公开文档，公布实例选定的 Service、Front 和辅助包，以及服务该 Realm 的
+Issuer 和 AFP。Realm 签名 key 持有方为该 Realm 域名签署 Profile。Profile 可以由域名自己托管、由
+AFP 托管，或内嵌在 Realm 邀请中。取得它的位置不影响其有效性。
 
 本文不定义 Actr Facility Provider 提供的 signaling、identity 或 ICE 协议，不定义 Actor credential
 格式，也不定义应用实例内部的应用权限。Realm membership（成员、Realm 邀请与 Realm 客户端 key）见
@@ -54,7 +58,7 @@ Realm**。只有这种情况下，Actr Host 显示该 Actr Facility Provider 为
 不带 padding。
 
 Actr Host **MUST NOT** 通过 DNS 解析 `.actr.alt` 名称，也不得把它发给任何 Actr Facility
-Provider。本机 Realm 没有 Realm Profile、没有 Actr Facility Provider，也不使用 Realm 管理请求；
+Provider。本机 Realm 没有 Realm Profile，不绑定 AFP，也不使用 Realm 管理请求。
 Actr Host 为每个本机 Realm 保存本地记录，其中包含选定 Service 和 Front 的精确类型、来源（下载地址或本地文件）及整包摘要。本机 Realm 名只在该安装上可用。本文其余部分只
 适用于 DNS Realm 域名。
 
@@ -103,7 +107,7 @@ Realm Profile 是 UTF-8 JSON object，member 名使用 snake_case。
 | `packages[ref].dependencies` | 可选映射：该包 manifest 中的依赖 alias → `packages` 中选定的目标包引用。见 §4.3。 |
 | `issuer.url` | Issuer 的注册与验证端点。 |
 | `issuer.keys` | 用于验证 Actor credential 的 Realm issuer 公钥，1 至 3 项（第 6.1 节）。 |
-| `provider.id` | Actr Facility Provider ID：Actr Facility Provider 的规范化 DNS authority，在 Realm 生命周期内不变。 |
+| `provider.id` | 该 Realm 所绑定的 AFP 的规范化 DNS authority（Actr Facility Provider ID），在 Realm 生命周期内固定。 |
 | `provider.signaling` | signaling 端点。共享同一 `control_plane_id` 的条目是同一 Actr Facility Provider control plane 的副本或故障切换入口，不是 federation。 |
 | `provider.ice` | STUN 与 TURN 端点。TURN 条目标明短期 TURN credential 的 `credential_audience`。 |
 | `policy` | `membership` 为 `invite-only`（默认）或 `open`。可选正整数 `open_joins_per_minute` 和 `max_members` 分别限制免邀请加入频率和成员总数。 |
@@ -262,8 +266,8 @@ key 持有方签署后以 `publish_profile` 提交。持有方发布之前，Act
 
 ### 7.1 创建
 
-Actr Facility Provider 由 Actr Host、用户或 key 持有方的策略选定。每一步都须经 Realm 签名 key
-持有方授权（第 7.3 节）。
+Actr Host、用户或 Realm 签名 key 持有方的策略选定负责分配和服务该 Realm 的 AFP。分配流程的每一步
+都须经 Realm 签名 key 持有方授权（第 7.3 节）。
 
 1. 向选定的 Actr Facility Provider 发送 `create_realm` 请求（第 8 节）。Actr Facility Provider 创建
    pending Realm，准备其 Realm issuer key 与端点，并返回未签名的首个 Realm Profile。
@@ -340,7 +344,7 @@ Authority Discovery 第 4.3 节）接受以下 Realm 管理请求：
 
 | `op` | 用途 |
 | --- | --- |
-| `create_realm` | 请求包含两个引用和完整包表。可选的 `policy` 默认为邀请制。AFP 在 pending Realm 中保存选定的包和策略，写入首份草稿。 |
+| `create_realm` | 请求包含两个引用和完整包表。可选的 `policy` 默认为邀请制。接收请求的 AFP 分配 pending Realm，保存选定的包和策略并写入首份草稿。 |
 | `publish_profile` | 在 `profile` 中提交已签名的 Realm Profile：首次提交激活 pending Realm，响应一次性携带 owner 邀请（`owner_invite`）；之后提交 sequence 更高的版本即更新（含退役）。 |
 | `reissue_owner_invite` | 签发新的 owner 邀请（响应 `owner_invite`），并使该 Realm 此前未用的 owner 邀请失效；用于 owner 丢失全部客户端时的恢复（Actr Realm Membership 第 5 节）。 |
 | `get_admission` | 由 Realm 域签名查询指定 Realm 的加入策略、活跃成员数、实际成员上限和每分钟免邀请加入上限。 |

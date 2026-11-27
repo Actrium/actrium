@@ -434,7 +434,7 @@ process shutdown and state removal require separate deployment actions.
 
 ## 12. Migrating a Service to another device
 
-Migrating the host within the same Realm and the same Program Release can keep the ActorId. A Realm is permanently bound to its Actr Facility Provider; changing operators means creating a new instance on the new Actr Facility Provider and migrating under the rules in this section. Migrating to a different Realm (including from a local Realm to a Realm under a domain) must produce a new ActorId.
+Migrating the host within the same Realm and the same Program Release can keep the ActorId. A networked Realm is served throughout its lifetime by the Actr Facility Provider identified by `provider.id` in its Realm Profile. To change operators, create a new Realm with the new Actr Facility Provider and migrate under the rules in this section. Migrating to a different Realm (including from a local Realm to a Realm under a domain) must produce a new ActorId.
 
 1. obtain a migration lease;
 2. stop accepting new requests on the old host;

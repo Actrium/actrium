@@ -127,7 +127,7 @@ sequenceDiagram
     U-->>A: Confirm creation
     A->>M: Create(idempotency_key, verified_release, workspace, domain, realm_id, display_name)
     M->>M: Obtain authorization from the Realm signing key holder
-    M->>M: Actr Facility Provider creates a pending Realm
+    M->>M: The selected Actr Facility Provider allocates a pending Realm
     M->>M: Sign and activate the Realm Profile that pins the verified Service package
     M->>M: Redeem the owner invite and become the Realm's owner (obtain Realm membership)
     M->>S: Persist identity within the new Realm and start the Service

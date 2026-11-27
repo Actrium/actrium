@@ -35,10 +35,11 @@ Conclusions:
 - A Realm is named by "RealmId + Realm domain"; one domain can hold many Realms;
 - A Realm is usually tightly bound to signaling, but the binding is "trust and configuration delegation," not "one Realm equals one signaling server";
 - One Realm can delegate to multiple signaling clusters;
-- One Actr Facility Provider (AFP) provides shared signaling, STUN/TURN and Issuer services for many Realms.
-- A Realm is bound to one Actr Facility Provider at creation and can never switch; the machines and endpoints inside that Actr Facility Provider can be replaced without changing the Realm identity or ActorIds.
+- **Actr Facility Provider (AFP)** is a general term for the providers and operators that fulfill platform responsibilities in the Actr ecosystem. Those responsibilities include providing infrastructure and allocating Realms for application instances.
+- An AFP that serves networked Realms handles their allocation and can provide shared signaling, STUN/TURN, and Issuer services to multiple Realms.
+- Each networked Realm binds to one AFP at creation. The `provider.id` in its Realm Profile stays fixed for the lifetime of the Realm. The AFP can replace machines and endpoints while the Realm identity and ActorIds stay the same.
 
-In v1, multiple signaling endpoints must belong to the same logical control plane, using shared/replicated presence, or having every Actor use the same active primary under a deterministic rule. They are replicas and failover entry points, not independent Actr Facility Providers freely federating with each other; federation across Actr Facility Providers is a later protocol.
+In v1, multiple signaling endpoints must belong to the same logical control plane, using shared or replicated presence or having every Actor use the same active primary under a deterministic rule. These endpoints are replicas and failover entry points within the same AFP. Federation between AFPs that serve Realms is a later protocol.
 
 ## 2. Definition of a Realm
 
@@ -78,15 +79,15 @@ Local      = k7m2q9xh@<installation-id>.actr.alt
 
 ### 2.3 Realm, Publisher and Actr Facility Provider
 
-| | Publisher | Realm | Actr Facility Provider |
+| | Publisher | Realm | AFP serving the Realm |
 |---|---|---|---|
-| What it is | Publisher of a program | Trust domain of one application instance | Shared infrastructure |
-| Identifier | Normalized DNS domain | Realm name `<realm_id>@<domain>` | Actr Facility Provider ID (the Actr Facility Provider's domain) |
+| What it is | Publisher of a program | Trust domain of one application instance | Operator that allocates and manages the Realm and provides its facilities |
+| Identifier | Normalized DNS domain | Realm name `<realm_id>@<domain>` | `provider.id` in the Realm Profile, the canonical DNS authority of the AFP bound to the Realm |
 | Long-term trust root | Publisher key | Realm signing key | None; it is the trust root when it holds a Realm signing key (Realms under its own domain, or delegated custody) |
 
-Each Realm is bound to one Actr Facility Provider when it is created and can never switch. To change operators, create a new instance on the new Actr Facility Provider, migrate data at the application level, and retire the old instance.
+The Realm signing key holder authorizes creation of a networked Realm, and the selected AFP allocates it. To change operators, create a new Realm with the new AFP, migrate the application data, and retire the old Realm. See [Actr Realm Profile](../../../actr/protocols/realm-profile.md).
 
-A Publisher domain names the program (who published it); a Realm domain names the deployment (who operates it). The same package can run on `notes@acme.com` and also on `notes@foo.org`. One Actr Facility Provider (such as a Loran deployment) hosts a large number of Realms from many domains.
+A Publisher domain names the program (who published it), and a Realm domain names the deployment (who operates it). The same package can run on `notes@acme.com` and on `notes@foo.org`. Loran is example software that provides part of the Actr platform infrastructure. One deployment can serve Realms across multiple domains. See [Loran](../../../loran/README.md).
 
 A Realm is not:
 
@@ -226,7 +227,7 @@ These boundaries depend on:
 - Type discovery and candidate ranking;
 - WebRTC offer/answer/ICE exchange;
 - Initial connection ACL screening;
-- Actr Facility Provider failover;
+- Signaling endpoint failover within the same AFP.
 - Network status events.
 
 It is not responsible for storing Service business state.
@@ -496,7 +497,7 @@ Rules:
 - Where the Realm Profile is stored does not affect its validity;
 - Non-default ports are allowed;
 - Switching endpoints never changes the Realm or the ActorId;
-- Failover cannot jump to an undeclared Actr Facility Provider;
+- Failover uses only endpoints authorized by the Realm Profile for the same AFP.
 - The Actr Facility Provider's certificate and the ticket audience must match.
 
 ## 11. Port policy

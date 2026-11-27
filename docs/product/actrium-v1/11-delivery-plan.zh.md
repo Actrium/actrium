@@ -29,7 +29,7 @@
 
 ### Realm 包选择
 
-先实现 Schema 和 SDK，再实现 AFP 和 CLI 管理接口，最后支持 Host 部署和客户端。
+先实现 Schema 和 SDK，再实现 AFP 的 Realm 管理接口和对应的 CLI 命令，最后支持 Host 部署和客户端。
 分别验收 Profile 校验、Service 加载和业务就绪。
 
 ## 2. 关键依赖图
@@ -101,7 +101,7 @@ flowchart LR
 8. Realm 签名 key、由其签名的 Realm Profile 和 Realm issuer key discovery；
 9. Actor credential 绑定 public key，并以 transcript/SDP challenge 证明私钥持有；
 10. signaling 一次性 ticket/header；
-11. Actr Facility Provider 委派与 failover；一个 Actr Facility Provider 承载多个 Realm，Realm 创建经 Realm 签名 key 签名授权；
+11. Realm 委派与端点故障切换。为联网 Realm 提供服务的 AFP 可以分配和承载多个 Realm，分配须经 Realm 签名 key 持有方授权。
 12. per-Realm/TURN-pool key id 与轮换；
 13. Publisher DNS 长度和规范化；
 14. Actor store namespace 接受 instance identity；
@@ -262,7 +262,7 @@ flowchart LR
 
 - 域名信任与按实例创建联网 Realm；
 - 经 Realm 邀请加入实例 Realm 并取得 Realm membership；
-- signaling Actr Facility Provider failover；
+- 同一 AFP 内的信令端点故障切换。
 - P2P/TURN；
 - 从 Realm 链接解析 Realm 名并取得 Realm Profile；
 - Actor/peer handshake；
@@ -277,7 +277,7 @@ flowchart LR
 - 无权限不能因知道 ActorId 而连接；
 - signaling 不能冒充 Actor；
 - TURN 使用短期 credential；
-- Actr Facility Provider failover 不换 ActorId。
+- 同一 AFP 内切换信令端点时保留 ActorId。
 
 ## 10. P4：Hardening 与 Public Beta
 
@@ -388,7 +388,7 @@ flowchart LR
 - 信令是否「无实权」：否；
 - Realm 与物理信令是否一一绑定：否；
 - Realm 是否对应应用实例：是，新建实例即新建 Realm；
-- 一个 Actr Facility Provider 是否承载多个 Realm：是。
+- 为联网 Realm 提供服务的 AFP 可以分配和承载多个 Realm。
 
 ## 14. 最小纵切
 
