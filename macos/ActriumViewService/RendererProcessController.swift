@@ -310,7 +310,7 @@ final class RendererProcessController {
 
     private let arguments: Arguments
     private let connection: IPCHelperConnection
-    private var serviceCalls: [UUID: (RealmServiceReply) -> Void] = [:]
+    private lazy var realmService = RealmServiceClient(connection: connection)
     private lazy var localStorage = GuestLocalStorageClient(connection: connection)
 
     static func callLocalStorage(
@@ -418,23 +418,7 @@ final class RendererProcessController {
             reply(RealmServiceReply(id: call.id, failure: failure))
             return
         }
-        do {
-            let data = try JSONEncoder().encode(call)
-            try controller.connection.sendHostEvent(
-                name: RealmServiceCall.requestEvent,
-                userInfoJSON: String(decoding: data, as: UTF8.self),
-                tabId: tabId
-            )
-            controller.serviceCalls[call.id] = reply
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(call.timeoutMs)) { [weak controller] in
-                let failure = RealmServiceFailure(
-                    code: "realm_service_timeout", message: "The Service call timed out."
-                )
-                controller?.serviceCalls.removeValue(forKey: call.id)?(RealmServiceReply(id: call.id, failure: failure))
-            }
-        } catch {
-            reply(RealmServiceReply(id: call.id, failure: RealmServiceFailure(error: error)))
-        }
+        controller.realmService.send(call, tabId: tabId, reply: reply)
     }
     static func subscribeRealmServiceEvents(
         tabId: String,
@@ -737,10 +721,7 @@ final class RendererProcessController {
                 return
             }
             if name == RealmServiceCall.responseEvent {
-                guard let response = try? JSONDecoder().decode(RealmServiceReply.self, from: Data(json.utf8)) else {
-                    return
-                }
-                self.serviceCalls.removeValue(forKey: response.id)?(response)
+                realmService.receive(json: json, tabId: tabId)
                 return
             }
             if name == RealmServiceEventSubscription.responseEvent,
@@ -1096,6 +1077,7 @@ final class RendererProcessController {
     private func destroyTab(_ tabId: String) {
         cancelFileImport(tabId)
         fileExport.close(tabId: tabId)
+        realmService.close(tabId: tabId)
         cancelGuestMenu(tabId)
         attachmentCache?.close(tabId: tabId)
         failPendingAttachmentCalls(tabId: tabId)

@@ -10,7 +10,7 @@ use crate::types::{
     PayloadType, ReconnectReason,
 };
 use crate::workload::{DynamicWorkload, RuntimeObservers, WebRtcPeerStateBridge};
-use actr_framework::{Bytes, Context as _, Dest};
+use actr_framework::{Bytes, Context as _, Dest, MaybeSendBoxFuture};
 use actr_hyper::{ActrRef, NetworkEventHandle, Node, Registered, WorkloadPackage};
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -871,26 +871,47 @@ impl ActrRefWrapper {
         stream_id: String,
         callback: Box<dyn crate::context::DataChunkCallback>,
     ) -> ActrResult<()> {
-        let callback: Arc<dyn crate::context::DataChunkCallback> = Arc::from(callback);
         self.inner
             .app_context()
             .await
-            .register_stream(stream_id, move |chunk, sender| {
-                let callback = callback.clone();
-                Box::pin(async move {
-                    callback
-                        .on_stream(chunk.into(), sender.into())
-                        .await
-                        .map_err(actr_protocol::ActrError::from)
-                })
-            })
+            .register_stream(stream_id, bridge_data_chunk_callback(callback))
             .await?;
         Ok(())
     }
 
     /// Unregister a DataChunk callback for a stream ID.
     pub async fn unregister_stream(&self, stream_id: String) -> ActrResult<()> {
+        if let Some(router) = &self.front_event_router {
+            router.unregister_stream(&stream_id);
+        }
         self.inner.unregister_stream(&stream_id).await?;
+        Ok(())
+    }
+
+    /// Register a Front DataStream for the selected Service peer.
+    pub async fn register_service_stream(
+        &self,
+        stream_id: String,
+        service: ActrId,
+        callback: Box<dyn crate::context::DataChunkCallback>,
+    ) -> ActrResult<()> {
+        let router =
+            self.front_event_router
+                .as_ref()
+                .ok_or_else(|| ActrError::InvalidArgument {
+                    msg: "This actor was not created as a Front".into(),
+                })?;
+        let context = self.inner.app_context().await;
+        let service: actr_protocol::ActrId = service.into();
+        router.register_stream(stream_id.clone(), service.clone())?;
+        if let Err(error) = context.register_peer_stream(
+            stream_id.clone(),
+            service,
+            bridge_data_chunk_callback(callback),
+        ) {
+            router.unregister_stream(&stream_id);
+            return Err(error.into());
+        }
         Ok(())
     }
 
@@ -962,6 +983,26 @@ async fn load_linked_init(
     crate::logger::init_observability(init.runtime_config().observability.clone());
     info!(config_path = %config_path, "Creating linked runtime wrapper");
     Ok(init)
+}
+
+fn bridge_data_chunk_callback(
+    callback: Box<dyn crate::context::DataChunkCallback>,
+) -> impl Fn(
+    actr_protocol::DataChunk,
+    actr_protocol::ActrId,
+) -> MaybeSendBoxFuture<'static, actr_protocol::ActorResult<()>>
++ Send
++ Sync {
+    let callback: Arc<dyn crate::context::DataChunkCallback> = Arc::from(callback);
+    move |chunk, sender| {
+        let callback = callback.clone();
+        Box::pin(async move {
+            callback
+                .on_stream(chunk.into(), sender.into())
+                .await
+                .map_err(actr_protocol::ActrError::from)
+        })
+    }
 }
 
 async fn new_from_front_inner(

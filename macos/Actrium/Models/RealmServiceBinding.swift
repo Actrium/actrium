@@ -81,6 +81,21 @@ private final class RealmServiceAttachmentResultCallback: ActrBindings.DataChunk
     }
 }
 
+private final class RealmServiceReplyStreamCallback: ActrBindings.DataChunkCallback {
+    private let target: ActrBindings.ActrId
+    private let deliver: @Sendable (ActrBindings.DataChunk) async -> Void
+
+    init(target: ActrBindings.ActrId, deliver: @escaping @Sendable (ActrBindings.DataChunk) async -> Void) {
+        self.target = target
+        self.deliver = deliver
+    }
+
+    func onStream(chunk: ActrBindings.DataChunk, sender: ActrBindings.ActrId) async throws {
+        guard sender == target else { return }
+        await deliver(chunk)
+    }
+}
+
 /// A lock-protected intake snapshot for the nonisolated Rust event callback.
 /// The MainActor registry remains authoritative; queued delivery rechecks each
 /// captured subscription ID so a replacement can never inherit an old event.
@@ -108,6 +123,7 @@ private final class RealmServiceEventRoutingSnapshot: @unchecked Sendable {
 final class RealmServiceBindings {
     static let shared = RealmServiceBindings()
     private var bindings: [UUID: any RealmServiceBindingHandle] = [:]
+    private var replyStreams: [UUID: (tabId: UUID, binding: RealmServiceBinding)] = [:]
     private var bindingTabs: [UUID: UUID] = [:]
     private var subscriptions: [UUID: (bindingId: UUID, events: Set<String>)] = [:]
     private let routingSnapshot = RealmServiceEventRoutingSnapshot()
@@ -169,6 +185,7 @@ final class RealmServiceBindings {
     }
 
     func remove(_ tabId: UUID) {
+        retireReplyStreams(for: tabId)
         guard let binding = bindings.removeValue(forKey: tabId) else { return }
         bindingTabs.removeValue(forKey: binding.id)
         bindingEventGenerations.removeValue(forKey: binding.id)
@@ -185,6 +202,13 @@ final class RealmServiceBindings {
     }
 
     func subscribe(_ request: RealmServiceEventSubscription, tabId: UUID) async throws {
+        if let streamId = request.streamId {
+            guard request.events.isEmpty else {
+                throw RealmServiceError(message: "A DataStream registration must contain only a stream ID.")
+            }
+            try await subscribeReplyStream(streamId, subscriptionId: request.id, tabId: tabId)
+            return
+        }
         guard let binding = bindings[tabId] else {
             throw RealmServiceError(message: "The tab has no Realm Service.")
         }
@@ -225,6 +249,11 @@ final class RealmServiceBindings {
     }
 
     func unsubscribe(_ subscriptionId: UUID, tabId: UUID) {
+        if let stream = replyStreams[subscriptionId], stream.tabId == tabId {
+            replyStreams.removeValue(forKey: subscriptionId)
+            Task { await stream.binding.unregisterReplyStream(subscriptionId) }
+            return
+        }
         if pendingSubscriptions[subscriptionId] == tabId {
             cancelledSubscriptions.insert(subscriptionId)
             return
@@ -251,6 +280,7 @@ final class RealmServiceBindings {
     /// crash recovery reuses the tab ID, so both established and still-pending
     /// registrations must stop receiving events immediately.
     func retireSubscriptions(for tabId: UUID) {
+        retireReplyStreams(for: tabId)
         guard let binding = bindings[tabId] else { return }
         let bindingId = binding.id
         let retired = subscriptions.filter { $0.value.bindingId == bindingId }
@@ -273,6 +303,35 @@ final class RealmServiceBindings {
             // A replacement renderer may already have subscribed again.
             guard !subscriptions.values.contains(where: { $0.bindingId == bindingId }) else { return }
             await binding.suspendEvents(ifGeneration: generation)
+        }
+    }
+
+    private func subscribeReplyStream(_ streamId: String, subscriptionId: UUID, tabId: UUID) async throws {
+        guard let binding = binding(for: tabId), replyStreams[subscriptionId] == nil else {
+            throw RealmServiceError(message: "The tab has no available Realm Service DataStream binding.")
+        }
+        replyStreams[subscriptionId] = (tabId, binding)
+        do {
+            try await binding.registerReplyStream(streamId, subscriptionId: subscriptionId) { [weak self] chunk in
+                await self?.publishReplyChunk(chunk, subscriptionId: subscriptionId)
+            }
+            guard replyStreams[subscriptionId]?.binding === binding else { throw CancellationError() }
+        } catch {
+            replyStreams.removeValue(forKey: subscriptionId)
+            throw error
+        }
+    }
+
+    private func publishReplyChunk(_ chunk: ActrBindings.DataChunk, subscriptionId: UUID) {
+        guard let stream = replyStreams[subscriptionId] else { return }
+        eventHandler?(stream.tabId, RealmServiceEvent(
+            subscriptionId: subscriptionId, event: chunk.streamId, payload: chunk.payload, sequence: chunk.sequence
+        ))
+    }
+
+    private func retireReplyStreams(for tabId: UUID) {
+        for id in replyStreams.filter({ $0.value.tabId == tabId }).keys {
+            unsubscribe(id, tabId: tabId)
         }
     }
 
@@ -551,6 +610,19 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                 target: target, routeKey: route, requestPayload: payload, timeoutMs: Int64(timeoutMs)
             )
         }
+
+        func sendDataChunk(
+            _ chunk: ActrBindings.DataChunk, route: String, capability: String, timeoutMs: UInt64
+        ) async throws {
+            if let session {
+                try await session.sendDataChunk(
+                    route: route, capability: capability, chunk: chunk,
+                    payloadType: .streamReliable, timeoutMs: timeoutMs
+                )
+            } else {
+                try await reference.sendDataChunk(target: target, chunk: chunk, payloadType: .streamReliable)
+            }
+        }
     }
 
     private struct Capabilities: Decodable {
@@ -575,6 +647,14 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
     let routes: Set<String>
     private let routeCapabilities: [String: String]
     private let events: Set<String>
+    private let replyStreamsAllowed: Bool
+    private let streamSendAllowed: Bool
+    private struct ReplyStream {
+        let streamId: String
+        var reference: ActrRefWrapper?
+        var cancelled = false
+    }
+    private var replyStreams: [UUID: ReplyStream] = [:]
     private let eventRelay: RealmServiceEventRelay
     private let eventPeers = RealmServiceEventPeerController()
     /// `true` only when the manifest grants `service.attachmentUpload` AND the
@@ -604,6 +684,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         let connection = try Connection(profile: profile, verifiedProfileBody: verifiedProfileBody)
         let capabilities = try JSONDecoder().decode(Capabilities.self, from: Data(capabilitiesJSON.utf8))
         let services = ["service", "host:service"].compactMap { capabilities.hostModules[$0] }
+        let stream = capabilities.hostModules["service-stream"] ?? capabilities.hostModules["host:service-stream"]
         // Verified session metadata owns Attach routes and capabilities. The
         // signed capability manifest additionally declares Service events.
         let declaredRoutes = Set(metadata.routes.map(\.route))
@@ -620,6 +701,10 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             trustedFrontKey: trustedFrontKey,
             routes: RealmServiceAttachmentUploadPolicy.businessRoutes(declaredRoutes),
             events: Set(services.flatMap { $0.events ?? [] }),
+            replyStreamsAllowed: permissions.contains("host:service-stream.register")
+                && stream?.rpc?.contains("register") == true,
+            streamSendAllowed: permissions.contains("host:service-stream.send")
+                && stream?.rpc?.contains("send") == true,
             attachmentUploadAllowed: RealmServiceAttachmentUploadPolicy.isPermitted(
                 permissions: permissions, declaredRoutes: declaredRoutes
             )
@@ -635,6 +720,8 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         trustedFrontKey: Data,
         routes: Set<String>,
         events: Set<String>,
+        replyStreamsAllowed: Bool,
+        streamSendAllowed: Bool,
         attachmentUploadAllowed: Bool
     ) throws {
         self.connection = connection
@@ -651,6 +738,8 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             capabilities[route.route] = route.capabilities.first
         }
         self.events = events
+        self.replyStreamsAllowed = replyStreamsAllowed
+        self.streamSendAllowed = streamSendAllowed
         self.attachmentUploadAllowed = attachmentUploadAllowed
 
         let encoder = JSONEncoder()
@@ -688,6 +777,7 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
         return try RealmServiceBinding(
             connection: connection, front: front, metadata: metadata, frontType: frontType,
             serviceType: serviceType, trustedFrontKey: trustedFrontKey, routes: routes, events: events,
+            replyStreamsAllowed: replyStreamsAllowed, streamSendAllowed: streamSendAllowed,
             attachmentUploadAllowed: attachmentUploadAllowed
         )
     }
@@ -702,8 +792,15 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
 
     func call(_ request: RealmServiceCall) async throws -> Data {
         guard !stopped, routes.contains(request.route),
-              (1...300_000).contains(request.timeoutMs), request.payload.count <= 1_048_576 else {
+              (1...300_000).contains(request.timeoutMs) else {
             throw RealmServiceError(message: "The Service call is outside this tab's declared capabilities.")
+        }
+        if let chunk = request.streamChunk {
+            try await sendStreamChunk(chunk, request: request)
+            return Data()
+        }
+        guard request.payload.count <= 1_048_576 else {
+            throw RealmServiceError(message: "The Service call payload exceeds the limit.")
         }
         let eventGeneration = await eventPeers.activeGeneration()
         let connection = try await readyConnection(
@@ -715,6 +812,24 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
             route: request.route,
             capability: routeCapabilities[request.route] ?? "service",
             payload: request.payload,
+            timeoutMs: UInt64(request.timeoutMs)
+        )
+    }
+
+    private func sendStreamChunk(_ chunk: RealmServiceCall.StreamChunk, request: RealmServiceCall) async throws {
+        guard streamSendAllowed, chunk.sequence > 0, !request.payload.isEmpty,
+              request.payload.count <= RealmServiceCall.maxStreamChunkBytes,
+              chunk.id.range(of: #"\A[A-Za-z0-9_-]{1,128}\z"#, options: .regularExpression) != nil else {
+            throw RealmServiceError(message: "The Service DataStream send is outside this tab's declared capabilities.")
+        }
+        let connection = try await readyConnection()
+        guard !stopped else { throw CancellationError() }
+        let dataChunk = ActrBindings.DataChunk(
+            streamId: chunk.id, sequence: chunk.sequence, payload: request.payload, metadata: [],
+            timestampMs: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+        try await connection.sendDataChunk(
+            dataChunk, route: request.route, capability: routeCapabilities[request.route] ?? "service",
             timeoutMs: UInt64(request.timeoutMs)
         )
     }
@@ -785,6 +900,47 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
 
     private func clearEventPeer() async {
         await eventPeers.clear()
+    }
+
+    func registerReplyStream(
+        _ streamId: String,
+        subscriptionId: UUID,
+        deliver: @escaping @Sendable (ActrBindings.DataChunk) async -> Void
+    ) async throws {
+        guard replyStreamsAllowed, !stopped,
+              streamId.range(of: #"\A[A-Za-z0-9_-]{1,128}\z"#, options: .regularExpression) != nil,
+              !replyStreams.values.contains(where: { $0.streamId == streamId }) else {
+            throw RealmServiceError(message: "The Service DataStream cannot be registered.")
+        }
+        replyStreams[subscriptionId] = ReplyStream(streamId: streamId)
+        do {
+            let connection = try await readyConnection(resolveTargetForCall: true)
+            guard replyStreams[subscriptionId]?.cancelled == false else { throw CancellationError() }
+            let callback = RealmServiceReplyStreamCallback(target: connection.target, deliver: deliver)
+            try await connection.reference.registerServiceStream(
+                streamId: streamId, service: connection.target, callback: callback
+            )
+            replyStreams[subscriptionId]?.reference = connection.reference
+            if stopped || replyStreams[subscriptionId]?.cancelled == true {
+                try await connection.reference.unregisterStream(streamId: streamId)
+                throw CancellationError()
+            }
+        } catch {
+            replyStreams.removeValue(forKey: subscriptionId)
+            throw error
+        }
+    }
+
+    func unregisterReplyStream(_ subscriptionId: UUID) async {
+        guard let stream = replyStreams[subscriptionId], !stream.cancelled else { return }
+        replyStreams[subscriptionId]?.cancelled = true
+        guard let reference = stream.reference else { return }
+        defer { replyStreams.removeValue(forKey: subscriptionId) }
+        do {
+            try await reference.unregisterStream(streamId: stream.streamId)
+        } catch {
+            NSLog("Could not unregister Service DataStream: %@", error.localizedDescription)
+        }
     }
 
     /// Availability as seen by this binding: the manifest must opt in and the
@@ -938,20 +1094,11 @@ actor RealmServiceBinding: RealmServiceBindingHandle {
                 timestampMs: Int64(Date().timeIntervalSince1970 * 1000)
             )
             do {
-                if let session = connection.session {
-                    try await session.sendDataChunk(
-                        route: RealmServiceAttachmentUploadPolicy.transportRoute,
-                        capability: routeCapabilities[RealmServiceAttachmentUploadPolicy.transportRoute]
-                            ?? "service",
-                        chunk: chunk,
-                        payloadType: .streamReliable,
-                        timeoutMs: UInt64(RealmServiceAttachmentIPC.chunkTimeoutMs)
-                    )
-                } else {
-                    try await connection.reference.sendDataChunk(
-                        target: connection.target, chunk: chunk, payloadType: .streamReliable
-                    )
-                }
+                let route = RealmServiceAttachmentUploadPolicy.transportRoute
+                try await connection.sendDataChunk(
+                    chunk, route: route, capability: routeCapabilities[route] ?? "service",
+                    timeoutMs: UInt64(RealmServiceAttachmentIPC.chunkTimeoutMs)
+                )
             } catch {
                 // The sequence window already moved; the session cannot
                 // recover from a failed send. Scope the cleanup to this

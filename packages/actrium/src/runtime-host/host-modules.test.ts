@@ -7,6 +7,7 @@ import type { FrontCapability } from './capabilities';
 import type { AttachmentUploadManager } from './attachment-upload';
 import { createHostModules, type HostModules } from './host-modules';
 import { createTestServiceEventSource } from './service-events.test-utils';
+import { NativeServiceStreams } from './service-streams';
 
 const input = { route: 'echo.EchoService.Echo', payloadBase64: 'AAEC' };
 
@@ -14,6 +15,7 @@ function createTestHostModules(options?: {
   hasServiceCapability?: boolean;
   hasServiceOnCapability?: boolean;
   serviceEventSource?: ReturnType<typeof createTestServiceEventSource>['source'];
+  serviceStreams?: NativeServiceStreams;
   authorizeCapability?: (capability: FrontCapability) => Promise<void>;
   onCapabilityRevoked?: (capability: FrontCapability, listener: () => void) => () => void;
   trackServiceEventSubscription?: (cleanup: () => void) => () => void;
@@ -28,6 +30,7 @@ function createTestHostModules(options?: {
     hasServiceOnCapability: options?.hasServiceOnCapability ?? true,
     callActor: async () => ({ success: true, payloadBase64: 'AAEC' }),
     serviceEventSource: options?.serviceEventSource,
+    serviceStreams: options?.serviceStreams,
     authorizeCapability: options?.authorizeCapability ?? (async () => {}),
     onCapabilityRevoked: options?.onCapabilityRevoked,
     trackServiceEventSubscription: options?.trackServiceEventSubscription,
@@ -38,6 +41,87 @@ function createTestHostModules(options?: {
     recognizeSpeech: options?.recognizeSpeech,
   });
 }
+
+test('revoking a pending Service stream releases the late native subscription', async () => {
+  let complete!: (id: string) => void;
+  let revoke!: () => void;
+  const released: string[] = [];
+  const stopWatching = { calls: 0 };
+  const bridge = new NativeServiceStreams('tab', {
+    subscribeServiceStream: () => new Promise((resolve) => { complete = resolve; }),
+    unsubscribeServiceEvents: (_tab, id) => { released.push(id); },
+  }, () => () => {});
+  const modules = createTestHostModules({
+    serviceStreams: bridge,
+    onCapabilityRevoked: (capability, listener) => {
+      expect(capability).toBe('host:service-stream.register');
+      revoke = listener;
+      return () => { stopWatching.calls += 1; };
+    },
+  });
+  const registration = modules['host:service-stream'].register({ streamId: 'reply' });
+  await Promise.resolve();
+  expect(revoke).toBeFunction();
+  revoke();
+  complete('late');
+  await expect(registration).rejects.toThrow('cancelled');
+  expect(released).toEqual(['late']);
+  expect(stopWatching.calls).toBe(1);
+});
+
+test('Service stream revocation stops delivery and removes the watcher on unregister', async () => {
+  let listener: ((event: unknown) => void) | undefined;
+  const watchers = new Set<() => void>();
+  const released: string[] = [];
+  const received: string[] = [];
+  let attempt = 0;
+  const bridge = new NativeServiceStreams('tab', {
+    subscribeServiceStream: async () => String(++attempt),
+    unsubscribeServiceEvents: (_tab, id) => { released.push(id); },
+  }, (callback) => {
+    listener = callback;
+    return () => { listener = undefined; };
+  });
+  const modules = createTestHostModules({
+    serviceStreams: bridge,
+    onCapabilityRevoked: (_capability, revoke) => {
+      watchers.add(revoke);
+      return () => { watchers.delete(revoke); };
+    },
+  });
+  const stream = modules['host:service-stream'];
+  const input = { streamId: 'reply' };
+  const stop = stream.onChunk(({ sequence }) => received.push(sequence));
+  const event = { ...input, tabId: 'tab', subscriptionId: '1', sequence: '1', payloadBase64: '' };
+  await stream.register(input);
+  listener?.(event);
+  expect(watchers.size).toBe(1);
+  for (const revoke of watchers) revoke();
+  listener?.({ ...event, sequence: '2' });
+  await stream.register(input);
+  await stream.unregister(input);
+  expect(received).toEqual(['1']);
+  expect(released).toEqual(['1', '2']);
+  expect(watchers.size).toBe(0);
+  stop?.();
+});
+
+test('synchronous Service stream revocation prevents native startup', async () => {
+  let attempts = 0;
+  const bridge = new NativeServiceStreams('tab', {
+    subscribeServiceStream: async () => String(++attempts),
+    unsubscribeServiceEvents: () => {},
+  }, () => () => {});
+  const modules = createTestHostModules({
+    serviceStreams: bridge,
+    onCapabilityRevoked: (_capability, revoke) => {
+      revoke();
+      return () => {};
+    },
+  });
+  await expect(modules['host:service-stream'].register({ streamId: 'reply' })).rejects.toThrow('cancelled');
+  expect(attempts).toBe(0);
+});
 
 test('file export authorizes the save and preserves cancellation', async () => {
   const calls: unknown[] = [];

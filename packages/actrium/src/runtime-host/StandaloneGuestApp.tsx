@@ -3,6 +3,7 @@ import {
   ActivityIndicator as NativeActivityIndicator,
   DeviceEventEmitter,
   Image as NativeImage,
+  NativeEventEmitter,
   NativeModules,
   Pressable as NativePressable,
   Text as NativeText,
@@ -45,6 +46,7 @@ import { DocumentSelectionSurface } from './DocumentSelectionSurface';
 import { CachedImagePreview } from './CachedImagePreview';
 import { verifyRuntimeCapabilityManifestJSON } from './runtime-capability-verify';
 import { callHttpService, callNativeService } from './service-call';
+import { NativeServiceStreams } from './service-streams';
 import {
   createHttpServiceEventSource,
   createNativeServiceEventSource,
@@ -407,6 +409,13 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     // native uploader; when the manifest links uploadAttachment there, the
     // app fails closed instead of silently uploading.
     const nativeUploadSupported = !tab.serviceCallUrl && !legacyEchoTab;
+    const streamBridge = nativeUploadSupported ? NativeModules.RealmService : undefined;
+    const serviceStreams = streamBridge?.subscribeServiceStream && streamBridge?.unsubscribeServiceEvents
+      ? new NativeServiceStreams(tab.id, streamBridge, (handler) => {
+          const listener = new NativeEventEmitter(streamBridge).addListener('realmServiceEvent', handler);
+          return () => listener.remove();
+        })
+      : undefined;
     const attachmentBridge = nativeUploadSupported
       ? (NativeModules.RealmService as RealmServiceAttachmentBridge | undefined)
       : undefined;
@@ -449,6 +458,11 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       hasServiceOnCapability,
       callActor: callServiceActor,
       serviceEventSource,
+      serviceStreams,
+      sendServiceStreamChunk: streamBridge?.sendServiceStreamChunk ? async (chunk) => {
+        if (disposed) throw new Error('The Service DataStream sender has ended.');
+        await streamBridge.sendServiceStreamChunk(tab.id, chunk.route, chunk.streamId, chunk.sequence, chunk.payloadBase64);
+      } : undefined,
       authorizeCapability: (capability) => authorizer.authorize(capability),
       onCapabilityRevoked: (capability, listener) =>
         authorizer.onRevoked(capability, listener),
@@ -615,6 +629,7 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       for (const cleanup of [...eventSubscriptions]) cleanup();
       eventSubscriptions.clear();
       attachmentUploader.dispose();
+      serviceStreams?.dispose();
       stopEngine?.();
     };
   }, [

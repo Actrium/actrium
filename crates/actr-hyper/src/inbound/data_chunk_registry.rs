@@ -193,6 +193,7 @@ impl WorkerDone {
 struct StreamEntry {
     callback: Option<DataChunkCallback>,
     owner: Option<ActrId>,
+    reply_cancellation: Option<CancellationToken>,
     worker: Option<StreamWorker>,
 }
 
@@ -406,12 +407,44 @@ impl DataChunkRegistry {
         } else {
             None
         };
+        self.register_callback(stream_id, callback, owner, None)
+    }
+
+    pub(crate) fn register_peer_stream(
+        &self,
+        stream_id: String,
+        peer: ActrId,
+        callback: DataChunkCallback,
+    ) -> ActorResult<()> {
+        let cancellation = CancellationToken::new();
+        let registered = cancellation.clone();
+        let callback: DataChunkCallback = Arc::new(move |chunk, sender| {
+            if registered.is_cancelled() {
+                return Box::pin(async { Ok(()) });
+            }
+            callback(chunk, sender)
+        });
+        self.register_callback(stream_id, callback, Some(peer), Some(cancellation))
+    }
+
+    fn register_callback(
+        &self,
+        stream_id: String,
+        callback: DataChunkCallback,
+        owner: Option<ActrId>,
+        reply_cancellation: Option<CancellationToken>,
+    ) -> ActorResult<()> {
         let mut state = self
             .inner
             .state
             .lock()
             .expect("data stream registry state poisoned");
         if state.shutting_down || self.inner.shutdown.is_cancelled() {
+            if reply_cancellation.is_some() {
+                return Err(ActrError::Unavailable(
+                    "The stream registry is closed".into(),
+                ));
+            }
             tracing::debug!(
                 stream_id = %stream_id,
                 "data stream registry is shut down; ignoring register"
@@ -420,6 +453,13 @@ impl DataChunkRegistry {
         }
 
         let entry = state.streams.entry(stream_id.clone()).or_default();
+        if entry.callback.is_some()
+            && (entry.reply_cancellation.is_some() || reply_cancellation.is_some())
+        {
+            return Err(ActrError::InvalidArgument(
+                "The stream ID is already registered".into(),
+            ));
+        }
         if entry.owner.is_some() && entry.owner != owner {
             return Err(ActrError::PermissionDenied(
                 "The stream is registered to another Actor".into(),
@@ -427,6 +467,7 @@ impl DataChunkRegistry {
         }
         entry.owner = owner;
         entry.callback = Some(callback);
+        entry.reply_cancellation = reply_cancellation;
         tracing::info!("📡 Registered data stream handler: {}", stream_id);
         Ok(())
     }
@@ -461,6 +502,10 @@ impl DataChunkRegistry {
                 ));
             }
             entry.callback = None;
+            if let Some(cancellation) = entry.reply_cancellation.take() {
+                cancellation.cancel();
+                entry.owner = None;
+            }
             if let Some(worker) = entry.worker.as_mut() {
                 // Dropping the sender closes the worker queue after any
                 // dispatch clones complete. The handle stays tracked so a

@@ -121,6 +121,85 @@ final class RendererIPCWriterTests: XCTestCase {
         await fulfillment(of: [rejected], timeout: 1)
     }
 
+    func testRealmStreamTimesOutWhileReaderIsPausedAndNeverWritesExpiredRequest() async throws {
+        let (host, renderer) = try pausedConnection()
+        defer { renderer.disconnect(); host.stop() }
+        let client = RealmServiceClient(connection: renderer)
+        let call = streamCall(sequence: 1, timeoutMs: 50)
+        let timedOut = expectation(description: "The blocked stream request times out")
+        let responsive = expectation(description: "The main actor still processes work")
+        client.send(call, tabId: "one") { reply in
+            XCTAssertEqual(reply.id, call.id)
+            XCTAssertEqual(reply.failure?.code, "realm_service_timeout")
+            timedOut.fulfill()
+        }
+        DispatchQueue.main.async { responsive.fulfill() }
+        await fulfillment(of: [responsive, timedOut], timeout: 1)
+
+        let drained = expectation(description: "Host receives a frame queued after the expired request")
+        host.onHostEvent = { name, _, _ in
+            XCTAssertNotEqual(name, RealmServiceCall.requestEvent)
+            if name == "drained" { drained.fulfill() }
+        }
+        try renderer.sendHostEvent(name: "drained", userInfoJSON: "{}")
+        try host.start()
+        await fulfillment(of: [drained], timeout: 3)
+    }
+
+    func testRealmStreamSendsFullChunksInOrderWhenReaderResumes() async throws {
+        let (host, renderer) = try pausedConnection()
+        defer { renderer.disconnect(); host.stop() }
+        let client = RealmServiceClient(connection: renderer)
+        let first = streamCall(sequence: 1, timeoutMs: 15_000)
+        let second = streamCall(sequence: 2, timeoutMs: 15_000)
+        let delivered = expectation(description: "Both calls get a reply")
+        delivered.expectedFulfillmentCount = 2
+        for call in [first, second] {
+            client.send(call, tabId: "one") { reply in
+                XCTAssertEqual(reply.id, call.id)
+                XCTAssertEqual(reply.payload, Data())
+                delivered.fulfill()
+            }
+        }
+        let overflow = streamCall(sequence: 3, timeoutMs: 15_000)
+        let rejected = expectation(description: "The full queue rejects the next chunk")
+        client.send(overflow, tabId: "one") { reply in
+            XCTAssertEqual(reply.id, overflow.id)
+            XCTAssertEqual(reply.failure?.code, "realm_service_busy")
+            rejected.fulfill()
+        }
+        await fulfillment(of: [rejected], timeout: 1)
+        var sequences: [UInt64] = []
+        renderer.onHostEvent = { _, json, tabId in client.receive(json: json, tabId: tabId) }
+        host.onHostEvent = { name, json, tabId in
+            guard name == RealmServiceCall.requestEvent else { return }
+            do {
+                let call = try JSONDecoder().decode(RealmServiceCall.self, from: Data(json.utf8))
+                sequences.append(try XCTUnwrap(call.streamChunk).sequence)
+                XCTAssertEqual(call.payload, first.payload)
+                let reply = RealmServiceReply(id: call.id, payload: Data())
+                let data = try JSONEncoder().encode(reply)
+                try host.sendHostEvent(
+                    name: RealmServiceCall.responseEvent, userInfoJSON: String(decoding: data, as: UTF8.self),
+                    tabId: tabId
+                )
+            } catch {
+                XCTFail("Failed to echo the stream call: \(error)")
+            }
+        }
+        try host.start()
+        await fulfillment(of: [delivered], timeout: 16)
+        XCTAssertEqual(sequences, [1, 2])
+    }
+
+    private func streamCall(sequence: UInt64, timeoutMs: Int) -> RealmServiceCall {
+        RealmServiceCall(
+            id: UUID(), route: "example.Service.Upload",
+            payload: Data(repeating: 0xFF, count: RealmServiceCall.maxStreamChunkBytes),
+            timeoutMs: timeoutMs, streamChunk: .init(id: "stream", sequence: sequence)
+        )
+    }
+
     private func sendRequiredFrames(_ renderer: IPCHelperConnection, payload: String) throws {
         for _ in 0..<8 {
             try renderer.sendHostEvent(name: "required", userInfoJSON: payload)

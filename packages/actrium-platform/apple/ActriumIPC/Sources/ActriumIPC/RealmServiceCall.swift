@@ -3,17 +3,30 @@ import Foundation
 public struct RealmServiceCall: Codable, Sendable {
     public static let requestEvent = "com.actrium.realmService.request"
     public static let responseEvent = "com.actrium.realmService.response"
+    public static let maxStreamChunkBytes = GuestFileImportCall.maxBytes
 
     public let id: UUID
     public let route: String
     public let payload: Data
     public let timeoutMs: Int
+    public let streamChunk: StreamChunk?
 
-    public init(id: UUID, route: String, payload: Data, timeoutMs: Int) {
+    public struct StreamChunk: Codable, Sendable {
+        public let id: String
+        public let sequence: UInt64
+
+        public init(id: String, sequence: UInt64) {
+            self.id = id
+            self.sequence = sequence
+        }
+    }
+
+    public init(id: UUID, route: String, payload: Data, timeoutMs: Int, streamChunk: StreamChunk? = nil) {
         self.id = id
         self.route = route
         self.payload = payload
         self.timeoutMs = timeoutMs
+        self.streamChunk = streamChunk
     }
 }
 
