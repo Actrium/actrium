@@ -2168,6 +2168,7 @@ async fn load_oci_workload(
     config: actr_config::OciRuntimeConfig,
     verified: actr_pack::oci::VerifiedOciPackage,
 ) -> HyperResult<LoadedWorkload> {
+    let verified = Arc::new(verified);
     let manifest = verified.manifest();
     let host_platform = if cfg!(target_arch = "aarch64") {
         actr_pack::oci::OCI_ARM64_PLATFORM
@@ -2192,7 +2193,7 @@ async fn load_oci_workload(
     let (v2_service_spec, routes) = service_spec::calculate_oci_service_spec(&verified)?;
     let workload = oci::OciWorkload::prepare(
         Arc::new(config),
-        &verified,
+        Arc::clone(&verified),
         lock.as_ref(),
         routes,
         inner.config.egress_policy.clone(),

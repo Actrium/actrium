@@ -8,7 +8,7 @@ use std::path::Path;
 use actr_config::OciRuntimeConfig;
 use anyhow::{Context, Result, ensure};
 
-use super::image::{UNPACK_PREFIX, cleanup_unpack_cgroup};
+use super::image::{IMAGE_STAGE_PREFIX, UNPACK_PREFIX, cleanup_unpack_cgroup, remove_image_tree};
 use super::runtime::{private_dir, validate_cgroup};
 use super::supervisor::{Launch, cleanup};
 
@@ -83,9 +83,6 @@ fn collect(config: &OciRuntimeConfig, evict: bool) -> Result<(usize, usize)> {
         instances += 1;
     }
 
-    if !evict {
-        return Ok((instances, 0));
-    }
     let mut removed_images = 0;
     for entry in fs::read_dir(&images)? {
         let entry = entry?;
@@ -96,7 +93,19 @@ fn collect(config: &OciRuntimeConfig, evict: bool) -> Result<(usize, usize)> {
         let Some(name) = file_name.to_str() else {
             continue;
         };
-        if name.len() != 64 || !name.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        if let Some(key) = image_stage_key(name) {
+            if let Err(error) = remove_abandoned_image_stage(
+                &entry.path(),
+                &images.join(format!("{key}.build.lock")),
+            ) {
+                if evict {
+                    return Err(error);
+                }
+                tracing::warn!(%error, "could not reclaim an abandoned OCI image stage");
+            }
+            continue;
+        }
+        if !evict || !is_image_key(name) {
             continue;
         }
         let path = images.join(format!("{name}.lock"));
@@ -104,11 +113,38 @@ fn collect(config: &OciRuntimeConfig, evict: bool) -> Result<(usize, usize)> {
             continue;
         }
         if let Some(_lock) = exclusive(&path)? {
-            fs::remove_dir_all(entry.path())?;
+            remove_image_tree(&entry.path())?;
             removed_images += 1;
         }
     }
     Ok((instances, removed_images))
+}
+
+fn is_image_key(name: &str) -> bool {
+    name.len() == 64 && name.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn image_stage_key(name: &str) -> Option<&str> {
+    let (key, suffix) = name.strip_prefix(IMAGE_STAGE_PREFIX)?.split_once('-')?;
+    (is_image_key(key) && !suffix.is_empty()).then_some(key)
+}
+
+fn remove_abandoned_image_stage(stage: &Path, build_lock: &Path) -> Result<()> {
+    // The builder holds this lock until the stage is dropped. Keep the lock
+    // file itself so future builders and collectors always synchronize on it.
+    let _lock = match exclusive(build_lock) {
+        Ok(Some(lock)) => lock,
+        Ok(None) => return Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    match remove_image_tree(stage) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_context(|| format!("reclaim OCI image stage {}", stage.display()))
+        }
+    }
 }
 
 fn reconcile_unpack_cgroups(state: &Path, parent: &Path) -> Result<()> {

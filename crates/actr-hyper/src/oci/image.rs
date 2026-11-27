@@ -4,9 +4,10 @@ use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use actr_config::OciRuntimeConfig;
@@ -19,6 +20,7 @@ use super::runtime::{private_dir, validate_cgroup, volume_limits};
 use super::supervisor::wait_empty;
 
 pub(super) const UNPACK_PREFIX: &str = "actr-unpack-";
+pub(super) const IMAGE_STAGE_PREFIX: &str = "actr-stage-";
 
 pub(super) struct ImageLease {
     pub rootfs: PathBuf,
@@ -26,9 +28,29 @@ pub(super) struct ImageLease {
     _lock: File,
 }
 
+struct StagedImage {
+    // Remove the temporary files before releasing either lock, even if the
+    // caller stops waiting for the blocking task.
+    stage: ImageStage,
+    _build_lock: File,
+    lease_lock: File,
+}
+
+struct ImageStage(PathBuf);
+
+impl Drop for ImageStage {
+    fn drop(&mut self) {
+        if let Err(error) = remove_image_tree(&self.0)
+            && error.kind() != io::ErrorKind::NotFound
+        {
+            tracing::warn!(path = %self.0.display(), %error, "OCI image stage requires reconciliation");
+        }
+    }
+}
+
 pub(super) async fn prepare(
     config: &OciRuntimeConfig,
-    package: &VerifiedOciPackage,
+    package: &Arc<VerifiedOciPackage>,
 ) -> Result<ImageLease> {
     let image_dir = private_dir(&config.image_dir)?;
     volume_limits(
@@ -60,25 +82,46 @@ pub(super) async fn prepare(
     let lock = open_lock(&lock_path)?;
     let build_lock = open_lock(&image_dir.join(format!("{name}.build.lock")))?;
     let rootfs = image_dir.join(&name);
-    let (lock, _build) = tokio::task::spawn_blocking(move || {
+    let (lock, build_lock) = tokio::task::spawn_blocking(move || {
         lock.lock_shared()?;
         build_lock.lock()?;
         Ok::<_, io::Error>((lock, build_lock))
     })
     .await??;
-    if !rootfs.exists() {
-        let stage = tempfile::tempdir_in(&image_dir)?;
-        let index_file = stage.path().join("index.json");
-        let original = package.read_metadata(&package.manifest().workload.entry)?;
-        let mut index: serde_json::Value = serde_json::from_slice(&original)?;
-        index["manifests"][0]["annotations"] =
-            serde_json::json!({"org.opencontainers.image.ref.name": "actr-verified"});
-        fs::write(&index_file, serde_json::to_vec(&index)?)?;
+    let lock = if !rootfs.exists() {
+        tracing::debug!(digest = %workload.digest, "loading OCI image tar into the rootfs cache");
+        let package = Arc::clone(package);
+        let stage_prefix = format!("{IMAGE_STAGE_PREFIX}{name}-");
+        let staged = tokio::task::spawn_blocking(move || {
+            let stage = ImageStage(
+                tempfile::Builder::new()
+                    .prefix(&stage_prefix)
+                    .tempdir_in(image_dir)?
+                    .keep(),
+            );
+            let layout = stage.0.join("image");
+            package.extract_image_layout(&layout)?;
+            let index_file = layout.join("index.json");
+            let mut index: serde_json::Value = serde_json::from_slice(&fs::read(&index_file)?)?;
+            index["manifests"][0]["annotations"] =
+                serde_json::json!({"org.opencontainers.image.ref.name": "actr-verified"});
+            fs::write(index_file, serde_json::to_vec(&index)?)?;
+            Ok::<_, anyhow::Error>(StagedImage {
+                stage,
+                _build_lock: build_lock,
+                lease_lock: lock,
+            })
+        })
+        .await??;
+        let stage = &staged.stage.0;
+        let layout = stage.join("image");
+        let output = stage.join("output");
+        fs::create_dir(&output)?;
         let limits = UnpackCgroup::new(
             &private_dir(&config.state_dir)?,
             &validate_cgroup(&config.cgroup_parent)?,
         )?;
-        let diagnostic = stage.path().join("unpack.stderr");
+        let diagnostic = stage.join("unpack.stderr");
         let mut cmd = Command::new(&config.bubblewrap);
         cmd.env_clear()
             .kill_on_drop(true)
@@ -109,13 +152,10 @@ pub(super) async fn prepare(
             .arg(&config.umoci)
             .arg("/umoci")
             .arg("--ro-bind")
-            .arg(package.layout_directory())
+            .arg(&layout)
             .arg("/image")
-            .arg("--ro-bind")
-            .arg(&index_file)
-            .arg("/image/index.json")
             .arg("--bind")
-            .arg(stage.path())
+            .arg(&output)
             .arg("/stage")
             .args(["--dev", "/dev", "--proc", "/proc", "--chdir", "/stage"])
             .args([
@@ -151,13 +191,17 @@ pub(super) async fn prepare(
                 String::from_utf8_lossy(&detail).trim()
             );
         }
-        let prepared = stage.path().join("rootfs");
+        let prepared = output.join("rootfs");
         for path in ["proc", "dev", "tmp", "run/actr", "data"] {
             ensure_directory(&prepared, path)?;
         }
         check_entry(&prepared, &workload.args[0])?;
         fs::rename(&prepared, &rootfs)?;
-    }
+        staged.lease_lock
+    } else {
+        tracing::debug!(digest = %workload.digest, "reusing cached OCI rootfs");
+        lock
+    };
     check_entry(&rootfs, &workload.args[0])?;
 
     Ok(ImageLease {
@@ -165,6 +209,37 @@ pub(super) async fn prepare(
         lock_path,
         _lock: lock,
     })
+}
+
+pub(super) fn remove_image_tree(path: &Path) -> io::Result<()> {
+    match fs::remove_dir_all(path) {
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+            make_image_dirs_removable(path)?;
+            fs::remove_dir_all(path)
+        }
+        result => result,
+    }
+}
+
+fn make_image_dirs_removable(path: &Path) -> io::Result<()> {
+    // O_PATH opens even a mode-000 directory. Use the descriptor for chmod
+    // and traversal so a symlink in the image cannot redirect either.
+    let dir = File::options()
+        .read(true)
+        .custom_flags(libc::O_PATH | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    let dir_path = PathBuf::from(format!("/proc/self/fd/{}", dir.as_raw_fd()));
+    let mode = dir.metadata()?.permissions().mode();
+    if mode & 0o700 != 0o700 {
+        fs::set_permissions(&dir_path, fs::Permissions::from_mode(mode | 0o700))?;
+    }
+    for entry in fs::read_dir(dir_path)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            make_image_dirs_removable(&entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 fn open_lock(path: &Path) -> io::Result<File> {

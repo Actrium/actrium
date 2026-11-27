@@ -82,6 +82,27 @@ async fn starts_from_a_verified_complete_image_and_reclaims_the_container() -> a
 
     use std::os::unix::fs::{PermissionsExt, symlink};
 
+    let image_key = "a".repeat(64);
+    let abandoned_stage = host.image_dir.join(format!("actr-stage-{image_key}-test"));
+    let assets = abandoned_stage.join("output/rootfs/assets");
+    let nested = assets.join("private");
+    let outside = dir.path().join("outside-stage");
+    fs::create_dir_all(&nested)?;
+    fs::create_dir(&outside)?;
+    fs::write(nested.join("asset"), b"image data")?;
+    symlink(&outside, assets.join("outside"))?;
+    fs::set_permissions(&nested, fs::Permissions::from_mode(0o000))?;
+    fs::set_permissions(&assets, fs::Permissions::from_mode(0o555))?;
+    fs::set_permissions(&outside, fs::Permissions::from_mode(0o555))?;
+    let build_lock = File::create_new(host.image_dir.join(format!("{image_key}.build.lock")))?;
+    build_lock.lock()?;
+    actr_hyper::oci::gc(&host).await?;
+    assert!(
+        abandoned_stage.exists(),
+        "GC reclaimed an active image stage"
+    );
+    drop(build_lock);
+
     let supervisor = dir.path().join("pause-supervisor");
     let waiting = dir.path().join("supervisor-waiting");
     let resume = dir.path().join("supervisor-resume");
@@ -129,11 +150,15 @@ exit 1
                 license: None,
             },
         )?;
-        let node = Node::from_hyper(hyper, runtime)
+        let attached = Node::from_hyper(hyper, runtime)
             .attach_verified_oci(verified)
-            .await?
-            .register(&issuer)
             .await?;
+        assert!(
+            !abandoned_stage.exists(),
+            "startup left an abandoned image stage"
+        );
+        assert_eq!(fs::metadata(&outside)?.permissions().mode() & 0o777, 0o555);
+        let node = attached.register(&issuer).await?;
         let actor = if run == 0 {
             let collect_during_startup = async {
                 wait_for_marker(&waiting).await?;

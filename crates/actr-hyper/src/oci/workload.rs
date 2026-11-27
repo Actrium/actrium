@@ -138,7 +138,7 @@ impl std::fmt::Debug for OciWorkload {
 impl OciWorkload {
     pub(crate) async fn prepare(
         config: Arc<OciRuntimeConfig>,
-        package: &VerifiedOciPackage,
+        package: Arc<VerifiedOciPackage>,
         lock: Option<&LockFile>,
         routes: BTreeSet<String>,
         policy: Option<Arc<dyn EgressPolicy>>,
@@ -208,7 +208,7 @@ impl OciWorkload {
         runtime::data_grant(&config, &capabilities)?;
         super::gc::reconcile(&config).await?;
 
-        let image = image::prepare(&config, package).await?;
+        let image = image::prepare(&config, &package).await?;
         let descriptor = manifest
             .workload
             .oci
