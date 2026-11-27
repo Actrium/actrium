@@ -79,12 +79,12 @@ impl FrontCapabilityManifest {
         if required
             .iter()
             .any(|capability| capability == SERVICE_STREAM_SEND_CAPABILITY)
-            && self
-                .host_modules
-                .get("service-stream")
-                .or_else(|| self.host_modules.get("host:service-stream"))
-                .and_then(|module| module.rpc.as_ref())
-                .is_some_and(|methods| methods.iter().any(|method| method == "send"))
+            && ["service-stream", "host:service-stream"]
+                .into_iter()
+                .filter_map(|name| self.host_modules.get(name))
+                .filter_map(|module| module.rpc.as_deref())
+                .flatten()
+                .any(|method| method == "send")
         {
             grants.insert(SERVICE_STREAM_SEND_CAPABILITY.to_owned());
         }
@@ -299,6 +299,24 @@ mod tests {
                     .contains(SERVICE_STREAM_SEND_CAPABILITY)
             );
         }
+    }
+
+    #[test]
+    fn stream_send_uses_either_host_module_alias() {
+        let manifest: FrontCapabilityManifest = serde_json::from_value(serde_json::json!({
+            "keelApi": "1.0",
+            "hostModules": {
+                "service-stream": { "rpc": ["register"] },
+                "host:service-stream": { "rpc": ["send"] }
+            }
+        }))
+        .unwrap();
+        let required = [SERVICE_STREAM_SEND_CAPABILITY.to_owned()];
+        assert!(
+            manifest
+                .program_capabilities(&required)
+                .contains(SERVICE_STREAM_SEND_CAPABILITY)
+        );
     }
 
     #[test]
