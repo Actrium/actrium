@@ -23,7 +23,7 @@ async fn ordinary_policy_checks_tell_routes_and_upload_grants() {
         peer_types,
         front_type: front_type.clone(),
         routes: BTreeSet::from(["echo".into()]),
-        uploads_allowed: false,
+        streams_allowed: false,
     };
     let mut tell = RpcEnvelope {
         direction: Some(Direction::Tell as i32),
@@ -52,7 +52,7 @@ async fn ordinary_policy_checks_tell_routes_and_upload_grants() {
             .await
             .is_err()
     );
-    guard.uploads_allowed = true;
+    guard.streams_allowed = true;
     assert!(
         guard
             .check_stream(IncomingStreamChunk::new(&mut chunk, &front))
@@ -90,7 +90,7 @@ async fn ordinary_uploads_are_bound_to_the_registering_front() {
         peer_types,
         front_type,
         routes: BTreeSet::new(),
-        uploads_allowed: true,
+        streams_allowed: true,
     })));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let callback: crate::inbound::DataChunkCallback = Arc::new(move |chunk, sender| {

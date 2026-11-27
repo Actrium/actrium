@@ -14,7 +14,7 @@ pub(crate) struct OrdinaryServiceGuard {
     peer_types: PeerTypes,
     front_type: ActrType,
     routes: BTreeSet<String>,
-    uploads_allowed: bool,
+    streams_allowed: bool,
 }
 
 impl OrdinaryServiceGuard {
@@ -30,7 +30,7 @@ impl OrdinaryServiceGuard {
             peer_types,
             front_type: metadata.front_actor_type,
             routes,
-            uploads_allowed,
+            streams_allowed: uploads_allowed || metadata.stream_send_allowed,
         }
     }
 }
@@ -64,12 +64,12 @@ impl IncomingGuard for OrdinaryServiceGuard {
         &self,
         request: IncomingStreamChunk<'_>,
     ) -> Result<(), IncomingGuardError> {
-        if !self.uploads_allowed
+        if !self.streams_allowed
             || self.peer_types.get(request.sender).as_ref() != Some(&self.front_type)
         {
             return Err(IncomingGuardError::new(
                 IncomingGuardErrorCode::PermissionDenied,
-                "Service policy does not grant this caller attachment uploads",
+                "Service policy does not grant this caller stream uploads",
             ));
         }
         Ok(())

@@ -6,6 +6,7 @@ use crate::inbound::{DataChunkRegistry, MediaFrameRegistry};
 use crate::lifecycle::session_state::{SessionPhase, SessionState};
 use crate::outbound::Gate;
 use crate::service_lookup::{SERVICE_CANDIDATE_COUNT, select_service};
+use crate::transport::VerifiedPeerContext;
 use crate::wire::webrtc::SignalingClient;
 #[cfg(feature = "opentelemetry")]
 use crate::wire::webrtc::trace::inject_span_context_to_rpc;
@@ -42,6 +43,7 @@ pub struct RuntimeContext {
     self_id: ActrId,
     caller_id: Option<ActrId>,
     request_id: String,
+    reply_stream_channel: Option<Arc<VerifiedPeerContext>>,
     inproc_gate: Gate,          // Shell/Local calls - immediately available
     outproc_gate: Option<Gate>, // Remote Actor calls - lazily initialized
     data_chunk_registry: Arc<DataChunkRegistry>, // DataChunk callback registry
@@ -180,6 +182,7 @@ impl RuntimeContext {
             self_id,
             caller_id,
             request_id,
+            reply_stream_channel: None,
             inproc_gate,
             outproc_gate,
             data_chunk_registry,
@@ -205,6 +208,31 @@ impl RuntimeContext {
     pub(crate) fn with_scope(mut self, scope: Arc<crate::request_scope::RequestScope>) -> Self {
         self.scope = Some(scope);
         self
+    }
+
+    pub(crate) fn with_reply_stream_channel(
+        mut self,
+        channel: Option<Arc<VerifiedPeerContext>>,
+    ) -> Self {
+        self.reply_stream_channel = channel;
+        self
+    }
+
+    /// Register a Host-owned reply callback that only accepts this peer.
+    #[doc(hidden)]
+    pub fn register_peer_stream<F>(
+        &self,
+        stream_id: String,
+        peer: ActrId,
+        callback: F,
+    ) -> ActorResult<()>
+    where
+        F: Fn(DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>>
+            + MaybeSendSync
+            + 'static,
+    {
+        self.data_chunk_registry
+            .register_peer_stream(stream_id, peer, Arc::new(callback))
     }
 
     /// Set the reply-delivery handle, `expects_response` flag, and caller
@@ -609,34 +637,7 @@ impl RuntimeContext {
         payload_type: actr_protocol::PayloadType,
         chunk: DataChunk,
     ) -> ActorResult<()> {
-        let deadline =
-            crate::transport::RpcDeadline::from_duration(crate::transport::DATA_CHUNK_SEND_TIMEOUT);
-        self.ensure_session_ready_until(crate::timer::ids::RUNTIME_DATA_CHUNK_PREFLIGHT, deadline)
-            .await?;
-        deadline.ensure_remaining()?;
-
-        let gate = self.select_gate(target)?;
-        let target_id = self.extract_target_id(target);
-        let mut chunk = chunk;
-        self.data_chunk_registry
-            .authenticate_outgoing_chunk(target_id, &mut chunk)
-            .await?;
-
-        use actr_protocol::prost::Message as ProstMessage;
-
-        let payload = chunk.encode_to_vec();
-        let stream_id = chunk.stream_id.as_str();
-        let operation_id = crate::outbound::data_chunk_operation_id(stream_id, chunk.sequence);
-
-        gate.send_data_chunk(
-            target_id,
-            payload_type,
-            stream_id,
-            bytes::Bytes::from(payload),
-            deadline,
-            &operation_id,
-        )
-        .await
+        self.send_data_chunk(target, chunk, payload_type).await
     }
 
     /// Get dependency fingerprint from the packaged manifest.lock.toml
@@ -1150,7 +1151,31 @@ impl Context for RuntimeContext {
             payload.len()
         );
 
-        // 3. Send via Gate with the caller-specified PayloadType
+        // Host-signed attachment results use their own session route.
+        if let Some(channel) = &self.reply_stream_channel
+            && matches!(target, Dest::Peer(peer) if peer == &channel.peer_actor_id)
+            && !chunk
+                .metadata
+                .iter()
+                .any(|entry| entry.key == crate::actrium::metadata::SESSION_ID)
+        {
+            let Gate::Peer(gate) = gate else {
+                return Err(ActrError::Internal(
+                    "Verified stream replies require a peer gate".into(),
+                ));
+            };
+            return gate
+                .send_verified_reply_chunk_until(
+                    channel,
+                    payload_type,
+                    stream_id,
+                    Bytes::from(payload),
+                    deadline,
+                    &operation_id,
+                )
+                .await;
+        }
+
         gate.send_data_chunk(
             target_id,
             payload_type,

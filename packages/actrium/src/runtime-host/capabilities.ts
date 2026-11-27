@@ -46,6 +46,10 @@ export const FRONT_CAPABILITY_SPECS = {
     hostModule: 'host:service',
     hostMethod: 'uploadAttachment',
   },
+  'host:service-stream.register': { module: 'host:service-stream', hostModule: 'host:service-stream', hostMethod: 'register' },
+  'host:service-stream.unregister': { module: 'host:service-stream', hostModule: 'host:service-stream', hostMethod: 'unregister' },
+  'host:service-stream.onChunk': { module: 'host:service-stream', hostModule: 'host:service-stream', hostMethod: 'onChunk' },
+  'host:service-stream.send': { module: 'host:service-stream', hostModule: 'host:service-stream', hostMethod: 'send' },
   'host:assets.read': {
     module: 'host:assets',
     hostModule: 'host:assets',

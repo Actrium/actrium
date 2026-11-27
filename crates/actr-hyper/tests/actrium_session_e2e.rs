@@ -18,6 +18,9 @@ use actrium_runtime::{
 use async_trait::async_trait;
 use tempfile::TempDir;
 
+#[path = "actrium_session_e2e/reply_stream.rs"]
+mod reply_stream;
+
 const REALM: &str = "test7@example.com";
 const READ: &str = "documents.read";
 const PREPARE_ATTACHMENT_ROUTE: &str = "ask.AskService.PrepareAttachmentUpload";
@@ -57,7 +60,10 @@ impl RpcRequest for EchoRequest {
     }
 }
 
-struct EchoWorkload;
+#[derive(Default)]
+struct EchoWorkload {
+    reply_ready: Arc<tokio::sync::Notify>,
+}
 
 #[async_trait]
 impl Workload for EchoWorkload {
@@ -71,12 +77,16 @@ impl MessageDispatcher for EchoDispatcher {
     type Workload = EchoWorkload;
 
     async fn dispatch<C: Context>(
-        _workload: &Self::Workload,
+        workload: &Self::Workload,
         envelope: RpcEnvelope,
-        _ctx: &C,
+        ctx: &C,
     ) -> actr_protocol::ActorResult<Bytes> {
         match envelope.route_key.as_str() {
             "echo" => Ok(envelope.payload.unwrap_or_default()),
+            reply_stream::ROUTE => reply_stream::dispatch(ctx, workload.reply_ready.clone()),
+            reply_stream::UPLOAD_ROUTE => {
+                reply_stream::prepare_upload(ctx, workload.reply_ready.clone()).await
+            }
             PREPARE_ATTACHMENT_ROUTE => {
                 let payload = envelope.payload.unwrap_or_default();
                 let request =
@@ -303,6 +313,10 @@ fn make_service_config(
         routes: actr_hyper::actrium::service_routes(&BTreeMap::from([
             ("echo".to_string(), BTreeSet::from([READ.to_string()])),
             (
+                reply_stream::ROUTE.to_string(),
+                BTreeSet::from([READ.to_string()]),
+            ),
+            (
                 ATTACHMENT_UPLOAD_ROUTE.to_string(),
                 BTreeSet::from([READ.to_string()]),
             ),
@@ -321,6 +335,7 @@ async fn register_node(
     server: &TestSignalingServer,
     dir: &TempDir,
     actor_type: ActrType,
+    workload: EchoWorkload,
 ) -> Node<actr_hyper::Registered> {
     let hyper = Hyper::new(HyperConfig::new(
         dir.path(),
@@ -330,7 +345,7 @@ async fn register_node(
     .unwrap();
     let config = runtime_config(dir, server, actor_type);
     Node::from_hyper(hyper, config)
-        .link(EchoWorkload)
+        .link(workload)
         .await
         .unwrap()
         .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
@@ -338,8 +353,12 @@ async fn register_node(
         .unwrap()
 }
 
-async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (ActrRef, ActrId) {
-    let registered = register_node(server, dir, service_type()).await;
+async fn start_service_node(
+    server: &TestSignalingServer,
+    dir: &TempDir,
+    reply_ready: Arc<tokio::sync::Notify>,
+) -> (ActrRef, ActrId) {
+    let registered = register_node(server, dir, service_type(), EchoWorkload { reply_ready }).await;
     let service_actor_id = registered.actor_id();
 
     let policies = ServicePolicies {
@@ -366,33 +385,6 @@ async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (Act
     (actr, service_actor_id)
 }
 
-async fn start_front_node(server: &TestSignalingServer, dir: &TempDir) -> ActrRef {
-    let registered = register_node(server, dir, front_type()).await;
-    let front_actor_id = registered.actor_id();
-
-    let policies = ServicePolicies {
-        membership: Arc::new(AllowPolicies),
-        authorize_attach: Arc::new(AllowPolicies),
-        authorize_takeover: Arc::new(AllowPolicies),
-        authorize_request: Arc::new(AllowPolicies),
-        privacy: Arc::new(AllowPolicies),
-        quota: Arc::new(AllowPolicies),
-    };
-    let service = InMemorySessionService::new(
-        make_service_config(
-            &front_actor_id.to_string_repr(),
-            registered.actrium_actor_signing_key().unwrap(),
-        ),
-        policies,
-    )
-    .unwrap();
-    registered
-        .with_actrium_service(service)
-        .start()
-        .await
-        .unwrap()
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_fronts_use_the_same_service_over_ordinary_relay() {
     let mut server = TestSignalingServer::start_with_relay().await.unwrap();
@@ -401,27 +393,33 @@ async fn two_fronts_use_the_same_service_over_ordinary_relay() {
     let first_dir = TempDir::new().unwrap();
     let second_dir = TempDir::new().unwrap();
     let params = attach_params();
-    let service = register_node(&server, &service_dir, service_type())
+    let service = register_node(
+        &server,
+        &service_dir,
+        service_type(),
+        EchoWorkload::default(),
+    )
+    .await
+    .with_ordinary_service_authorization(FrontSessionMetadata {
+        service_type: service_type(),
+        front_actor_type: front_type(),
+        package_digest: params.package_digest,
+        guest_digest: params.guest_digest,
+        protocol_fingerprint: params.protocol_fingerprint,
+        runtime: params.runtime,
+        program_capabilities: BTreeSet::from([READ.to_owned()]),
+        routes: BTreeMap::from([("echo".to_owned(), BTreeSet::from([READ.to_owned()]))]),
+        stream_send_allowed: false,
+    })
+    .start()
+    .await
+    .unwrap();
+    let first = register_node(&server, &first_dir, front_type(), EchoWorkload::default())
         .await
-        .with_ordinary_service_authorization(FrontSessionMetadata {
-            service_type: service_type(),
-            front_actor_type: front_type(),
-            package_digest: params.package_digest,
-            guest_digest: params.guest_digest,
-            protocol_fingerprint: params.protocol_fingerprint,
-            runtime: params.runtime,
-            program_capabilities: BTreeSet::from([READ.to_owned()]),
-            routes: BTreeMap::from([("echo".to_owned(), BTreeSet::from([READ.to_owned()]))]),
-        })
         .start()
         .await
         .unwrap();
-    let first = register_node(&server, &first_dir, front_type())
-        .await
-        .start()
-        .await
-        .unwrap();
-    let second = register_node(&server, &second_dir, front_type())
+    let second = register_node(&server, &second_dir, front_type(), EchoWorkload::default())
         .await
         .start()
         .await
@@ -506,8 +504,10 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
 
     let service_dir = TempDir::new().unwrap();
     let front_dir = TempDir::new().unwrap();
-    let (service, service_actor_id) = start_service_node(&server, &service_dir).await;
-    let front = start_front_node(&server, &front_dir).await;
+    let reply_ready = Arc::new(tokio::sync::Notify::new());
+    let (service, service_actor_id) =
+        start_service_node(&server, &service_dir, reply_ready.clone()).await;
+    let (front, router) = reply_stream::start_front_node(&server, &front_dir).await;
 
     tokio::time::timeout(Duration::from_secs(30), async {
         while server.relay_connection_count() != 2 {
@@ -545,6 +545,8 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     .expect("business call must not hang")
     .expect("session-signed business call succeeds");
     assert_eq!(response, payload, "echo returns the signed request payload");
+
+    reply_stream::verify(&front, &router, &service_actor_id, &session, &reply_ready).await;
 
     // A fire-and-forget tell is admitted by the same Guard pipeline.
     session
