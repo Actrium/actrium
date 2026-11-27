@@ -120,6 +120,31 @@ test('keeps the current document visible and selectable until the appended Markd
   expect(renderer.root.findByType('paragraph').props.children).toBe('Parsed: ' + first);
 });
 
+test.each([
+  ['a replacement', 'Different message'],
+  ['an empty source', ''],
+])('clears the previous document and selection while parsing %s', async (_label, markdown) => {
+  const onAvailabilityChange = mock();
+  const surface = createDocumentSelection(onAvailabilityChange);
+  const copy = mock();
+  const first = 'First message';
+  await render({ markdown: first }, surface);
+  renderer.root.findByType('paragraph').props.onSelect();
+  surface.copy(copy);
+  expect(copy.mock.calls).toEqual([['Parsed: ' + first]]);
+
+  let finishParse;
+  parse.mockImplementationOnce(() => new Promise((resolve) => { finishParse = resolve; }));
+  await render({ markdown }, surface);
+  expect(renderer.root.findAllByType(Renderer)).toHaveLength(0);
+  expect(onAvailabilityChange.mock.calls).toEqual([[true], [false]]);
+  surface.copy(copy);
+  expect(copy).toHaveBeenCalledTimes(1);
+
+  await act(async () => finishParse({ type: 'root', children: [paragraph('Parsed: ' + markdown)] }));
+  expect(renderer.root.findByType(Renderer).props.markdown).toBe(markdown);
+});
+
 test('ignores a parse that finishes after a newer Markdown revision', async () => {
   await render({ markdown: 'First' });
   let finishOlder;
@@ -135,15 +160,15 @@ test('ignores a parse that finishes after a newer Markdown revision', async () =
   expect(renderer.root.findByType('paragraph').props.children).toBe('Latest');
 });
 
-test('reports a failed parse and keeps the last successful result during recovery', async () => {
+test('reports a failed parse and keeps the last successful result while retrying an append', async () => {
   await render({ markdown: 'First' });
   parse.mockRejectedValueOnce(new Error('Parse failed'));
-  await render({ markdown: 'Invalid revision' });
+  await render({ markdown: 'First invalid revision' });
   expect(renderer.root.findByType('text').props.children).toBe('Could not parse Markdown.');
 
   let finishParse;
   parse.mockImplementationOnce(() => new Promise((resolve) => { finishParse = resolve; }));
-  await render({ markdown: 'Recovered revision' });
+  await render({ markdown: 'First recovered revision' });
   expect(renderer.root.findByType(Renderer).props.markdown).toBe('First');
   await act(async () => finishParse({ type: 'root', children: [paragraph('Recovered')] }));
   expect(renderer.root.findByType('paragraph').props.children).toBe('Recovered');

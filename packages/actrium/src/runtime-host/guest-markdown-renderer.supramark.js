@@ -30,9 +30,9 @@ function errorDocument(text) {
   };
 }
 
-function useMarkdownSelection(literalKey) {
+function useMarkdownSelection(rendererKey) {
   const surface = useContext(DocumentSelectionContext);
-  // Parsed revisions share a mounted renderer and its selection handle.
+  // Appended revisions share a mounted renderer and its selection handle.
   const selection = useMemo(() => {
     let handle = null;
     return {
@@ -48,7 +48,7 @@ function useMarkdownSelection(literalKey) {
         ));
       },
     };
-  }, [surface, literalKey]);
+  }, [surface, rendererKey]);
   useLayoutEffect(() => () => selection.onHandleReady(null), [selection]);
   return selection;
 }
@@ -61,7 +61,11 @@ function MarkdownDocument({ markdown, theme, paddingHorizontal, variant }) {
     paddingHorizontal === undefined ? undefined : { root: { paddingHorizontal } }
   ), [paddingHorizontal]);
   const literal = useMemo(() => error ? errorDocument(markdown) : null, [error, markdown]);
-  const selection = useMarkdownSelection(literalKey);
+  const parsed = result.document;
+  const matchingDocument = parsed && markdown.startsWith(parsed.markdown) ? parsed : null;
+  const document = literal ? { markdown, ast: literal } : matchingDocument;
+  const failed = !literal && result.failedMarkdown === markdown;
+  const selection = useMarkdownSelection(!failed && document ? literalKey : null);
 
   useEffect(() => {
     if (error) return;
@@ -77,10 +81,9 @@ function MarkdownDocument({ markdown, theme, paddingHorizontal, variant }) {
     return () => { active = false; };
   }, [error, markdown]);
 
-  if (!literal && result.failedMarkdown === markdown) {
+  if (failed) {
     return <InitialScrollContent><Text style={styles?.root}>Could not parse Markdown.</Text></InitialScrollContent>;
   }
-  const document = literal ? { markdown, ast: literal } : result.document;
   // The renderer registers its selection handle on mount, so each literal revision needs a new mount.
   return <InitialScrollContent>
     {document ? <SupramarkRenderer key={literalKey} markdown={document.markdown} ast={document.ast}
