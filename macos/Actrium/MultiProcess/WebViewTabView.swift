@@ -125,8 +125,9 @@ struct WebViewMultiProcessTabView: View {
 
     var body: some View {
         ZStack {
-            // Overview Mode: Show screenshots or placeholders
-            Color(nsColor: .windowBackgroundColor)
+            // Overview Mode: Show screenshots or placeholders. A blank page
+            // reads as white rather than as the dark workspace behind it.
+            Color.white
 
             if !isFocused {
                 // Try to show cached snapshot first
@@ -249,6 +250,18 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         // Use custom DownloadableWebView for context menu download support
         self.webView = DownloadableWebView(frame: .zero, configuration: config)
         super.init()
+
+        // A page that has not painted yet — still loading, or failed to load —
+        // shows this backdrop. Without it the system's dark under-page color
+        // makes the empty content area read as black.
+        webView.underPageBackgroundColor = .white
+        // The web view also paints its own blank surface, which follows the
+        // system appearance and is black in dark mode. Turn drawing off so
+        // the white container behind the web view shows through instead;
+        // pages paint their own background on top as usual.
+        if webView.responds(to: Selector(("setDrawsBackground:"))) {
+            webView.setValue(false, forKey: "drawsBackground")
+        }
 
         if let webView = webView as? DownloadableWebView {
             webView.onPrimaryMouseDown = { [weak self] in
@@ -976,7 +989,49 @@ final class WebViewHolderManager {
     static let shared = WebViewHolderManager()
     private var holders: [UUID: WebViewHolder] = [:]
 
-    private init() {}
+    /// Debounced re-capture after a live window resize settles, so the latest
+    /// cached snapshot always matches the current page geometry.
+    private var resizeCaptureTask: Task<Void, Never>?
+    private var resizeEndObserver: NSObjectProtocol?
+
+    private init() {
+        installResizeEndObserver()
+    }
+
+    /// After a window resize ends, re-capture every web tab once layout has
+    /// settled (short debounce). Each capture flows into
+    /// TabSnapshotCacheManager, keeping the single latest image fresh for
+    /// mode-transition animations.
+    private func installResizeEndObserver() {
+        guard resizeEndObserver == nil else { return }
+        // AppKit's own resize-end notification: the app has no producer for a
+        // custom resize notification, so observing one meant the recapture
+        // never ran after a normal window resize.
+        resizeEndObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didEndLiveResizeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            let resizedWindow = notification.object as? NSWindow
+            self.resizeCaptureTask?.cancel()
+            self.resizeCaptureTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 350_000_000) // 0.35s debounce
+                guard let self = self, !Task.isCancelled else { return }
+                for (tabId, holder) in self.holders {
+                    // Scope the recapture to the window that actually
+                    // resized: a Tab refreshes only while its WebView is
+                    // still hosted by that window. A detached holder (no host
+                    // window) and Tabs in other windows keep their cached
+                    // image instead of recapturing through a window they are
+                    // no longer displayed in.
+                    guard let resizedWindow,
+                          holder.webView.window === resizedWindow else { continue }
+                    await self.takeSnapshot(for: tabId)
+                }
+            }
+        }
+    }
 
     func holder(for tabId: UUID) -> WebViewHolder {
         if let existing = holders[tabId] {
@@ -1003,9 +1058,15 @@ final class WebViewHolderManager {
         holders[tabId]?.snapshot
     }
 
-    /// Take a snapshot for a specific tab
+    /// Take a snapshot for a specific tab.
+    /// Every capture also refreshes the tab's single latest snapshot in
+    /// TabSnapshotCacheManager, so transitions never read a stale or missing
+    /// image.
     func takeSnapshot(for tabId: UUID) async {
         await holders[tabId]?.takeSnapshot()
+        if let image = holders[tabId]?.snapshot {
+            TabSnapshotCacheManager.shared.setSnapshot(image, for: tabId)
+        }
     }
 }
 
@@ -1022,6 +1083,10 @@ struct PersistentWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         // Use container view to ensure the correct layout
         let container = NSView(frame: NSRect(origin: .zero, size: size))
+        // White backing so an unpainted page (loading or failed) never shows
+        // the dark workspace behind the web content.
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.white.cgColor
         let webView = holder.webView
 
         // navigationDelegate Already WebViewHolder Medium Settings
@@ -1758,6 +1823,7 @@ struct FocusedWebOverlay: View {
         PersistentWebView(holder: holder, size: viewportSize)
             .id(tab.id)
             .frame(width: viewportSize.width, height: viewportSize.height)
+            .background(Color.white)
             .onAppear {
                 holder.loadIfNeeded(url)
             }

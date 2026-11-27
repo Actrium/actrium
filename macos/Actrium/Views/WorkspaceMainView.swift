@@ -1,9 +1,50 @@
+import Combine
 import SwiftUI
 import WebKit
 
 private let logger = AppLogger.ui
 import AppKit
 import UniformTypeIdentifiers
+
+// MARK: - Hosting Window
+
+/// Reports the `NSWindow` that hosts a workspace, so snapshot captures can
+/// bind to that window instead of the app-wide key window.
+private struct WorkspaceWindowReader: NSViewRepresentable {
+    let onWindowChange: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> WindowReportingView {
+        let view = WindowReportingView()
+        view.onWindowChange = onWindowChange
+        return view
+    }
+
+    func updateNSView(_ nsView: WindowReportingView, context: Context) {
+        nsView.onWindowChange = onWindowChange
+        nsView.reportWindowIfNeeded()
+    }
+
+    final class WindowReportingView: NSView {
+        var onWindowChange: ((NSWindow?) -> Void)?
+        private weak var reportedWindow: NSWindow?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            reportWindowIfNeeded()
+        }
+
+        func reportWindowIfNeeded() {
+            guard window !== reportedWindow else { return }
+            reportedWindow = window
+            // The view can move between windows during a SwiftUI update pass;
+            // hand the change back on the next runloop turn.
+            let window = self.window
+            DispatchQueue.main.async { [onWindowChange] in
+                onWindowChange?(window)
+            }
+        }
+    }
+}
 
 // MARK: - Notification Names
 
@@ -61,6 +102,10 @@ struct WorkspaceMainView: View {
 
     // Mode Switch Transition controller
     @StateObject private var modeTransitionController = ModeTransitionController()
+
+    /// The window hosting this workspace. Snapshot captures bind to it so a
+    /// delayed capture cannot read whichever window happens to be key.
+    @State private var hostingWindow: NSWindow?
 
     // 🔑 Drag State (from) TabGridView Raise, Jean. UnifiedReactNativeLayer I can also visit)
     @State private var draggingTabId: UUID?
@@ -247,6 +292,14 @@ struct WorkspaceMainView: View {
                                 if let newURL = newURL {
                                     NSLog("🔗 WorkspaceMainView: Updating tab \(focusedTabId) URL to: \(newURL.absoluteString)")
                                     viewModel.updateTabURL(for: focusedTabId, url: newURL)
+
+                                    // The page content changed (SPA navigation).
+                                    // Refresh the latest snapshot so the next
+                                    // mode transition animates current content.
+                                    Task { @MainActor in
+                                        try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s debounce
+                                        await WebViewHolderManager.shared.takeSnapshot(for: focusedTabId)
+                                    }
                                 }
                             },
                             onMainFrameLinkActivated: {
@@ -281,9 +334,32 @@ struct WorkspaceMainView: View {
                         // Safari-style loading progress bar
                         if viewModel.isCurrentTabLoading {
                             GeometryReader { geo in
+                                let barWidth = geo.size.width * viewModel.loadingProgress
+                                // The leading tip of the filled bar fades out
+                                // over roughly 20pt, so the head reads as a
+                                // moving highlight instead of a hard edge.
+                                let fadeFraction = barWidth > 0
+                                    ? min(0.5, 20 / barWidth)
+                                    : 0
                                 Rectangle()
-                                    .fill(Color.accentColor)
-                                    .frame(width: geo.size.width * viewModel.loadingProgress, height: 2)
+                                    .fill(
+                                        LinearGradient(
+                                            stops: [
+                                                .init(color: Color.accentColor, location: 0),
+                                                .init(
+                                                    color: Color.accentColor,
+                                                    location: 1 - fadeFraction
+                                                ),
+                                                .init(
+                                                    color: Color.accentColor.opacity(0),
+                                                    location: 1
+                                                ),
+                                            ],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: barWidth, height: 2)
                                     .animation(.linear(duration: 0.2), value: viewModel.loadingProgress)
                             }
                             .frame(height: 2)
@@ -606,6 +682,31 @@ struct WorkspaceMainView: View {
                 }
             }
 
+            // Enter Focus Mode: capture the viewport once a native/empty Tab
+            // (e.g. a freshly opened New Tab Start Page) has rendered, so the
+            // next mode transition animates its real content instead of an
+            // empty slot falling back to the gray base layer.
+            if case .focus(let focusedTabId) = newValue,
+               let tab = viewModel.tabs.first(where: { $0.id == focusedTabId }) {
+                var capturesViewportSnapshotOnFocus = false
+                switch tab.contentType {
+                case .native, .empty: capturesViewportSnapshotOnFocus = true
+                case .web, .reactNative: capturesViewportSnapshotOnFocus = false
+                }
+                if capturesViewportSnapshotOnFocus {
+                    let size = CGSize(
+                        width: max(viewportSize.width, 100),
+                        height: max(viewportSize.height, 100)
+                    )
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 400_000_000) // 0.4s render settle
+                        guard viewModel.actriumMode == .focus(tabId: focusedTabId) else { return }
+                        guard let snapshot = captureViewportSnapshot(viewportSize: size, in: hostingWindow) else { return }
+                        TabSnapshotCacheManager.shared.setSnapshot(snapshot, for: focusedTabId)
+                    }
+                }
+            }
+
             // Enter Overview The tags need automatic focus search boxes when mode is ticked
             if case .overview = newValue {
                 shouldAutoFocusSearchTabs = true
@@ -615,6 +716,22 @@ struct WorkspaceMainView: View {
                 isSearchTabsFocused = false
             }
             // Note: isOverviewMode By ViewBridgeCoordinatorManager Subscriptions actriumMode AutoSync
+        }
+        // Bind snapshot captures to the window that hosts this workspace.
+        .background {
+            WorkspaceWindowReader { hostingWindow = $0 }
+                .allowsHitTesting(false)
+        }
+        // A native Start Page card renders its cached snapshot, which would
+        // otherwise keep showing favorites or recently visited sites the user
+        // just removed. Drop those snapshots when the library data changes so
+        // the card falls back to the live Start Page; the next focus pass
+        // re-captures it.
+        .onReceive(historyVM.$recentItems.dropFirst()) { _ in
+            invalidateNativeTabSnapshots()
+        }
+        .onReceive(bookmarkVM.$bookmarks.dropFirst()) { _ in
+            invalidateNativeTabSnapshots()
         }
         // shouldAutoFocusAddressBar Move processing to AddressBarContainer It's... onAppear Medium
         // This will only be triggered when the address bar is actually rendered, without delay.
@@ -899,6 +1016,16 @@ struct WorkspaceMainView: View {
         // Note: Do not intercept viewport, because Overview Mode viewport The whole grid is shown, not a single card
         let overviewSnapshot = TabSnapshotCacheManager.shared.overviewSnapshot(for: tabId)
 
+        // Fallback: no snapshot available → the zoom would animate an empty
+        // slot over the gray base layer. Skip the image-based animation and
+        // switch directly so no gray frame can appear.
+        guard let overviewSnapshot else {
+            NSLog("🎬 enterFocus: no snapshot for tab %@, direct switch (no animation)",
+                  String(tabId.uuidString.prefix(8)))
+            viewModel.actriumMode = .focus(tabId: tabId)
+            return
+        }
+
         // 🔑 Calculate Current Overview Mode transform(For animation starting point)
         let overviewTransform = calculateOverviewTransform(
             actriumSize: gridResult.actriumSize,
@@ -956,7 +1083,7 @@ struct WorkspaceMainView: View {
             case .native, .empty:
                 focusSnapshot = nil
             case .web, .reactNative:
-                focusSnapshot = captureViewportSnapshot(viewportSize: viewportSize)
+                focusSnapshot = captureViewportSnapshot(viewportSize: viewportSize, in: hostingWindow)
             }
         } else {
             focusSnapshot = nil
@@ -979,6 +1106,17 @@ struct WorkspaceMainView: View {
             let cardSize = CGSize(width: gridResultForCard.cardWidth, height: gridResultForCard.cardHeight)
             // applyBlur=false Ensure Sync settings
             TabSnapshotCacheManager.shared.setOverviewSnapshot(snapshot, for: currentTabId, targetSize: cardSize, applyBlur: false)
+        }
+
+        // Fallback: neither a fresh capture nor a cached image exists → the
+        // zoom-out would animate an empty slot over the gray base layer.
+        // Skip the image-based animation and switch directly.
+        guard focusSnapshot != nil
+            || TabSnapshotCacheManager.shared.focusSnapshot(for: currentTabId) != nil else {
+            NSLog("🎬 exitToOverview: no snapshot for tab %@, direct switch (no animation)",
+                  String(currentTabId.uuidString.prefix(8)))
+            viewModel.actriumMode = .overview
+            return
         }
 
         // 🔑 Calculating Cards in Overview Position in the lower viewer of mode (used for Zoom Animation)
@@ -1030,11 +1168,13 @@ struct WorkspaceMainView: View {
     /// Only the view area, excluding the sidebar and the toolbar
     /// Optimization: Direct access to view areas to avoid cutting through the entire window
     /// - Parameter viewportSize: Portage Dimensions
-    private func captureViewportSnapshot(viewportSize: CGSize) -> NSImage? {
+    private func captureViewportSnapshot(
+        viewportSize: CGSize,
+        in window: NSWindow?
+    ) -> NSImage? {
         let startTime = CACurrentMediaTime()
 
-        guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
-              let contentView = window.contentView else {
+        guard let window, let contentView = window.contentView else {
             return nil
         }
 
@@ -1243,6 +1383,21 @@ struct WorkspaceMainView: View {
     private var floatingTitleBarHeight: CGFloat { CardStyle.titleBarHeight }
 
     /// Calculate spacing (between cards) and vertical margins
+    /// Native (Start Page) cards prefer the cached viewport snapshot, which
+    /// is what the mode transition zooms. That image goes stale as soon as
+    /// the library data behind the Start Page changes, so drop it and let the
+    /// card render the live page until the next focus pass re-captures.
+    private func invalidateNativeTabSnapshots() {
+        for tab in viewModel.tabs {
+            switch tab.contentType {
+            case .native, .empty:
+                TabSnapshotCacheManager.shared.invalidate(tabId: tab.id)
+            case .web, .reactNative:
+                break
+            }
+        }
+    }
+
     // MARK: - VirtualGrid Helper
 
     /// Build VirtualGrid Card Info Numerator
@@ -2393,12 +2548,24 @@ private struct TabPanel: View {
             case .native(let nativeType):
                 // Native SwiftUI content - rendered in main process, no XPC
                 // 🔑 Focus mode: rendered by FocusedNativeOverlay (outside actrium transform)
-                // 🔑 Overview mode: rendered here at cardSize (will be shown as thumbnail)
+                // 🔑 Overview mode: prefer the latest cached snapshot (same
+                //    image the transition zooms) so the card is identical
+                //    before and after the switch. Only fall back to a live
+                //    re-render when no snapshot exists yet.
                 if isFocused {
                     // Focus mode: placeholder only, actual content rendered by FocusedNativeOverlay
                     Color.clear
+                } else if let snapshot = TabSnapshotCacheManager.shared.snapshot(for: tab.id) {
+                    // Overview mode: show the cached snapshot (matches the
+                    // transition image; the live Start Page must not cover it)
+                    Image(nsImage: snapshot)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: max(cardWidth, 1), height: max(cardHeight, 1))
+                        .clipped()
                 } else {
-                    // Overview mode: render at cardSize for thumbnail
+                    // Overview mode fallback without a snapshot: render at
+                    // cardSize for thumbnail (previous behavior)
                     let nativeSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
                     switch nativeType {
                     case .startPage:

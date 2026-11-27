@@ -49,32 +49,26 @@ enum TabGroupColor: String, Codable, CaseIterable {
     case orange
 
     var swiftUIColor: Color {
-        switch self {
-        case .gray:   return Color.gray
-        case .blue:   return Color.blue
-        case .red:    return Color.red
-        case .yellow: return Color.yellow
-        case .green:  return Color.green
-        case .pink:   return Color.pink
-        case .purple: return Color.purple
-        case .cyan:   return Color.cyan
-        case .orange: return Color.orange
-        }
+        Color(nsColor: nsColor)
     }
 
+    /// The group's tint. Every surface (editor swatch, dot, header fill,
+    /// border, sidebar indicator) derives from this single value, so the
+    /// group reads the same color everywhere.
     var nsColor: NSColor {
-        // Softer pastel colors matching the design
+        let base: NSColor
         switch self {
-        case .gray:   return NSColor(red: 0.7, green: 0.7, blue: 0.7, alpha: 1.0)
-        case .blue:   return NSColor(red: 0.55, green: 0.65, blue: 0.95, alpha: 1.0)
-        case .red:    return NSColor(red: 0.95, green: 0.6, blue: 0.6, alpha: 1.0)
-        case .yellow: return NSColor(red: 0.95, green: 0.85, blue: 0.5, alpha: 1.0)
-        case .green:  return NSColor(red: 0.6, green: 0.85, blue: 0.6, alpha: 1.0)
-        case .pink:   return NSColor(red: 0.95, green: 0.7, blue: 0.85, alpha: 1.0)
-        case .purple: return NSColor(red: 0.75, green: 0.6, blue: 0.9, alpha: 1.0)
-        case .cyan:   return NSColor(red: 0.5, green: 0.85, blue: 0.9, alpha: 1.0)
-        case .orange: return NSColor(red: 0.95, green: 0.75, blue: 0.55, alpha: 1.0)
+        case .gray:   base = .systemGray
+        case .blue:   base = .systemBlue
+        case .red:    base = .systemRed
+        case .yellow: base = .systemYellow
+        case .green:  base = .systemGreen
+        case .pink:   base = .systemPink
+        case .purple: base = .systemPurple
+        case .cyan:   base = .systemCyan
+        case .orange: base = .systemOrange
         }
+        return base.pastelTint
     }
 
     var displayName: String {
@@ -89,5 +83,30 @@ enum TabGroupColor: String, Codable, CaseIterable {
         case .cyan:   return "Cyan"
         case .orange: return "Orange"
         }
+    }
+}
+
+private extension NSColor {
+    /// Same hue, lower saturation and higher brightness — a soft pastel tint
+    /// of the system color that suits a toolbar surface.
+    ///
+    /// Saturated system colors already sit at (or near) full brightness, so
+    /// the brightness lift is a share of the headroom left rather than a flat
+    /// addition; that keeps every case pastel without clipping any to white.
+    var pastelTint: NSColor {
+        guard let srgb = usingColorSpace(.sRGB) else { return self }
+
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+        srgb.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+
+        return NSColor(
+            hue: hue,
+            saturation: saturation * 0.45,
+            brightness: brightness + (1 - brightness) * 0.45,
+            alpha: alpha
+        )
     }
 }

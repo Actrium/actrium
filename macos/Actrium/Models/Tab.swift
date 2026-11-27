@@ -226,7 +226,10 @@ struct Tab: Identifiable {
         self.reloadNonce = reloadNonce
         self.leftPanelDefaultVisible = leftPanelDefaultVisible
         self.rightPanelDefaultVisible = rightPanelDefaultVisible
-        self.backgroundColor = backgroundColor ?? "#1e1e1e"
+        // Until a page reports its own theme color, the content area is a
+        // blank page: white, like an empty document, rather than a dark
+        // placeholder that reads as a failed load.
+        self.backgroundColor = backgroundColor ?? "#ffffff"
         self.appIcon = appIcon
         self.verifiedAppName = verifiedAppName
     }
