@@ -938,12 +938,18 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                         onUserInitiatedMainFrameNavigation?()
                     }
                 case .formSubmitted, .formResubmitted:
-                    // Form submissions are user-initiated too; a pending
-                    // Realm load must yield to them. Reload is handled by
-                    // BrowserViewModel.reloadCurrentTab because .reload
-                    // cannot distinguish the toolbar from location.reload().
-                    onUserInitiatedMainFrameNavigation?()
+                    // A timer-triggered form.submit() produces the same
+                    // navigation type as a real submission, so require
+                    // trusted user activation: a primary mouse press or a
+                    // Return press right before the submission.
+                    if let activatedAt = (webView as? DownloadableWebView)?.lastUserActivationAt,
+                       activatedAt.duration(to: .now) < .seconds(1) {
+                        onUserInitiatedMainFrameNavigation?()
+                    }
                 default:
+                    // Reload is handled by BrowserViewModel.reloadCurrentTab
+                    // because .reload cannot distinguish the toolbar from
+                    // location.reload().
                     break
                 }
             }
@@ -1305,6 +1311,11 @@ class DownloadableWebView: WKWebView {
     /// a scripted history traversal has no such native gesture evidence, so
     /// the navigation delegate can tell the two apart.
     private(set) var lastTrackpadScrollAt: ContinuousClock.Instant?
+    /// Most recent trusted user activation (a primary mouse press or a
+    /// Return press). A scripted form submission produces no such event, so
+    /// the navigation delegate can tell a real submission from an automatic
+    /// one.
+    private(set) var lastUserActivationAt: ContinuousClock.Instant?
     /// Store the detected element info for context menu
     private var contextMenuImageURL: URL?
     private var contextMenuLinkURL: URL?
@@ -1317,8 +1328,17 @@ class DownloadableWebView: WKWebView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        lastUserActivationAt = .now
         onPrimaryMouseDown?()
         super.mouseDown(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // kVK_Return / kVK_KeypadEnter — Return in a form field submits it.
+        if event.keyCode == 36 || event.keyCode == 76 {
+            lastUserActivationAt = .now
+        }
+        super.keyDown(with: event)
     }
 
     /// Pre-detect element on right mouse down using synchronous approach

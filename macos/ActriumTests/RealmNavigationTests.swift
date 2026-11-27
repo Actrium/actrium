@@ -253,7 +253,7 @@ final class RealmNavigationTests: XCTestCase {
     }
 
     @MainActor
-    func testFormSubmissionSupersedesAPendingRealmLoad() async throws {
+    func testUserFormSubmissionSupersedesAPendingRealmLoad() async throws {
         try await assertNoEnrollment { view in
             let tabId = try XCTUnwrap(view.currentTabId)
             let holder = WebViewHolder()
@@ -264,14 +264,70 @@ final class RealmNavigationTests: XCTestCase {
                 """, baseURL: nil)
             await fulfillment(of: [pageReady], timeout: 5)
             holder.onNavigationFinished = nil
-            let submitted = expectation(description: "WebKit allowed the form submission")
+            let submitted = expectation(description: "WebKit allowed the user form submission")
             holder.onUserInitiatedMainFrameNavigation = {
                 view.webTabDidActivateLink(tabId)
                 submitted.fulfill()
             }
+            // A real submission follows a primary mouse press on the submit
+            // button; inject that activation evidence.
+            let press = try XCTUnwrap(NSEvent.mouseEvent(
+                with: .leftMouseDown, location: .zero, modifierFlags: [],
+                timestamp: 0, windowNumber: 0, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: 1))
+            holder.webView.mouseDown(with: press)
             _ = try await holder.webView.evaluateJavaScript("document.querySelector('form').submit()")
             await fulfillment(of: [submitted], timeout: 5)
         }
+    }
+
+    @MainActor
+    func testAutomaticFormSubmissionKeepsAPendingRealmLoad() async throws {
+        let documents = try discoveryDocuments(membership: "invite-only")
+        let profile = NavigationGate()
+        defer { profile.release() }
+        let view = BrowserViewModel(
+            realmPreferences: try makePreferences(),
+            realmTrustDirectory: realmTrustDirectory,
+            fetchRealmDocument: { url, _ in
+                if url.path == "/realm/echo" { await profile.wait() }
+                return try XCTUnwrap(documents[url.absoluteString])
+            },
+            confirmRealmMembership: { _ in false },
+            saveBrowserSession: { _, _ in }
+        )
+        view.navigateCurrentTab(to: "https://old.example/")
+        let tabId = try XCTUnwrap(view.currentTabId)
+        let holder = WebViewHolder()
+        let pageReady = expectation(description: "The form page finished loading")
+        holder.onNavigationFinished = { _, _ in pageReady.fulfill() }
+        // GET submission replaces the action's query with the form data, so
+        // a named field makes the resulting URL predictable.
+        holder.webView.loadHTMLString("""
+            <form action="about:blank" method="get">
+            <input type="hidden" name="q" value="submitted"><input type="submit">
+            </form>
+            """, baseURL: nil)
+        await fulfillment(of: [pageReady], timeout: 15)
+        let submitted = expectation(description: "The automatic submission navigated")
+        holder.onNavigationFinished = { _, url in
+            guard url?.absoluteString == "about:blank?q=submitted" else { return }
+            submitted.fulfill()
+        }
+        holder.onUserInitiatedMainFrameNavigation = {
+            XCTFail("An automatic form submission was reported as a user gesture")
+            view.webTabDidActivateLink(tabId)
+        }
+        view.navigateCurrentTab(to: realmURI)
+        try await waitUntil { profile.waiting }
+
+        // A timer-triggered form.submit() has no mouse or key activation.
+        _ = try await holder.webView.evaluateJavaScript("document.querySelector('form').submit()")
+        await fulfillment(of: [submitted], timeout: 5)
+        profile.release()
+
+        try await waitUntil { view.pendingRealmInvite(for: tabId) != nil }
+        XCTAssertEqual(view.pendingInviteRedeem?.uri, realmURI)
     }
 
     @MainActor
