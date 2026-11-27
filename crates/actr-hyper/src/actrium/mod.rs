@@ -43,6 +43,7 @@ pub mod metadata {
 }
 
 pub mod manifest;
+pub(crate) mod ordinary;
 pub mod peer;
 pub mod policies;
 pub mod service;

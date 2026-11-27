@@ -218,6 +218,23 @@ impl RuntimeContext {
         self
     }
 
+    /// Register a Host-owned reply callback that only accepts this peer.
+    #[doc(hidden)]
+    pub fn register_peer_stream<F>(
+        &self,
+        stream_id: String,
+        peer: ActrId,
+        callback: F,
+    ) -> ActorResult<()>
+    where
+        F: Fn(DataChunk, ActrId) -> MaybeSendBoxFuture<'static, ActorResult<()>>
+            + MaybeSendSync
+            + 'static,
+    {
+        self.data_chunk_registry
+            .register_peer_stream(stream_id, peer, Arc::new(callback))
+    }
+
     /// Set the reply-delivery handle, `expects_response` flag, and caller
     /// deadline for an `ReplyMode::Explicit` route (RFC-0323). Called by
     /// `admit_incoming` before the dispatch continuation runs so the
@@ -433,6 +450,16 @@ impl RuntimeContext {
         let deadline = crate::transport::RpcDeadline::from_timeout_ms(timeout_ms)?;
         self.call_raw_with_deadline(target, route_key, payload_type, payload, deadline, None)
             .await
+    }
+
+    pub(crate) async fn prepare_peer_rpc(&self, peer: &ActrId, timeout_ms: i64) -> ActorResult<()> {
+        let deadline = crate::transport::RpcDeadline::from_timeout_ms(timeout_ms)?;
+        self.ensure_session_ready_until(crate::timer::ids::RUNTIME_CALL_PREFLIGHT, deadline)
+            .await?;
+        let Gate::Peer(gate) = self.select_gate(&Dest::Peer(peer.clone()))? else {
+            return Err(ActrError::Unavailable("Peer gate is unavailable".into()));
+        };
+        gate.prepare_rpc_peer(peer, deadline).await
     }
 
     pub(crate) async fn call_raw_with_deadline(
@@ -1073,9 +1100,11 @@ impl Context for RuntimeContext {
             "📊 Registering DataChunk callback for stream_id: {}",
             stream_id
         );
-        self.data_chunk_registry
-            .register(stream_id, Arc::new(callback));
-        Ok(())
+        self.data_chunk_registry.register_for_caller(
+            stream_id,
+            Arc::new(callback),
+            self.caller_id.as_ref(),
+        )
     }
 
     async fn unregister_stream(&self, stream_id: &str) -> ActorResult<()> {
@@ -1083,8 +1112,8 @@ impl Context for RuntimeContext {
             "🚫 Unregistering DataChunk callback for stream_id: {}",
             stream_id
         );
-        self.data_chunk_registry.unregister(stream_id);
-        Ok(())
+        self.data_chunk_registry
+            .unregister_for_caller(stream_id, self.caller_id.as_ref())
     }
 
     async fn send_data_chunk(

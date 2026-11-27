@@ -319,6 +319,15 @@ export interface ScrollEvent {
   };
 }
 
+/** Requests received during initial end positioning are ignored. Send a new ID after onInitialScrollComplete. */
+export interface ScrollRequest {
+  /** Increase for each request on the same ScrollView. */
+  id: number;
+  /** Vertical content offset, or the end of the scrollable content. Horizontal lists ignore numeric targets. */
+  target: number | 'end';
+  animated?: boolean;
+}
+
 /**
  * Image Source
  */

@@ -57,6 +57,8 @@ pub struct FrontSessionMetadata {
     pub program_capabilities: BTreeSet<String>,
     /// Business routes declared by the Front capability manifest.
     pub routes: BTreeMap<String, BTreeSet<String>>,
+    /// Whether the signed Front declares the ordinary Service stream sender.
+    pub stream_send_allowed: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -165,8 +167,19 @@ pub fn front_session_metadata(
             "hostModules.service must declare an RPC route or event",
         ));
     }
+    let upload_permitted = front_manifest
+        .host
+        .required_capabilities
+        .iter()
+        .any(|capability| {
+            matches!(
+                capability.as_str(),
+                "service.attachmentUpload" | "host:service.uploadAttachment"
+            )
+        });
     let routes: BTreeMap<String, BTreeSet<String>> = route_names
         .into_iter()
+        .filter(|route| route.as_str() != ATTACHMENT_UPLOAD_TRANSPORT || upload_permitted)
         .map(|route| {
             (
                 route.clone(),
@@ -174,6 +187,17 @@ pub fn front_session_metadata(
             )
         })
         .collect();
+    let stream_send_allowed = front_manifest
+        .host
+        .required_capabilities
+        .iter()
+        .any(|capability| capability == "host:service-stream.send")
+        && capabilities
+            .host_modules
+            .get("service-stream")
+            .or_else(|| capabilities.host_modules.get("host:service-stream"))
+            .and_then(|module| module.rpc.as_ref())
+            .is_some_and(|methods| methods.iter().any(|method| method == "send"));
 
     let contract_path = dependency
         .contract
@@ -218,6 +242,7 @@ pub fn front_session_metadata(
         },
         program_capabilities: BTreeSet::from([SERVICE_CAPABILITY.to_owned()]),
         routes,
+        stream_send_allowed,
     })
 }
 

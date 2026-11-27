@@ -27,7 +27,9 @@ import {
   CapabilityAuthorizer,
   evaluateCapabilityAccess,
 } from './capability-authorization';
-import { contract, type FileImportPickInput, type FileImportPickOutput } from './contract';
+import {
+  contract, type FileExportSaveInput, type FileExportSaveOutput, type FileImportPickInput, type FileImportPickOutput,
+} from './contract';
 import {
   AttachmentUploadManager,
   createRealmServiceAttachmentAdapter,
@@ -188,6 +190,9 @@ type FileImportBridge = {
   cachedAttachment?<Action extends keyof CachedFileResult>(
     tabId: string, reloadKey: number, action: Action, fileId: string
   ): Promise<CachedFileResult[Action]>;
+};
+type FileExportBridge = {
+  save?(tabId: string, reloadKey: number, name: string, base64: string): Promise<FileExportSaveOutput>;
 };
 
 const requestNativeCapabilityGrant = (
@@ -369,6 +374,8 @@ export const StandaloneGuestApp: React.FC<Props> = ({
     };
 
     const fileImport = NativeModules.GuestFileImport as FileImportBridge | undefined;
+    const fileExport = NativeModules.GuestFileExport as FileExportBridge | undefined;
+    const nativeSave = fileExport?.save?.bind(fileExport, tab.id, tab.reloadKey ?? 0);
     const nativePick = fileImport?.pick?.bind(fileImport, tab.id, tab.reloadKey ?? 0);
     const nativePickCached = fileImport?.pickCached?.bind(fileImport, tab.id, tab.reloadKey ?? 0);
     if (v1?.ok && v1.linkage.links.some(([id]) => id === 'host:file-import') && !nativePick) {
@@ -463,6 +470,10 @@ export const StandaloneGuestApp: React.FC<Props> = ({
       writeClipboardText,
       setTabTitle: (title) => setTabTitle(tab.id, tab.reloadKey ?? 0, title),
       localStorage,
+      saveFile: nativeSave && ((input: FileExportSaveInput) => {
+        if (disposed) throw new Error('The file export session has ended.');
+        return nativeSave(input.name, input.base64);
+      }),
       pickFiles: nativePick && ((input) => {
         const pick = input.cache ? nativePickCached : nativePick;
         if (!pick) throw new Error('Cached file selection is unavailable.');

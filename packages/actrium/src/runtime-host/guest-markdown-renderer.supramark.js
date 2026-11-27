@@ -3,6 +3,7 @@ import { Text } from 'react-native';
 import '@goaskaway/supramark-markdown-native-rn';
 import { parse } from '@goaskaway/supramark-core/rn';
 import { Supramark as SupramarkRenderer } from '@goaskaway/supramark-rn';
+import { InitialScrollContent } from 'keel/host/preset';
 import { DocumentSelectionContext } from './DocumentSelectionSurface';
 
 const config = { features: [{ id: '@supramark/feature-math', enabled: false }] };
@@ -29,15 +30,9 @@ function errorDocument(text) {
   };
 }
 
-function MarkdownDocument({ markdown, theme, paddingHorizontal, variant }) {
-  const [result, setResult] = useState(null);
+function useMarkdownSelection(rendererKey) {
   const surface = useContext(DocumentSelectionContext);
-  const error = variant === 'error';
-  const styles = useMemo(() => (
-    paddingHorizontal === undefined ? undefined : { root: { paddingHorizontal } }
-  ), [paddingHorizontal]);
-  const literal = useMemo(() => error ? errorDocument(markdown) : null, [error, markdown]);
-  // Give each Markdown revision its own handle so late cleanup cannot clear its replacement.
+  // Appended revisions share a mounted renderer and its selection handle.
   const selection = useMemo(() => {
     let handle = null;
     return {
@@ -53,27 +48,47 @@ function MarkdownDocument({ markdown, theme, paddingHorizontal, variant }) {
         ));
       },
     };
-  }, [surface, markdown]);
+  }, [surface, rendererKey]);
   useLayoutEffect(() => () => selection.onHandleReady(null), [selection]);
+  return selection;
+}
+
+function MarkdownDocument({ markdown, theme, paddingHorizontal, variant }) {
+  const [result, setResult] = useState({ document: null, failedMarkdown: null });
+  const error = variant === 'error';
+  const literalKey = error ? markdown : undefined;
+  const styles = useMemo(() => (
+    paddingHorizontal === undefined ? undefined : { root: { paddingHorizontal } }
+  ), [paddingHorizontal]);
+  const literal = useMemo(() => error ? errorDocument(markdown) : null, [error, markdown]);
+  const parsed = result.document;
+  const matchingDocument = parsed && markdown.startsWith(parsed.markdown) ? parsed : null;
+  const document = literal ? { markdown, ast: literal } : matchingDocument;
+  const failed = !literal && result.failedMarkdown === markdown;
+  const selection = useMarkdownSelection(!failed && document ? literalKey : null);
+
   useEffect(() => {
     if (error) return;
     let active = true;
     parse(markdown, { config }).then((root) => displayNodes(root)[0]).then(
       (ast) => {
-        if (active) setResult({ markdown, ast });
+        if (active) setResult({ document: { markdown, ast }, failedMarkdown: null });
       },
       () => {
-        if (active) setResult({ markdown, error: true });
+        if (active) setResult((previous) => ({ ...previous, failedMarkdown: markdown }));
       }
     );
     return () => { active = false; };
   }, [error, markdown]);
 
-  if (!literal && result?.markdown !== markdown) return null;
-  if (!literal && result.error) return <Text style={styles?.root}>Could not parse Markdown.</Text>;
+  if (failed) {
+    return <InitialScrollContent><Text style={styles?.root}>Could not parse Markdown.</Text></InitialScrollContent>;
+  }
   // The renderer registers its selection handle on mount, so each literal revision needs a new mount.
-  return <SupramarkRenderer key={error ? markdown : undefined} markdown={markdown} ast={literal ?? result.ast}
-    config={config} theme={theme} selection={selection} styles={styles} />;
+  return <InitialScrollContent>
+    {document ? <SupramarkRenderer key={literalKey} markdown={document.markdown} ast={document.ast}
+      config={config} theme={theme} selection={selection} styles={styles} /> : null}
+  </InitialScrollContent>;
 }
 
 export function Supramark({ markdown, theme, paddingHorizontal, variant }) {

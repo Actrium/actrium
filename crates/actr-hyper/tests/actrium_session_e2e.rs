@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use actr_framework::{Bytes, Context, Dest, MessageDispatcher, Workload};
-use actr_hyper::actrium::ActriumAttachParams;
+use actr_hyper::actrium::{ActriumAttachParams, FrontSessionMetadata};
 use actr_hyper::test_support::TestSignalingServer;
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
 use actr_protocol::{
@@ -60,6 +60,7 @@ impl RpcRequest for EchoRequest {
     }
 }
 
+#[derive(Default)]
 struct EchoWorkload {
     reply_ready: Arc<tokio::sync::Notify>,
 }
@@ -83,6 +84,9 @@ impl MessageDispatcher for EchoDispatcher {
         match envelope.route_key.as_str() {
             "echo" => Ok(envelope.payload.unwrap_or_default()),
             reply_stream::ROUTE => reply_stream::dispatch(ctx, workload.reply_ready.clone()),
+            reply_stream::UPLOAD_ROUTE => {
+                reply_stream::prepare_upload(ctx, workload.reply_ready.clone()).await
+            }
             PREPARE_ATTACHMENT_ROUTE => {
                 let payload = envelope.payload.unwrap_or_default();
                 let request =
@@ -327,26 +331,34 @@ fn make_service_config(
     }
 }
 
-async fn start_service_node(
+async fn register_node(
     server: &TestSignalingServer,
     dir: &TempDir,
-    reply_ready: Arc<tokio::sync::Notify>,
-) -> (ActrRef, ActrId) {
-    let service_type = service_type();
+    actor_type: ActrType,
+    workload: EchoWorkload,
+) -> Node<actr_hyper::Registered> {
     let hyper = Hyper::new(HyperConfig::new(
         dir.path(),
         Arc::new(StaticTrust::dev_only()),
     ))
     .await
     .unwrap();
-    let config = runtime_config(dir, server, service_type.clone());
-    let registered = Node::from_hyper(hyper, config)
-        .link(EchoWorkload { reply_ready })
+    let config = runtime_config(dir, server, actor_type);
+    Node::from_hyper(hyper, config)
+        .link(workload)
         .await
         .unwrap()
         .register(&format!("http://127.0.0.1:{}/issuer", server.port()))
         .await
-        .unwrap();
+        .unwrap()
+}
+
+async fn start_service_node(
+    server: &TestSignalingServer,
+    dir: &TempDir,
+    reply_ready: Arc<tokio::sync::Notify>,
+) -> (ActrRef, ActrId) {
+    let registered = register_node(server, dir, service_type(), EchoWorkload { reply_ready }).await;
     let service_actor_id = registered.actor_id();
 
     let policies = ServicePolicies {
@@ -374,7 +386,112 @@ async fn start_service_node(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_fronts_use_the_same_service_over_ordinary_relay() {
+    let mut server = TestSignalingServer::start_with_relay().await.unwrap();
+    server.pause_forwarding();
+    let service_dir = TempDir::new().unwrap();
+    let first_dir = TempDir::new().unwrap();
+    let second_dir = TempDir::new().unwrap();
+    let params = attach_params();
+    let service = register_node(
+        &server,
+        &service_dir,
+        service_type(),
+        EchoWorkload::default(),
+    )
+    .await
+    .with_ordinary_service_authorization(FrontSessionMetadata {
+        service_type: service_type(),
+        front_actor_type: front_type(),
+        package_digest: params.package_digest,
+        guest_digest: params.guest_digest,
+        protocol_fingerprint: params.protocol_fingerprint,
+        runtime: params.runtime,
+        program_capabilities: BTreeSet::from([READ.to_owned()]),
+        routes: BTreeMap::from([("echo".to_owned(), BTreeSet::from([READ.to_owned()]))]),
+        stream_send_allowed: false,
+    })
+    .start()
+    .await
+    .unwrap();
+    let first = register_node(&server, &first_dir, front_type(), EchoWorkload::default())
+        .await
+        .start()
+        .await
+        .unwrap();
+    let second = register_node(&server, &second_dir, front_type(), EchoWorkload::default())
+        .await
+        .start()
+        .await
+        .unwrap();
+    assert_ne!(first.actor_id(), second.actor_id());
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while server.relay_connection_count() != 3 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("all three nodes connect to Relay");
+
+    let service_id = service.actor_id();
+    first.prepare_peer_rpc(&service_id, 15_000).await.unwrap();
+    let unknown = ActrId {
+        serial_number: service_id.serial_number + 10_000,
+        ..service_id.clone()
+    };
+    assert!(first.prepare_peer_rpc(&unknown, 500).await.is_err());
+
+    let target = Dest::Peer(service_id);
+    let first_context = first.app_context().await;
+    let second_context = second.app_context().await;
+    let first_payload = Bytes::from_static(b"first");
+    let second_payload = Bytes::from_static(b"second");
+    let (first_reply, second_reply) = tokio::join!(
+        first_context.call_raw(
+            &target,
+            "echo".into(),
+            PayloadType::RpcReliable,
+            first_payload.clone(),
+            15_000
+        ),
+        second_context.call_raw(
+            &target,
+            "echo".into(),
+            PayloadType::RpcReliable,
+            second_payload.clone(),
+            15_000
+        ),
+    );
+    assert_eq!(first_reply.unwrap(), first_payload);
+    assert_eq!(second_reply.unwrap(), second_payload);
+
+    let denied = first_context
+        .call_raw(
+            &target,
+            PREPARE_ATTACHMENT_ROUTE.into(),
+            PayloadType::RpcReliable,
+            Bytes::from(PrepareAttachmentRequest::default().encode_to_vec()),
+            15_000,
+        )
+        .await;
+    assert!(matches!(
+        denied,
+        Err(actr_protocol::ActrError::PermissionDenied(message))
+            if message.contains("Service policy does not grant this caller the requested route")
+    ));
+
+    for node in [first, second, service] {
+        node.shutdown();
+        node.wait_for_shutdown().await;
+    }
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn attach_and_session_signed_business_call_over_verified_relay() {
+    if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+        return;
+    }
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer()

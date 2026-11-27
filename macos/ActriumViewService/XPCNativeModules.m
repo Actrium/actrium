@@ -114,6 +114,15 @@ RCT_EXTERN_METHOD(show:(NSString *)tabId
                   rejecter:(RCTPromiseRejectBlock)reject)
 @end
 
+@interface RCT_EXTERN_MODULE(GuestFileExport, NSObject)
+RCT_EXTERN_METHOD(save:(NSString *)tabId
+                  reloadKey:(NSNumber *)reloadKey
+                  name:(NSString *)name
+                  base64:(NSString *)base64
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+@end
+
 @interface RCT_EXTERN_MODULE(GuestFileImport, NSObject)
 
 RCT_EXTERN_METHOD(pick:(NSString *)tabId

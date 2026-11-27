@@ -77,8 +77,8 @@ pub(crate) enum CompleteOutcome {
     /// A waiting caller was found and woken (it may have gone away, in
     /// which case the oneshot send fails silently - same as before).
     Completed,
-    /// No pending entry for this request_id (late reply after timeout,
-    /// duplicate response, or an id that was never registered here).
+    /// The response has no eligible pending entry, or its sender differs
+    /// from the registered target.
     Orphan,
 }
 
@@ -197,16 +197,28 @@ impl<M> RpcCorrelation<M> {
     /// [`complete_from_envelope`](Self::complete_from_envelope) for the
     /// standard inbound-response policy).
     pub(crate) fn complete(&self, request_id: &str, result: ActorResult<Bytes>) -> CompleteOutcome {
-        match lock_ignore_poison(&self.inner).remove(request_id) {
-            Some(entry) => {
-                let _ = entry.tx.send(result);
-                CompleteOutcome::Completed
-            }
-            None => CompleteOutcome::Orphan,
-        }
+        self.complete_matching(request_id, result, |_| true)
     }
 
-    /// Standard inbound-response path shared by all response readers:
+    fn complete_matching(
+        &self,
+        request_id: &str,
+        result: ActorResult<Bytes>,
+        matches: impl FnOnce(&M) -> bool,
+    ) -> CompleteOutcome {
+        let mut pending = lock_ignore_poison(&self.inner);
+        if !pending
+            .get(request_id)
+            .is_some_and(|entry| matches(&entry.meta))
+        {
+            return CompleteOutcome::Orphan;
+        }
+        let entry = pending.remove(request_id).expect("matched pending request");
+        let _ = entry.tx.send(result);
+        CompleteOutcome::Completed
+    }
+
+    /// In-process inbound-response path:
     /// converts the envelope's `(payload, error)` pair via
     /// [`envelope_response_to_result`], then completes. On `Orphan` emits
     /// the crate-standard warn (`rpc.orphan_response_dropped`) with
@@ -218,17 +230,29 @@ impl<M> RpcCorrelation<M> {
         caller: Option<IncomingCaller<'_>>,
         peer: impl FnOnce() -> String,
     ) -> CompleteOutcome {
-        self.complete_from_envelope_with_context(envelope, caller, None, peer)
+        self.complete_from_envelope_matching(envelope, caller, None, |_| true, peer)
             .await
     }
 
-    pub(crate) async fn complete_from_envelope_with_context(
+    async fn complete_from_envelope_matching(
         &self,
         envelope: RpcEnvelope,
         caller: Option<IncomingCaller<'_>>,
         peer_context: Option<Arc<VerifiedPeerContext>>,
+        matches: impl Fn(&M) -> bool,
         peer: impl FnOnce() -> String,
     ) -> CompleteOutcome {
+        if lock_ignore_poison(&self.inner)
+            .get(&envelope.request_id)
+            .is_some_and(|entry| !matches(&entry.meta))
+        {
+            tracing::warn!(
+                request_id = %envelope.request_id,
+                peer = %peer(),
+                "rpc.unexpected_peer_response_dropped: response sender does not match the pending peer"
+            );
+            return CompleteOutcome::Orphan;
+        }
         let guard = self
             .incoming_guard
             .read()
@@ -244,7 +268,11 @@ impl<M> RpcCorrelation<M> {
             // A rejected response must never release its payload to the guest.
             // Wake the caller with the authorization error instead of leaving a
             // pending request alive until its transport deadline.
-            return self.complete(&envelope.request_id, Err(error.into_actr_error()));
+            return self.complete_matching(
+                &envelope.request_id,
+                Err(error.into_actr_error()),
+                matches,
+            );
         }
         let RpcEnvelope {
             request_id,
@@ -254,7 +282,7 @@ impl<M> RpcCorrelation<M> {
             ..
         } = envelope;
         let result = envelope_response_to_result(payload, error);
-        let outcome = self.complete(&request_id, result);
+        let outcome = self.complete_matching(&request_id, result, matches);
         if outcome == CompleteOutcome::Orphan {
             tracing::warn!(
                 request_id = %request_id,
@@ -272,6 +300,25 @@ impl<M> RpcCorrelation<M> {
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn len(&self) -> usize {
         lock_ignore_poison(&self.inner).len()
+    }
+}
+
+impl RpcCorrelation<ActrId> {
+    pub(crate) async fn complete_from_envelope_with_context(
+        &self,
+        envelope: RpcEnvelope,
+        caller: Option<IncomingCaller<'_>>,
+        peer_context: Option<Arc<VerifiedPeerContext>>,
+        peer: impl FnOnce() -> String,
+    ) -> CompleteOutcome {
+        self.complete_from_envelope_matching(
+            envelope,
+            caller,
+            peer_context,
+            |target| caller.is_some_and(|(sender, _)| sender == target),
+            peer,
+        )
+        .await
     }
 }
 
@@ -491,6 +538,47 @@ mod tests {
         assert_eq!(outcome, CompleteOutcome::Completed);
         let result = pending.recv().await;
         assert_eq!(result.unwrap(), Bytes::from_static(b"resp"));
+    }
+
+    #[tokio::test]
+    async fn peer_response_must_match_the_registered_actor() {
+        let correlation = RpcCorrelation::<ActrId>::new();
+        let target = ActrId {
+            serial_number: 1,
+            realm: "test@example.com".into(),
+        };
+        let other = ActrId {
+            serial_number: 2,
+            ..target.clone()
+        };
+        let pending = correlation.register("req-1", target.clone());
+        let envelope = RpcEnvelope {
+            request_id: "req-1".into(),
+            route_key: "echo".into(),
+            payload: Some(Bytes::from_static(b"response")),
+            ..Default::default()
+        };
+        for caller in [None, Some((&other, None))] {
+            assert_eq!(
+                correlation
+                    .complete_from_envelope_with_context(envelope.clone(), caller, None, || {
+                        "unexpected peer".into()
+                    })
+                    .await,
+                CompleteOutcome::Orphan
+            );
+            assert_eq!(correlation.len(), 1);
+        }
+        let outcome = correlation
+            .complete_from_envelope_with_context(envelope, Some((&target, None)), None, || {
+                panic!("the expected peer completes the pending call")
+            })
+            .await;
+        assert_eq!(outcome, CompleteOutcome::Completed);
+        assert_eq!(
+            pending.recv().await.unwrap(),
+            Bytes::from_static(b"response")
+        );
     }
 
     #[tokio::test]

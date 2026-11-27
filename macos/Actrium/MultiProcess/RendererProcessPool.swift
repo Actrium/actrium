@@ -161,6 +161,7 @@ final class RendererProcessPool: ObservableObject {
     private var tabWorkerMap: [UUID: String] = [:]
     private let localStorage: RendererLocalStorage
     private let fileImport = RendererFileImport()
+    private let fileExport = RendererFileExport()
     private lazy var attachmentStorage: (container: URL, lock: FileHandle)? = {
         guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: ActriumRuntimePaths.appGroupID
@@ -174,6 +175,7 @@ final class RendererProcessPool: ObservableObject {
     }()
     var documentWindow: ((UUID, Int) -> NSWindow?)?
     var fileImportWindow: ((UUID, Int) -> NSWindow?)?
+    var fileExportWindow: ((UUID, Int) -> NSWindow?)?
     private var fingerprintWorkerMap: [String: String] = [:]
     private var systemWorkerId: String?
     private var viewportRequestId: UInt32 = 1
@@ -261,6 +263,7 @@ final class RendererProcessPool: ObservableObject {
         guestMenu.cancel(tabId: tabId)
         localStorage.remove(tabId)
         fileImport.cancel(tabId: tabId)
+        fileExport.cancel(tabId: tabId)
         // The renderer is going away (close or fingerprint replacement):
         // invalidate late attachment results and cancel the tab's sessions
         // without touching any other tab.
@@ -339,6 +342,7 @@ final class RendererProcessPool: ObservableObject {
         let reloadKey = resolvedConfig["reloadKey"] as? Int ?? 0
         guestMenu.update(tabId: tabId, reloadKey: reloadKey)
         fileImport.update(tabId: tabId, reloadKey: reloadKey)
+        fileExport.update(tabId: tabId, reloadKey: reloadKey)
 
         let config = localStorage.prepare(tabId: tabId, config: resolvedConfig)
         guard JSONSerialization.isValidJSONObject(config),
@@ -506,6 +510,7 @@ final class RendererProcessPool: ObservableObject {
         for tabId in tabWorkerMap.keys {
             guestMenu.cancel(tabId: tabId)
             fileImport.cancel(tabId: tabId)
+            fileExport.cancel(tabId: tabId)
         }
         let activeWorkers = Array(workers.values)
         for worker in activeWorkers {
@@ -736,6 +741,12 @@ final class RendererProcessPool: ObservableObject {
                 guard let self, let worker, let tabId = UUID(uuidString: tab),
                       self.worker(for: tabId) === worker else { return }
                 Task { await self.handleFileImport(userInfoJSON, tabId: tabId, worker: worker) }
+                return
+            }
+            if name == GuestFileExportCall.requestEvent {
+                guard let self, let worker, let tabId = UUID(uuidString: tab),
+                      self.worker(for: tabId) === worker else { return }
+                Task { await self.handleFileExport(userInfoJSON, tabId: tabId, worker: worker) }
                 return
             }
             if name == GuestMenuCall.requestEvent {
@@ -1065,6 +1076,25 @@ final class RendererProcessPool: ObservableObject {
         }
     }
 
+    private func handleFileExport(_ json: String, tabId: UUID, worker: Worker) async {
+        do {
+            guard worker === self.worker(for: tabId) else { return }
+            let call = try JSONDecoder().decode(GuestFileExportCall.self, from: Data(json.utf8))
+            let reply = await fileExport.reply(to: call, tabId: tabId) { reloadKey in
+                guard self.worker(for: tabId) === worker else { return nil }
+                return self.fileExportWindow?(tabId, reloadKey)
+            }
+            guard self.worker(for: tabId) === worker else { return }
+            let response = try JSONEncoder().encode(reply)
+            try worker.connection.sendHostEvent(
+                name: GuestFileExportCall.responseEvent, userInfoJSON: String(decoding: response, as: UTF8.self),
+                tabId: tabId.uuidString
+            )
+        } catch {
+            AppLogger.reactNative.error("Could not handle the file export request: \(error.localizedDescription)")
+        }
+    }
+
     private func handleTermination(of worker: Worker, status: Int32) {
         guard workers[worker.id] != nil else { return }
         worker.isTerminating = true
@@ -1074,6 +1104,7 @@ final class RendererProcessPool: ObservableObject {
         for tabId in affectedTabs {
             guestMenu.cancel(tabId: tabId)
             fileImport.cancel(tabId: tabId)
+            fileExport.cancel(tabId: tabId)
             rendererEpoch[tabId, default: 0] &+= 1
             RealmServiceBindings.shared.cancelAttachmentUploads(tabId)
             RealmServiceBindings.shared.retireSubscriptions(for: tabId)

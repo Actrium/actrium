@@ -55,6 +55,8 @@ export interface SwRuntimeConfig {
   package_url?: string;
 
   /** URL of the SW host WASM (wasm-pack output, e.g. "/packages/actr_sw_host_bg.wasm").
+   *  Set `?v=<build revision>` when deploying updated runtime WASM and glue so
+   *  the matching Service Worker takes control before initialization.
    *  Loaded independently of the workload; guest WASM and glue are authenticated
    *  resources inside the signed `.actr` package. */
   runtime_wasm_url?: string;

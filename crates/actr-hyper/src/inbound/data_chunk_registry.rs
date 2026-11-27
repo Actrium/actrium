@@ -59,7 +59,7 @@
 //! A worker is never resurrected after its channel closes: once unregistered or
 //! shut down, a stream stays gone until explicitly re-registered.
 
-use actr_protocol::{ActorResult, ActrId, DataChunk, PayloadType};
+use actr_protocol::{ActorResult, ActrError, ActrId, DataChunk, PayloadType};
 use futures_util::FutureExt as _;
 use futures_util::future::BoxFuture;
 use std::collections::HashMap;
@@ -192,6 +192,8 @@ impl WorkerDone {
 #[derive(Default)]
 struct StreamEntry {
     callback: Option<DataChunkCallback>,
+    owner: Option<ActrId>,
+    reply_cancellation: Option<CancellationToken>,
     worker: Option<StreamWorker>,
 }
 
@@ -380,22 +382,94 @@ impl DataChunkRegistry {
     /// # Arguments
     /// - `stream_id`: stream identifier (must be globally unique)
     /// - `callback`: data stream handler callback
+    #[cfg(test)]
     pub(crate) fn register(&self, stream_id: String, callback: DataChunkCallback) {
+        self.register_for_caller(stream_id, callback, None).unwrap();
+    }
+
+    pub(crate) fn register_for_caller(
+        &self,
+        stream_id: String,
+        callback: DataChunkCallback,
+        caller: Option<&ActrId>,
+    ) -> ActorResult<()> {
+        let bind_to_caller = self
+            .inner
+            .incoming_guard
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .is_some_and(|guard| guard.binds_streams_to_caller());
+        let owner = if bind_to_caller {
+            Some(caller.cloned().ok_or_else(|| {
+                ActrError::PermissionDenied("Stream registration requires a peer caller".into())
+            })?)
+        } else {
+            None
+        };
+        self.register_callback(stream_id, callback, owner, None)
+    }
+
+    pub(crate) fn register_peer_stream(
+        &self,
+        stream_id: String,
+        peer: ActrId,
+        callback: DataChunkCallback,
+    ) -> ActorResult<()> {
+        let cancellation = CancellationToken::new();
+        let registered = cancellation.clone();
+        let callback: DataChunkCallback = Arc::new(move |chunk, sender| {
+            if registered.is_cancelled() {
+                return Box::pin(async { Ok(()) });
+            }
+            callback(chunk, sender)
+        });
+        self.register_callback(stream_id, callback, Some(peer), Some(cancellation))
+    }
+
+    fn register_callback(
+        &self,
+        stream_id: String,
+        callback: DataChunkCallback,
+        owner: Option<ActrId>,
+        reply_cancellation: Option<CancellationToken>,
+    ) -> ActorResult<()> {
         let mut state = self
             .inner
             .state
             .lock()
             .expect("data stream registry state poisoned");
         if state.shutting_down || self.inner.shutdown.is_cancelled() {
+            if reply_cancellation.is_some() {
+                return Err(ActrError::Unavailable(
+                    "The stream registry is closed".into(),
+                ));
+            }
             tracing::debug!(
                 stream_id = %stream_id,
                 "data stream registry is shut down; ignoring register"
             );
-            return;
+            return Ok(());
         }
 
-        state.streams.entry(stream_id.clone()).or_default().callback = Some(callback);
+        let entry = state.streams.entry(stream_id.clone()).or_default();
+        if entry.callback.is_some()
+            && (entry.reply_cancellation.is_some() || reply_cancellation.is_some())
+        {
+            return Err(ActrError::InvalidArgument(
+                "The stream ID is already registered".into(),
+            ));
+        }
+        if entry.owner.is_some() && entry.owner != owner {
+            return Err(ActrError::PermissionDenied(
+                "The stream is registered to another Actor".into(),
+            ));
+        }
+        entry.owner = owner;
+        entry.callback = Some(callback);
+        entry.reply_cancellation = reply_cancellation;
         tracing::info!("📡 Registered data stream handler: {}", stream_id);
+        Ok(())
     }
 
     /// Unregister stream callback (drain semantics)
@@ -403,7 +477,16 @@ impl DataChunkRegistry {
     /// Removes the callback and drops the stored worker sender. The worker
     /// drains any already-queued chunks and then exits on its own; it is never
     /// resurrected.
+    #[cfg(test)]
     pub(crate) fn unregister(&self, stream_id: &str) {
+        self.unregister_for_caller(stream_id, None).unwrap();
+    }
+
+    pub(crate) fn unregister_for_caller(
+        &self,
+        stream_id: &str,
+        caller: Option<&ActrId>,
+    ) -> ActorResult<()> {
         let mut state = self
             .inner
             .state
@@ -411,7 +494,18 @@ impl DataChunkRegistry {
             .expect("data stream registry state poisoned");
 
         let should_remove = if let Some(entry) = state.streams.get_mut(stream_id) {
+            if let (Some(caller), Some(owner)) = (caller, entry.owner.as_ref())
+                && caller != owner
+            {
+                return Err(ActrError::PermissionDenied(
+                    "The stream is registered to another Actor".into(),
+                ));
+            }
             entry.callback = None;
+            if let Some(cancellation) = entry.reply_cancellation.take() {
+                cancellation.cancel();
+                entry.owner = None;
+            }
             if let Some(worker) = entry.worker.as_mut() {
                 // Dropping the sender closes the worker queue after any
                 // dispatch clones complete. The handle stays tracked so a
@@ -432,6 +526,7 @@ impl DataChunkRegistry {
         }
 
         tracing::info!("🚫 Unregistered data stream handler: {}", stream_id);
+        Ok(())
     }
 
     /// Force-close the registry during synchronous teardown.
@@ -513,7 +608,7 @@ impl DataChunkRegistry {
             .and_then(|guard| guard.stream_alias(&chunk.stream_id))
             .unwrap_or_else(|| chunk.stream_id.clone());
 
-        let (tx, callback) = match self.worker_tx(&stream_id).await {
+        let (tx, callback) = match self.worker_tx(&stream_id, &sender_id).await {
             Some(worker) => worker,
             None => return,
         };
@@ -649,6 +744,7 @@ impl DataChunkRegistry {
     async fn worker_tx(
         &self,
         stream_id: &str,
+        sender: &ActrId,
     ) -> Option<(mpsc::Sender<QueuedChunk>, DataChunkCallback)> {
         loop {
             let wait_for = {
@@ -669,6 +765,7 @@ impl DataChunkRegistry {
                 let Some(callback) = state
                     .streams
                     .get(stream_id)
+                    .filter(|entry| entry.owner.as_ref().is_none_or(|owner| owner == sender))
                     .and_then(|entry| entry.callback.clone())
                 else {
                     tracing::warn!("⚠️ No callback registered for stream: {}", stream_id);

@@ -58,6 +58,7 @@ export const HOST_SUPPORTED_METHODS: Readonly<Record<string, ReadonlySet<string>
   'host:speech': new Set(['recognize', 'onInterimResult', 'stop', 'onStateChange']),
   'host:tts': new Set(['speak', 'stop']),
   'host:file-import': new Set(['pick', 'openPreview', 'release']),
+  'host:file-export': new Set(['save']),
 };
 
 /** Modules with a real Host implementation, not just a contract declaration. */
@@ -111,6 +112,7 @@ export function createHostModules(options: {
   setTabTitle?: (title: string) => void;
   localStorage?: LocalStorageCall;
   pickFiles?: (input: FileImportPickInput) => Promise<FileImportPickOutput>;
+  saveFile?: HostModules['host:file-export']['save'];
   openFilePreview?: (fileId: string) => Promise<void>;
   releaseCachedFile?: (fileId: string) => Promise<void>;
   readCachedFile?: (fileId: string) => Promise<{ filename: string; base64: string }>;
@@ -388,8 +390,10 @@ export function createHostModules(options: {
       },
     },
     'host:file-export': {
-      save: async () => {
-        throw notImplemented('host:file-export', 'save');
+      save: async (input) => {
+        await options.authorizeCapability('host:file-export.save');
+        if (!options.saveFile) throw new Error('The host file export module is unavailable.');
+        return options.saveFile(input);
       },
     },
     'host:share': {

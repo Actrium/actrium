@@ -8,6 +8,7 @@
 import type { ReviewedUnknown } from '../shared';
 import { REF_RESULT_EVENT, RENDER_ERROR_EVENT } from '../shared/events';
 import { KBD_EVENT, KBD_SUBSCRIBE, KBD_UNSUBSCRIBE, type KeelKeyEvent } from '../shared/keyboard';
+import type { ScrollRequest } from '../shared/style-types';
 import type {
   ImageSource,
   LayoutEvent,
@@ -615,10 +616,7 @@ export interface ImageProps extends BaseProps {
   blurRadius?: number;
 }
 
-/**
- * ScrollView Component Props
- */
-export interface ScrollViewProps extends ViewProps {
+interface ScrollContainerProps extends ViewProps {
   horizontal?: boolean;
   showsVerticalScrollIndicator?: boolean;
   showsHorizontalScrollIndicator?: boolean;
@@ -634,6 +632,18 @@ export interface ScrollViewProps extends ViewProps {
   contentContainerStyle?: StyleProp;
   keyboardShouldPersistTaps?: 'always' | 'never' | 'handled';
   keyboardDismissMode?: 'none' | 'on-drag' | 'interactive';
+}
+
+/** ScrollView component props. */
+export interface ScrollViewProps extends ScrollContainerProps {
+  scrollRequest?: ScrollRequest;
+  /** Scroll to the end on subsequent native layout changes while enabled. */
+  scrollToEndOnLayout?: boolean;
+  /** Offset applied once when the mounted content is first ready. Defaults to start. */
+  initialScrollPosition?: 'start' | 'end';
+  /** Reports the offset once the initial end position has been applied. */
+  onInitialScrollComplete?: (offset: { x: number; y: number }) => void;
+  onContentSizeChange?: (width: number, height: number) => void;
 }
 
 /**
@@ -655,7 +665,7 @@ export interface TouchableOpacityProps extends BaseProps {
 /**
  * FlatList Component Props
  */
-export interface FlatListProps<T = unknown> extends ScrollViewProps {
+export interface FlatListProps<T = unknown> extends ScrollContainerProps {
   data: T[];
   renderItem: (info: { item: T; index: number }) => ReactNode;
   keyExtractor?: (item: T, index: number) => string;
@@ -873,7 +883,8 @@ export interface KeyboardAvoidingViewProps extends ViewProps {
 /**
  * SectionList Component Props (minimal typed surface).
  */
-export interface SectionListProps<ItemT = unknown, SectionT = unknown> extends ScrollViewProps {
+export interface SectionListProps<ItemT = unknown, SectionT = unknown>
+  extends ScrollContainerProps {
   sections: ReadonlyArray<{ data: ReadonlyArray<ItemT> } & SectionT>;
   renderItem?: (info: { item: ItemT; index: number }) => ReactNode;
   renderSectionHeader?: (info: { section: { data: ReadonlyArray<ItemT> } & SectionT }) => ReactNode;
@@ -883,7 +894,7 @@ export interface SectionListProps<ItemT = unknown, SectionT = unknown> extends S
 /**
  * VirtualizedList Component Props (minimal typed surface).
  */
-export interface VirtualizedListProps<ItemT = unknown> extends ScrollViewProps {
+export interface VirtualizedListProps<ItemT = unknown> extends ScrollContainerProps {
   data: ReadonlyArray<ItemT>;
   getItem: (data: ReadonlyArray<ItemT>, index: number) => ItemT;
   getItemCount: (data: ReadonlyArray<ItemT>) => number;

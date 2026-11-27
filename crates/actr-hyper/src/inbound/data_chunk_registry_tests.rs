@@ -149,6 +149,52 @@ fn unregister_removes_stream() {
     assert_eq!(reg.callback_len(), 0);
 }
 
+#[tokio::test]
+async fn peer_reply_registration_is_exclusive_and_discarded_on_unregister() {
+    let reg = DataChunkRegistry::new();
+    let first = ActrId {
+        serial_number: 1,
+        ..ActrId::default()
+    };
+    let second = ActrId {
+        serial_number: 2,
+        ..ActrId::default()
+    };
+    let (first_callback, first_harness, mut first_probe) = Harness::new();
+    let (second_callback, _, mut second_probe) = Harness::new();
+
+    reg.register("reply".into(), second_callback.clone());
+    assert!(
+        reg.register_peer_stream("reply".into(), first.clone(), first_callback.clone())
+            .is_err()
+    );
+    reg.unregister("reply");
+    reg.register_peer_stream("reply".into(), first.clone(), first_callback)
+        .unwrap();
+    assert!(
+        reg.register_for_caller("reply".into(), second_callback.clone(), None)
+            .is_err()
+    );
+
+    let release = first_harness.gate(1);
+    reg.dispatch(chunk_seq("reply", 99), second.clone(), RELIABLE)
+        .await;
+    reg.dispatch(chunk_seq("reply", 1), first.clone(), RELIABLE)
+        .await;
+    assert_eq!(first_probe.wait_started().await, 1);
+    reg.dispatch(chunk_seq("reply", 2), first.clone(), RELIABLE)
+        .await;
+    reg.unregister("reply");
+    reg.register_peer_stream("reply".into(), second.clone(), second_callback)
+        .unwrap();
+
+    release.send(()).unwrap();
+    reg.dispatch(chunk_seq("reply", 98), first, RELIABLE).await;
+    reg.dispatch(chunk_seq("reply", 3), second, RELIABLE).await;
+    assert_eq!(second_probe.wait_done().await, 3);
+    assert_eq!(first_probe.completions(), vec![1]);
+}
+
 #[test]
 fn clear_removes_all_streams_and_closes_registry() {
     let reg = DataChunkRegistry::new();

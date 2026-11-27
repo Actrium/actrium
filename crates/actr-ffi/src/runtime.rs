@@ -10,7 +10,7 @@ use crate::types::{
     PayloadType, ReconnectReason,
 };
 use crate::workload::{DynamicWorkload, RuntimeObservers, WebRtcPeerStateBridge};
-use actr_framework::{Bytes, Context as _, Dest};
+use actr_framework::{Bytes, Context as _, Dest, MaybeSendBoxFuture};
 use actr_hyper::{ActrRef, NetworkEventHandle, Node, Registered, WorkloadPackage};
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -716,6 +716,14 @@ impl ActrRefWrapper {
             .map_err(ActrError::from)
     }
 
+    /// Prepare a reliable RPC channel without invoking a business operation.
+    pub async fn prepare_peer_rpc(&self, target: ActrId, timeout_ms: i64) -> ActrResult<()> {
+        self.inner
+            .prepare_peer_rpc(&target.into(), timeout_ms)
+            .await
+            .map_err(ActrError::from)
+    }
+
     /// Trigger shutdown.
     pub fn shutdown(&self) {
         self.inner.shutdown();
@@ -863,19 +871,10 @@ impl ActrRefWrapper {
         stream_id: String,
         callback: Box<dyn crate::context::DataChunkCallback>,
     ) -> ActrResult<()> {
-        let callback: Arc<dyn crate::context::DataChunkCallback> = Arc::from(callback);
         self.inner
             .app_context()
             .await
-            .register_stream(stream_id, move |chunk, sender| {
-                let callback = callback.clone();
-                Box::pin(async move {
-                    callback
-                        .on_stream(chunk.into(), sender.into())
-                        .await
-                        .map_err(actr_protocol::ActrError::from)
-                })
-            })
+            .register_stream(stream_id, bridge_data_chunk_callback(callback))
             .await?;
         Ok(())
     }
@@ -889,7 +888,7 @@ impl ActrRefWrapper {
         Ok(())
     }
 
-    /// Register a Front DataStream for a single verified Service peer.
+    /// Register a Front DataStream for the selected Service peer.
     pub async fn register_service_stream(
         &self,
         stream_id: String,
@@ -902,10 +901,16 @@ impl ActrRefWrapper {
                 .ok_or_else(|| ActrError::InvalidArgument {
                     msg: "This actor was not created as a Front".into(),
                 })?;
-        router.register_stream(stream_id.clone(), service.into())?;
-        if let Err(error) = self.register_stream(stream_id.clone(), callback).await {
+        let context = self.inner.app_context().await;
+        let service: actr_protocol::ActrId = service.into();
+        router.register_stream(stream_id.clone(), service.clone())?;
+        if let Err(error) = context.register_peer_stream(
+            stream_id.clone(),
+            service,
+            bridge_data_chunk_callback(callback),
+        ) {
             router.unregister_stream(&stream_id);
-            return Err(error);
+            return Err(error.into());
         }
         Ok(())
     }
@@ -978,6 +983,26 @@ async fn load_linked_init(
     crate::logger::init_observability(init.runtime_config().observability.clone());
     info!(config_path = %config_path, "Creating linked runtime wrapper");
     Ok(init)
+}
+
+fn bridge_data_chunk_callback(
+    callback: Box<dyn crate::context::DataChunkCallback>,
+) -> impl Fn(
+    actr_protocol::DataChunk,
+    actr_protocol::ActrId,
+) -> MaybeSendBoxFuture<'static, actr_protocol::ActorResult<()>>
++ Send
++ Sync {
+    let callback: Arc<dyn crate::context::DataChunkCallback> = Arc::from(callback);
+    move |chunk, sender| {
+        let callback = callback.clone();
+        Box::pin(async move {
+            callback
+                .on_stream(chunk.into(), sender.into())
+                .await
+                .map_err(actr_protocol::ActrError::from)
+        })
+    }
 }
 
 async fn new_from_front_inner(
@@ -1261,6 +1286,15 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
         node.clone()
             .with_actrium_service(config, ActriumServicePolicies::allow_all())
             .expect("an event-only peer accepts an empty deny-all RPC table");
+        if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+            assert!(matches!(
+                node.start().await,
+                Err(ActrError::InvalidArgument { msg })
+                    if msg.contains("Actor channel authentication")
+            ));
+            server.shutdown().await;
+            return;
+        }
         let actr_ref = node
             .start()
             .await
@@ -1302,6 +1336,15 @@ echo = { actr_type = "acme/EchoService@1.0.0" }
         node.clone()
             .with_actrium_service(config, ActriumServicePolicies::allow_all())
             .expect("the same node accepts a corrected config");
+        if !actr_hyper::ACTOR_CHANNEL_AUTHENTICATION_ENABLED {
+            assert!(matches!(
+                node.start().await,
+                Err(ActrError::InvalidArgument { msg })
+                    if msg.contains("Actor channel authentication")
+            ));
+            server.shutdown().await;
+            return;
+        }
         let actr_ref = node
             .start()
             .await
