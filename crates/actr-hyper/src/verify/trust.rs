@@ -19,7 +19,8 @@
 
 use std::sync::Arc;
 
-use actr_pack::{ValidatedActorIdentity, VerifiedRuntimePackage};
+use actr_pack::{InspectedActorPackage, ValidatedActorIdentity, VerifiedRuntimePackage};
+use actr_protocol::ActrType;
 use async_trait::async_trait;
 use ed25519_dalek::VerifyingKey;
 
@@ -34,6 +35,16 @@ use crate::verify::cert_cache::PublisherCertCache;
 #[async_trait]
 pub trait TrustProvider: Send + Sync + std::fmt::Debug {
     async fn verify_package(&self, bytes: &[u8]) -> HyperResult<VerifiedRuntimePackage>;
+
+    /// Authenticate bounded OCI metadata and return the publisher key for payload verification.
+    async fn verify_oci_metadata(
+        &self,
+        _metadata: &InspectedActorPackage,
+    ) -> HyperResult<VerifyingKey> {
+        Err(HyperError::Config(
+            "trust provider does not support OCI metadata".into(),
+        ))
+    }
 
     /// Verify while limiting decompression of signed package payloads. Hyper's
     /// workload-loading path always calls this method with its configured
@@ -81,7 +92,7 @@ fn verify_ed25519_manifest_bounded(
     Ok(verified)
 }
 
-fn pack_err_to_hyper(e: actr_pack::PackError) -> HyperError {
+pub(crate) fn pack_err_to_hyper(e: actr_pack::PackError) -> HyperError {
     match e {
         actr_pack::PackError::SignatureVerificationFailed(msg) => {
             HyperError::SignatureVerificationFailed(msg)
@@ -150,6 +161,16 @@ impl StaticTrust {
 
 #[async_trait]
 impl TrustProvider for StaticTrust {
+    async fn verify_oci_metadata(
+        &self,
+        metadata: &InspectedActorPackage,
+    ) -> HyperResult<VerifyingKey> {
+        metadata
+            .verify_signature(&self.pubkey)
+            .map_err(pack_err_to_hyper)?;
+        Ok(self.pubkey)
+    }
+
     async fn verify_package(&self, bytes: &[u8]) -> HyperResult<VerifiedRuntimePackage> {
         verify_ed25519_manifest(bytes, &self.pubkey)
     }
@@ -220,18 +241,8 @@ impl RegistryTrust {
             )
         })?;
 
-        // Pre-flight the unauthenticated locator fields before they are used for
-        // the key lookup. This is NOT a trust decision — the signature check
-        // below establishes authenticity. It only ensures the fields are
-        // syntactically safe to place into a registry URL / cache key (a bad
-        // identity must not trigger a certificate HTTP lookup at all).
-        let identity = ValidatedActorIdentity::from_actor_type(pack_manifest.actor_type())
-            .map_err(|error| HyperError::InvalidManifest(error.to_string()))?;
-        validate_key_id_for_lookup(key_id)?;
-
         let pubkey = self
-            .cache
-            .get_or_fetch(identity.publisher(), Some(key_id))
+            .key_for_actor(pack_manifest.actor_type(), key_id)
             .await?;
 
         match max_entry_bytes {
@@ -241,10 +252,38 @@ impl RegistryTrust {
             None => verify_ed25519_manifest(bytes, &pubkey),
         }
     }
+
+    async fn key_for_actor(&self, actor: ActrType, key_id: &str) -> HyperResult<VerifyingKey> {
+        // Unauthenticated fields are lookup locators only. Signature verification
+        // with the registry's key establishes authenticity after the lookup.
+        let identity = ValidatedActorIdentity::from_actor_type(actor)
+            .map_err(|error| HyperError::InvalidManifest(error.to_string()))?;
+        validate_key_id_for_lookup(key_id)?;
+        self.cache
+            .get_or_fetch(identity.publisher(), Some(key_id))
+            .await
+    }
 }
 
 #[async_trait]
 impl TrustProvider for RegistryTrust {
+    async fn verify_oci_metadata(
+        &self,
+        metadata: &InspectedActorPackage,
+    ) -> HyperResult<VerifyingKey> {
+        let manifest = &metadata.manifest;
+        let actor = ActrType {
+            publisher: manifest.actor.publisher.clone(),
+            name: manifest.actor.name.clone(),
+            version: manifest.actor.version.clone(),
+        };
+        let key = self
+            .key_for_actor(actor, &manifest.signature.key_id)
+            .await?;
+        metadata.verify_signature(&key).map_err(pack_err_to_hyper)?;
+        Ok(key)
+    }
+
     async fn verify_package(&self, bytes: &[u8]) -> HyperResult<VerifiedRuntimePackage> {
         self.verify_package_inner(bytes, None).await
     }
@@ -284,6 +323,20 @@ impl ChainTrust {
 
 #[async_trait]
 impl TrustProvider for ChainTrust {
+    async fn verify_oci_metadata(
+        &self,
+        metadata: &InspectedActorPackage,
+    ) -> HyperResult<VerifyingKey> {
+        let mut last_error = HyperError::SignatureVerificationFailed("empty trust chain".into());
+        for provider in &self.providers {
+            match provider.verify_oci_metadata(metadata).await {
+                Ok(key) => return Ok(key),
+                Err(error) => last_error = error,
+            }
+        }
+        Err(last_error)
+    }
+
     async fn verify_package(&self, bytes: &[u8]) -> HyperResult<VerifiedRuntimePackage> {
         let mut last_err: Option<HyperError> = None;
         for p in &self.providers {

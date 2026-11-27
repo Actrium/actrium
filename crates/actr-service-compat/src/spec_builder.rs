@@ -183,6 +183,36 @@ pub fn self_contained_unary_routes(source: &str) -> Result<std::collections::BTr
     Ok(routes)
 }
 
+/// Validate and list the routes of an OCI v1 RETURN-only Proto contract.
+pub fn validate_oci_rpc_routes(source: &str) -> Result<std::collections::BTreeSet<String>> {
+    let descriptor =
+        self_contained_descriptor(source).map_err(CompatibilityError::ProtoSignError)?;
+    let package = descriptor.package();
+    let mut routes = std::collections::BTreeSet::new();
+    for service in &descriptor.service {
+        for method in &service.method {
+            // OCI v1 uses the default reliable lane and RETURN semantics.
+            // Custom method options can select another lane or reply mode.
+            if method.client_streaming() || method.server_streaming() || method.options.is_some() {
+                return Err(CompatibilityError::ProtoSignError(anyhow::anyhow!(
+                    "OCI RPC methods must be unary RETURN routes using the default reliable lane"
+                )));
+            }
+            let mut route = format!("{}.{}", service.name(), method.name());
+            if !package.is_empty() {
+                route = format!("{package}.{route}");
+            }
+            routes.insert(route);
+        }
+    }
+    if routes.is_empty() {
+        return Err(CompatibilityError::ProtoSignError(anyhow::anyhow!(
+            "OCI actor.receive requires at least one route"
+        )));
+    }
+    Ok(routes)
+}
+
 fn published_proto_name(name: &str) -> &str {
     name.trim_end_matches(".proto")
 }

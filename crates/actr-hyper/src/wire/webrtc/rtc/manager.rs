@@ -666,6 +666,41 @@ impl RtcConnectionManager {
         }
     }
 
+    /// Wait for queued reliable RPC data to leave SCTP's send pipeline.
+    #[cfg(all(
+        feature = "oci-engine",
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    pub(crate) async fn drain_rpc_sends(&self) {
+        use super::status::LaneKind;
+
+        let lanes: Vec<_> = self
+            .peers
+            .read()
+            .await
+            .values()
+            .filter_map(|slot| match slot {
+                PeerSlot::Active(entry) => {
+                    let generation = entry.handle.snapshot().pc_generation;
+                    entry.handle.lane_handle(generation, LaneKind::RpcReliable)
+                }
+                PeerSlot::Closing(_) => None,
+            })
+            .collect();
+        join_all(lanes.into_iter().map(|lane| async move {
+            while lane.is_ready()
+                && matches!(lane.channel().outstanding_bytes().await, Ok(bytes) if bytes > 0)
+            {
+                tokio::select! {
+                    _ = lane.cancellation().cancelled() => break,
+                    _ = crate::timer::sleep(crate::timer::ids::OCI_RTC_SEND_DRAIN_POLL, std::time::Duration::from_millis(10)) => {}
+                }
+            }
+        }))
+        .await;
+    }
+
     /// Registry lifecycle admission used by PeerGate. This does not derive or
     /// publish RTC status; it only prevents a new business send from dialing a
     /// replacement while the old controller is still being closed.

@@ -569,14 +569,19 @@ async fn explicit_close_closes_each_data_channel_before_the_pc() {
     h.handle.close().await.expect("send close");
     timeout(WAIT, async {
         loop {
-            if !h.handle.snapshot().sendable {
+            if !h.handle.snapshot().sendable
+                && channel
+                    .close_calls
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    != 0
+            {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
     .await
-    .expect("peer did not converge after close");
+    .expect("explicit close did not close the reliable lane");
 
     assert!(
         channel

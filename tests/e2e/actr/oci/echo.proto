@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package echo;
+
+message Payload {
+  bytes data = 1;
+}
+
+service Echo {
+  rpc Ping(Payload) returns (Payload);
+  rpc Proxy(Payload) returns (Payload);
+  rpc Fetch(Payload) returns (Payload);
+  rpc Block(Payload) returns (Payload);
+}

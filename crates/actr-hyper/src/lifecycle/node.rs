@@ -2456,19 +2456,62 @@ impl Inner {
             caller_id: caller_id.cloned(),
             request_id: envelope.request_id.clone(),
         };
-        #[cfg(feature = "wasm-engine")]
+        #[cfg(all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
+        if let Some(oci) = self.workload_dispatch.oci_admission() {
+            if let Err(error) = oci.check(&envelope.route_key) {
+                return ready_continuation(Err(error));
+            }
+        }
+
         let authorize_inbound = {
             let invocation = dispatch_ctx.clone();
             let route = envelope.route_key.clone();
-            move || match &broker {
-                Some(broker) => broker.authorize_inbound(&invocation, &route),
-                None => Ok(()),
+            #[cfg(all(
+                feature = "oci-engine",
+                target_os = "linux",
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            ))]
+            let oci = self.workload_dispatch.oci_admission().cloned();
+            move || -> ActorResult<()> {
+                let _ = (&invocation, &route);
+                #[cfg(feature = "wasm-engine")]
+                if let Some(broker) = &broker {
+                    broker.authorize_inbound(&invocation, &route)?;
+                }
+                #[cfg(all(
+                    feature = "oci-engine",
+                    target_os = "linux",
+                    any(target_arch = "x86_64", target_arch = "aarch64")
+                ))]
+                if let Some(oci) = &oci {
+                    oci.authorize_inbound(&invocation, &route)?;
+                }
+                Ok(())
             }
         };
-        #[cfg(feature = "wasm-engine")]
         if let Err(error) = authorize_inbound() {
             return ready_continuation(Err(error));
         }
+
+        #[cfg(all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
+        let scope = if scope.is_none()
+            && self.workload_dispatch.oci_admission().is_some()
+            && envelope.timeout_ms > 0
+        {
+            let deadline = tokio::time::Instant::now()
+                + std::time::Duration::from_millis((envelope.timeout_ms as u64).min(30_000));
+            Some(crate::request_scope::RequestScope::root_at(deadline))
+        } else {
+            scope
+        };
 
         // 0.5. Deduplication: share results only among retries of the same
         // operation from the same authenticated caller.
@@ -2509,7 +2552,6 @@ impl Inner {
                     if scope.as_ref().is_some_and(|scope| !scope.is_active()) {
                         return IncomingOutcome::Replied(Err(ActrError::TimedOut));
                     }
-                    #[cfg(feature = "wasm-engine")]
                     if let Err(error) = authorize_inbound() {
                         return IncomingOutcome::Replied(Err(error));
                     }
@@ -2520,7 +2562,6 @@ impl Inner {
                 if scope.as_ref().is_some_and(|scope| !scope.is_active()) {
                     return ready_continuation(Err(ActrError::TimedOut));
                 }
-                #[cfg(feature = "wasm-engine")]
                 if let Err(error) = authorize_inbound() {
                     return ready_continuation(Err(error));
                 }
@@ -3036,6 +3077,12 @@ impl Inner {
             crate::workload::Workload::Wasm(_) => None,
             #[cfg(feature = "dynclib-engine")]
             crate::workload::Workload::DynClib(_) => None,
+            #[cfg(all(
+                feature = "oci-engine",
+                target_os = "linux",
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            ))]
+            crate::workload::Workload::Oci(_) => None,
         };
 
         #[cfg(feature = "dynclib-engine")]
@@ -4406,6 +4453,33 @@ impl Inner {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 4.6. Start Inproc receive loop (Shell → Guest)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        #[cfg(all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
+        let oci = node_ref.workload_dispatch.oci_admission();
+        #[cfg(all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
+        let drain_oci_replies = oci.is_some();
+        #[cfg(not(all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )))]
+        let drain_oci_replies = false;
+
+        // A dead OCI Guest stops RPC intake first. Keep the Node's transports
+        // alive until the request pumps have sent their admitted replies.
+        let rpc_intake = shutdown_token.child_token();
+        let (inproc_request_done, inproc_requests_drained) = tokio::sync::oneshot::channel::<()>();
+        let (inproc_response_done, _inproc_responses_drained) =
+            tokio::sync::oneshot::channel::<()>();
+        let (mailbox_done, _mailbox_drained) = tokio::sync::oneshot::channel::<()>();
+
         if let Some(shell_to_workload) = &node_ref.shell_to_workload {
             tracing::info!("🔄 Starting Inproc receive loop (Shell → Guest)");
             // Start Guest receive loop (Shell → Guest REQUEST)
@@ -4418,7 +4492,9 @@ impl Inner {
                         ActrError::Unavailable(format!("Failed to get guest receive lane: {e}"))
                     })?;
                 let response_tx = workload_to_shell.clone();
-                let shutdown = shutdown_token.clone();
+                let request_transport = shell_to_workload.clone();
+                let shutdown = rpc_intake.clone();
+                let lifetime = shutdown_token.clone();
                 let outstanding_replies = node_ref.outstanding_replies.clone();
                 let max_pending_replies = node_ref.max_pending_replies;
                 let hook_cb = node_hook_callback.clone();
@@ -4427,6 +4503,9 @@ impl Inner {
                 let scope_registry = shell_to_workload.scope_registry().clone();
 
                 let inproc_handle = tokio::spawn(async move {
+                    // Dropping the sender also releases the response pump on
+                    // task failure or cancellation.
+                    let _done = inproc_request_done;
                     use futures_util::StreamExt as _;
                     use futures_util::stream::FuturesUnordered;
                     use std::sync::atomic::{AtomicBool, Ordering};
@@ -4445,6 +4524,7 @@ impl Inner {
                     let pending_saturated = AtomicBool::new(false);
                     let mut inflight: FuturesUnordered<Pin<Box<dyn Future<Output = ()> + Send>>> =
                         FuturesUnordered::new();
+                    let mut draining = false;
 
                     loop {
                         // RFC-0323 §7 rising-edge backpressure signal. Fires
@@ -4483,9 +4563,16 @@ impl Inner {
                         }
                         tokio::select! {
                             biased;
-                            _ = shutdown.cancelled() => {
+                            _ = shutdown.cancelled(), if !draining => {
                                 tracing::info!("📭 Guest receive loop (Shell → Guest) received shutdown signal");
-                                break;
+                                if drain_oci_replies && !lifetime.is_cancelled() {
+                                    // Return the admission failure to requests already
+                                    // queued locally, and reject further submissions.
+                                    request_transport.close_reliable_receive().await;
+                                    draining = true;
+                                } else {
+                                    break;
+                                }
                             }
                             // Drain finished reply continuations (gate-on only;
                             // inert when `inflight` is empty).
@@ -4618,6 +4705,9 @@ impl Inner {
                                         }
                                     }
                                     Err(e) => {
+                                        if draining {
+                                            break;
+                                        }
                                         tracing::error!(
                                             severity = 8,
                                             error_category = "transport_error",
@@ -4654,14 +4744,28 @@ impl Inner {
                         ActrError::Unavailable(format!("Failed to get shell receive lane: {e}"))
                     })?;
                 let request_mgr = shell_to_workload.clone();
+                let response_transport = workload_to_shell.clone();
                 let shutdown = shutdown_token.clone();
 
                 let shell_receive_handle = tokio::spawn(async move {
+                    let _done = inproc_response_done;
+                    let stop = async {
+                        if drain_oci_replies {
+                            let _ = inproc_requests_drained.await;
+                        } else {
+                            shutdown.cancelled().await;
+                        }
+                    };
+                    tokio::pin!(stop);
+                    let mut draining = false;
                     loop {
                         tokio::select! {
-                            _ = shutdown.cancelled() => {
-                                tracing::info!("📭 Shell receive loop (Guest → Shell) received shutdown signal");
-                                break;
+                            _ = &mut stop, if !draining => {
+                                if !drain_oci_replies {
+                                    break;
+                                }
+                                response_transport.close_reliable_receive().await;
+                                draining = true;
                             }
                             envelope_result = response_rx_lane.recv_envelope() => {
                                 match envelope_result {
@@ -4681,6 +4785,9 @@ impl Inner {
                                         }
                                     }
                                     Err(e) => {
+                                        if draining {
+                                            break;
+                                        }
                                         tracing::error!(
                                             severity = 8,
                                             error_category = "transport_error",
@@ -4876,13 +4983,14 @@ impl Inner {
             let mailbox = node_ref.mailbox.clone();
             let ws_gate = node_ref.websocket_gate.clone();
             let rtc_route: RtcResponseRoute = node_ref.rtc_manager.clone();
-            let shutdown = shutdown_token.clone();
+            let shutdown = rpc_intake.clone();
             let mailbox_enqueue_wake = mailbox_enqueue_wake.clone();
             let outstanding_replies = node_ref.outstanding_replies.clone();
             let max_pending_replies = node_ref.max_pending_replies;
             let hook_cb = node_hook_callback.clone();
 
             let mailbox_handle = tokio::spawn(async move {
+                let _done = mailbox_done;
                 use futures_util::StreamExt as _;
                 use futures_util::stream::FuturesUnordered;
                 use std::sync::atomic::{AtomicBool, Ordering};
@@ -5264,10 +5372,60 @@ impl Inner {
             )
             .await
             {
+                #[cfg(all(
+                    feature = "oci-engine",
+                    target_os = "linux",
+                    any(target_arch = "x86_64", target_arch = "aarch64")
+                ))]
+                if node_ref.workload_dispatch.oci_admission().is_some() {
+                    shutdown_token.cancel();
+                    return Err(e);
+                }
                 tracing::warn!(error = %e, "workload on_ready returned Err");
             }
         }
 
+        #[cfg(all(
+            feature = "oci-engine",
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
+        if let Some(oci) = oci {
+            let mut status = oci.status();
+            let lifetime = shutdown_token.clone();
+            let rtc = node_ref.rtc_manager.clone();
+            task_handles.push(tokio::spawn(async move {
+                tokio::select! {
+                    _ = lifetime.cancelled() => return,
+                    failed = status.wait_for(|phase| *phase == crate::oci::Status::Failed) => {
+                        if failed.is_err() {
+                            return;
+                        }
+                    }
+                }
+                tracing::error!("OCI Guest failed, draining its Node's RPC replies");
+                rpc_intake.cancel();
+                let drain = async {
+                    let _ = tokio::join!(_inproc_responses_drained, _mailbox_drained);
+                    // Sending on a reliable RTC lane queues data for SCTP.
+                    // Keep the connections alive until those sends drain.
+                    if let Some(rtc) = rtc {
+                        rtc.drain_rpc_sends().await;
+                    }
+                };
+                if crate::timer::timeout(
+                    crate::timer::ids::OCI_REPLY_DRAIN,
+                    Duration::from_secs(5),
+                    drain,
+                )
+                .await
+                .is_err()
+                {
+                    tracing::warn!("OCI reply drain exceeded its shutdown deadline");
+                }
+                lifetime.cancel();
+            }));
+        }
         // Create ActrRefShared
         let peer_runtime = match (
             node_ref.actrium_peer.clone(),
@@ -5285,6 +5443,12 @@ impl Inner {
             credential_state,
             session_state: Some(session_state),
             shutdown_token,
+            #[cfg(all(
+                feature = "oci-engine",
+                target_os = "linux",
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            ))]
+            oci: node_ref.workload_dispatch.oci_admission().cloned(),
             task_handles: Mutex::new(task_handles),
             rtc_manager: rtc_manager.clone(),
             actor_signer,

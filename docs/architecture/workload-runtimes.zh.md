@@ -80,6 +80,8 @@ Host
         │   └── Wasmtime Engine
         ├── Actr Native Runtime                 actr.native/1
         │   └── Dynamic Library Engine
+        ├── Actr OCI Runtime                    actr.oci/1
+        │   └── Syd OCI Engine
         ├── Actr Linked Runtime                 actr.linked/1
         │   └── In-Process Engine
         └── Keel Guest Runtime                  keel.guest/1
@@ -119,6 +121,7 @@ Keel Guest Runtime 与其他 Profile Runtime 在 Hyper 层平级。Keel 内部�
 | --- | --- | --- | --- |
 | `actr.component/1` | Actr Component Runtime | Wasmtime Component Runtime | `actr-hyper-component-wasmtime` |
 | `actr.native/1` | Actr Native Runtime | Dylib Native Runtime | `actr-hyper-native-dylib` |
+| `actr.oci/1` | Actr OCI Runtime | Syd OCI Runtime | `actr-hyper` 的 `oci-engine` feature |
 | `actr.linked/1` | Actr Linked Runtime | In-Process Linked Runtime | `actr-hyper-linked-inproc` |
 | `keel.guest/1` | Keel Guest Runtime | Keel Guest Runtime for Hyper | `actr-hyper-keel` |
 
@@ -206,6 +209,14 @@ Keel 的适配层，不代表整个 Keel 项目。它负责：
 
 Keel 自身还包含 Host UI、Guest SDK、renderer、contracts、devtools 和 bundler。Hermes、JSC、
 QuickJS、Keel WASM 等属于 Keel Sandbox Engine，是 Keel Guest Runtime 的内部下一级。
+
+### 7.5 Actr OCI Runtime
+
+`actr.oci/1` 定义内含完整单平台 OCI 镜像的包执行契约。包内
+`workload.entry` 指向 `index.json`，签名的 `[workload.oci]` 固定镜像
+digest、平台、IPC 版本及 Guest 参数。rootless Syd OCI 支持 Linux x86_64
+和 aarch64，镜像必须匹配宿主架构。文件、HTTPS 和 Actor RPC 按包声明与宿主授权加载。
+完整配置见[英文 OCI 工作负载指南](oci-workloads.md)。
 
 ## 8. Package 声明
 

@@ -137,6 +137,7 @@ fn runtime_config(
         storage_root: None,
         wasi_data_dir: None,
         wasi_data_access: actr_config::WasiDataAccess::default(),
+        oci: None,
         actrium: None,
     }
 }

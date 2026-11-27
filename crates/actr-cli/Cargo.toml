@@ -26,6 +26,7 @@ default = ["dynclib-engine", "opentelemetry"]
 test-utils = ["dep:actr-mock-loran", "dep:rusqlite"]
 wasm-engine = ["actr-hyper/wasm-engine"]
 dynclib-engine = ["actr-hyper/dynclib-engine"]
+oci-engine = ["actr-hyper/oci-engine"]
 opentelemetry = ["actr-hyper/opentelemetry", "actr-config/opentelemetry"]
 
 [[bin]]

@@ -18,6 +18,7 @@ workspace = true
 default = []
 wasm-engine = ["dep:cap-primitives", "dep:libc", "dep:wasmtime", "dep:wasmtime-wasi", "dep:windows-sys"]
 dynclib-engine = ["dep:libloading"]
+oci-engine = ["actr-protocol/oci-ipc", "dep:libc"]
 opentelemetry = [
   "actr-config/opentelemetry",
   "dep:opentelemetry",
@@ -162,6 +163,9 @@ libloading = { version = "0.8", optional = true }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"], optional = true }
 
+[target.'cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))'.dependencies]
+libc = { version = "0.2", optional = true }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { version = "0.2", optional = true }
 
@@ -203,3 +207,8 @@ actr-config.workspace = true
 actr-hyper = { path = ".", features = ["test-utils"] }
 actr-framework = { workspace = true, features = ["test-utils"] }
 tracing-log = "0.2"
+
+[[bin]]
+name = "actr-oci-supervisor"
+path = "src/bin/actr_oci_supervisor.rs"
+required-features = ["oci-engine"]
