@@ -947,8 +947,21 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             logger.warning("⚠️ [updateTabURL] Tab not found: \(tabId)")
             return
         }
-        // WebKit can report a URL from the old page after the tab has changed content.
-        guard case .web = tabs[index].contentType else { return }
+        // WebKit can report a URL from the old page after the tab has been
+        // explicitly switched to non-web content (Realm, package, or system
+        // page); reject those late updates. A web tab that merely navigated
+        // to about:blank still owns its webview (an address-bar about:blank
+        // becomes the system start page instead), so it must keep accepting
+        // URL updates — otherwise Back cannot restore the previous page.
+        guard tabs[index].systemTabType == nil,
+              tabs[index].bundleFingerprint == nil,
+              let currentURL = tabs[index].url,
+              currentURL.scheme == "http" || currentURL.scheme == "https"
+                || currentURL.absoluteString.hasPrefix("about:blank")
+        else {
+            logger.debug("🔗 [updateTabURL] Ignored \(url.absoluteString) for non-web tab \(tabId)")
+            return
+        }
         let oldURL = tabs[index].url?.absoluteString ?? "nil"
         tabs[index].url = url
         logger.notice("🔗 [updateTabURL] Tab \(tabId) URL updated from \(oldURL) to \(url.absoluteString)")
@@ -1814,7 +1827,42 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
                     admitted = true
                 } else if admission.isOpen {
                     await pendingRealmInvites.wait(for: realmName)
-                    guard try profileIsCurrent() else { return }
+                    try checkCurrent()
+                    if try !profileIsCurrent() {
+                        // A competing navigation — typically an invite exchange
+                        // for the same Realm — accepted a newer Profile while
+                        // this link waited its turn. Adopt that verified
+                        // snapshot instead of silently dropping the navigation.
+                        logger.notice("🔗 [navigateCurrentTab] Profile advanced while waiting for an invite; re-verifying \(realmName)")
+                        guard let latest = try RealmProfileStore.currentRealm(realmName, preferences: realmPreferences)
+                        else {
+                            throw NSError(
+                                domain: "ActrDiscovery", code: 26,
+                                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                                    "The Realm Profile changed while this link was waiting. Please try again.",
+                                    comment: "Actr realm profile advanced while waiting error")])
+                        }
+                        try validateProfile(latest.body)
+                        guard let refreshed = verifiedUpdate, refreshed.profile != nil else { return }
+                        try saveRealmTrust(refreshed.stateJson, .profile, name: realmName)
+                        let refreshedAdmission = try RealmJoinService.VerifiedProfile(
+                            body: latest.body, accepted: latest.accepted)
+                        guard refreshedAdmission.isOpen else {
+                            throw NSError(
+                                domain: "ActrDiscovery", code: 26,
+                                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                                    "The Realm Profile changed while this link was waiting. Please try again.",
+                                    comment: "Actr realm profile advanced while waiting error")])
+                        }
+                        admission = refreshedAdmission
+                        guard try profileIsCurrent() else {
+                            throw NSError(
+                                domain: "ActrDiscovery", code: 26,
+                                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString(
+                                    "The Realm Profile changed while this link was waiting. Please try again.",
+                                    comment: "Actr realm profile advanced while waiting error")])
+                        }
+                    }
                     try await joinOpenRealm(admission)
                     admitted = true
                 } else {
@@ -2613,6 +2661,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         // For web content (http/https), use WebView's reload
         if sourceURL.scheme == "http" || sourceURL.scheme == "https" {
             logger.notice("🔄 [reloadCurrentTab] Web Content, Call WebView reload")
+            // A user-requested reload supersedes a pending Realm load, just
+            // like toolbar Back/Forward. Script-driven location.reload()
+            // never reaches this path, so it cannot cancel the load.
+            webTabDidActivateLink(id)
             WebViewHolderManager.shared.existingHolder(for: id)?.reload()
             return
         }

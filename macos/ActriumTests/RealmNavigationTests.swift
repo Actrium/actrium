@@ -76,7 +76,7 @@ final class RealmNavigationTests: XCTestCase {
             defer { window.close() }
             await loadWebLink(in: holder)
             let linkActivated = expectation(description: "WebKit allowed a user-activated main-frame link")
-            holder.onMainFrameLinkActivated = {
+            holder.onUserInitiatedMainFrameNavigation = {
                 view.webTabDidActivateLink(tabId)
                 linkActivated.fulfill()
             }
@@ -122,7 +122,7 @@ final class RealmNavigationTests: XCTestCase {
             view.updateTabURL(for: tabId, url: url)
             navigationFinished.fulfill()
         }
-        holder.onMainFrameLinkActivated = {
+        holder.onUserInitiatedMainFrameNavigation = {
             XCTFail("A scripted link was reported as a user click")
             view.webTabDidActivateLink(tabId)
         }
@@ -141,6 +141,252 @@ final class RealmNavigationTests: XCTestCase {
     func testClosingWindowInvalidatesAPendingRealmLoad() async throws {
         try await assertNoEnrollment { view in
             view.invalidateRealmNavigationForWindowClose()
+        }
+    }
+
+    @MainActor
+    func testBackFromACompletedBlankPageRestoresTheWebURL() throws {
+        let view = BrowserViewModel(
+            realmPreferences: try makePreferences(),
+            saveBrowserSession: { _, _ in }
+        )
+        view.navigateCurrentTab(to: "https://page.example/")
+        let tabId = try XCTUnwrap(view.currentTabId)
+        let blank = try XCTUnwrap(URL(string: "about:blank"))
+        view.updateTabURL(for: tabId, url: blank)
+        XCTAssertEqual(view.tabs.first { $0.id == tabId }?.url, blank)
+        // A completed blank navigation classifies the tab as empty, but its
+        // webview still owns it: the URL WebKit reports when the user goes
+        // Back must land, or the tab stays blank forever.
+        let restored = try XCTUnwrap(URL(string: "https://page.example/"))
+        view.updateTabURL(for: tabId, url: restored)
+        XCTAssertEqual(view.tabs.first { $0.id == tabId }?.url, restored)
+    }
+
+    @MainActor
+    func testSystemPageTabRejectsLateWebURLUpdates() throws {
+        let view = BrowserViewModel(
+            realmPreferences: try makePreferences(),
+            saveBrowserSession: { _, _ in }
+        )
+        view.navigateCurrentTab(to: "https://page.example/")
+        let tabId = try XCTUnwrap(view.currentTabId)
+        view.navigateCurrentTab(to: "about:history")
+        let late = try XCTUnwrap(URL(string: "https://page.example/late"))
+        view.updateTabURL(for: tabId, url: late)
+        XCTAssertEqual(view.tabs.first { $0.id == tabId }?.url?.absoluteString, "about:history")
+    }
+
+    @MainActor
+    func testTrackpadHistoryGestureSupersedesAPendingRealmLoad() async throws {
+        try await assertNoEnrollment { view in
+            let tabId = try XCTUnwrap(view.currentTabId)
+            let holder = WebViewHolder()
+            // Two distinct URLs so WebKit records a back-forward history entry.
+            for page in ["first", "second"] {
+                let ready = expectation(description: "Page \(page) finished loading")
+                holder.onNavigationFinished = { _, _ in ready.fulfill() }
+                holder.webView.load(URLRequest(url: try XCTUnwrap(URL(string: "about:blank?\(page)"))))
+                await fulfillment(of: [ready], timeout: 5)
+            }
+            holder.onNavigationFinished = nil
+            let navigatedBack = expectation(description: "WebKit allowed the trackpad history navigation")
+            holder.onUserInitiatedMainFrameNavigation = {
+                view.webTabDidActivateLink(tabId)
+                navigatedBack.fulfill()
+            }
+            // A trackpad back swipe reaches the web view as a scroll stream
+            // right before WebKit performs the traversal; inject the evidence.
+            let scroll = try XCTUnwrap(CGEvent(
+                scrollWheelEvent2Source: nil, units: .pixel,
+                wheelCount: 2, wheel1: 0, wheel2: -10, wheel3: 0))
+            scroll.setIntegerValueField(
+                .scrollWheelEventScrollPhase, value: Int64(NSEvent.Phase.changed.rawValue))
+            holder.webView.scrollWheel(with: try XCTUnwrap(NSEvent(cgEvent: scroll)))
+            holder.goBack()
+            await fulfillment(of: [navigatedBack], timeout: 5)
+        }
+    }
+
+    @MainActor
+    func testScriptedHistoryTraversalKeepsAPendingRealmLoad() async throws {
+        let documents = try discoveryDocuments(membership: "invite-only")
+        let profile = NavigationGate()
+        defer { profile.release() }
+        let view = BrowserViewModel(
+            realmPreferences: try makePreferences(),
+            realmTrustDirectory: realmTrustDirectory,
+            fetchRealmDocument: { url, _ in
+                if url.path == "/realm/echo" { await profile.wait() }
+                return try XCTUnwrap(documents[url.absoluteString])
+            },
+            confirmRealmMembership: { _ in false },
+            saveBrowserSession: { _, _ in }
+        )
+        view.navigateCurrentTab(to: "https://old.example/")
+        let tabId = try XCTUnwrap(view.currentTabId)
+        let holder = WebViewHolder()
+        for page in ["first", "second"] {
+            let ready = expectation(description: "Page \(page) finished loading")
+            holder.onNavigationFinished = { _, _ in ready.fulfill() }
+            holder.webView.load(URLRequest(url: try XCTUnwrap(URL(string: "about:blank?\(page)"))))
+            await fulfillment(of: [ready], timeout: 5)
+        }
+        let traversedBack = expectation(description: "The scripted traversal went back")
+        holder.onNavigationFinished = { _, url in
+            guard url?.absoluteString == "about:blank?first" else { return }
+            traversedBack.fulfill()
+        }
+        holder.onUserInitiatedMainFrameNavigation = {
+            XCTFail("A scripted history traversal was reported as a user gesture")
+            view.webTabDidActivateLink(tabId)
+        }
+        view.navigateCurrentTab(to: realmURI)
+        try await waitUntil { profile.waiting }
+
+        _ = try await holder.webView.evaluateJavaScript("history.back(); void 0")
+        await fulfillment(of: [traversedBack], timeout: 5)
+        profile.release()
+
+        try await waitUntil { view.pendingRealmInvite(for: tabId) != nil }
+        XCTAssertEqual(view.pendingInviteRedeem?.uri, realmURI)
+    }
+
+    @MainActor
+    func testScriptedTraversalAfterVerticalScrollingKeepsAPendingRealmLoad() async throws {
+        let documents = try discoveryDocuments(membership: "invite-only")
+        let profile = NavigationGate()
+        defer { profile.release() }
+        let view = BrowserViewModel(
+            realmPreferences: try makePreferences(),
+            realmTrustDirectory: realmTrustDirectory,
+            fetchRealmDocument: { url, _ in
+                if url.path == "/realm/echo" { await profile.wait() }
+                return try XCTUnwrap(documents[url.absoluteString])
+            },
+            confirmRealmMembership: { _ in false },
+            saveBrowserSession: { _, _ in }
+        )
+        view.navigateCurrentTab(to: "https://old.example/")
+        let tabId = try XCTUnwrap(view.currentTabId)
+        let holder = WebViewHolder()
+        for page in ["first", "second"] {
+            let ready = expectation(description: "Page \(page) finished loading")
+            holder.onNavigationFinished = { _, _ in ready.fulfill() }
+            holder.webView.load(URLRequest(url: try XCTUnwrap(URL(string: "about:blank?\(page)"))))
+            await fulfillment(of: [ready], timeout: 5)
+        }
+        let traversedBack = expectation(description: "The scripted traversal went back")
+        holder.onNavigationFinished = { _, url in
+            guard url?.absoluteString == "about:blank?first" else { return }
+            traversedBack.fulfill()
+        }
+        holder.onUserInitiatedMainFrameNavigation = {
+            XCTFail("A scripted traversal after vertical scrolling was reported as a user gesture")
+            view.webTabDidActivateLink(tabId)
+        }
+        view.navigateCurrentTab(to: realmURI)
+        try await waitUntil { profile.waiting }
+
+        // Ordinary vertical page scrolling is not swipe evidence: a scripted
+        // traversal right after it must still keep the pending Realm load.
+        let scroll = try XCTUnwrap(CGEvent(
+            scrollWheelEvent2Source: nil, units: .pixel,
+            wheelCount: 2, wheel1: -10, wheel2: 0, wheel3: 0))
+        scroll.setIntegerValueField(
+            .scrollWheelEventScrollPhase, value: Int64(NSEvent.Phase.changed.rawValue))
+        holder.webView.scrollWheel(with: try XCTUnwrap(NSEvent(cgEvent: scroll)))
+
+        _ = try await holder.webView.evaluateJavaScript("history.back(); void 0")
+        await fulfillment(of: [traversedBack], timeout: 5)
+        profile.release()
+
+        try await waitUntil { view.pendingRealmInvite(for: tabId) != nil }
+        XCTAssertEqual(view.pendingInviteRedeem?.uri, realmURI)
+    }
+
+    @MainActor
+    func testUserFormSubmissionSupersedesAPendingRealmLoad() async throws {
+        try await assertNoEnrollment { view in
+            let tabId = try XCTUnwrap(view.currentTabId)
+            let holder = WebViewHolder()
+            let pageReady = expectation(description: "The form page finished loading")
+            holder.onNavigationFinished = { _, _ in pageReady.fulfill() }
+            holder.webView.loadHTMLString("""
+                <form action="about:blank?submitted" method="get"><input type="submit"></form>
+                """, baseURL: nil)
+            await fulfillment(of: [pageReady], timeout: 5)
+            holder.onNavigationFinished = nil
+            let submitted = expectation(description: "WebKit allowed the user form submission")
+            holder.onUserInitiatedMainFrameNavigation = {
+                view.webTabDidActivateLink(tabId)
+                submitted.fulfill()
+            }
+            // A real submission follows a primary mouse press on the submit
+            // button; inject that activation evidence.
+            let press = try XCTUnwrap(NSEvent.mouseEvent(
+                with: .leftMouseDown, location: .zero, modifierFlags: [],
+                timestamp: 0, windowNumber: 0, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: 1))
+            holder.webView.mouseDown(with: press)
+            _ = try await holder.webView.evaluateJavaScript("document.querySelector('form').submit()")
+            await fulfillment(of: [submitted], timeout: 5)
+        }
+    }
+
+    @MainActor
+    func testAutomaticFormSubmissionKeepsAPendingRealmLoad() async throws {
+        let documents = try discoveryDocuments(membership: "invite-only")
+        let profile = NavigationGate()
+        defer { profile.release() }
+        let view = BrowserViewModel(
+            realmPreferences: try makePreferences(),
+            realmTrustDirectory: realmTrustDirectory,
+            fetchRealmDocument: { url, _ in
+                if url.path == "/realm/echo" { await profile.wait() }
+                return try XCTUnwrap(documents[url.absoluteString])
+            },
+            confirmRealmMembership: { _ in false },
+            saveBrowserSession: { _, _ in }
+        )
+        view.navigateCurrentTab(to: "https://old.example/")
+        let tabId = try XCTUnwrap(view.currentTabId)
+        let holder = WebViewHolder()
+        let pageReady = expectation(description: "The form page finished loading")
+        holder.onNavigationFinished = { _, _ in pageReady.fulfill() }
+        // GET submission replaces the action's query with the form data, so
+        // a named field makes the resulting URL predictable.
+        holder.webView.loadHTMLString("""
+            <form action="about:blank" method="get">
+            <input type="hidden" name="q" value="submitted"><input type="submit">
+            </form>
+            """, baseURL: nil)
+        await fulfillment(of: [pageReady], timeout: 15)
+        let submitted = expectation(description: "The automatic submission navigated")
+        holder.onNavigationFinished = { _, url in
+            guard url?.absoluteString == "about:blank?q=submitted" else { return }
+            submitted.fulfill()
+        }
+        holder.onUserInitiatedMainFrameNavigation = {
+            XCTFail("An automatic form submission was reported as a user gesture")
+            view.webTabDidActivateLink(tabId)
+        }
+        view.navigateCurrentTab(to: realmURI)
+        try await waitUntil { profile.waiting }
+
+        // A timer-triggered form.submit() has no mouse or key activation.
+        _ = try await holder.webView.evaluateJavaScript("document.querySelector('form').submit()")
+        await fulfillment(of: [submitted], timeout: 5)
+        profile.release()
+
+        try await waitUntil { view.pendingRealmInvite(for: tabId) != nil }
+        XCTAssertEqual(view.pendingInviteRedeem?.uri, realmURI)
+    }
+
+    @MainActor
+    func testUserReloadSupersedesAPendingRealmLoad() async throws {
+        try await assertNoEnrollment { view in
+            view.reloadCurrentTab()
         }
     }
 
@@ -479,6 +725,98 @@ final class RealmNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testPlainOpenReverifiesWhenAnotherTabAdvancesTheProfileWhileItWaits() async throws {
+        let preferences = try makePreferences()
+        let realmURL = try XCTUnwrap(URL(string: realmURI))
+        let blockerURL = try XCTUnwrap(URL(string: "actr://other.example/other"))
+        let invite = try makeInviteText()
+        let blockerInvite = try makeInviteText(for: "other@other.example", secretByte: 2)
+        let inviteLink = try linkCarryingInvite(invite, to: realmURL)
+        let blockerLink = try linkCarryingInvite(blockerInvite, to: blockerURL)
+        let signer = Curve25519.Signing.PrivateKey()
+        let original = try discoveryDocuments(membership: "open", signer: signer)
+        let updated = try profile(membership: "open", signer: signer, sequence: 2).0
+        let blockerDocuments = try discoveryDocuments(membership: "invite-only", for: blockerURL)
+        let blocker = NavigationGate()
+        let exchange = NavigationGate()
+        defer {
+            blocker.release()
+            exchange.release()
+        }
+        var profileFetches = 0
+        var plainJoinSequences: [UInt64] = []
+        let view = BrowserViewModel(
+            realmPreferences: preferences,
+            realmTrustDirectory: realmTrustDirectory,
+            pendingRealmInvites: PendingRealmInvites(),
+            fetchRealmDocument: { url, _ in
+                if url.host == "publisher.example" { throw CancellationError() }
+                if url.path == "/realm/echo" {
+                    profileFetches += 1
+                    // Fetches 1-2 are the invited tab's and the first plain
+                    // tab's discovery (sequence 1). The second plain tab
+                    // discovers the republished profile (sequence 2).
+                    if profileFetches > 2 { return updated }
+                }
+                return try XCTUnwrap(original[url.absoluteString] ?? blockerDocuments[url.absoluteString])
+            },
+            joinOpenRealm: { admission in
+                XCTAssertEqual(admission.info.realmName, self.realmName)
+                plainJoinSequences.append(admission.info.sequence)
+            },
+            inviteMembershipExchange: { profile, code, _, _ in
+                if code == blockerInvite {
+                    await blocker.wait()
+                    return #"{"member_id":"blocker","role":"viewer","key_id":"key"}"#
+                }
+                XCTAssertEqual(code, invite)
+                await exchange.wait()
+                return #"{"member_id":"editor","role":"editor","key_id":"key"}"#
+            },
+            confirmRealmMembership: { _ in false },
+            saveBrowserSession: { _, _ in }
+        )
+        func acceptedSequence() -> UInt64? {
+            try? RealmProfileStore.currentRealm(realmName, preferences: preferences)?.accepted.info.sequence
+        }
+
+        view.navigateCurrentTab(to: blockerLink.absoluteString)
+        try await waitUntil("blocker exchange started") { blocker.waiting }
+        view.openURLInNewTab(inviteLink)
+        let invitedTab = try XCTUnwrap(view.currentTabId)
+        try await waitUntil("invited discovery accepted sequence 1") { acceptedSequence() == 1 }
+        view.openURLInNewTab(realmURL)
+        let firstPlainTab = try XCTUnwrap(view.currentTabId)
+        // The first plain link verified sequence 1 and is waiting for the invite.
+        try await waitUntil("first plain discovery fetched the profile") { profileFetches == 2 }
+
+        // While the invite is still pending, another tab discovers and accepts
+        // the republished Profile (sequence 2).
+        view.openURLInNewTab(realmURL)
+        let secondPlainTab = try XCTUnwrap(view.currentTabId)
+        try await waitUntil("another tab advanced the accepted profile") { acceptedSequence() == 2 }
+
+        blocker.release()
+        try await waitUntil("invited exchange started") { exchange.waiting }
+        exchange.release()
+
+        // The first plain link must not silently drop the navigation: it
+        // should re-verify the latest Profile and join under it, just like
+        // the second plain link that discovered sequence 2 itself.
+        try await waitUntil("both plain links joined after re-verifying") { plainJoinSequences.count == 2 }
+        XCTAssertEqual(plainJoinSequences, [2, 2])
+        try await waitUntil("invited tab opened the Realm") {
+            view.tabs.first(where: { $0.id == invitedTab })?.url == realmURL
+        }
+        try await waitUntil("first plain tab opened the Realm") {
+            view.tabs.first(where: { $0.id == firstPlainTab })?.url == realmURL
+        }
+        try await waitUntil("second plain tab opened the Realm") {
+            view.tabs.first(where: { $0.id == secondPlainTab })?.url == realmURL
+        }
+    }
+
+    @MainActor
     func testPlainOpenInAnotherWindowWaitsForPendingInvite() async throws {
         try await assertPlainOpenWaitsForInvite(inAnotherWindow: true)
     }
@@ -749,12 +1087,12 @@ final class RealmNavigationTests: XCTestCase {
     }
 
     @MainActor
-    private func waitUntil(_ condition: () -> Bool) async throws {
+    private func waitUntil(_ label: String = "Realm navigation", _ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(3)
         while !condition() && ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        _ = try XCTUnwrap(condition() ? true : nil, "Timed out waiting for Realm navigation")
+        _ = try XCTUnwrap(condition() ? true : nil, "Timed out waiting for \(label)")
     }
 
     private func makePreferences() throws -> UserDefaults {

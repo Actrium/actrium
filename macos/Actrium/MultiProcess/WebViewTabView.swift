@@ -188,8 +188,10 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// Callback when URL changes (including History.pushState/replaceState)
     var onURLChanged: ((URL?) -> Void)?
 
-    /// Callback when a user-activated link can navigate this tab's main frame.
-    var onMainFrameLinkActivated: (() -> Void)?
+    /// Callback when a user-initiated navigation can navigate this tab's main
+    /// frame: a trusted link click, native history navigation, or a form
+    /// submission. Scripted link clicks and automatic redirects do not fire it.
+    var onUserInitiatedMainFrameNavigation: (() -> Void)?
 
     /// Callback when loading state changes
     var onLoadingStateChanged: ((Bool) -> Void)?
@@ -918,8 +920,39 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             return
         }
 
-        if isTrustedLink, navigationAction.targetFrame?.isMainFrame == true {
-            onMainFrameLinkActivated?()
+        if navigationAction.targetFrame?.isMainFrame == true {
+            if isTrustedLink {
+                onUserInitiatedMainFrameNavigation?()
+            } else {
+                switch navigationAction.navigationType {
+                case .backForward:
+                    // WebKit reports a scripted history.back()/forward() with
+                    // the same type as a trackpad swipe, so the type alone is
+                    // not a user gesture. Require native gesture evidence: the
+                    // swipe arrives as a horizontal trackpad scroll stream
+                    // right before the traversal. Toolbar buttons and keyboard
+                    // shortcuts cancel the pending load explicitly in
+                    // BrowserViewModel.goBack()/goForward().
+                    if let scrolledAt = (webView as? DownloadableWebView)?.lastTrackpadScrollAt,
+                       scrolledAt.duration(to: .now) < .seconds(1) {
+                        onUserInitiatedMainFrameNavigation?()
+                    }
+                case .formSubmitted, .formResubmitted:
+                    // A timer-triggered form.submit() produces the same
+                    // navigation type as a real submission, so require
+                    // trusted user activation: a primary mouse press or a
+                    // Return press right before the submission.
+                    if let activatedAt = (webView as? DownloadableWebView)?.lastUserActivationAt,
+                       activatedAt.duration(to: .now) < .seconds(1) {
+                        onUserInitiatedMainFrameNavigation?()
+                    }
+                default:
+                    // Reload is handled by BrowserViewModel.reloadCurrentTab
+                    // because .reload cannot distinguish the toolbar from
+                    // location.reload().
+                    break
+                }
+            }
         }
         decisionHandler(.allow)
     }
@@ -1273,13 +1306,43 @@ private class ClosureMenuItem: NSMenuItem {
 /// Custom WKWebView subclass that adds download options to context menu
 class DownloadableWebView: WKWebView {
     var onPrimaryMouseDown: (() -> Void)?
+    /// Most recent horizontal trackpad scroll-stream timestamp. WebKit's
+    /// back/forward swipe is driven by a horizontal scroll stream (a
+    /// non-empty `phase` with dominant x deltas), while ordinary vertical
+    /// scrolling and scripted history traversals produce no such evidence,
+    /// so the navigation delegate can tell a real swipe from both.
+    private(set) var lastTrackpadScrollAt: ContinuousClock.Instant?
+    /// Most recent trusted user activation (a primary mouse press or a
+    /// Return press). A scripted form submission produces no such event, so
+    /// the navigation delegate can tell a real submission from an automatic
+    /// one.
+    private(set) var lastUserActivationAt: ContinuousClock.Instant?
     /// Store the detected element info for context menu
     private var contextMenuImageURL: URL?
     private var contextMenuLinkURL: URL?
 
+    override func scrollWheel(with event: NSEvent) {
+        // Only a horizontal-dominant trackpad scroll stream can drive
+        // WebKit's back/forward swipe; ordinary vertical page scrolling
+        // must not become evidence for a later scripted traversal.
+        if event.phase != [], abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
+            lastTrackpadScrollAt = .now
+        }
+        super.scrollWheel(with: event)
+    }
+
     override func mouseDown(with event: NSEvent) {
+        lastUserActivationAt = .now
         onPrimaryMouseDown?()
         super.mouseDown(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // kVK_Return / kVK_KeypadEnter — Return in a form field submits it.
+        if event.keyCode == 36 || event.keyCode == 76 {
+            lastUserActivationAt = .now
+        }
+        super.keyDown(with: event)
     }
 
     /// Pre-detect element on right mouse down using synchronous approach
@@ -1723,7 +1786,7 @@ struct FocusedWebOverlay: View {
     init(tab: Tab, url: URL, viewportSize: CGSize,
          onNavigationFinished: ((String?, URL?) -> Void)? = nil,
          onURLChanged: ((URL?) -> Void)? = nil,
-         onMainFrameLinkActivated: (() -> Void)? = nil,
+         onUserInitiatedMainFrameNavigation: (() -> Void)? = nil,
          onLoadingStateChanged: ((Bool) -> Void)? = nil,
          onOpenNewWindow: ((URL) -> Void)? = nil,
          onThemeColorChanged: ((String) -> Void)? = nil,
@@ -1744,7 +1807,7 @@ struct FocusedWebOverlay: View {
         // Set callbacks immediately in init (SwiftUI View init can be called multiple times)
         holder.onNavigationFinished = onNavigationFinished
         holder.onURLChanged = onURLChanged
-        holder.onMainFrameLinkActivated = onMainFrameLinkActivated
+        holder.onUserInitiatedMainFrameNavigation = onUserInitiatedMainFrameNavigation
         holder.onLoadingStateChanged = onLoadingStateChanged
         holder.onOpenNewWindow = onOpenNewWindow
         holder.onThemeColorChanged = onThemeColorChanged
