@@ -445,11 +445,6 @@ pub(crate) async fn inproc_send_reply(
 pub(crate) type RtcResponseRoute =
     Option<Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>>;
 
-/// Send `response_envelope` back to `caller` via the best available transport.
-///
-/// Priority: ready direct RTC → accepted relay → other ready RTC.
-/// Module-level so both the inline mailbox path and the gate-on continuation
-/// share one implementation.
 /// How long the RTC response path waits for the caller's peer to become
 /// sendable before falling through to the gate-off delivery path. Named (like
 /// DATA_CHUNK_SEND_TIMEOUT / TELL_SEND_TIMEOUT) so the budget stays tunable
@@ -457,6 +452,68 @@ pub(crate) type RtcResponseRoute =
 /// the "Gate off" fallback serializes replies behind it by design.
 const CALLER_SENDABLE_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
+async fn send_on_ingress_channel(
+    ws_gate: &Option<Arc<crate::wire::websocket::WebSocketGate>>,
+    rtc_route: &RtcResponseRoute,
+    caller: &ActrId,
+    envelope: RpcEnvelope,
+    ingress: &VerifiedPeerContext,
+) -> ActorResult<()> {
+    if let Some(manager) = rtc_route
+        && let Some(handle) = manager.get_controller(caller).await
+        && let generation = handle.snapshot().pc_generation
+        && handle
+            .secure_cell_for(generation)
+            .verified_peer()
+            .as_deref()
+            == Some(ingress)
+    {
+        // The receive lane may deliver a request before the controller
+        // publishes sendability for that generation.
+        let mut updates = handle.subscribe();
+        let ready = crate::timer::timeout(
+            crate::timer::ids::WEBRTC_PEER_SENDABLE,
+            CALLER_SENDABLE_WAIT,
+            updates.wait_for(|snapshot| snapshot.pc_generation != generation || snapshot.sendable),
+        )
+        .await
+        .is_ok_and(|snapshot| snapshot.is_ok_and(|snapshot| snapshot.pc_generation == generation));
+        if !ready
+            || handle
+                .secure_cell_for(generation)
+                .verified_peer()
+                .as_deref()
+                != Some(ingress)
+        {
+            return Err(ActrError::Unavailable(
+                "the request's verified WebRTC channel is no longer sendable".into(),
+            ));
+        }
+        return handle
+            .send_with_progress(
+                crate::wire::webrtc::rtc::status::LaneKind::RpcReliable,
+                generation,
+                Bytes::from(envelope.encode_to_vec()),
+                false,
+            )
+            .await
+            .result
+            .map_err(|error| ActrError::Unavailable(error.to_string()));
+    }
+    if let Some(gate) = ws_gate
+        && gate
+            .send_response_on_channel(caller, envelope, Some(ingress))
+            .await?
+    {
+        return Ok(());
+    }
+    Err(ActrError::Unavailable(
+        "the request's verified Actor channel has retired".into(),
+    ))
+}
+
+/// Reply on the authenticated ingress generation for session RPCs.
+/// Ordinary RPCs use ready direct RTC, then the accepted relay, then other ready RTC.
 async fn send_envelope_to_caller(
     ws_gate: &Option<Arc<crate::wire::websocket::WebSocketGate>>,
     rtc_route: &RtcResponseRoute,
@@ -464,7 +521,17 @@ async fn send_envelope_to_caller(
     response_envelope: RpcEnvelope,
     request_id: &str,
     route_key: &str,
+    ingress: Option<&VerifiedPeerContext>,
 ) {
+    if let Some(ingress) = ingress {
+        if let Err(error) =
+            send_on_ingress_channel(ws_gate, rtc_route, caller, response_envelope, ingress).await
+        {
+            tracing::warn!(%request_id, %route_key, %error, "session response could not be sent on its ingress channel");
+        }
+        return;
+    }
+
     // #251 response-path diagnostics: the host has the guest's response and
     // is about to push it to the caller. Info-level so the default
     // RUST_LOG=info of the polyglot e2e captures the send attempt — without
@@ -482,20 +549,24 @@ async fn send_envelope_to_caller(
     // Promote responses too: retaining the relay receive path must not pin
     // every reply to WSS after direct ICE becomes usable.
     let direct = if let Some(manager) = rtc_route {
-        manager.get_controller(caller).await.filter(|handle| {
+        manager.get_controller(caller).await.and_then(|handle| {
             let snapshot = handle.snapshot();
-            snapshot.sendable
+            let generation = snapshot.pc_generation;
+            (snapshot.sendable
                 && snapshot.network_path == crate::wire::webrtc::rtc::status::NetworkPath::Direct
+                && handle.secure_cell_for(generation).is_io_sendable())
+            .then_some((handle, generation))
         })
     } else {
         None
     };
-    let direct_send = direct.map(|handle| {
+    let direct_send = direct.map(|(handle, generation)| {
         let payload = Bytes::from(response_envelope.encode_to_vec());
         async move {
             handle
                 .send_with_progress(
                     crate::wire::webrtc::rtc::status::LaneKind::RpcReliable,
+                    generation,
                     payload,
                     false,
                 )
@@ -527,17 +598,30 @@ async fn send_envelope_to_caller(
                 CALLER_SENDABLE_WAIT,
                 async {
                     loop {
-                        if rx.borrow().sendable {
+                        let epoch = handle.secure_epoch();
+                        let snapshot = rx.borrow_and_update().clone();
+                        if snapshot.sendable
+                            && handle
+                                .secure_cell_for(snapshot.pc_generation)
+                                .is_io_sendable()
+                        {
                             return;
                         }
-                        if rx.changed().await.is_err() {
-                            return;
+                        tokio::select! {
+                            update = rx.changed() => {
+                                if update.is_err() { return; }
+                            }
+                            _ = handle.await_secure_state_change(epoch) => {}
                         }
                     }
                 },
             )
             .await;
-            let sendable = handle.snapshot().sendable;
+            let snapshot = handle.snapshot();
+            let sendable = snapshot.sendable
+                && handle
+                    .secure_cell_for(snapshot.pc_generation)
+                    .is_io_sendable();
             if waited.is_ok() && sendable {
                 let mut buf = Vec::new();
                 match response_envelope.encode(&mut buf) {
@@ -719,6 +803,20 @@ where
     false
 }
 
+/// Preserve the authenticated ingress generation for session system and business replies.
+fn session_reply_channel(
+    envelope: &RpcEnvelope,
+    ingress: Option<Arc<VerifiedPeerContext>>,
+) -> Option<Arc<VerifiedPeerContext>> {
+    ingress.filter(|_| {
+        actrium_session_v1_method(&envelope.route_key).is_some()
+            || envelope
+                .metadata
+                .iter()
+                .any(|entry| entry.key == crate::actrium::metadata::CHANNEL_ID)
+    })
+}
+
 /// Send the RESPONSE envelope for an inbound mailbox call (Ok or Err path).
 /// Does NOT ACK the durable mailbox message — the caller (RETURN receive
 /// loop or EXPLICIT `ReplyDeliver`) is responsible for acking separately so
@@ -735,6 +833,7 @@ pub(crate) async fn mailbox_send_reply(
     tracestate: Option<String>,
     incoming_guard: Option<Arc<dyn IncomingGuard>>,
     metadata: Vec<actr_protocol::MetadataEntry>,
+    reply_channel: Option<Arc<VerifiedPeerContext>>,
     expects_response: bool,
     result: ActorResult<Bytes>,
     span: tracing::Span,
@@ -781,6 +880,7 @@ pub(crate) async fn mailbox_send_reply(
                     response_envelope,
                     &request_id,
                     &route_key,
+                    reply_channel.as_deref(),
                 )
                 .instrument(span);
                 #[cfg(not(feature = "opentelemetry"))]
@@ -791,6 +891,7 @@ pub(crate) async fn mailbox_send_reply(
                     response_envelope,
                     &request_id,
                     &route_key,
+                    reply_channel.as_deref(),
                 );
                 send_fut.await;
             }
@@ -857,6 +958,7 @@ pub(crate) async fn mailbox_send_reply(
                     error_envelope,
                     &request_id,
                     &route_key,
+                    reply_channel.as_deref(),
                 )
                 .await;
             }
@@ -901,6 +1003,7 @@ pub(crate) async fn mailbox_reply_and_ack(
     tracestate: Option<String>,
     incoming_guard: Option<Arc<dyn IncomingGuard>>,
     metadata: Vec<actr_protocol::MetadataEntry>,
+    reply_channel: Option<Arc<VerifiedPeerContext>>,
     expects_response: bool,
     msg_id: uuid::Uuid,
     result: ActorResult<Bytes>,
@@ -916,6 +1019,7 @@ pub(crate) async fn mailbox_reply_and_ack(
         tracestate,
         incoming_guard,
         metadata,
+        reply_channel,
         expects_response,
         result,
         span,
@@ -1009,6 +1113,9 @@ pub(crate) struct Inner {
     /// registries. Production builds never see this field.
     #[cfg(feature = "test-utils")]
     pub(crate) test_faults: Option<crate::wire::webrtc::test_runtime::TestFaultRegistries>,
+
+    #[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+    use_test_actor_channel_issuer: bool,
 
     /// RTC connection manager (created after startup; RTC backend only).
     /// Backs the node-level RTC status query/list/subscribe APIs (S6-4).
@@ -2677,6 +2784,7 @@ impl Inner {
                             envelope.tracestate.clone(),
                             self.incoming_guard.clone(),
                             envelope.metadata.clone(),
+                            session_reply_channel(&envelope, peer_context.clone()),
                             sink,
                             expects_response,
                             scope.clone(),
@@ -3140,6 +3248,8 @@ impl Inner {
             session_state: None,
             #[cfg(feature = "test-utils")]
             test_faults: None,
+            #[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+            use_test_actor_channel_issuer: false,
             rtc_manager: None,
             rtc_inbound_mailbox_slot: None,
             peer_transport: None,
@@ -3335,6 +3445,12 @@ impl Inner {
             "Pre-registered credential attached; start() will skip Issuer registration"
         );
         self.preregistered_credential = Some(register_ok);
+    }
+
+    /// Use fixture certificates for a test that supplies its own registration.
+    #[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+    pub(crate) fn use_fixture_actor_channel_issuer(&mut self) {
+        self.use_test_actor_channel_issuer = true;
     }
 
     pub(crate) fn set_preregistered_registration_context(&mut self, ctx: RegistrationContext) {
@@ -3723,6 +3839,24 @@ impl Inner {
 
             // Construct the RTC manager, controllers, and recovery stack as
             // one unit sharing the node's identity and inbound dispatch.
+            let relay_gate = Arc::new(crate::wire::websocket::WebSocketGate::new_relay(
+                pending_requests.clone(),
+                self.data_chunk_registry.clone(),
+                self.peer_types.clone(),
+            ));
+            let relay_client = crate::wire::relay::RelayClient::new(
+                self.config.signaling_url.to_string(),
+                self.config.issuer_endpoint.clone(),
+                client_key.clone(),
+                session_state.clone(),
+                relay_gate.clone(),
+                self.shutdown_token.clone(),
+                Some(actor_storage_root.clone()),
+                self.actor_key_namespace.clone(),
+                Some(credential_manager.clone()),
+            );
+            relay_gate.set_handover(handover.clone());
+
             let (rtc_manager, rtc_local_id, rtc_mailbox_slot): (
                 Arc<crate::wire::webrtc::rtc::manager::RtcConnectionManager>,
                 crate::wire::webrtc::rtc::signaling::SharedLocalId,
@@ -3834,6 +3968,15 @@ impl Inner {
                         self.shutdown_token.child_token(),
                     );
                 task_handles.push(inbound_dispatch_tasks);
+                use rtc::peer::authentication::ActorChannelCredentials;
+                let actor_channel_credentials =
+                    ActorChannelCredentials::Enrollment(relay_client.clone());
+                #[cfg(all(not(target_arch = "wasm32"), test, feature = "test-utils"))]
+                let actor_channel_credentials = if self.use_test_actor_channel_issuer {
+                    ActorChannelCredentials::fixture(&actor_id)
+                } else {
+                    actor_channel_credentials
+                };
                 let rtc_manager = Arc::new(
                     rtc::manager::RtcConnectionManager::with_inbound_config(
                         factory.clone(),
@@ -3844,7 +3987,8 @@ impl Inner {
                         )),
                         buffer_config,
                     )
-                    .with_media_registry(media_frame_registry.clone()),
+                    .with_media_registry(media_frame_registry.clone())
+                    .with_actor_channel_identity(actor_channel_credentials),
                 );
                 // Issuer rotates the HMAC TURN credential together with the actor
                 // credential. Apply the new value to live RTC sessions via
@@ -3972,23 +4116,6 @@ impl Inner {
             // Create DefaultWireBuilder with the configured wire transports
             use crate::transport::{DefaultWireBuilder, DefaultWireBuilderConfig};
 
-            let relay_gate = Arc::new(crate::wire::websocket::WebSocketGate::new_relay(
-                pending_requests.clone(),
-                self.data_chunk_registry.clone(),
-                self.peer_types.clone(),
-            ));
-            let relay_client = crate::wire::relay::RelayClient::new(
-                self.config.signaling_url.to_string(),
-                self.config.issuer_endpoint.clone(),
-                client_key.clone(),
-                session_state.clone(),
-                relay_gate.clone(),
-                self.shutdown_token.clone(),
-                crate::ACTOR_CHANNEL_AUTHENTICATION_ENABLED.then(|| actor_storage_root.clone()),
-                self.actor_key_namespace.clone(),
-                Some(credential_manager.clone()),
-            );
-            relay_gate.set_handover(handover.clone());
             let wire_builder = Arc::new(
                 DefaultWireBuilder::new(DefaultWireBuilderConfig::default())
                     .with_rtc_manager(rtc_manager.clone())
@@ -5191,6 +5318,7 @@ impl Inner {
                                                 let traceparent = envelope.traceparent.clone();
                                                 let tracestate = envelope.tracestate.clone();
                                                 let metadata = envelope.metadata.clone();
+                                                let reply_channel = session_reply_channel(&envelope, peer_context.clone());
                                                 let msg_id = msg_record.id;
                                                 let ws_gate = ws_gate.clone();
                                                 let rtc_route = rtc_route.clone();
@@ -5221,7 +5349,7 @@ impl Inner {
                                                                 mailbox_reply_and_ack(
                                                                     ws_gate, rtc_route, mailbox_c,
                                                                     caller_owned, request_id, route_key,
-                                                                    traceparent, tracestate, incoming_guard, metadata, expects_response,
+                                                                    traceparent, tracestate, incoming_guard, metadata, reply_channel, expects_response,
                                                                     msg_id, result, span,
                                                                 )
                                                                 .await;
@@ -5249,7 +5377,7 @@ impl Inner {
                                                             mailbox_reply_and_ack(
                                                                 ws_gate, rtc_route, mailbox_c,
                                                                 caller_owned, request_id, route_key,
-                                                                traceparent, tracestate, incoming_guard, metadata, expects_response,
+                                                                traceparent, tracestate, incoming_guard, metadata, reply_channel, expects_response,
                                                                 msg_id, result, span,
                                                             )
                                                             .await;

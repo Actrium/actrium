@@ -76,8 +76,7 @@ impl VerifiedChannel {
 
 /// States for a physical secure channel. The Actr Host drives transitions.
 ///
-/// Only `Verified` allows application data. `LegacyBypass` is a temporary
-/// compatibility mode that MUST be removed before production use.
+/// Only `Verified` allows application data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChannelState {
     /// Pre-handshake. No data allowed.
@@ -94,8 +93,6 @@ pub enum ChannelState {
     Closed,
     /// Terminal: authentication failure.
     Failed,
-    /// Temporary transport-only mode. MUST be removed in production.
-    LegacyBypass,
 }
 
 impl ChannelState {
@@ -127,9 +124,6 @@ impl ChannelState {
                 | (Rekeying, Closed)
                 | (Reauthenticating, Verified)
                 | (Reauthenticating, Closed)
-                | (LegacyBypass, Handshaking)
-                | (LegacyBypass, Closed)
-                | (LegacyBypass, Failed)
         )
     }
 }
@@ -386,7 +380,6 @@ mod tests {
         assert!(!ChannelState::Rekeying.is_sendable());
         assert!(!ChannelState::Closed.is_sendable());
         assert!(!ChannelState::Failed.is_sendable());
-        assert!(!ChannelState::LegacyBypass.is_sendable());
     }
 
     #[test]
@@ -404,7 +397,6 @@ mod tests {
         assert!(ChannelState::Verified.can_transition_to(ChannelState::Rekeying));
         assert!(ChannelState::Verified.can_transition_to(ChannelState::Reauthenticating));
         assert!(ChannelState::Rekeying.can_transition_to(ChannelState::Verified));
-        assert!(ChannelState::LegacyBypass.can_transition_to(ChannelState::Handshaking));
         // Invalid transitions
         assert!(!ChannelState::New.can_transition_to(ChannelState::Verified));
         assert!(!ChannelState::Closed.can_transition_to(ChannelState::Handshaking));

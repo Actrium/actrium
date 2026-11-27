@@ -3,8 +3,8 @@
 use super::*;
 use actr_relay_security::{
     ActorChannelEnrollment, ActorChannelIdentity, ActorChannelSession, ActorIdentityKey,
-    IdentityKey, IdentityRequest, IssuedIdentity, IssuerKey, LocalIdentity, SecureSession,
-    signing_key_id,
+    IdentityKey, IdentityRequest, IssuedIdentity, IssuerKey, LocalIdentity, RTC_AUTH_FRAME_PREFIX,
+    SecureSession, VerifiedActorChannel, dtls_fingerprint, signing_key_id,
 };
 use js_sys::{Function, Uint8Array};
 use wasm_bindgen::closure::Closure;
@@ -30,10 +30,6 @@ pub(super) struct Manager {
     /// renewed credential invalidates the enrolled Actor certificate.
     actor_identity: RefCell<Option<Rc<ActorChannelIdentity>>>,
     actor_binding: RefCell<Option<([u8; 32], [u8; 32])>>,
-    /// Issuer key ids observed to never mint Actor channel certificates.
-    /// Their channels run the legacy relay security until the identity
-    /// expires and enrollment is retried.
-    actor_legacy_issuers: RefCell<HashMap<u32, ()>>,
     /// Stable per-Worker tag bound into the Actor certificate.
     runtime_instance_id: RefCell<Option<String>>,
     issuers: RefCell<HashMap<u32, IssuerKey>>,
@@ -175,11 +171,12 @@ pub(super) async fn ensure_identity(ctx: &Rc<ClientContext>) -> Result<(u64, Str
         if let Some(cached) = cached_identity(ctx, &endpoint).await? {
             return Ok(cached);
         }
-        let binding = actor_binding_digests(ctx).await?;
-        let actor_material = match &binding {
-            Some(binding) => build_actor_enrollment(ctx, binding).await?,
-            None => None,
-        };
+        let binding = actor_binding_digests(ctx)
+            .await?
+            .ok_or_else(|| error("Missing Actor credential"))?;
+        let (actor_key, enrollment) = build_actor_enrollment(ctx, &binding)
+            .await?
+            .ok_or_else(|| error("Missing Actor enrollment"))?;
         let key = IdentityKey::generate().map_err(error)?;
         let noise_for_actor = key.clone();
         let proof = {
@@ -199,15 +196,13 @@ pub(super) async fn ensure_identity(ctx: &Rc<ClientContext>) -> Result<(u64, Str
             renewal_token: proof,
             public_key: key.public,
             admission_commitment: key.admission_commitment(),
-            actor: actor_material
-                .as_ref()
-                .map(|(_, enrollment)| enrollment.clone()),
+            actor: Some(enrollment),
         })
         .map_err(error)?;
         let issued: IssuedIdentity =
             match request(ctx, "relay-identity", JsValue::from_str(&body)).await {
                 Ok(issued) => issued,
-                Err(enrollment_error) if attempt == 0 && actor_material.is_some() => {
+                Err(enrollment_error) if attempt == 0 => {
                     let healed = ctx.runtime.lock().await.heal_actor_binding().await;
                     match healed {
                         Ok(true) => continue,
@@ -220,59 +215,28 @@ pub(super) async fn ensure_identity(ctx: &Rc<ClientContext>) -> Result<(u64, Str
                 }
                 Err(enrollment_error) => return Err(enrollment_error),
             };
-        let actor_certificate = issued.actor_certificate.clone();
-        let identity = key.certify(issued, &endpoint, now()).map_err(error)?;
+        let certificate = issued
+            .actor_certificate
+            .clone()
+            .ok_or_else(|| error("Issuer did not return an Actor channel certificate"))?;
         let realm = ctx.runtime.lock().await.realm.clone();
-        let actor_identity = match (actor_material, actor_certificate) {
-            (Some((actor_identity_key, _)), Some(certificate)) => {
-                match ActorChannelIdentity::certify(
-                    noise_for_actor,
-                    actor_identity_key,
-                    certificate,
-                    identity.issued.issuer.clone(),
-                    &realm,
-                    &endpoint,
-                    now(),
-                ) {
-                    Ok(actor) => {
-                        ctx.relay_security
-                            .actor_legacy_issuers
-                            .borrow_mut()
-                            .remove(&identity.issued.issuer.key_id);
-                        Some(Rc::new(actor))
-                    }
-                    Err(actor_error) => {
-                        log::warn!(
-                            "Actor channel certification rejected: {actor_error}; using the legacy relay channel"
-                        );
-                        None
-                    }
-                }
-            }
-            (Some(_), None) => {
-                // The Issuer does not issue Actor channel certificates (a mock
-                // or a deployment predating Actor channels). Degrade this
-                // issuer to the legacy relay channel instead of failing every
-                // peer connection; the marker is re-checked each identity
-                // lifetime so an upgraded Issuer is picked up without a
-                // Worker restart.
-                log::warn!(
-                    "Issuer returned no Actor channel certificate; using the legacy relay channel"
-                );
-                ctx.relay_security
-                    .actor_legacy_issuers
-                    .borrow_mut()
-                    .insert(identity.issued.issuer.key_id, ());
-                None
-            }
-            (None, _) => None,
-        };
-        *ctx.relay_security.actor_binding.borrow_mut() = if actor_identity.is_some() {
-            binding
-        } else {
-            None
-        };
-        *ctx.relay_security.actor_identity.borrow_mut() = actor_identity;
+        let actor = ActorChannelIdentity::certify(
+            noise_for_actor,
+            actor_key,
+            certificate,
+            issued.issuer.clone(),
+            &realm,
+            &endpoint,
+            now(),
+        )
+        .map_err(error)?;
+        let identity = key.certify(issued, &endpoint, now()).map_err(error)?;
+        if actor_binding_digests(ctx).await? != Some(binding) {
+            continue;
+        }
+        *ctx.relay_security.actor_binding.borrow_mut() = Some(binding);
+        let actor_expiry = actor.expires_at();
+        *ctx.relay_security.actor_identity.borrow_mut() = Some(Rc::new(actor));
         {
             let mut keys = ctx.relay_security.issuers.borrow_mut();
             keys.retain(|_, key| key.expires_at > now());
@@ -285,7 +249,7 @@ pub(super) async fn ensure_identity(ctx: &Rc<ClientContext>) -> Result<(u64, Str
             );
         }
         let result = (
-            identity.expires_at,
+            identity.expires_at.min(actor_expiry),
             bytes_to_base64(&identity.issued.certificate.claims),
         );
         *ctx.relay_security.identity.borrow_mut() = Some(identity);
@@ -309,36 +273,20 @@ async fn cached_identity(
         .map(|identity| {
             (
                 identity.expires_at,
-                identity.issued.issuer.key_id,
                 bytes_to_base64(&identity.issued.certificate.claims),
             )
         });
-    let Some((expires_at, issuer_key_id, claims_b64)) = cached else {
+    let Some((expires_at, claims_b64)) = cached else {
         return Ok(None);
     };
     let binding = *ctx.relay_security.actor_binding.borrow();
     let binding_current = actor_binding_digests(ctx).await?;
-    let actor_ok = match (&binding_current, &binding) {
-        (Some((credential_digest, state_digest)), Some((cached, cached_state))) => {
-            cached == credential_digest
-                && cached_state == state_digest
-                && ctx
-                    .relay_security
-                    .actor_identity
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|actor| actor.expires_at() > now() + 30)
-        }
-        (Some(_), None) => false,
-        (None, _) => true,
-    };
-    let legacy_issuer = ctx
-        .relay_security
-        .actor_legacy_issuers
-        .borrow()
-        .contains_key(&issuer_key_id);
-    if actor_ok || legacy_issuer {
-        return Ok(Some((expires_at, claims_b64)));
+    if binding_current.is_some()
+        && binding_current == binding
+        && let Some(actor) = ctx.relay_security.actor_identity.borrow().as_ref()
+        && actor.expires_at() > now() + 30
+    {
+        return Ok(Some((expires_at.min(actor.expires_at()), claims_b64)));
     }
     Ok(None)
 }
@@ -383,33 +331,19 @@ pub async fn prepare_relay_connection(
         .ok_or_else(|| error("Invalid channel"))?
         .parse::<u64>()
         .map_err(error)?;
-    let session = {
-        let actor = ctx.relay_security.actor_identity.borrow().clone();
-        match actor.as_deref() {
-            Some(actor) if initiator => {
-                ActorChannelSession::new_front(actor, &peer, &number.to_string(), now())
-                    .map_err(error)?
-                    .into_inner()
-            }
-            Some(actor) => {
-                ActorChannelSession::new_service(actor, &peer, &number.to_string(), now())
-                    .map_err(error)?
-                    .into_inner()
-            }
-            None => {
-                let identity = ctx.relay_security.identity.borrow();
-                SecureSession::new(
-                    identity
-                        .as_ref()
-                        .ok_or_else(|| error("Missing certified local key"))?,
-                    &peer,
-                    number,
-                    now(),
-                )
-                .map_err(error)?
-            }
-        }
-    };
+    let actor = ctx
+        .relay_security
+        .actor_identity
+        .borrow()
+        .clone()
+        .ok_or_else(|| error("Missing certified Actor identity"))?;
+    let session = if initiator {
+        ActorChannelSession::new_front(&actor, &peer, &number.to_string(), now())
+    } else {
+        ActorChannelSession::new_service(&actor, &peer, &number.to_string(), now())
+    }
+    .map_err(error)?
+    .into_inner();
     if ctx.relay_security.channels.borrow().len() >= 256 {
         return Err(error("Secure channel capacity exceeded"));
     }
@@ -534,12 +468,93 @@ pub async fn handle_relay_record(
     Ok(entry.session.borrow().is_ready())
 }
 
+/// Run the Actor exchange on the physical reliable DataChannel bridged by `port`.
+pub(super) async fn authenticate_rtc(
+    ctx: &Rc<ClientContext>,
+    peer: &str,
+    port: &MessagePort,
+    local_sdp: &str,
+    remote_sdp: &str,
+) -> Result<VerifiedActorChannel, JsValue> {
+    use futures::{
+        StreamExt,
+        channel::mpsc,
+        future::{Either, select},
+    };
+
+    let (mut sender, mut receiver) = mpsc::channel(8);
+    let read = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
+        let data = Uint8Array::new(&event.data());
+        if data.length() as usize
+            > actr_relay_security::MAX_RECORD_BYTES + RTC_AUTH_FRAME_PREFIX.len()
+        {
+            sender.close_channel();
+        } else if sender.try_send(data.to_vec()).is_err() {
+            sender.close_channel();
+        }
+    });
+    port.set_onmessage(Some(read.as_ref().unchecked_ref()));
+    let exchange = async {
+        let local = dtls_fingerprint(local_sdp).map_err(error)?;
+        let remote = dtls_fingerprint(remote_sdp).map_err(error)?;
+        ensure_identity(ctx).await?;
+        let actor = ctx
+            .relay_security
+            .actor_identity
+            .borrow()
+            .clone()
+            .ok_or_else(|| error("Missing certified Actor identity"))?;
+        let mut exchange =
+            ActorChannelSession::new_rtc(&actor, peer, &local, &remote, now()).map_err(error)?;
+        let send = |record: Vec<u8>| {
+            let mut frame = RTC_AUTH_FRAME_PREFIX.to_vec();
+            frame.extend(record);
+            port.post_message(&Uint8Array::from(frame.as_slice()).into())
+        };
+        if let Some(first) = exchange.start().map_err(error)? {
+            send(first)?;
+        }
+        while let Some(frame) = receiver.next().await {
+            let record = frame
+                .strip_prefix(RTC_AUTH_FRAME_PREFIX)
+                .ok_or_else(|| error("Invalid WebRTC Actor record"))?;
+            let issuer = match signing_key_id(record).map_err(error)? {
+                Some(id) => Some(issuer(ctx, id).await?),
+                None => None,
+            };
+            let received = exchange
+                .receive(record, issuer.as_ref(), now())
+                .map_err(error)?;
+            for reply in received.outbound {
+                send(reply)?;
+            }
+            if let Some(verified) = exchange.verified() {
+                return Ok(verified.clone());
+            }
+        }
+        Err(error("WebRTC Actor channel closed during authentication"))
+    };
+    let result = match select(Box::pin(exchange), TimeoutFuture::new(10_000)).await {
+        Either::Left((result, _)) => result,
+        Either::Right(_) => Err(error("WebRTC Actor authentication timed out")),
+    };
+    port.set_onmessage(None);
+    result
+}
+
 pub(super) fn authenticated(ctx: &ClientContext, channel: &str, peer: &str) -> bool {
     ctx.relay_security
         .channels
         .borrow()
         .get(channel)
-        .is_some_and(|entry| entry.peer == peer && entry.session.borrow().is_ready())
+        .is_some_and(|entry| {
+            entry.peer == peer
+                && entry
+                    .session
+                    .borrow()
+                    .verified_actor()
+                    .is_some_and(|context| context.is_valid_at(now()))
+        })
 }
 pub(super) fn access_token(ctx: &ClientContext) -> Result<String, JsValue> {
     let identity = ctx.relay_security.identity.borrow();

@@ -8,13 +8,13 @@ export type MessageToSW =
   | {
       type: 'fast_path_data';
       payload:
-        | { streamId: string; data: Uint8Array; timestamp: number }
-        | { batch: { streamId: string; data: Uint8Array; timestamp: number }[] };
+        | { streamId: string; connectionId: string; data: Uint8Array; timestamp: number }
+        | { batch: { streamId: string; connectionId: string; data: Uint8Array; timestamp: number }[] };
     }
   | { type: 'webrtc_event'; payload: WebRtcEventPayload }
   | { type: 'control'; payload: ControlCommandPayload }
   | { type: 'unregister_client' }
-  | { type: 'register_datachannel_port'; payload: { peerId: string; connectionId: string; port: MessagePort } };
+  | { type: 'register_datachannel_port'; payload: { peerId: string; connectionId: string; port: MessagePort; localSdp: string; remoteSdp: string } };
 
 /**
  * Control command payload
@@ -263,8 +263,8 @@ export class ServiceWorkerBridge {
    * The SW side registers this in WirePool,
    * using it as DataLane::PostMessage(port2).
    */
-  sendDataChannelPort(peerId: string, connectionId: string, port: MessagePort): void {
-    this.sendToSW({ type: 'register_datachannel_port', payload: { peerId, connectionId, port } }, [port]);
+  sendDataChannelPort(peerId: string, connectionId: string, port: MessagePort, localSdp: string, remoteSdp: string): void {
+    this.sendToSW({ type: 'register_datachannel_port', payload: { peerId, connectionId, port, localSdp, remoteSdp } }, [port]);
   }
 
   /**

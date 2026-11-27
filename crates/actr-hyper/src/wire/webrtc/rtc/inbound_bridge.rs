@@ -138,9 +138,10 @@ fn spawn_dispatch_worker(
                     return;
                 };
                 dispatcher
-                    .dispatch(
+                    .dispatch_with_context(
                         message.peer.encode_to_vec(),
                         message.payload,
+                        message.peer_context,
                         message.lane.to_payload_type(),
                         &mailbox,
                     )

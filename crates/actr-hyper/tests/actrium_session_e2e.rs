@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use actr_framework::{Bytes, Context, Dest, MessageDispatcher, Workload};
+use actr_framework::{Bytes, Context, Dest, MessageDispatcher, WebRtcNetworkPath, Workload};
 use actr_hyper::actrium::{ActriumAttachParams, FrontSessionMetadata};
-use actr_hyper::test_support::TestSignalingServer;
+use actr_hyper::test_support::{TestRtcControl, TestSignalingServer};
 use actr_hyper::{ActrRef, Hyper, HyperConfig, Node, StaticTrust};
 use actr_protocol::{
     ActrId, ActrType, DataChunk, PayloadType, RpcEnvelope, RpcRequest, prost::Message as _,
@@ -20,6 +20,7 @@ use tempfile::TempDir;
 
 const REALM: &str = "test7@example.com";
 const READ: &str = "documents.read";
+const EXPLICIT_ECHO: &str = "echo.explicit";
 const PREPARE_ATTACHMENT_ROUTE: &str = "ask.AskService.PrepareAttachmentUpload";
 const ATTACHMENT_UPLOAD_ROUTE: &str = "uploadAttachment";
 
@@ -70,13 +71,38 @@ struct EchoDispatcher;
 impl MessageDispatcher for EchoDispatcher {
     type Workload = EchoWorkload;
 
+    fn reply_mode_for_route(route: &str) -> actr_protocol::ReplyMode {
+        if route == EXPLICIT_ECHO {
+            actr_protocol::ReplyMode::Explicit
+        } else {
+            actr_protocol::ReplyMode::Return
+        }
+    }
+
     async fn dispatch<C: Context>(
         _workload: &Self::Workload,
         envelope: RpcEnvelope,
-        _ctx: &C,
+        ctx: &C,
     ) -> actr_protocol::ActorResult<Bytes> {
         match envelope.route_key.as_str() {
             "echo" => Ok(envelope.payload.unwrap_or_default()),
+            EXPLICIT_ECHO => {
+                let request = EchoRequest::decode(envelope.payload.unwrap_or_default())
+                    .map_err(|error| actr_protocol::ActrError::DecodeFailure(error.to_string()))?;
+                let deliver = ctx
+                    .reply_deliver()
+                    .expect("explicit route has reply delivery");
+                let reply = actr_framework::Reply::new(
+                    ctx.request_id().to_string(),
+                    ctx.reply_deadline(),
+                    deliver,
+                    ctx.expects_response(),
+                );
+                reply.send(Ok(EchoResponse {
+                    payload: request.payload,
+                }));
+                Ok(Bytes::new())
+            }
             PREPARE_ATTACHMENT_ROUTE => {
                 let payload = envelope.payload.unwrap_or_default();
                 let request =
@@ -304,6 +330,10 @@ fn make_service_config(
         routes: actr_hyper::actrium::service_routes(&BTreeMap::from([
             ("echo".to_string(), BTreeSet::from([READ.to_string()])),
             (
+                EXPLICIT_ECHO.to_string(),
+                BTreeSet::from([READ.to_string()]),
+            ),
+            (
                 ATTACHMENT_UPLOAD_ROUTE.to_string(),
                 BTreeSet::from([READ.to_string()]),
             ),
@@ -323,13 +353,29 @@ async fn register_node(
     dir: &TempDir,
     actor_type: ActrType,
 ) -> Node<actr_hyper::Registered> {
+    register_node_with_webrtc(
+        server,
+        dir,
+        actor_type,
+        actr_config::WebRtcConfig::default(),
+    )
+    .await
+}
+
+async fn register_node_with_webrtc(
+    server: &TestSignalingServer,
+    dir: &TempDir,
+    actor_type: ActrType,
+    webrtc: actr_config::WebRtcConfig,
+) -> Node<actr_hyper::Registered> {
     let hyper = Hyper::new(HyperConfig::new(
         dir.path(),
         Arc::new(StaticTrust::dev_only()),
     ))
     .await
     .unwrap();
-    let config = runtime_config(dir, server, actor_type);
+    let mut config = runtime_config(dir, server, actor_type);
+    config.webrtc = webrtc;
     Node::from_hyper(hyper, config)
         .link(EchoWorkload)
         .await
@@ -339,8 +385,13 @@ async fn register_node(
         .unwrap()
 }
 
-async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (ActrRef, ActrId) {
-    let registered = register_node(server, dir, service_type()).await;
+async fn start_service_node(
+    server: &TestSignalingServer,
+    dir: &TempDir,
+    webrtc: actr_config::WebRtcConfig,
+    heartbeat_interval: Duration,
+) -> (ActrRef, ActrId, InMemorySessionService) {
+    let registered = register_node_with_webrtc(server, dir, service_type(), webrtc).await;
     let service_actor_id = registered.actor_id();
 
     let policies = ServicePolicies {
@@ -351,24 +402,28 @@ async fn start_service_node(server: &TestSignalingServer, dir: &TempDir) -> (Act
         privacy: Arc::new(AllowPolicies),
         quota: Arc::new(AllowPolicies),
     };
-    let service = InMemorySessionService::new(
-        make_service_config(
-            &service_actor_id.to_string_repr(),
-            registered.actrium_actor_signing_key().unwrap(),
-        ),
-        policies,
-    )
-    .unwrap();
+    let mut config = make_service_config(
+        &service_actor_id.to_string_repr(),
+        registered.actrium_actor_signing_key().unwrap(),
+    );
+    config.heartbeat_interval = heartbeat_interval;
+    // Give heartbeat renewal room before the Actor certificate's hard expiry.
+    config.lease_duration = Duration::from_secs(120);
+    let service = InMemorySessionService::new(config, policies).unwrap();
     let actr = registered
-        .with_actrium_service(service)
+        .with_actrium_service(service.clone())
         .start()
         .await
         .unwrap();
-    (actr, service_actor_id)
+    (actr, service_actor_id, service)
 }
 
-async fn start_front_node(server: &TestSignalingServer, dir: &TempDir) -> ActrRef {
-    let registered = register_node(server, dir, front_type()).await;
+async fn start_front_node(
+    server: &TestSignalingServer,
+    dir: &TempDir,
+    webrtc: actr_config::WebRtcConfig,
+) -> ActrRef {
+    let registered = register_node_with_webrtc(server, dir, front_type(), webrtc).await;
     let front_actor_id = registered.actor_id();
 
     let policies = ServicePolicies {
@@ -500,15 +555,20 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
         .with_test_writer()
         .try_init();
     let mut server = TestSignalingServer::start_with_relay().await.unwrap();
-    server.enable_actor_certificates();
     // Block SDP offer/answer/ICE forwarding so data can only flow over the
-    // verified Actor channel on the relay (no legacy WebRTC bypass).
+    // verified Actor channel using the relay transport.
     server.pause_forwarding();
 
     let service_dir = TempDir::new().unwrap();
     let front_dir = TempDir::new().unwrap();
-    let (service, service_actor_id) = start_service_node(&server, &service_dir).await;
-    let front = start_front_node(&server, &front_dir).await;
+    let (service, service_actor_id, _) = start_service_node(
+        &server,
+        &service_dir,
+        Default::default(),
+        Duration::from_secs(30),
+    )
+    .await;
+    let front = start_front_node(&server, &front_dir, Default::default()).await;
 
     tokio::time::timeout(Duration::from_secs(30), async {
         while server.relay_connection_count() != 2 {
@@ -858,5 +918,243 @@ async fn attach_and_session_signed_business_call_over_verified_relay() {
     service.wait_for_shutdown().await;
     front.shutdown();
     front.wait_for_shutdown().await;
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn actrium_session_over_direct_ice_and_replacement() {
+    webrtc_session_lifecycle(false, false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn actrium_session_over_forced_turn() {
+    webrtc_session_lifecycle(true, false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn actrium_session_over_forced_turn_with_verified_wss_available() {
+    webrtc_session_lifecycle(true, true).await;
+}
+
+async fn webrtc_session_lifecycle(turn_only: bool, with_wss: bool) {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_test_writer()
+        .try_init();
+
+    let mut server = if with_wss {
+        TestSignalingServer::start_with_relay().await.unwrap()
+    } else {
+        TestSignalingServer::start().await.unwrap()
+    };
+    let mut webrtc = actr_config::WebRtcConfig::default();
+    let turn_socket = if turn_only {
+        let socket = Arc::new(tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        webrtc.ice_transport_policy = actr_config::IceTransportPolicy::Relay;
+        webrtc.ice_servers = vec![actr_config::IceServer {
+            urls: vec![format!(
+                "turn:{}?transport=udp",
+                socket.local_addr().unwrap()
+            )],
+            ..Default::default()
+        }];
+        Some(socket)
+    } else {
+        None
+    };
+    let expected_path = if turn_only {
+        WebRtcNetworkPath::Relayed
+    } else {
+        WebRtcNetworkPath::Direct
+    };
+
+    let service_dir = TempDir::new().unwrap();
+    let front_dir = TempDir::new().unwrap();
+    let (service, service_id, registry) = start_service_node(
+        &server,
+        &service_dir,
+        webrtc.clone(),
+        Duration::from_secs(1),
+    )
+    .await;
+    let front = start_front_node(&server, &front_dir, webrtc).await;
+    let front_id = front.actor_id();
+    let turn_server = if let Some(socket) = turn_socket {
+        let mut passwords = BTreeMap::new();
+        for actor in [&front, &service] {
+            let credential = actor.session_state().unwrap().turn_credential().await;
+            passwords.insert(credential.username, credential.password);
+        }
+        let auth = turn::StaticAuthenticator::new(passwords).unwrap();
+        Some(
+            turn::create_turn_server(
+                socket,
+                "127.0.0.1",
+                REALM,
+                (49_152, 65_535),
+                Arc::new(auth),
+                true,
+            )
+            .await
+            .expect("start local TURN"),
+        )
+    } else {
+        None
+    };
+
+    // Warm and prove an authenticated WSS channel before enabling ICE.
+    let wss_channel = if with_wss {
+        server.pause_forwarding();
+        let wss = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                match front.attach_actrium(&service_id, attach_params()).await {
+                    Ok(session) => break session,
+                    Err(error) => {
+                        eprintln!("waiting for verified WSS: {error}");
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("authenticated WSS Attach");
+        let channel = registry
+            .session(&wss.session_id().await)
+            .await
+            .unwrap()
+            .channel_id;
+        wss.detach().await.expect("release the WSS lease");
+        assert_eq!(server.relay_connection_count(), 2);
+        server.resume_forwarding();
+        Some(channel)
+    } else {
+        assert_eq!(server.relay_connection_count(), 0);
+        None
+    };
+    let relay_frames = server.relay_frame_count();
+
+    let session = if with_wss {
+        front
+            .attach_actrium_over_webrtc(&service_id, attach_params())
+            .await
+    } else {
+        front.attach_actrium(&service_id, attach_params()).await
+    }
+    .expect("Attach over the selected authenticated WebRTC wire");
+    let front_rtc = TestRtcControl::from_actor(&front).unwrap();
+    let service_rtc = TestRtcControl::from_actor(&service).unwrap();
+    let session_id = session.session_id().await;
+    let initial = registry
+        .session(&session_id)
+        .await
+        .expect("lease established");
+    let front_channel = front_rtc.verified_channel(&service_id).await.unwrap();
+    let service_channel = service_rtc.verified_channel(&front_id).await.unwrap();
+    assert_eq!(initial.channel_id, front_channel.channel_id);
+    assert_eq!(initial.channel_id, service_channel.channel_id);
+    assert_eq!(
+        initial.channel_transcript_digest,
+        service_channel.transcript_digest
+    );
+    assert_ne!(wss_channel.as_ref(), Some(&initial.channel_id));
+    for (rtc, peer) in [(&front_rtc, &service_id), (&service_rtc, &front_id)] {
+        rtc.wait_state(peer, Duration::from_secs(10), |state| {
+            state.sendable && state.network_path == expected_path
+        })
+        .await
+        .expect("selected ICE candidate pair matches the test configuration");
+    }
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while session.lease_expiry_for_test().await <= initial.lease_expires_at_epoch_secs {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("Front receives a successful heartbeat response extending the lease");
+    let renewed = registry.session(&session_id).await.unwrap();
+    assert!(renewed.lease_expires_at_epoch_secs > initial.lease_expires_at_epoch_secs);
+    assert_eq!(renewed.channel_id, initial.channel_id);
+
+    let payload = b"returned over the selected WebRTC wire".to_vec();
+    assert_eq!(
+        session
+            .call("echo", READ, payload.clone(), Duration::from_secs(8))
+            .await
+            .unwrap(),
+        payload
+    );
+    let explicit_request = EchoRequest {
+        payload: payload.clone(),
+    }
+    .encode_to_vec();
+    let explicit_response = session
+        .call(
+            EXPLICIT_ECHO,
+            READ,
+            explicit_request,
+            Duration::from_secs(8),
+        )
+        .await
+        .expect("explicit reply uses the ingress WebRTC wire");
+    assert_eq!(
+        EchoResponse::decode(explicit_response.as_slice())
+            .unwrap()
+            .payload,
+        payload
+    );
+
+    if !turn_only {
+        let generation = front_rtc
+            .fail_peer(&service_id)
+            .await
+            .expect("retire the Front PC");
+        service_rtc
+            .fail_peer(&front_id)
+            .await
+            .expect("retire the Service PC");
+        front_rtc
+            .wait_state(&service_id, Duration::from_secs(25), |state| {
+                state.pc_generation > generation && state.sendable
+            })
+            .await
+            .expect("a new physical PeerConnection becomes sendable");
+        session
+            .resume()
+            .await
+            .expect("resume on the newly verified WebRTC generation");
+        let resumed = registry.session(&session_id).await.unwrap();
+        let replacement = front_rtc.verified_channel(&service_id).await.unwrap();
+        assert!(replacement.channel_generation > front_channel.channel_generation);
+        assert_eq!(resumed.channel_id, replacement.channel_id);
+        assert_ne!(resumed.channel_id, initial.channel_id);
+        assert!(resumed.lease_epoch > initial.lease_epoch);
+        assert_eq!(
+            session
+                .call("echo", READ, payload.clone(), Duration::from_secs(8))
+                .await
+                .unwrap(),
+            payload
+        );
+    }
+
+    session.detach().await.expect("detach over WebRTC");
+    assert_eq!(
+        registry.status(&session_id).await.unwrap().state,
+        actrium_runtime::SessionState::Closed
+    );
+    assert_eq!(
+        server.relay_frame_count(),
+        relay_frames,
+        "session exchanges must not use WSS"
+    );
+
+    service.shutdown();
+    front.shutdown();
+    service.wait_for_shutdown().await;
+    front.wait_for_shutdown().await;
+    if let Some(server) = turn_server {
+        turn::shutdown_turn_server(&server).await.unwrap();
+    }
     server.shutdown().await;
 }

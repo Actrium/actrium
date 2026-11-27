@@ -39,7 +39,7 @@ use super::service::{
 use super::{ATTACHMENT_CANCEL_ROUTE, metadata};
 use crate::actr_ref::ActrRef;
 use crate::outbound::PeerGate;
-use crate::transport::{PeerTransport, RpcDeadline, VerifiedPeerContext};
+use crate::transport::{ConnType, PeerTransport, RpcDeadline, VerifiedPeerContext};
 
 const SESSION_RPC_TIMEOUT_MS: i64 = 30_000;
 /// Resume runs before the next business request, which may race the verified
@@ -88,9 +88,12 @@ impl PeerRuntime {
         }
     }
 
-    /// Connect to the peer and return the verified channel view. Legacy wires
-    /// never produce a context, so Attach cannot silently downgrade.
-    async fn verified_context(&self, service: &ActrId) -> ActorResult<Arc<VerifiedPeerContext>> {
+    /// Connect to the peer and return its verified channel context.
+    async fn verified_context(
+        &self,
+        service: &ActrId,
+        required: Option<ConnType>,
+    ) -> ActorResult<(ConnType, Arc<VerifiedPeerContext>)> {
         let transport = self
             .transport
             .get_or_create_transport(&Dest::Peer(service.clone()))
@@ -98,12 +101,47 @@ impl PeerRuntime {
             .map_err(|error| {
                 ActrError::Unavailable(format!("Actrium peer connection failed: {error}"))
             })?;
-        transport.verified_peer_context().await.ok_or_else(|| {
+        transport.verified_peer_context(required).await.ok_or_else(|| {
             ActrError::PermissionDenied(
                 "the peer has no verified Actor channel; Actrium Attach requires mutual authentication"
                     .to_string(),
             )
         })
+    }
+
+    /// A rebuilt peer transport becomes usable asynchronously. Resume waits
+    /// for that verified channel (bounded) so the request that triggered
+    /// recovery is not rejected by the handshake still being in flight.
+    async fn wait_for_verified_context(
+        &self,
+        service: &ActrId,
+        required: Option<ConnType>,
+    ) -> ActorResult<(ConnType, Arc<VerifiedPeerContext>)> {
+        let deadline = tokio::time::Instant::now() + CHANNEL_RECOVERY_TIMEOUT;
+        loop {
+            match self.verified_context(service, required).await {
+                Ok(channel) => return Ok(channel),
+                Err(error)
+                    if Self::channel_is_recovering(&error)
+                        && tokio::time::Instant::now() < deadline =>
+                {
+                    crate::timer::sleep(
+                        crate::timer::ids::ACTRIUM_SESSION_CHANNEL_RECOVERY,
+                        CHANNEL_RECOVERY_POLL,
+                    )
+                    .await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    fn channel_is_recovering(error: &ActrError) -> bool {
+        match error {
+            ActrError::Unavailable(_) => true,
+            ActrError::PermissionDenied(message) => message.contains("no verified Actor channel"),
+            _ => false,
+        }
     }
 }
 
@@ -129,6 +167,8 @@ pub struct ActriumPeerSession {
     params: ActriumAttachParams,
     actor_signing_key: ed25519_dalek::SigningKey,
     state: Mutex<SessionState>,
+    session_transport: ConnType,
+    lease_transition: Mutex<()>,
     heartbeat: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -139,6 +179,11 @@ impl ActriumPeerSession {
 
     pub async fn lease_epoch(&self) -> u64 {
         self.state.lock().await.lease_epoch
+    }
+
+    #[cfg(feature = "test-utils")]
+    pub async fn lease_expiry_for_test(&self) -> u64 {
+        self.state.lock().await.expires_at_epoch_secs
     }
 
     fn envelope(method: &str, payload: Vec<u8>) -> ActorResult<RpcEnvelope> {
@@ -156,25 +201,30 @@ impl ActriumPeerSession {
         &self,
         method: &str,
         request: &Req,
+        channel: &Arc<VerifiedPeerContext>,
     ) -> ActorResult<Resp> {
         let payload = serde_json::to_vec(request)
             .map_err(|error| ActrError::Internal(format!("session encoding failed: {error}")))?;
-        let response = self.session_rpc_bytes(method, payload).await?;
+        let response = self.session_rpc_bytes(method, payload, channel).await?;
         serde_json::from_slice(&response)
             .map_err(|error| ActrError::Internal(format!("invalid session response: {error}")))
     }
 
-    async fn session_rpc_bytes(&self, method: &str, payload: Vec<u8>) -> ActorResult<Bytes> {
-        let envelope = Self::envelope(method, payload)?;
+    async fn session_rpc_bytes(
+        &self,
+        method: &str,
+        payload: Vec<u8>,
+        channel: &Arc<VerifiedPeerContext>,
+    ) -> ActorResult<Bytes> {
+        let mut envelope = Self::envelope(method, payload)?;
+        envelope.metadata.push(MetadataEntry {
+            key: metadata::CHANNEL_ID.into(),
+            value: channel.channel_id.clone(),
+        });
         let deadline = RpcDeadline::from_timeout_ms(envelope.timeout_ms)?;
         self.runtime
             .gate
-            .send_request_with_type_until(
-                &self.service,
-                PayloadType::RpcReliable,
-                envelope,
-                deadline,
-            )
+            .send_request_on_verified_channel(&self.service, envelope, deadline, channel.clone())
             .await
     }
 
@@ -239,37 +289,6 @@ impl ActriumPeerSession {
         }
     }
 
-    /// A rebuilt peer transport becomes usable asynchronously. Resume waits
-    /// for that verified channel (bounded) so the request that triggered
-    /// recovery is not rejected by the handshake still being in flight.
-    async fn channel_after_reconnect(&self) -> ActorResult<Arc<VerifiedPeerContext>> {
-        let deadline = tokio::time::Instant::now() + CHANNEL_RECOVERY_TIMEOUT;
-        loop {
-            match self.runtime.verified_context(&self.service).await {
-                Ok(channel) => return Ok(channel),
-                Err(error)
-                    if Self::channel_is_recovering(&error)
-                        && tokio::time::Instant::now() < deadline =>
-                {
-                    crate::timer::sleep(
-                        crate::timer::ids::ACTRIUM_SESSION_CHANNEL_RECOVERY,
-                        CHANNEL_RECOVERY_POLL,
-                    )
-                    .await;
-                }
-                Err(error) => return Err(error),
-            }
-        }
-    }
-
-    fn channel_is_recovering(error: &ActrError) -> bool {
-        match error {
-            ActrError::Unavailable(_) => true,
-            ActrError::PermissionDenied(message) => message.contains("no verified Actor channel"),
-            _ => false,
-        }
-    }
-
     async fn start_heartbeat(self: &Arc<Self>, interval_ms: u32) {
         let interval = Duration::from_millis(u64::from(interval_ms.max(1)));
         let weak = Arc::downgrade(self);
@@ -284,15 +303,18 @@ impl ActriumPeerSession {
                 let Some(session) = weak.upgrade() else {
                     break;
                 };
-                let request = {
+                let (request, channel) = {
                     let state = session.state.lock().await;
-                    HeartbeatRequest {
-                        session_id: state.session_id.clone(),
-                        lease_epoch: state.lease_epoch,
-                    }
+                    (
+                        HeartbeatRequest {
+                            session_id: state.session_id.clone(),
+                            lease_epoch: state.lease_epoch,
+                        },
+                        state.channel.clone(),
+                    )
                 };
                 match session
-                    .session_rpc::<_, HeartbeatOutcome>("Heartbeat", &request)
+                    .session_rpc::<_, HeartbeatOutcome>("Heartbeat", &request, &channel)
                     .await
                 {
                     Ok(outcome) => {
@@ -334,7 +356,7 @@ impl ActriumPeerSession {
         kind: MessageKind,
         payload: Vec<u8>,
         timeout: Duration,
-    ) -> ActorResult<(RpcEnvelope, PendingCall)> {
+    ) -> ActorResult<(RpcEnvelope, PendingCall, Arc<VerifiedPeerContext>)> {
         let state = self.state.lock().await.clone();
         let now = now_secs();
         Self::ensure_usable(&state, now)?;
@@ -377,6 +399,7 @@ impl ActriumPeerSession {
                 ..Default::default()
             },
             pending,
+            state.channel,
         ))
     }
 
@@ -398,7 +421,7 @@ impl ActriumPeerSession {
                 }
                 None => (None, None, payload),
             };
-        let (envelope, pending) = self
+        let (envelope, pending, channel) = self
             .business_envelope(route, capability, MessageKind::Request, payload, timeout)
             .await?;
         let request_id = envelope.request_id.clone();
@@ -423,12 +446,7 @@ impl ActriumPeerSession {
         let result = self
             .runtime
             .gate
-            .send_request_with_type_until(
-                &self.service,
-                PayloadType::RpcReliable,
-                envelope,
-                deadline,
-            )
+            .send_request_on_verified_channel(&self.service, envelope, deadline, channel)
             .await
             .map(|bytes| bytes.to_vec());
         if preserve_result
@@ -444,7 +462,7 @@ impl ActriumPeerSession {
     /// Fire-and-forget tell with a session-signed request. No response proof
     /// exists for tells; the Service enforces the same Guard admission.
     pub async fn tell(&self, route: &str, capability: &str, payload: Vec<u8>) -> ActorResult<()> {
-        let (envelope, _pending) = self
+        let (envelope, _pending, _) = self
             .business_envelope(
                 route,
                 capability,
@@ -477,7 +495,7 @@ impl ActriumPeerSession {
             prepare_request_id,
         })
         .map_err(|error| ActrError::Internal(format!("session encoding failed: {error}")))?;
-        let (envelope, pending_call) = self
+        let (envelope, pending_call, channel) = self
             .business_envelope(
                 ATTACHMENT_CANCEL_ROUTE,
                 capability,
@@ -495,12 +513,7 @@ impl ActriumPeerSession {
         let result = self
             .runtime
             .gate
-            .send_request_with_type_until(
-                &self.service,
-                PayloadType::RpcReliable,
-                envelope,
-                deadline,
-            )
+            .send_request_on_verified_channel(&self.service, envelope, deadline, channel)
             .await;
         drop(pending);
         result.map(|_| ())
@@ -608,10 +621,14 @@ impl ActriumPeerSession {
     /// Resume the lease over a freshly authenticated channel after a
     /// reconnect. No-op when the current channel generation is unchanged.
     pub async fn resume(&self) -> ActorResult<()> {
+        let _transition = self.lease_transition.lock().await;
         let previous = self.state.lock().await.clone();
         Self::ensure_usable(&previous, now_secs())?;
-        let channel = self.channel_after_reconnect().await?;
-        if previous.channel.channel_id == channel.channel_id {
+        let (_, channel) = self
+            .runtime
+            .wait_for_verified_context(&self.service, Some(self.session_transport))
+            .await?;
+        if previous.channel == channel {
             return Ok(());
         }
         let mut request = ResumeRequest {
@@ -622,7 +639,7 @@ impl ActriumPeerSession {
             session_proof: Vec::new(),
         };
         request.session_proof = resume_proof(previous.secret.as_bytes(), &request);
-        let response: AttachResponse = self.session_rpc("Resume", &request).await?;
+        let response: AttachResponse = self.session_rpc("Resume", &request, &channel).await?;
         let secret = self.verify_response(&response, &resume_digest(&request), &channel)?;
         *self.state.lock().await = SessionState {
             session_id: response.session_id.clone(),
@@ -639,7 +656,11 @@ impl ActriumPeerSession {
     /// authorized by the Service's takeover policy; the proof binds the old
     /// lease to the complete new Attach request.
     pub async fn takeover(self: &Arc<Self>, session_id: &str, lease_epoch: u64) -> ActorResult<()> {
-        let channel = self.runtime.verified_context(&self.service).await?;
+        let _transition = self.lease_transition.lock().await;
+        let (_, channel) = self
+            .runtime
+            .wait_for_verified_context(&self.service, Some(self.session_transport))
+            .await?;
         let mut attach = self.attach_request(&channel);
         sign_attach_request(&mut attach, &self.actor_signing_key);
         let request_digest = attach_request_digest(&attach);
@@ -656,7 +677,7 @@ impl ActriumPeerSession {
             .to_bytes()
             .to_vec();
         let response: AttachResponse = self
-            .session_rpc("Takeover", &TakeoverPayload { takeover, attach })
+            .session_rpc("Takeover", &TakeoverPayload { takeover, attach }, &channel)
             .await?;
         let secret = self.verify_response(&response, &request_digest, &channel)?;
         *self.state.lock().await = SessionState {
@@ -681,16 +702,20 @@ impl ActriumPeerSession {
 
     /// Release the lease immediately and stop the heartbeat.
     pub async fn detach(&self) -> ActorResult<()> {
-        let request = {
+        let _transition = self.lease_transition.lock().await;
+        let (request, channel) = {
             let state = self.state.lock().await;
-            DetachRequest {
-                session_id: state.session_id.clone(),
-                lease_epoch: state.lease_epoch,
-            }
+            (
+                DetachRequest {
+                    session_id: state.session_id.clone(),
+                    lease_epoch: state.lease_epoch,
+                },
+                state.channel.clone(),
+            )
         };
         let payload = serde_json::to_vec(&request)
             .map_err(|error| ActrError::Internal(format!("session encoding failed: {error}")))?;
-        self.session_rpc_bytes("Detach", payload).await?;
+        self.session_rpc_bytes("Detach", payload, &channel).await?;
         self.state.lock().await.recovery_required = true;
         if let Some(handle) = self.heartbeat.lock().await.take() {
             handle.abort();
@@ -726,12 +751,34 @@ impl ActrRef {
         cancellation.and(unregistered)
     }
 
-    /// Connect to a peer Service over the verified Actor channel and Attach.
+    /// Attach over the preferred verified Actor channel. The session keeps
+    /// its selected transport when resuming after a reconnect.
     /// Requires `Node<Attached>::with_actrium_service` before registration.
     pub async fn attach_actrium(
         &self,
         service: &ActrId,
         params: ActriumAttachParams,
+    ) -> ActorResult<Arc<ActriumPeerSession>> {
+        self.attach_actrium_on_transport(service, params, None)
+            .await
+    }
+
+    /// Attach over an authenticated WebRTC connection (direct ICE or TURN).
+    /// Resume and takeover on this session also require a verified WebRTC wire.
+    pub async fn attach_actrium_over_webrtc(
+        &self,
+        service: &ActrId,
+        params: ActriumAttachParams,
+    ) -> ActorResult<Arc<ActriumPeerSession>> {
+        self.attach_actrium_on_transport(service, params, Some(ConnType::WebRTC))
+            .await
+    }
+
+    async fn attach_actrium_on_transport(
+        &self,
+        service: &ActrId,
+        params: ActriumAttachParams,
+        required_transport: Option<ConnType>,
     ) -> ActorResult<Arc<ActriumPeerSession>> {
         let runtime = self.shared.peer_runtime.clone().ok_or_else(|| {
             ActrError::InvalidArgument(
@@ -739,7 +786,9 @@ impl ActrRef {
                     .to_string(),
             )
         })?;
-        let channel = runtime.verified_context(service).await?;
+        let (session_transport, channel) = runtime
+            .wait_for_verified_context(service, required_transport)
+            .await?;
         let actor_signing_key =
             ed25519_dalek::SigningKey::from_bytes(&self.shared.actor_signer.signing_key_bytes());
         let session = Arc::new(ActriumPeerSession {
@@ -757,11 +806,13 @@ impl ActrRef {
                 expires_at_epoch_secs: u64::MAX,
                 recovery_required: false,
             }),
+            session_transport,
+            lease_transition: Mutex::new(()),
             heartbeat: Mutex::new(None),
         });
         let mut attach = session.attach_request(&channel);
         sign_attach_request(&mut attach, &session.actor_signing_key);
-        let response: AttachResponse = session.session_rpc("Attach", &attach).await?;
+        let response: AttachResponse = session.session_rpc("Attach", &attach, &channel).await?;
         let secret =
             session.verify_response(&response, &attach_request_digest(&attach), &channel)?;
         *session.state.lock().await = SessionState {

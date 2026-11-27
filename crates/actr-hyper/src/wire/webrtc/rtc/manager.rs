@@ -193,6 +193,8 @@ pub(crate) struct RtcConnectionManager {
     /// Each controller's sessions dispatch received
     /// track RTP into it. `None` (tests) drops media dispatch.
     media_registry: Option<Arc<crate::inbound::MediaFrameRegistry>>,
+    actor_channel_identity:
+        Option<crate::wire::webrtc::rtc::peer::authentication::ActorChannelCredentials>,
     /// Raw Handler-fact observer used only by the integration evidence
     /// harness. It never participates in Controller decisions.
     #[cfg(feature = "test-utils")]
@@ -316,6 +318,7 @@ impl RtcConnectionManager {
                 crate::wire::webrtc::rtc::recovery::PeerRecoveryObligationLog::new(),
             ),
             media_registry: None,
+            actor_channel_identity: None,
             #[cfg(feature = "test-utils")]
             driver_event_observer: None,
             #[cfg(feature = "test-utils")]
@@ -338,6 +341,14 @@ impl RtcConnectionManager {
             peer_publish_barriers: std::sync::Mutex::new(HashMap::new()),
             peers: RwLock::new(HashMap::new()),
         }
+    }
+
+    pub(crate) fn with_actor_channel_identity(
+        mut self,
+        provider: crate::wire::webrtc::rtc::peer::authentication::ActorChannelCredentials,
+    ) -> Self {
+        self.actor_channel_identity = Some(provider);
+        self
     }
 
     /// Attach the node media-frame registry (Stage 6). Call before the manager
@@ -584,6 +595,7 @@ impl RtcConnectionManager {
                 super::peer::controller::SharedNodeDeps {
                     inbound: self.inbound.clone(),
                     media_registry: self.media_registry.clone(),
+                    actor_channel_identity: self.actor_channel_identity.clone(),
                     buffer_config: self.buffer_config.clone(),
                     #[cfg(feature = "test-utils")]
                     driver_event_observer: self.driver_event_observer.clone(),

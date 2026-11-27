@@ -10,20 +10,22 @@ use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
 
 pub mod actor;
+mod rtc_binding;
 pub use actor::{
     ACTOR_CHANNEL_AUDIENCE, ACTOR_CHANNEL_CERTIFICATE_DOMAIN, ActorChannelCertificate,
     ActorChannelClaims, ActorChannelEnrollment, ActorChannelIdentity, ActorChannelSession,
     ActorIdentityKey, VerifiedActorChannel, actor_channel_signing_bytes, actor_credential_digest,
     verify_actor_channel_certificate,
 };
+pub use rtc_binding::{RTC_AUTH_FRAME_PREFIX, dtls_fingerprint};
 
 pub const PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 pub const CERTIFICATE_DOMAIN: &str = "ACTR-RELAY-IDENTITY-V2";
 pub const CERTIFICATE_TTL: u64 = 300;
 pub const MAX_APPLICATION_BYTES: usize = 8 * 1024 * 1024 + 5;
 pub const MAX_RECORD_BYTES: usize = 65535 + 13;
-/// Enables the additional mutual Actor proof for Relay channels.
-pub const ACTOR_CHANNEL_AUTHENTICATION_ENABLED: bool = false;
+/// Enables the mutual Actor proof for Relay channels and Actrium sessions.
+pub const ACTOR_CHANNEL_AUTHENTICATION_ENABLED: bool = true;
 const MAGIC: &[u8; 8] = b"ACTRE2E1";
 const HEADER: usize = 13;
 #[cfg(not(test))]
@@ -346,6 +348,7 @@ impl SecureSession {
         self.partial.clear();
         self.partial_total = None;
     }
+    #[cfg(test)]
     pub fn new(local: &LocalIdentity, peer: &str, channel: u64, now: u64) -> Result<Self> {
         if local.endpoint == peer || local.expires_at <= now || channel == 0 {
             return Err(SecurityError("invalid secure channel identity"));

@@ -44,6 +44,15 @@ struct Entry<M> {
     meta: M,
     tx: oneshot::Sender<ActorResult<Bytes>>,
     delivery: PendingDeliveryState,
+    expected_channel: Option<Arc<VerifiedPeerContext>>,
+}
+
+impl<M> Entry<M> {
+    fn accepts_response(&self, ingress: Option<&VerifiedPeerContext>) -> bool {
+        self.expected_channel
+            .as_deref()
+            .is_none_or(|expected| Some(expected) == ingress)
+    }
 }
 
 /// Delivery phase recorded for a pending outbound operation.
@@ -110,6 +119,15 @@ impl<M> RpcCorrelation<M> {
     /// observes "Response channel closed") - request ids are uuid v4, so a
     /// collision indicates a caller bug worth surfacing in the logs.
     pub(crate) fn register(&self, request_id: impl Into<String>, meta: M) -> PendingRpc<M> {
+        self.register_on_channel(request_id, meta, None)
+    }
+
+    pub(crate) fn register_on_channel(
+        &self,
+        request_id: impl Into<String>,
+        meta: M,
+        expected_channel: Option<Arc<VerifiedPeerContext>>,
+    ) -> PendingRpc<M> {
         let request_id = request_id.into();
         let (tx, rx) = oneshot::channel();
         let previous = lock_ignore_poison(&self.inner)
@@ -119,6 +137,7 @@ impl<M> RpcCorrelation<M> {
                     meta,
                     tx,
                     delivery: PendingDeliveryState::default(),
+                    expected_channel,
                 },
             )
             .is_some();
@@ -197,19 +216,22 @@ impl<M> RpcCorrelation<M> {
     /// [`complete_from_envelope`](Self::complete_from_envelope) for the
     /// standard inbound-response policy).
     pub(crate) fn complete(&self, request_id: &str, result: ActorResult<Bytes>) -> CompleteOutcome {
-        self.complete_matching(request_id, result, |_| true)
+        self.complete_if(request_id, result, None, |_| true)
     }
 
-    fn complete_matching(
+    /// Complete only when the pending entry still accepts both the response's
+    /// ingress channel generation and `matches`'s metadata predicate.
+    fn complete_if(
         &self,
         request_id: &str,
         result: ActorResult<Bytes>,
+        ingress: Option<&VerifiedPeerContext>,
         matches: impl FnOnce(&M) -> bool,
     ) -> CompleteOutcome {
         let mut pending = lock_ignore_poison(&self.inner);
         if !pending
             .get(request_id)
-            .is_some_and(|entry| matches(&entry.meta))
+            .is_some_and(|entry| entry.accepts_response(ingress) && matches(&entry.meta))
         {
             return CompleteOutcome::Orphan;
         }
@@ -242,10 +264,21 @@ impl<M> RpcCorrelation<M> {
         matches: impl Fn(&M) -> bool,
         peer: impl FnOnce() -> String,
     ) -> CompleteOutcome {
-        if lock_ignore_poison(&self.inner)
+        let ingress = peer_context.as_deref();
+        let channel_mismatch = lock_ignore_poison(&self.inner)
             .get(&envelope.request_id)
-            .is_some_and(|entry| !matches(&entry.meta))
-        {
+            .is_some_and(|entry| !entry.accepts_response(ingress));
+        if channel_mismatch {
+            tracing::debug!(
+                request_id = %envelope.request_id,
+                "response arrived on a different Actor channel generation"
+            );
+            return CompleteOutcome::Orphan;
+        }
+        let peer_mismatch = lock_ignore_poison(&self.inner)
+            .get(&envelope.request_id)
+            .is_some_and(|entry| !matches(&entry.meta));
+        if peer_mismatch {
             tracing::warn!(
                 request_id = %envelope.request_id,
                 peer = %peer(),
@@ -261,16 +294,18 @@ impl<M> RpcCorrelation<M> {
         if let Some(guard) = guard
             && let Err(error) = guard
                 .check(
-                    IncomingDispatchRequest::new(&envelope, caller).with_peer_context(peer_context),
+                    IncomingDispatchRequest::new(&envelope, caller)
+                        .with_peer_context(peer_context.clone()),
                 )
                 .await
         {
             // A rejected response must never release its payload to the guest.
             // Wake the caller with the authorization error instead of leaving a
             // pending request alive until its transport deadline.
-            return self.complete_matching(
+            return self.complete_if(
                 &envelope.request_id,
                 Err(error.into_actr_error()),
+                ingress,
                 matches,
             );
         }
@@ -282,7 +317,8 @@ impl<M> RpcCorrelation<M> {
             ..
         } = envelope;
         let result = envelope_response_to_result(payload, error);
-        let outcome = self.complete_matching(&request_id, result, matches);
+        // Authorization and channel checks can yield while the pending entry is replaced.
+        let outcome = self.complete_if(&request_id, result, ingress, matches);
         if outcome == CompleteOutcome::Orphan {
             tracing::warn!(
                 request_id = %request_id,
@@ -408,6 +444,50 @@ fn lock_ignore_poison<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn retired_generation_cannot_complete_a_pending_session_call() {
+        let correlation = RpcCorrelation::new();
+        let retired = Arc::new(crate::transport::secure_channel::test_context(1));
+        let current = Arc::new(crate::transport::secure_channel::test_context(2));
+        let pending = correlation.register_on_channel("request", (), Some(current.clone()));
+        let response = RpcEnvelope {
+            request_id: "request".into(),
+            payload: Some(Bytes::from_static(b"response")),
+            ..Default::default()
+        };
+        for ingress in [Some(retired), None] {
+            assert_eq!(
+                correlation
+                    .complete_from_envelope_matching(
+                        response.clone(),
+                        None,
+                        ingress,
+                        |_| true,
+                        String::new
+                    )
+                    .await,
+                CompleteOutcome::Orphan
+            );
+            assert_eq!(correlation.len(), 1);
+        }
+        assert_eq!(
+            correlation
+                .complete_from_envelope_matching(
+                    response,
+                    None,
+                    Some(current),
+                    |_| true,
+                    String::new
+                )
+                .await,
+            CompleteOutcome::Completed
+        );
+        assert_eq!(
+            pending.recv().await.unwrap(),
+            Bytes::from_static(b"response")
+        );
+    }
 
     #[tokio::test]
     async fn guard_drop_removes_entry() {

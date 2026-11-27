@@ -1471,6 +1471,35 @@ async fn response_uses_ready_relay_after_proven_pre_send_rtc_failure() {
 }
 
 #[tokio::test]
+async fn session_response_cannot_fall_back_to_a_different_verified_channel() {
+    let peer = ActrId {
+        realm: "test@example.com".into(),
+        serial_number: 9002,
+    };
+    let (gate, mut sent) = response_route_test_gate(&peer).await;
+    let retired = crate::transport::secure_channel::test_context(2);
+    let response = RpcEnvelope {
+        request_id: "session-response".into(),
+        ..Default::default()
+    };
+
+    send_envelope_to_caller(
+        &gate,
+        &None,
+        &peer,
+        response,
+        "session-response",
+        "test.Response",
+        Some(&retired),
+    )
+    .await;
+    assert!(matches!(
+        sent.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
 async fn response_never_replays_a_successful_or_uncertain_rtc_send() {
     use crate::wire::webrtc::rtc::peer::send::{RtcSendAttempt, RtcSendError};
 
@@ -1725,6 +1754,7 @@ async fn response_send_timeout_submits_recovery_hint_to_current_peer() {
             },
             "response-timeout-hint",
             "test.Response",
+            None,
         )
         .await;
     });

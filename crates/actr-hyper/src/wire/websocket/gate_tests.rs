@@ -465,12 +465,15 @@ fn empty_pending() -> crate::transport::correlation::PendingRequestsMap {
     std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new())
 }
 
-/// Insert an inbound-sink entry for `peer` with a sendable (`LegacyBypass`)
+/// Insert an inbound-sink entry for `peer` with a verified
 /// secure cell. Tests that need a different state construct the tuple inline.
 async fn insert_sink_entry(inbound_sinks: &InboundSinkMap, peer: &ActrId, sink: WsSink) {
     inbound_sinks.write().await.insert(
         peer.clone(),
-        (sink, SecureCell::new(SecureChannelState::LegacyBypass)),
+        (
+            sink,
+            SecureCell::new_verified(crate::transport::secure_channel::test_context(1)),
+        ),
     );
 }
 
@@ -1517,7 +1520,7 @@ async fn send_response_falls_back_before_sending_when_channel_not_ready() {
 }
 
 #[tokio::test]
-async fn send_response_strict_cell_rejects_legacy_bypass_without_writing() {
+async fn send_response_strict_cell_rejects_unverified_channel_without_writing() {
     let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
     let gate = WebSocketGate::new(
         rx,
@@ -1538,16 +1541,13 @@ async fn send_response_strict_cell_rejects_legacy_bypass_without_writing() {
     let sink: WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
     gate.inbound_sinks.write().await.insert(
         peer.clone(),
-        (
-            sink,
-            SecureCell::new_actrium(SecureChannelState::LegacyBypass),
-        ),
+        (sink, SecureCell::new(SecureChannelState::New)),
     );
 
     let result = gate.send_response(&peer, RpcEnvelope::default()).await;
     assert!(
         matches!(result, Ok(false)),
-        "strict LegacyBypass is not Verified and must fall back: {result:?}"
+        "strict New is not Verified and must fall back: {result:?}"
     );
     assert_eq!(
         writes.load(Ordering::SeqCst),
@@ -1598,7 +1598,7 @@ async fn send_response_falls_back_if_session_closes_while_waiting_for_sink() {
         }
     });
     let sink: WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
-    let secure = SecureCell::new(SecureChannelState::Verified);
+    let secure = SecureCell::new_verified(crate::transport::secure_channel::test_context(1));
     gate.inbound_sinks
         .write()
         .await
@@ -1635,7 +1635,7 @@ async fn send_response_keeps_an_inflight_write_uncertain_on_close() {
         std::future::pending::<Result<(), tokio_tungstenite::tungstenite::Error>>()
     });
     let sink: WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
-    let secure = SecureCell::new(SecureChannelState::Verified);
+    let secure = SecureCell::new_verified(crate::transport::secure_channel::test_context(1));
     gate.inbound_sinks
         .write()
         .await
@@ -1671,7 +1671,7 @@ async fn send_response_rechecks_sendability_after_acquiring_sink() {
         }
     });
     let sink: WsSink = Arc::new(tokio::sync::Mutex::new(Some(Box::pin(sink))));
-    let secure = SecureCell::new(SecureChannelState::Verified);
+    let secure = SecureCell::new_verified(crate::transport::secure_channel::test_context(1));
     gate.inbound_sinks
         .write()
         .await

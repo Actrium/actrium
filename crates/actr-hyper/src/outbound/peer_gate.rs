@@ -1512,6 +1512,46 @@ impl PeerGate {
         envelope: RpcEnvelope,
         deadline: RpcDeadline,
     ) -> ActorResult<Bytes> {
+        self.send_request_until(target, payload_type, envelope, deadline, None)
+            .await
+    }
+
+    pub(crate) async fn send_request_on_verified_channel(
+        &self,
+        target: &ActrId,
+        envelope: RpcEnvelope,
+        deadline: RpcDeadline,
+        channel: Arc<crate::transport::VerifiedPeerContext>,
+    ) -> ActorResult<Bytes> {
+        let signed_channel = envelope
+            .metadata
+            .iter()
+            .find(|entry| entry.key == crate::actrium::metadata::CHANNEL_ID);
+        if channel.peer_actor_id != *target
+            || signed_channel.is_none_or(|entry| entry.value != channel.channel_id)
+        {
+            return Err(ActrError::Internal(
+                "session RPC does not match its selected Actor channel".into(),
+            ));
+        }
+        self.send_request_until(
+            target,
+            PayloadType::RpcReliable,
+            envelope,
+            deadline,
+            Some(channel),
+        )
+        .await
+    }
+
+    async fn send_request_until(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+        deadline: RpcDeadline,
+        expected_channel: Option<Arc<crate::transport::VerifiedPeerContext>>,
+    ) -> ActorResult<Bytes> {
         deadline.ensure_remaining()?;
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Request);
         let dest = Self::actr_id_to_dest(target);
@@ -1543,9 +1583,11 @@ impl PeerGate {
 
                 // The RAII guard removes pending state on send failure,
                 // response-channel closure, timeout, or caller cancellation.
-                let pending = self
-                    .pending_requests
-                    .register(request_id.clone(), target.clone());
+                let pending = self.pending_requests.register_on_channel(
+                    request_id.clone(),
+                    target.clone(),
+                    expected_channel,
+                );
                 deadline.ensure_remaining()?;
 
                 let sent = self
@@ -2138,6 +2180,16 @@ mod tests {
 
     #[async_trait]
     impl WireHandle for ReadyWebSocketWire {
+        fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+            crate::transport::SecureChannelState::Verified
+        }
+        fn verified_peer_context(
+            &self,
+        ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+            Some(std::sync::Arc::new(
+                crate::transport::secure_channel::test_context(1),
+            ))
+        }
         fn connection_type(&self) -> ConnType {
             ConnType::WebSocket
         }
@@ -2205,6 +2257,16 @@ mod tests {
 
     #[async_trait]
     impl WireHandle for ReadySuccessfulWire {
+        fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+            crate::transport::SecureChannelState::Verified
+        }
+        fn verified_peer_context(
+            &self,
+        ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+            Some(std::sync::Arc::new(
+                crate::transport::secure_channel::test_context(1),
+            ))
+        }
         fn connection_type(&self) -> ConnType {
             ConnType::WebSocket
         }
@@ -2245,6 +2307,16 @@ mod tests {
 
     #[async_trait]
     impl WireHandle for LifecycleWebRtcWire {
+        fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+            crate::transport::SecureChannelState::Verified
+        }
+        fn verified_peer_context(
+            &self,
+        ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+            Some(std::sync::Arc::new(
+                crate::transport::secure_channel::test_context(1),
+            ))
+        }
         fn connection_type(&self) -> ConnType {
             ConnType::WebRTC
         }
@@ -2302,6 +2374,16 @@ mod tests {
 
     #[async_trait]
     impl WireHandle for ReadyWebRtcCallWire {
+        fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+            crate::transport::SecureChannelState::Verified
+        }
+        fn verified_peer_context(
+            &self,
+        ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+            Some(std::sync::Arc::new(
+                crate::transport::secure_channel::test_context(1),
+            ))
+        }
         fn connection_type(&self) -> ConnType {
             ConnType::WebRTC
         }
@@ -3564,6 +3646,16 @@ mod tests {
 
     #[async_trait]
     impl WireHandle for PendingWebSocketWire {
+        fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+            crate::transport::SecureChannelState::Verified
+        }
+        fn verified_peer_context(
+            &self,
+        ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+            Some(std::sync::Arc::new(
+                crate::transport::secure_channel::test_context(1),
+            ))
+        }
         fn connection_type(&self) -> ConnType {
             ConnType::WebSocket
         }
@@ -3748,6 +3840,16 @@ mod tests {
 
     #[async_trait]
     impl WireHandle for LanelessPendingWire {
+        fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+            crate::transport::SecureChannelState::Verified
+        }
+        fn verified_peer_context(
+            &self,
+        ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+            Some(std::sync::Arc::new(
+                crate::transport::secure_channel::test_context(1),
+            ))
+        }
         fn connection_type(&self) -> ConnType {
             ConnType::WebSocket
         }
@@ -3922,6 +4024,16 @@ mod tests {
 
         #[async_trait]
         impl WireHandle for ReadyWsWire {
+            fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+                crate::transport::SecureChannelState::Verified
+            }
+            fn verified_peer_context(
+                &self,
+            ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+                Some(std::sync::Arc::new(
+                    crate::transport::secure_channel::test_context(1),
+                ))
+            }
             fn connection_type(&self) -> ConnType {
                 ConnType::WebSocket
             }
@@ -4040,6 +4152,16 @@ mod tests {
 
         #[async_trait]
         impl WireHandle for RevWsWire {
+            fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+                crate::transport::SecureChannelState::Verified
+            }
+            fn verified_peer_context(
+                &self,
+            ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+                Some(std::sync::Arc::new(
+                    crate::transport::secure_channel::test_context(1),
+                ))
+            }
             fn connection_type(&self) -> ConnType {
                 ConnType::WebSocket
             }
@@ -4142,6 +4264,16 @@ mod tests {
 
         #[async_trait]
         impl WireHandle for AdversarialWire {
+            fn secure_channel_state(&self) -> crate::transport::SecureChannelState {
+                crate::transport::SecureChannelState::Verified
+            }
+            fn verified_peer_context(
+                &self,
+            ) -> Option<std::sync::Arc<crate::transport::VerifiedPeerContext>> {
+                Some(std::sync::Arc::new(
+                    crate::transport::secure_channel::test_context(1),
+                ))
+            }
             fn connection_type(&self) -> crate::transport::ConnType {
                 crate::transport::ConnType::WebSocket
             }

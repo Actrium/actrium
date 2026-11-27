@@ -39,10 +39,7 @@ async fn inherent_close_drives_secure_state_closed() {
         !conn.is_connected(),
         "sync state reads must be safe inside Tokio"
     );
-    assert_eq!(
-        conn.secure_channel_state(),
-        SecureChannelState::LegacyBypass
-    );
+    assert_eq!(conn.secure_channel_state(), SecureChannelState::New);
 
     conn.close().await.expect("inherent close should succeed");
     assert!(!conn.is_connected());

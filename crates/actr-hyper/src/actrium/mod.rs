@@ -10,8 +10,7 @@
 //!
 //! Everything is opt-in through `Node<Attached>::with_actrium_service`; a node
 //! without it keeps the existing behavior. Session methods and business RPC
-//! require a verified Actor channel: legacy or in-process transports have no
-//! authenticated channel generation and are rejected rather than trusted.
+//! require an authenticated Actor channel generation.
 //!
 //! Wire payloads for the session system routes are serde JSON envelopes of
 //! the `actrium-core` domain types, matching the JSON envelope already used
@@ -72,8 +71,7 @@ pub(crate) fn member_role(role: &str) -> Result<MemberRole, IncomingGuardError> 
 }
 
 /// Project the transport-authenticated peer context into the session
-/// protocol's channel view. The context is produced by the verified relay
-/// handshake, never reconstructed from caller-declared metadata.
+/// protocol's channel view. The transport handshake supplies the context.
 ///
 /// Hyper does not retain a separate transport negotiation digest; the policy
 /// binding captured by the same verification fills that slot so complete

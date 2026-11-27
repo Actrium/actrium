@@ -26,6 +26,7 @@ async fn start_node_with_fixture_registration(
     registration: register_response::RegisterOk,
 ) -> ActorResult<ActrRef> {
     let mut attachment = node.attachment.take().expect("attached fixture node");
+    attachment.node.use_fixture_actor_channel_issuer();
     attachment.node.set_preregistered_credential(registration);
     let signaling = attachment.node.signaling_client.clone();
     let node = attachment.node.start().await?;
