@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use actr_protocol::{ActrType, Direction, RpcEnvelope};
 
+use super::manifest::SERVICE_STREAM_SEND_CAPABILITY;
 use crate::actrium::{ATTACHMENT_PREPARE_ROUTE, ATTACHMENT_UPLOAD_TRANSPORT, FrontSessionMetadata};
 use crate::lifecycle::node::PeerTypes;
 use crate::lifecycle::{
@@ -14,12 +15,16 @@ pub(crate) struct OrdinaryServiceGuard {
     peer_types: PeerTypes,
     front_type: ActrType,
     routes: BTreeSet<String>,
-    uploads_allowed: bool,
+    streams_allowed: bool,
 }
 
 impl OrdinaryServiceGuard {
     pub(crate) fn new(metadata: FrontSessionMetadata, peer_types: PeerTypes) -> Self {
         let uploads_allowed = metadata.routes.contains_key(ATTACHMENT_UPLOAD_TRANSPORT);
+        let streams_allowed = uploads_allowed
+            || metadata
+                .program_capabilities
+                .contains(SERVICE_STREAM_SEND_CAPABILITY);
         let mut routes: BTreeSet<_> = metadata.routes.into_keys().collect();
         routes.remove(ATTACHMENT_UPLOAD_TRANSPORT);
         routes.remove(ATTACHMENT_PREPARE_ROUTE);
@@ -30,7 +35,7 @@ impl OrdinaryServiceGuard {
             peer_types,
             front_type: metadata.front_actor_type,
             routes,
-            uploads_allowed,
+            streams_allowed,
         }
     }
 }
@@ -64,12 +69,12 @@ impl IncomingGuard for OrdinaryServiceGuard {
         &self,
         request: IncomingStreamChunk<'_>,
     ) -> Result<(), IncomingGuardError> {
-        if !self.uploads_allowed
+        if !self.streams_allowed
             || self.peer_types.get(request.sender).as_ref() != Some(&self.front_type)
         {
             return Err(IncomingGuardError::new(
                 IncomingGuardErrorCode::PermissionDenied,
-                "Service policy does not grant this caller attachment uploads",
+                "Service policy does not grant this caller data streams",
             ));
         }
         Ok(())

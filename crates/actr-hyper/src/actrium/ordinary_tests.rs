@@ -1,6 +1,26 @@
 use super::*;
 use actr_protocol::{ActrId, DataChunk, PayloadType};
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
+
+fn front_metadata(front_type: ActrType) -> FrontSessionMetadata {
+    FrontSessionMetadata {
+        service_type: ActrType {
+            name: "service".into(),
+            ..front_type.clone()
+        },
+        front_actor_type: front_type,
+        package_digest: vec![0; 32],
+        guest_digest: vec![0; 32],
+        protocol_fingerprint: vec![0; 32],
+        runtime: actrium_runtime::Runtime {
+            actrium_version: "1.0.0".into(),
+            front_host_api: "1.0".into(),
+            keel_api: "1.0".into(),
+        },
+        program_capabilities: BTreeSet::from(["service".into()]),
+        routes: BTreeMap::new(),
+    }
+}
 
 #[tokio::test]
 async fn ordinary_policy_checks_tell_routes_and_upload_grants() {
@@ -23,7 +43,7 @@ async fn ordinary_policy_checks_tell_routes_and_upload_grants() {
         peer_types,
         front_type: front_type.clone(),
         routes: BTreeSet::from(["echo".into()]),
-        uploads_allowed: false,
+        streams_allowed: false,
     };
     let mut tell = RpcEnvelope {
         direction: Some(Direction::Tell as i32),
@@ -52,7 +72,7 @@ async fn ordinary_policy_checks_tell_routes_and_upload_grants() {
             .await
             .is_err()
     );
-    guard.uploads_allowed = true;
+    guard.streams_allowed = true;
     assert!(
         guard
             .check_stream(IncomingStreamChunk::new(&mut chunk, &front))
@@ -68,7 +88,29 @@ async fn ordinary_policy_checks_tell_routes_and_upload_grants() {
 }
 
 #[tokio::test]
-async fn ordinary_uploads_are_bound_to_the_registering_front() {
+async fn ordinary_guard_denies_streams_without_a_signed_grant() {
+    let front_type = ActrType {
+        publisher: "test".into(),
+        name: "front".into(),
+        version: "1.0.0".into(),
+    };
+    let front = ActrId {
+        realm: "test@example.com".into(),
+        serial_number: 1,
+    };
+    let peer_types = PeerTypes::default();
+    peer_types.record(front.clone(), front_type.clone());
+    let guard = OrdinaryServiceGuard::new(front_metadata(front_type), peer_types);
+
+    let error = guard
+        .check_stream(IncomingStreamChunk::new(&mut DataChunk::default(), &front))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, IncomingGuardErrorCode::PermissionDenied);
+}
+
+#[tokio::test]
+async fn ordinary_streams_are_bound_to_the_registering_front() {
     let front_type = ActrType {
         publisher: "test".into(),
         name: "front".into(),
@@ -86,12 +128,13 @@ async fn ordinary_uploads_are_bound_to_the_registering_front() {
     peer_types.record(first.clone(), front_type.clone());
     peer_types.record(second.clone(), front_type.clone());
     let registry = crate::inbound::DataChunkRegistry::new();
-    registry.set_incoming_guard(Some(Arc::new(OrdinaryServiceGuard {
-        peer_types,
-        front_type,
-        routes: BTreeSet::new(),
-        uploads_allowed: true,
-    })));
+    let mut metadata = front_metadata(front_type);
+    metadata
+        .program_capabilities
+        .insert(SERVICE_STREAM_SEND_CAPABILITY.to_owned());
+    let guard = OrdinaryServiceGuard::new(metadata, peer_types);
+    assert!(!guard.routes.contains(ATTACHMENT_PREPARE_ROUTE));
+    registry.set_incoming_guard(Some(Arc::new(guard)));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let callback: crate::inbound::DataChunkCallback = Arc::new(move |chunk, sender| {
         tx.send((chunk.stream_id, sender)).unwrap();

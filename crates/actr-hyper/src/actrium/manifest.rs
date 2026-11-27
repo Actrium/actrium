@@ -19,6 +19,7 @@ use crate::error::HyperError;
 pub const ACTRIUM_VERSION_V1: &str = "1.0.0";
 pub const FRONT_HOST_API_V1: &str = "1.0";
 pub const SERVICE_CAPABILITY: &str = "service";
+pub(crate) const SERVICE_STREAM_SEND_CAPABILITY: &str = "host:service-stream.send";
 pub const ATTACHMENT_UPLOAD_TRANSPORT: &str = "uploadAttachment";
 pub const ATTACHMENT_PREPARE_ROUTE: &str = "ask.AskService.PrepareAttachmentUpload";
 pub const ATTACHMENT_CANCEL_ROUTE: &str =
@@ -70,6 +71,25 @@ struct FrontCapabilityManifest {
 struct FrontHostModule {
     rpc: Option<Vec<String>>,
     events: Option<Vec<String>>,
+}
+
+impl FrontCapabilityManifest {
+    fn program_capabilities(&self, required: &[String]) -> BTreeSet<String> {
+        let mut grants = BTreeSet::from([SERVICE_CAPABILITY.to_owned()]);
+        if required
+            .iter()
+            .any(|capability| capability == SERVICE_STREAM_SEND_CAPABILITY)
+            && ["service-stream", "host:service-stream"]
+                .into_iter()
+                .filter_map(|name| self.host_modules.get(name))
+                .filter_map(|module| module.rpc.as_deref())
+                .flatten()
+                .any(|method| method == "send")
+        {
+            grants.insert(SERVICE_STREAM_SEND_CAPABILITY.to_owned());
+        }
+        grants
+    }
 }
 
 fn invalid(message: impl Into<String>) -> HyperError {
@@ -211,6 +231,8 @@ pub fn front_session_metadata(
         .ok_or_else(|| invalid("unexpected Service fingerprint encoding"))?;
     let protocol_fingerprint = hex::decode(fingerprint_hex)
         .map_err(|error| invalid(format!("Service fingerprint: {error}")))?;
+    let program_capabilities =
+        capabilities.program_capabilities(&front_manifest.host.required_capabilities);
 
     Ok(FrontSessionMetadata {
         service_type: service_type.clone(),
@@ -227,7 +249,7 @@ pub fn front_session_metadata(
             front_host_api: FRONT_HOST_API_V1.to_owned(),
             keel_api: capabilities.keel_api,
         },
-        program_capabilities: BTreeSet::from([SERVICE_CAPABILITY.to_owned()]),
+        program_capabilities,
         routes,
     })
 }
@@ -245,6 +267,57 @@ fn read_declared(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_send_requires_both_front_declarations() {
+        let required = [SERVICE_STREAM_SEND_CAPABILITY.to_owned()];
+        for (module, methods, allowed) in [
+            ("service-stream", vec!["send".into()], true),
+            ("host:service-stream", vec!["send".into()], true),
+            ("service-stream", vec!["register".into()], false),
+            ("unrelated", vec!["send".into()], false),
+        ] {
+            let manifest = FrontCapabilityManifest {
+                keel_api: "1.0".into(),
+                host_modules: BTreeMap::from([(
+                    module.to_owned(),
+                    FrontHostModule {
+                        rpc: Some(methods),
+                        events: None,
+                    },
+                )]),
+            };
+            assert_eq!(
+                manifest
+                    .program_capabilities(&required)
+                    .contains(SERVICE_STREAM_SEND_CAPABILITY),
+                allowed,
+            );
+            assert!(
+                !manifest
+                    .program_capabilities(&[])
+                    .contains(SERVICE_STREAM_SEND_CAPABILITY)
+            );
+        }
+    }
+
+    #[test]
+    fn stream_send_uses_either_host_module_alias() {
+        let manifest: FrontCapabilityManifest = serde_json::from_value(serde_json::json!({
+            "keelApi": "1.0",
+            "hostModules": {
+                "service-stream": { "rpc": ["register"] },
+                "host:service-stream": { "rpc": ["send"] }
+            }
+        }))
+        .unwrap();
+        let required = [SERVICE_STREAM_SEND_CAPABILITY.to_owned()];
+        assert!(
+            manifest
+                .program_capabilities(&required)
+                .contains(SERVICE_STREAM_SEND_CAPABILITY)
+        );
+    }
 
     #[test]
     fn upload_transport_adds_its_fixed_prepare_route() {
