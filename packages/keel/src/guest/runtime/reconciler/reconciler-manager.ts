@@ -113,6 +113,8 @@ export function render(element: ReactElement, sendToHost: SendToHost): void {
         const stack = error instanceof Error ? (error.stack ?? '') : '';
         console.error(`[keel] onUncaughtError: ${msg}`);
         if (stack) console.error(`[keel] stack: ${stack}`);
+        const report = globals.__keel_reportRootRenderError;
+        if (typeof report === 'function') report(msg);
       }, // onUncaughtError
       // biome-ignore lint/suspicious/noExplicitAny: Error could be non-standard
       (error: any) => {

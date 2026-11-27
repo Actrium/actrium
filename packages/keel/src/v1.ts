@@ -105,6 +105,13 @@ function checkGuestEntry(entry: string): void {
   }
 }
 
+export class V1ComponentNotAllowedError extends Error {
+  constructor(exportName: string) {
+    super(`component_not_allowed: keel/guest export "${exportName}" is unavailable in v1`);
+    this.name = 'V1ComponentNotAllowedError';
+  }
+}
+
 /** Convert a validated linkage into the public manifest using the Host contract. */
 export function createV1CapabilityManifest(
   linkage: V1Linkage,
@@ -125,9 +132,7 @@ export function createV1CapabilityManifest(
       const component = v1ComponentName(exportName);
       // An unrecognized SDK export may expose a component outside the v1 registry.
       if (!component && !V1_SDK_UTILITIES.has(exportName)) {
-        throw new Error(
-          `component_not_allowed: keel/guest export "${exportName}" is unavailable in v1`
-        );
+        throw new V1ComponentNotAllowedError(exportName);
       }
       // SDK helpers and components share one public module ID.
       if (component) components.add(component);

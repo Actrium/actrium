@@ -12,6 +12,47 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { createTestContext, destroyTestContext, type TestContext } from './00-setup.test';
 import { findNodeByTestId, wait, waitFor } from './helpers/test-utils';
 
+describe('E2E Error Handling: Guest Root', () => {
+  let ctx: TestContext;
+
+  beforeEach(() => {
+    ctx = createTestContext(true);
+  });
+
+  afterEach(async () => {
+    await destroyTestContext(ctx);
+  });
+
+  it('reports an uncaught render error for the root', async () => {
+    const errors: Error[] = [];
+    ctx.engine.on('rootRenderError', (error) => errors.push(error));
+    await ctx.engine.loadBundle(`
+      const React = require('react');
+      const { render } = require('keel/reconciler');
+      function App() { throw new Error('Root crashed'); }
+      render(React.createElement(App), globalThis.__keel_sendBatch);
+    `);
+    await waitFor(() => errors.length > 0, 2000);
+    expect(errors.map((error) => error.message)).toEqual(['Root crashed']);
+  });
+
+  it('leaves an error caught by a guest boundary inside the guest', async () => {
+    const errors: Error[] = [];
+    ctx.engine.on('rootRenderError', (error) => errors.push(error));
+    await ctx.engine.loadBundle(`
+      const React = require('react');
+      const { render } = require('keel/reconciler');
+      const { KeelErrorBoundary } = require('keel/guest');
+      function Widget() { throw new Error('Widget crashed'); }
+      const fallback = React.createElement('View', { testID: 'guest-fallback' });
+      const app = React.createElement(KeelErrorBoundary, { fallback }, React.createElement(Widget));
+      render(app, globalThis.__keel_sendBatch);
+    `);
+    await waitFor(() => !!findNodeByTestId(ctx.receiver, 'guest-fallback'), 2000);
+    expect(errors).toEqual([]);
+  });
+});
+
 describe('E2E Error Handling: Guest Runtime Errors', () => {
   let ctx: TestContext;
 

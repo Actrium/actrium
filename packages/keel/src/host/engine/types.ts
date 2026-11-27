@@ -73,6 +73,9 @@ export interface EngineOptions {
    */
   debug?: boolean;
 
+  /** Let React route rendering exceptions to Guest boundaries and report uncaught root failures. */
+  reportRootRenderErrors?: boolean;
+
   /**
    * Custom logger
    */
@@ -205,6 +208,7 @@ export interface DevToolsError {
 export interface EngineEvents {
   load: () => void;
   error: (error: Error) => void;
+  rootRenderError: (error: Error) => void;
   destroy: () => void;
   operation: (batch: OperationBatch) => void;
   message: (message: GuestMessage) => void;

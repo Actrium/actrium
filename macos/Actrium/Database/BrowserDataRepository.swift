@@ -395,7 +395,8 @@ final class BrowserDataRepository {
     func saveSession(tabs: [Tab], currentTabId: UUID?) {
         let now = Int64(Date().timeIntervalSince1970)
         let browserTabs = tabs.compactMap { tab -> (id: UUID, item: AppleBrowserSessionTab)? in
-            guard let url = tab.url, Self.isSessionRestorableURL(url) else { return nil }
+            guard tab.actrOpenFailure == nil,
+                  let url = tab.url, Self.isSessionRestorableURL(url) else { return nil }
             let item = AppleBrowserSessionTab(
                 id: tab.id.uuidString,
                 title: normalizedTitle(tab.title, url: url),

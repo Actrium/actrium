@@ -3,6 +3,19 @@ import Testing
 @testable import Actrium
 
 struct RendererSurfaceKeyboardFocusTests {
+    @Test @MainActor func rendererCrashWithoutARecoverableConfigurationShowsNativeError() {
+        let surface = RendererSurfaceHostView(frame: NSRect(x: 0, y: 0, width: 400, height: 220))
+        let tab = UUID()
+        surface.tabId = tab
+
+        NotificationCenter.default.post(name: .rendererProcessCrashed, object: nil, userInfo: ["tabId": UUID()])
+        #expect(surface.accessibilityChildren()?.isEmpty == true)
+        NotificationCenter.default.post(name: .rendererProcessCrashed, object: nil, userInfo: ["tabId": tab])
+
+        let label = surface.accessibilityChildren()?.first as? NSTextField
+        #expect(label?.stringValue == RendererSurfaceHostView.failureMessage)
+    }
+
     @Test @MainActor func copyRequiresSelectionInTheFocusedSurface() {
         let window = NSWindow(contentRect: .zero, styleMask: .titled, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

@@ -63,6 +63,7 @@ enum TabWindowTransfer {
             verifiedAppName: tab.verifiedAppName
         )
         result.realmProfileSigner = tab.realmProfileSigner
+        result.actrOpenFailure = tab.actrOpenFailure
         result.historyPageIndex = tab.historyPageIndex
         return result
     }

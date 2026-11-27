@@ -102,6 +102,7 @@ struct Tab: Identifiable {
     /// Host-designated permission to use the legacy ACTR_CALL bridge.
     var legacyActorBridge: Bool = false
     var htmlContent: String?
+    var actrOpenFailure: ActrOpenFailure?
 
     /// System tab type (nil for regular tabs, set for built-in pages like History/Bookmarks)
     var systemTabType: SystemTabType?
@@ -234,8 +235,11 @@ struct Tab: Identifiable {
     // MARK: - Content Type Detection
 
     /// Determines tab content type.
-    /// Priority: Web URL, React Native app, native system page, then empty.
+    /// The system error page takes precedence over the failed navigation's URL.
     var contentType: TabContentType {
+        if actrOpenFailure != nil {
+            return .reactNative(bundleFingerprint: "system.actr-error")
+        }
         let result: TabContentType
 
         // 1. Check for an HTTP(S) Web URL.

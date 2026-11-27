@@ -18,6 +18,64 @@ final class RealmNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testMalformedRealmLinkShowsHostErrorInTheTargetTab() throws {
+        let view = BrowserViewModel(saveBrowserSession: { _, _ in })
+        let tabId = try XCTUnwrap(view.currentTabId)
+        let input = "actr://realm.example"
+        view.navigateCurrentTab(to: input, fromAddressBar: true)
+
+        let failed = try XCTUnwrap(view.tabs.first { $0.id == tabId })
+        XCTAssertEqual(view.currentTabId, tabId)
+        XCTAssertEqual(failed.url?.absoluteString, input)
+        XCTAssertEqual(failed.actrOpenFailure, .invalidLink)
+        XCTAssertEqual(failed.contentType, .reactNative(bundleFingerprint: "system.actr-error"))
+        XCTAssertNil(failed.unifiedScript)
+        XCTAssertNil(failed.guestEntry)
+
+        view.navigateCurrentTab(to: "https://example.org/")
+        let replaced = try XCTUnwrap(view.tabs.first { $0.id == tabId })
+        XCTAssertNil(replaced.actrOpenFailure)
+        XCTAssertEqual(replaced.contentType, .web(url: try XCTUnwrap(URL(string: "https://example.org/"))))
+    }
+
+    @MainActor
+    func testRealmDiscoveryFailureStaysInTheOriginatingTab() async throws {
+        let fetch = NavigationGate()
+        defer { fetch.release() }
+        let view = BrowserViewModel(
+            realmPreferences: try makePreferences(),
+            realmTrustDirectory: realmTrustDirectory,
+            fetchRealmDocument: { _, _ in
+                await fetch.wait()
+                throw URLError(.notConnectedToInternet)
+            },
+            saveBrowserSession: { _, _ in }
+        )
+        let origin = try XCTUnwrap(view.currentTabId)
+        view.navigateCurrentTab(to: realmURI)
+        try await waitUntil { fetch.waiting }
+        let other = view.addNewTab(focusAddressBar: false).id
+
+        fetch.release()
+        try await waitUntil { view.tabs.first { $0.id == origin }?.actrOpenFailure == .downloadFailed }
+        XCTAssertEqual(view.currentTabId, other)
+        XCTAssertNil(view.tabs.first { $0.id == other }?.actrOpenFailure)
+    }
+
+    @MainActor
+    func testMissingLocalPackageShowsHostErrorWithoutGuestContent() throws {
+        let view = BrowserViewModel(saveBrowserSession: { _, _ in })
+        let missing = realmTrustDirectory.appendingPathComponent("missing.actr")
+        XCTAssertNil(view.importACTRPackage(from: missing))
+
+        let failed = try XCTUnwrap(view.currentTab)
+        XCTAssertEqual(failed.url, missing.standardizedFileURL)
+        XCTAssertEqual(failed.actrOpenFailure, .packageNotFound)
+        XCTAssertEqual(failed.contentType, .reactNative(bundleFingerprint: "system.actr-error"))
+        XCTAssertNil(failed.unifiedScript)
+    }
+
+    @MainActor
     func testBackgroundInviteSurvivesThePreviousWebPageChangingURL() async throws {
         let documents = try discoveryDocuments(membership: "invite-only")
         let profile = NavigationGate()
@@ -239,13 +297,14 @@ final class RealmNavigationTests: XCTestCase {
         XCTAssertEqual(view.currentTab?.id, restoredTabId)
         XCTAssertEqual(view.currentTab?.title, "Saved Runtime Title")
         try await waitUntil {
-            view.tabs.first { $0.id == restoredTabId }?.appId != nil || view.actrUriNotice != nil
-        }
-        if let notice = view.actrUriNotice {
-            XCTFail("Realm activation failed: \(notice.detail ?? "Unknown error")")
-            return
+            guard let tab = view.tabs.first(where: { $0.id == restoredTabId }) else { return false }
+            return tab.appId != nil || tab.actrOpenFailure != nil
         }
         let realmTab = try XCTUnwrap(view.tabs.first { $0.id == restoredTabId })
+        if let failure = realmTab.actrOpenFailure {
+            XCTFail("Realm activation failed: \(failure.rawValue)")
+            return
+        }
         XCTAssertEqual(realmTab.unifiedScript, fixture.script)
         XCTAssertEqual(realmTab.title, "Saved Runtime Title")
         XCTAssertEqual(savedTitles.last, "Saved Runtime Title")

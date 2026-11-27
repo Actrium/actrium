@@ -2,6 +2,7 @@ import { type HostModuleImplementationMap, type KeelContractShape, isHostModuleI
 import {
   type V1CapabilityManifest,
   type V1Linkage,
+  V1ComponentNotAllowedError,
   V1_SERVICE_PREFIX,
   createV1CapabilityManifest,
   readV1Linkage,
@@ -72,7 +73,7 @@ export function verifyV1RuntimeGuest(
   } catch (cause) {
     return {
       ok: false,
-      code: 'capability_mismatch',
+      code: cause instanceof V1ComponentNotAllowedError ? 'component_not_allowed' : 'capability_mismatch',
       details: [cause instanceof Error ? cause.message : String(cause)],
     };
   }

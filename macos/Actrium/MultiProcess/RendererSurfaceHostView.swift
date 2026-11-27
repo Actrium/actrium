@@ -48,6 +48,10 @@ struct PersistentRendererProcessView: NSViewRepresentable {
 }
 
 final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
+    static let failureMessage = NSLocalizedString(
+        "This page could not start. Reload the tab to try again.",
+        comment: "Tab renderer failure"
+    )
     weak var coordinator: ViewBridgeCoordinator?
     var tabId: UUID? {
         didSet { if tabId != oldValue { documentInteraction.reset() } }
@@ -78,6 +82,7 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
     private var lastConfiguredFingerprint: String?
     private var lastSentSize: CGSize?
     private var recoveryAttempt = 0
+    private var failureLabel: NSTextField?
     private var accessibilityObserver: NSObjectProtocol?
     private var caretObserver: NSObjectProtocol?
     private var focusObserver: NSObjectProtocol?
@@ -255,6 +260,14 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
             return
         }
 
+        let isNewLoad = requestedFingerprint != lastConfiguredFingerprint
+            || (config["reloadKey"] as? Int) != (lastConfig?["reloadKey"] as? Int)
+        if isNewLoad {
+            recoveryAttempt = 0
+            failureLabel?.isHidden = true
+        } else if failureLabel?.isHidden == false {
+            return
+        }
         lastConfig = config
         lastConfigData = data
         lastConfiguredFingerprint = requestedFingerprint
@@ -291,7 +304,6 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
                 self.installContext(contextId)
                 RendererProcessPool.shared.requestAccessibilityTree(for: tabId)
                 self.sendViewport(size: self.bounds.size)
-                self.recoveryAttempt = 0
                 self.coordinator?.xpcServiceReady = true
                 self.coordinator?.hasConnection = true
                 // Do not call onConnectionEstablished here. This runs after
@@ -301,16 +313,20 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
             } catch is CancellationError {
                 return
             } catch {
+                guard !Task.isCancelled,
+                      self.tabId == tabId,
+                      self.fingerprint == requestedFingerprint else { return }
                 NSLog(
                     "Renderer configuration failed for %@: %@",
                     tabId.uuidString,
                     error.localizedDescription
                 )
-                if self.fingerprint == requestedFingerprint {
-                    self.lastConfigData = nil
-                    self.lastConfiguredFingerprint = nil
-                }
                 self.coordinator?.xpcServiceReady = false
+                if self.recoveryAttempt > 0 {
+                    self.recoverRendererAfterCrash()
+                } else {
+                    self.showRendererFailure()
+                }
             }
         }
     }
@@ -390,6 +406,7 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
         layer?.addSublayer(newLayer)
         hostLayer = newLayer
         contextId = newContextId
+        failureLabel?.isHidden = true
         // The host may have gained focus before the new surface became ready.
         syncKeyboardFocus()
         if let tabId {
@@ -408,15 +425,36 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
         hostLayer = nil
     }
 
+    private func showRendererFailure() {
+        showPlaceholder()
+        if let failureLabel {
+            failureLabel.isHidden = false
+            return
+        }
+        let label = NSTextField(wrappingLabelWithString: Self.failureMessage)
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 16),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16)
+        ])
+        failureLabel = label
+    }
+
     private func recoverRendererAfterCrash() {
         guard recoveryAttempt < 3,
               let tabId,
               !fingerprint.isEmpty,
               let config = lastConfig else {
+            showRendererFailure()
             return
         }
 
         recoveryAttempt += 1
+        failureLabel?.isHidden = true
         let attempt = recoveryAttempt
         configureTask?.cancel()
         configureTask = Task { @MainActor [weak self] in
@@ -570,7 +608,8 @@ final class RendererSurfaceHostView: NSView, NSMenuItemValidation {
     }
 
     override func accessibilityChildren() -> [Any]? {
-        accessibilityElements
+        if let failureLabel, !failureLabel.isHidden { return [failureLabel] }
+        return accessibilityElements
     }
 
     override func accessibilityHitTest(_ point: NSPoint) -> Any? {

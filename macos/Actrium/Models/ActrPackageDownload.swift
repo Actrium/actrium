@@ -39,6 +39,13 @@ enum ActrPackageLinkPolicy {
 struct PendingPackageDownload: Identifiable {
     let id = UUID()
     let url: URL
+    let tabId: UUID
+    let reloadKey: Int
+    let opensInNewTab: Bool
+
+    func matches(_ tab: Tab) -> Bool {
+        tab.id == tabId && tab.reloadNonce == reloadKey
+    }
 
     var host: String { url.host ?? "" }
     var filename: String { url.lastPathComponent }
@@ -48,18 +55,16 @@ struct PendingPackageDownload: Identifiable {
     }
 }
 
-/// State of an in-flight (or failed) package download, shown in the progress sheet.
+/// State of an in-flight package download, shown in the progress sheet.
 struct ActivePackageDownload: Identifiable {
     let id = UUID()
     let pending: PendingPackageDownload
 
     var phase: Phase = .downloading
-    var errorMessage: String?
 
     enum Phase {
         case downloading
         case verifying
-        case failed
     }
 }
 
