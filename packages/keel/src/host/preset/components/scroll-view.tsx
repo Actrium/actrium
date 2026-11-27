@@ -15,6 +15,8 @@ import {
 import type { LayoutEvent, ScrollRequest } from '../../../shared/style-types';
 import { InitialScrollContentContext, useInitialScroll } from './initial-scroll-content';
 
+type NativeScrollView = React.ComponentRef<typeof RNScrollView>;
+
 export interface ScrollEvent {
   nativeEvent: {
     contentOffset: { x: number; y: number };
@@ -50,10 +52,7 @@ export interface ScrollViewProps {
   onMomentumScrollEnd?: (event: ScrollEvent) => void;
 }
 
-export const ScrollView = React.forwardRef<
-  React.ComponentRef<typeof RNScrollView>,
-  ScrollViewProps
->(
+export const ScrollView = React.forwardRef<NativeScrollView, ScrollViewProps>(
   (
     {
       style,
@@ -84,7 +83,13 @@ export const ScrollView = React.forwardRef<
     ref
   ) => {
     const initial = useInitialScroll(initialScrollPosition, horizontal, onInitialScrollComplete);
-    const nativeRef = useScrollRequest(ref, initial.hidden ? undefined : scrollRequest);
+    const nativeRef = React.useRef<NativeScrollView>(null);
+    const attachNativeRef = React.useCallback((view: NativeScrollView | null) => {
+      nativeRef.current = view;
+      if (typeof ref === 'function') ref(view);
+      else if (ref) ref.current = view;
+    }, [ref]);
+    useScrollRequest(nativeRef, scrollRequest, initial.hidden, horizontal);
     const followLayout = scrollToEndOnLayout === true && !initial.hidden;
     const scheduleLayoutScroll = useScrollToEndOnLayout(nativeRef, followLayout);
     // Convert event format
@@ -167,7 +172,7 @@ export const ScrollView = React.forwardRef<
 
     return (
       <RNScrollView
-        ref={nativeRef}
+        ref={attachNativeRef}
         style={initial.hidden ? [style, { opacity: 0 }] : style}
         contentContainerStyle={contentContainerStyle}
         contentOffset={initial.offset}
@@ -199,12 +204,12 @@ export const ScrollView = React.forwardRef<
 );
 
 function useScrollRequest(
-  ref: React.ForwardedRef<React.ComponentRef<typeof RNScrollView>>,
-  request: ScrollRequest | undefined
+  nativeRef: React.RefObject<NativeScrollView | null>,
+  request: ScrollRequest | undefined,
+  initializing: boolean,
+  horizontal: boolean
 ) {
-  const nativeRef = React.useRef<React.ComponentRef<typeof RNScrollView>>(null);
   const lastId = React.useRef(-1);
-  React.useImperativeHandle(ref, () => nativeRef.current!, []);
   React.useLayoutEffect(() => {
     const view = nativeRef.current;
     if (!view || !request || !Number.isSafeInteger(request.id) || request.id <= lastId.current) {
@@ -215,14 +220,14 @@ function useScrollRequest(
       return;
     }
     lastId.current = id;
+    if (initializing) return;
     if (target === 'end') view.scrollToEnd({ animated });
-    else view.scrollTo({ y: target, animated });
-  }, [request]);
-  return nativeRef;
+    else if (!horizontal) view.scrollTo({ y: target, animated });
+  }, [horizontal, initializing, nativeRef, request]);
 }
 
 function useScrollToEndOnLayout(
-  view: React.RefObject<React.ComponentRef<typeof RNScrollView> | null>,
+  view: React.RefObject<NativeScrollView | null>,
   enabled: boolean
 ) {
   const active = React.useRef(enabled);

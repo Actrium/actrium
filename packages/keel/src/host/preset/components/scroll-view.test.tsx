@@ -4,6 +4,9 @@ import { ScrollView as NativeScrollView, Text as NativeText, View as NativeView 
 import { act, create } from 'react-test-renderer';
 import { ScrollView } from './scroll-view';
 import { InitialScrollContent } from './initial-scroll-content';
+import type { ScrollRequest } from '../../../shared/style-types';
+
+const viewportLayout = { nativeEvent: { layout: { x: 0, y: 0, width: 600, height: 300 } } };
 
 test('executes each valid request once and preserves the forwarded native ref', async () => {
   const calls: unknown[] = [];
@@ -36,6 +39,60 @@ test('executes each valid request once and preserves the forwarded native ref', 
       ['end', { animated: false }],
       ['offset', { y: 120, animated: true }],
     ]);
+  } finally {
+    await act(async () => { renderer?.unmount(); });
+  }
+});
+
+test.each(['object', 'callback'])('updates the %s ref when the native view is replaced', async (kind) => {
+  const first = { scrollToEnd: () => {} };
+  const replacementCalls: unknown[] = [];
+  const replacement = { scrollToEnd: (options: unknown) => { replacementCalls.push(options); } };
+  const ref = React.createRef<React.ComponentRef<typeof ScrollView>>();
+  const outerRef = kind === 'object' ? ref : (view: React.ComponentRef<typeof ScrollView> | null) => {
+    ref.current = view;
+  };
+  let renderer: ReturnType<typeof create> | undefined;
+  try {
+    await act(async () => {
+      renderer = create(<ScrollView ref={outerRef} />, { createNodeMock: () => first });
+    });
+    expect(ref.current).toBe(first);
+    const nativeRef = renderer!.root.findByType(NativeScrollView).props.ref;
+    const attach = (view: typeof replacement | null) => {
+      if (typeof nativeRef === 'function') nativeRef(view);
+      else nativeRef.current = view;
+    };
+    await act(async () => { attach(null); });
+    expect(ref.current).toBeNull();
+    await act(async () => { attach(replacement); });
+    expect(ref.current).toBe(replacement);
+    await act(async () => {
+      renderer!.update(<ScrollView ref={outerRef} scrollRequest={{ id: 1, target: 'end' }} />);
+    });
+    expect(replacementCalls).toEqual([{ animated: false }]);
+  } finally {
+    await act(async () => { renderer?.unmount(); });
+  }
+});
+
+test('ignores numeric requests on a horizontal ScrollView and still supports the end target', async () => {
+  const calls: unknown[] = [];
+  const nativeView = {
+    scrollTo: (options: unknown) => { calls.push(['offset', options]); },
+    scrollToEnd: (options: unknown) => { calls.push(['end', options]); },
+  };
+  let renderer: ReturnType<typeof create> | undefined;
+  try {
+    await act(async () => {
+      renderer = create(<ScrollView horizontal scrollRequest={{ id: 1, target: 120 }} />, {
+        createNodeMock: () => nativeView,
+      });
+    });
+    await act(async () => {
+      renderer!.update(<ScrollView horizontal scrollRequest={{ id: 2, target: 'end' }} />);
+    });
+    expect(calls).toEqual([['end', { animated: false }]]);
   } finally {
     await act(async () => { renderer?.unmount(); });
   }
@@ -77,11 +134,10 @@ test('the end offset is applied on the first visible commit, after delayed conte
   );
   let renderer: ReturnType<typeof create> | undefined;
   const nativeScroll = () => renderer!.root.findByType(NativeScrollView);
-  const layout = { nativeEvent: { layout: { x: 0, y: 0, width: 600, height: 300 } } };
   try {
     await act(async () => { renderer = create(tree(false)); });
     await act(async () => {
-      nativeScroll().props.onLayout(layout);
+      nativeScroll().props.onLayout(viewportLayout);
       nativeScroll().props.onContentSizeChange(600, 100);
       flushFrame();
     });
@@ -91,7 +147,7 @@ test('the end offset is applied on the first visible commit, after delayed conte
     await act(async () => { renderer!.update(tree(true)); });
     await act(async () => {
       const content = renderer!.root.findAllByType(NativeView).find((node) => !node.props.testID && node.props.onLayout)!;
-      content.props.onLayout(layout);
+      content.props.onLayout(viewportLayout);
       nativeScroll().props.onContentSizeChange(600, 1000);
       flushFrame();
     });
@@ -105,6 +161,66 @@ test('the end offset is applied on the first visible commit, after delayed conte
     });
     expect(nativeScroll().props.contentOffset).toEqual({ x: 0, y: 700 });
     expect(completed).toHaveLength(1);
+  } finally {
+    await act(async () => { renderer?.unmount(); });
+    restore();
+  }
+});
+
+test('reveals the list using the measured layout when a tracked child stays pending', async () => {
+  const { flushFrame, restore } = mockAnimationFrames();
+  const completed: unknown[] = [];
+  let renderer: ReturnType<typeof create> | undefined;
+  try {
+    await act(async () => {
+      renderer = create(
+        <ScrollView initialScrollPosition="end" onInitialScrollComplete={(offset) => completed.push(offset)}>
+          <InitialScrollContent>{null}</InitialScrollContent>
+        </ScrollView>
+      );
+    });
+    const nativeScroll = () => renderer!.root.findByType(NativeScrollView);
+    await act(async () => {
+      nativeScroll().props.onLayout(viewportLayout);
+      nativeScroll().props.onContentSizeChange(600, 1000);
+      flushFrame();
+    });
+    expect(nativeScroll().props.pointerEvents).toBe('none');
+
+    await act(async () => { await Bun.sleep(1100); });
+    expect(nativeScroll().props.pointerEvents).toBeUndefined();
+    expect(nativeScroll().props.contentOffset).toEqual({ x: 0, y: 700 });
+    expect(completed).toEqual([{ x: 0, y: 700 }]);
+  } finally {
+    await act(async () => { renderer?.unmount(); });
+    restore();
+  }
+});
+
+test('discards requests received while the initial position is pending', async () => {
+  const { flushFrame, restore } = mockAnimationFrames();
+  const calls: unknown[] = [];
+  const nativeView = { scrollTo: (options: unknown) => { calls.push(options); } };
+  const tree = (scrollRequest: ScrollRequest) => (
+    <ScrollView initialScrollPosition="end" scrollRequest={scrollRequest} />
+  );
+  let renderer: ReturnType<typeof create> | undefined;
+  try {
+    await act(async () => {
+      renderer = create(tree({ id: 1, target: 0 }), { createNodeMock: () => nativeView });
+    });
+    await act(async () => { renderer!.update(tree({ id: 2, target: 120 })); });
+    const nativeScroll = renderer!.root.findByType(NativeScrollView);
+    await act(async () => {
+      nativeScroll.props.onLayout(viewportLayout);
+      nativeScroll.props.onContentSizeChange(600, 1000);
+      flushFrame();
+    });
+    expect(nativeScroll.props.contentOffset).toEqual({ x: 0, y: 700 });
+    await act(async () => { renderer!.update(tree({ id: 2, target: 240 })); });
+    expect(calls).toEqual([]);
+    await act(async () => { renderer!.update(tree({ id: 3, target: 300 })); });
+    expect(calls).toEqual([{ y: 300, animated: false }]);
   } finally {
     await act(async () => { renderer?.unmount(); });
     restore();
