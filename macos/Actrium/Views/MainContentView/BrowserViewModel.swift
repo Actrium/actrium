@@ -947,8 +947,21 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
             logger.warning("⚠️ [updateTabURL] Tab not found: \(tabId)")
             return
         }
-        // WebKit can report a URL from the old page after the tab has changed content.
-        guard case .web = tabs[index].contentType else { return }
+        // WebKit can report a URL from the old page after the tab has been
+        // explicitly switched to non-web content (Realm, package, or system
+        // page); reject those late updates. A web tab that merely navigated
+        // to about:blank still owns its webview (an address-bar about:blank
+        // becomes the system start page instead), so it must keep accepting
+        // URL updates — otherwise Back cannot restore the previous page.
+        guard tabs[index].systemTabType == nil,
+              tabs[index].bundleFingerprint == nil,
+              let currentURL = tabs[index].url,
+              currentURL.scheme == "http" || currentURL.scheme == "https"
+                || currentURL.absoluteString.hasPrefix("about:blank")
+        else {
+            logger.debug("🔗 [updateTabURL] Ignored \(url.absoluteString) for non-web tab \(tabId)")
+            return
+        }
         let oldURL = tabs[index].url?.absoluteString ?? "nil"
         tabs[index].url = url
         logger.notice("🔗 [updateTabURL] Tab \(tabId) URL updated from \(oldURL) to \(url.absoluteString)")

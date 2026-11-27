@@ -145,6 +145,39 @@ final class RealmNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testBackFromACompletedBlankPageRestoresTheWebURL() throws {
+        let view = BrowserViewModel(
+            realmPreferences: try makePreferences(),
+            saveBrowserSession: { _, _ in }
+        )
+        view.navigateCurrentTab(to: "https://page.example/")
+        let tabId = try XCTUnwrap(view.currentTabId)
+        let blank = try XCTUnwrap(URL(string: "about:blank"))
+        view.updateTabURL(for: tabId, url: blank)
+        XCTAssertEqual(view.tabs.first { $0.id == tabId }?.url, blank)
+        // A completed blank navigation classifies the tab as empty, but its
+        // webview still owns it: the URL WebKit reports when the user goes
+        // Back must land, or the tab stays blank forever.
+        let restored = try XCTUnwrap(URL(string: "https://page.example/"))
+        view.updateTabURL(for: tabId, url: restored)
+        XCTAssertEqual(view.tabs.first { $0.id == tabId }?.url, restored)
+    }
+
+    @MainActor
+    func testSystemPageTabRejectsLateWebURLUpdates() throws {
+        let view = BrowserViewModel(
+            realmPreferences: try makePreferences(),
+            saveBrowserSession: { _, _ in }
+        )
+        view.navigateCurrentTab(to: "https://page.example/")
+        let tabId = try XCTUnwrap(view.currentTabId)
+        view.navigateCurrentTab(to: "about:history")
+        let late = try XCTUnwrap(URL(string: "https://page.example/late"))
+        view.updateTabURL(for: tabId, url: late)
+        XCTAssertEqual(view.tabs.first { $0.id == tabId }?.url?.absoluteString, "about:history")
+    }
+
+    @MainActor
     func testInviteRedemptionPersistsAfterNavigatingAway() async throws {
         let preferences = try makePreferences()
         let documents = try discoveryDocuments(membership: "invite-only")
