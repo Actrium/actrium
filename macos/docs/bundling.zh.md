@@ -22,6 +22,11 @@ Actrium 项目包含独立的 React Native bundle。现行 Helper 是单一 `Act
 ./scripts/bundle-actrium-runtime.sh --help
 ```
 
+Xcode 和命令行脚本使用相同的 Node.js 配置。在 `macos/.xcode.env.local`
+中设置 `NODE_BINARY` 可覆盖调用方传入的值。默认从 `PATH` 查找 `node`。
+请使用可执行文件的绝对路径或 `PATH` 上的命令名，例如
+`export NODE_BINARY="$HOME/.volta/bin/node"`。
+
 ## Bundle 说明
 
 ### System Apps (`system.jsbundle`)
