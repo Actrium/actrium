@@ -929,9 +929,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                     // WebKit reports a scripted history.back()/forward() with
                     // the same type as a trackpad swipe, so the type alone is
                     // not a user gesture. Require native gesture evidence: the
-                    // swipe arrives as a trackpad scroll stream right before
-                    // the traversal. Toolbar buttons and keyboard shortcuts
-                    // cancel the pending load explicitly in
+                    // swipe arrives as a horizontal trackpad scroll stream
+                    // right before the traversal. Toolbar buttons and keyboard
+                    // shortcuts cancel the pending load explicitly in
                     // BrowserViewModel.goBack()/goForward().
                     if let scrolledAt = (webView as? DownloadableWebView)?.lastTrackpadScrollAt,
                        scrolledAt.duration(to: .now) < .seconds(1) {
@@ -1306,10 +1306,11 @@ private class ClosureMenuItem: NSMenuItem {
 /// Custom WKWebView subclass that adds download options to context menu
 class DownloadableWebView: WKWebView {
     var onPrimaryMouseDown: (() -> Void)?
-    /// Most recent trackpad scroll-stream timestamp. WebKit's back/forward
-    /// swipe arrives as a trackpad scroll stream (a non-empty `phase`), while
-    /// a scripted history traversal has no such native gesture evidence, so
-    /// the navigation delegate can tell the two apart.
+    /// Most recent horizontal trackpad scroll-stream timestamp. WebKit's
+    /// back/forward swipe is driven by a horizontal scroll stream (a
+    /// non-empty `phase` with dominant x deltas), while ordinary vertical
+    /// scrolling and scripted history traversals produce no such evidence,
+    /// so the navigation delegate can tell a real swipe from both.
     private(set) var lastTrackpadScrollAt: ContinuousClock.Instant?
     /// Most recent trusted user activation (a primary mouse press or a
     /// Return press). A scripted form submission produces no such event, so
@@ -1321,7 +1322,10 @@ class DownloadableWebView: WKWebView {
     private var contextMenuLinkURL: URL?
 
     override func scrollWheel(with event: NSEvent) {
-        if event.phase != [] {
+        // Only a horizontal-dominant trackpad scroll stream can drive
+        // WebKit's back/forward swipe; ordinary vertical page scrolling
+        // must not become evidence for a later scripted traversal.
+        if event.phase != [], abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
             lastTrackpadScrollAt = .now
         }
         super.scrollWheel(with: event)

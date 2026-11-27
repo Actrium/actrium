@@ -253,6 +253,59 @@ final class RealmNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testScriptedTraversalAfterVerticalScrollingKeepsAPendingRealmLoad() async throws {
+        let documents = try discoveryDocuments(membership: "invite-only")
+        let profile = NavigationGate()
+        defer { profile.release() }
+        let view = BrowserViewModel(
+            realmPreferences: try makePreferences(),
+            realmTrustDirectory: realmTrustDirectory,
+            fetchRealmDocument: { url, _ in
+                if url.path == "/realm/echo" { await profile.wait() }
+                return try XCTUnwrap(documents[url.absoluteString])
+            },
+            confirmRealmMembership: { _ in false },
+            saveBrowserSession: { _, _ in }
+        )
+        view.navigateCurrentTab(to: "https://old.example/")
+        let tabId = try XCTUnwrap(view.currentTabId)
+        let holder = WebViewHolder()
+        for page in ["first", "second"] {
+            let ready = expectation(description: "Page \(page) finished loading")
+            holder.onNavigationFinished = { _, _ in ready.fulfill() }
+            holder.webView.load(URLRequest(url: try XCTUnwrap(URL(string: "about:blank?\(page)"))))
+            await fulfillment(of: [ready], timeout: 5)
+        }
+        let traversedBack = expectation(description: "The scripted traversal went back")
+        holder.onNavigationFinished = { _, url in
+            guard url?.absoluteString == "about:blank?first" else { return }
+            traversedBack.fulfill()
+        }
+        holder.onUserInitiatedMainFrameNavigation = {
+            XCTFail("A scripted traversal after vertical scrolling was reported as a user gesture")
+            view.webTabDidActivateLink(tabId)
+        }
+        view.navigateCurrentTab(to: realmURI)
+        try await waitUntil { profile.waiting }
+
+        // Ordinary vertical page scrolling is not swipe evidence: a scripted
+        // traversal right after it must still keep the pending Realm load.
+        let scroll = try XCTUnwrap(CGEvent(
+            scrollWheelEvent2Source: nil, units: .pixel,
+            wheelCount: 2, wheel1: -10, wheel2: 0, wheel3: 0))
+        scroll.setIntegerValueField(
+            .scrollWheelEventScrollPhase, value: Int64(NSEvent.Phase.changed.rawValue))
+        holder.webView.scrollWheel(with: try XCTUnwrap(NSEvent(cgEvent: scroll)))
+
+        _ = try await holder.webView.evaluateJavaScript("history.back(); void 0")
+        await fulfillment(of: [traversedBack], timeout: 5)
+        profile.release()
+
+        try await waitUntil { view.pendingRealmInvite(for: tabId) != nil }
+        XCTAssertEqual(view.pendingInviteRedeem?.uri, realmURI)
+    }
+
+    @MainActor
     func testUserFormSubmissionSupersedesAPendingRealmLoad() async throws {
         try await assertNoEnrollment { view in
             let tabId = try XCTUnwrap(view.currentTabId)
