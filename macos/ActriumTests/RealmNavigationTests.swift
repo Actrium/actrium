@@ -76,7 +76,7 @@ final class RealmNavigationTests: XCTestCase {
             defer { window.close() }
             await loadWebLink(in: holder)
             let linkActivated = expectation(description: "WebKit allowed a user-activated main-frame link")
-            holder.onMainFrameLinkActivated = {
+            holder.onUserInitiatedMainFrameNavigation = {
                 view.webTabDidActivateLink(tabId)
                 linkActivated.fulfill()
             }
@@ -122,7 +122,7 @@ final class RealmNavigationTests: XCTestCase {
             view.updateTabURL(for: tabId, url: url)
             navigationFinished.fulfill()
         }
-        holder.onMainFrameLinkActivated = {
+        holder.onUserInitiatedMainFrameNavigation = {
             XCTFail("A scripted link was reported as a user click")
             view.webTabDidActivateLink(tabId)
         }
@@ -175,6 +175,58 @@ final class RealmNavigationTests: XCTestCase {
         let late = try XCTUnwrap(URL(string: "https://page.example/late"))
         view.updateTabURL(for: tabId, url: late)
         XCTAssertEqual(view.tabs.first { $0.id == tabId }?.url?.absoluteString, "about:history")
+    }
+
+    @MainActor
+    func testNativeHistoryNavigationSupersedesAPendingRealmLoad() async throws {
+        try await assertNoEnrollment { view in
+            let tabId = try XCTUnwrap(view.currentTabId)
+            let holder = WebViewHolder()
+            // Two distinct URLs so WebKit records a back-forward history entry.
+            for page in ["first", "second"] {
+                let ready = expectation(description: "Page \(page) finished loading")
+                holder.onNavigationFinished = { _, _ in ready.fulfill() }
+                holder.webView.load(URLRequest(url: try XCTUnwrap(URL(string: "about:blank?\(page)"))))
+                await fulfillment(of: [ready], timeout: 5)
+            }
+            holder.onNavigationFinished = nil
+            let navigatedBack = expectation(description: "WebKit allowed native history navigation")
+            holder.onUserInitiatedMainFrameNavigation = {
+                view.webTabDidActivateLink(tabId)
+                navigatedBack.fulfill()
+            }
+            holder.goBack()
+            await fulfillment(of: [navigatedBack], timeout: 5)
+        }
+    }
+
+    @MainActor
+    func testFormSubmissionSupersedesAPendingRealmLoad() async throws {
+        try await assertNoEnrollment { view in
+            let tabId = try XCTUnwrap(view.currentTabId)
+            let holder = WebViewHolder()
+            let pageReady = expectation(description: "The form page finished loading")
+            holder.onNavigationFinished = { _, _ in pageReady.fulfill() }
+            holder.webView.loadHTMLString("""
+                <form action="about:blank?submitted" method="get"><input type="submit"></form>
+                """, baseURL: nil)
+            await fulfillment(of: [pageReady], timeout: 5)
+            holder.onNavigationFinished = nil
+            let submitted = expectation(description: "WebKit allowed the form submission")
+            holder.onUserInitiatedMainFrameNavigation = {
+                view.webTabDidActivateLink(tabId)
+                submitted.fulfill()
+            }
+            _ = try await holder.webView.evaluateJavaScript("document.querySelector('form').submit()")
+            await fulfillment(of: [submitted], timeout: 5)
+        }
+    }
+
+    @MainActor
+    func testUserReloadSupersedesAPendingRealmLoad() async throws {
+        try await assertNoEnrollment { view in
+            view.reloadCurrentTab()
+        }
     }
 
     @MainActor

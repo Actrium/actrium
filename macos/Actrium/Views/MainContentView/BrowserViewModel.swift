@@ -2626,6 +2626,10 @@ class BrowserViewModel: ObservableObject, ActriumModePublisher {
         // For web content (http/https), use WebView's reload
         if sourceURL.scheme == "http" || sourceURL.scheme == "https" {
             logger.notice("🔄 [reloadCurrentTab] Web Content, Call WebView reload")
+            // A user-requested reload supersedes a pending Realm load, just
+            // like toolbar Back/Forward. Script-driven location.reload()
+            // never reaches this path, so it cannot cancel the load.
+            webTabDidActivateLink(id)
             WebViewHolderManager.shared.existingHolder(for: id)?.reload()
             return
         }

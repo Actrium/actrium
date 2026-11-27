@@ -249,7 +249,7 @@ struct WorkspaceMainView: View {
                                     viewModel.updateTabURL(for: focusedTabId, url: newURL)
                                 }
                             },
-                            onMainFrameLinkActivated: {
+                            onUserInitiatedMainFrameNavigation: {
                                 viewModel.webTabDidActivateLink(focusedTabId)
                             },
                             onLoadingStateChanged: { loading in

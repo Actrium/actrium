@@ -188,8 +188,10 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// Callback when URL changes (including History.pushState/replaceState)
     var onURLChanged: ((URL?) -> Void)?
 
-    /// Callback when a user-activated link can navigate this tab's main frame.
-    var onMainFrameLinkActivated: (() -> Void)?
+    /// Callback when a user-initiated navigation can navigate this tab's main
+    /// frame: a trusted link click, native history navigation, or a form
+    /// submission. Scripted link clicks and automatic redirects do not fire it.
+    var onUserInitiatedMainFrameNavigation: (() -> Void)?
 
     /// Callback when loading state changes
     var onLoadingStateChanged: ((Bool) -> Void)?
@@ -918,8 +920,22 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             return
         }
 
-        if isTrustedLink, navigationAction.targetFrame?.isMainFrame == true {
-            onMainFrameLinkActivated?()
+        if navigationAction.targetFrame?.isMainFrame == true {
+            if isTrustedLink {
+                onUserInitiatedMainFrameNavigation?()
+            } else {
+                switch navigationAction.navigationType {
+                case .backForward, .formSubmitted, .formResubmitted:
+                    // Native history navigation (trackpad gestures, toolbar
+                    // buttons) and form submissions are user-initiated too; a
+                    // pending Realm load must yield to them. Reload is handled
+                    // by BrowserViewModel.reloadCurrentTab because .reload
+                    // cannot distinguish the toolbar from location.reload().
+                    onUserInitiatedMainFrameNavigation?()
+                default:
+                    break
+                }
+            }
         }
         decisionHandler(.allow)
     }
@@ -1723,7 +1739,7 @@ struct FocusedWebOverlay: View {
     init(tab: Tab, url: URL, viewportSize: CGSize,
          onNavigationFinished: ((String?, URL?) -> Void)? = nil,
          onURLChanged: ((URL?) -> Void)? = nil,
-         onMainFrameLinkActivated: (() -> Void)? = nil,
+         onUserInitiatedMainFrameNavigation: (() -> Void)? = nil,
          onLoadingStateChanged: ((Bool) -> Void)? = nil,
          onOpenNewWindow: ((URL) -> Void)? = nil,
          onThemeColorChanged: ((String) -> Void)? = nil,
@@ -1744,7 +1760,7 @@ struct FocusedWebOverlay: View {
         // Set callbacks immediately in init (SwiftUI View init can be called multiple times)
         holder.onNavigationFinished = onNavigationFinished
         holder.onURLChanged = onURLChanged
-        holder.onMainFrameLinkActivated = onMainFrameLinkActivated
+        holder.onUserInitiatedMainFrameNavigation = onUserInitiatedMainFrameNavigation
         holder.onLoadingStateChanged = onLoadingStateChanged
         holder.onOpenNewWindow = onOpenNewWindow
         holder.onThemeColorChanged = onThemeColorChanged
