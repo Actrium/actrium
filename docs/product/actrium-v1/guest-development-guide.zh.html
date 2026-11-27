@@ -830,7 +830,7 @@ await writeText({ text: 'hello' });
   <div class="table-wrap"><table>
     <tr><th>模块</th><th>方法</th><th>说明</th></tr>
     <tr><td><code>host:clipboard</code></td><td><code>writeText</code></td><td>写剪贴板；用户授权</td></tr>
-    <tr><td><code>host:local-storage</code></td><td><code>getItem</code> / <code>setItem</code> / <code>removeItem</code></td><td>本地 KV；调用经 Capability Broker</td></tr>
+    <tr><td><code>host:local-storage</code></td><td><code>getItem</code> / <code>setItem</code> / <code>removeItem</code> / <code>replaceItems</code></td><td>本地 KV；调用经 Capability Broker</td></tr>
     <tr><td><code>host:speech</code></td><td><code>recognize</code> / <code>onInterimResult</code> / <code>stop</code> / <code>onStateChange</code></td><td><code>recognize</code> 需要用户授权；事件订阅和停止使用各自能力声明</td></tr>
     <tr><td><code>host:tts</code></td><td><code>speak</code> / <code>stop</code></td><td>文本转语音；<code>speak</code> 需要用户授权，<code>stop</code> 使用各自能力声明</td></tr>
     <tr><td><code>host:tab</code></td><td><code>setTitle</code></td><td>更新当前标签页标题（最长 256 UTF-8 字节）；无需用户授权</td></tr>
@@ -838,9 +838,17 @@ await writeText({ text: 'hello' });
   </table></div>
   <div class="codeblock"><div class="cb-head"><span class="cb-lang">typescript · guest · 各能力调用写法</span><button class="copy-btn" data-copy>复制</button></div>
 <pre>// 本地 KV
-import { getItem, setItem, removeItem } from 'host:local-storage';
+import { getItem, setItem, removeItem, replaceItems } from 'host:local-storage';
 await setItem({ key: 'draft', value: '...' });
 const value = await getItem({ key: 'draft' });   // string | null
+await replaceItems({
+  key: 'draft',
+  replacement: {
+    expected: value,
+    remove: ['old-draft'],
+    set: [{ key: 'draft', value: '新的草稿' }],
+  },
+});
 await removeItem({ key: 'draft' });
 
 // 语音识别
@@ -874,6 +882,7 @@ await stopSpeaking();
 import { setTitle } from 'host:tab';
 await setTitle({ title: '新标题' });</pre></div>
   <p>每个被使用的方法都需要对应的 package capability，例如 <code>host:local-storage.getItem</code>、<code>host:speech.recognize</code>、<code>host:tts.speak</code>、<code>host:tab.setTitle</code>、<code>host:file-import.pick</code>。订阅、停止、读取和预览是独立方法，不能只声明 <code>recognize</code> 或 <code>pick</code> 后假设其他方法也自动获批。</p>
+  <p>使用 <code>replaceItems</code> 时声明 <code>host:local-storage.replaceItems</code>。Host 会先比较指定 key 的当前值，再一次性应用整批删除和写入。参数上限和错误码见<a href="keel-host-capabilities.zh.html#native-storage">本地存储参考</a>。</p>
 
   <h2 id="cap-push">Service → Guest 固定事件推送</h2>
   <p>Product v1 的业务推送使用固定事件模块，不把通用 <code>Engine.sendEvent</code> 或命名事件 Hook 当作公共 Guest API。事件 handler 收到 <code>{ event, payloadBase64 }</code>，并返回退订函数；在 React 中应把退订函数交给 <code>useEffect</code> 清理。</p>
@@ -1137,7 +1146,7 @@ requiresSandbox = boolean   // 调用期由 sandbox 消耗，不进有效集</pr
     <tr><th>能力</th><th>grant</th><th>备注</th></tr>
     <tr><td><code>service.call</code> / <code>service.on</code> / <code>service.attachmentUpload</code></td><td>none</td><td>沙箱内调用</td></tr>
     <tr><td><code>host:clipboard.write</code></td><td>user</td><td>剪贴板</td></tr>
-    <tr><td><code>host:local-storage.getItem/setItem/removeItem</code></td><td>none</td><td><b>requiresBroker</b></td></tr>
+    <tr><td><code>host:local-storage.getItem/setItem/removeItem/replaceItems</code></td><td>none</td><td><b>requiresBroker</b></td></tr>
     <tr><td><code>host:speech.recognize / onInterimResult / stop / onStateChange</code></td><td>user / none</td><td>录音进程内查系统权限</td></tr>
     <tr><td><code>host:file-import.pick</code></td><td>user</td><td>文件选择</td></tr>
   </table></div>

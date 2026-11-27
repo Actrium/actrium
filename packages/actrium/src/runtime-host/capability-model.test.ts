@@ -301,6 +301,7 @@ describe('capability model data', () => {
       'host:local-storage.getItem',
       'host:local-storage.setItem',
       'host:local-storage.removeItem',
+      'host:local-storage.replaceItems',
       'host:speech.recognize',
       'host:speech.onInterimResult',
       'host:speech.stop',

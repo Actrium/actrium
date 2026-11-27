@@ -1695,6 +1695,12 @@ enum GuestLocalStorageError {
     "IdentityChanged",
     "MigrationRequired",
     "MigrationConflict",
+    "Conflict",
+};
+
+dictionary GuestLocalStorageItem {
+    string key;
+    string value;
 };
 
 /// A profile database. Callers supply an origin from the authorized Host document.
@@ -1718,6 +1724,8 @@ interface GuestLocalStorage {
     void set_item(string origin, string key, string value);
     [Throws=GuestLocalStorageError]
     void remove_item(string origin, string key);
+    [Throws=GuestLocalStorageError]
+    void replace_items(string origin, string key, string? expected, sequence<string> remove, sequence<GuestLocalStorageItem> set);
 };
 
 [Error]

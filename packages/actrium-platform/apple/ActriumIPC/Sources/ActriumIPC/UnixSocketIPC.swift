@@ -57,6 +57,7 @@ enum IPCSocketPath {
 /// serialized by `sendLock`. Shutdown wakes I/O without recycling its descriptor.
 private final class IPCSocket: @unchecked Sendable {
     let descriptor: Int32
+    let writeBacklog = IPCWriteBacklog()
     private let stateLock = NSLock()
     private let sendLock = NSLock()
     private var stopped = false
@@ -112,6 +113,166 @@ private final class IPCSocket: @unchecked Sendable {
     }
 }
 
+/// One marker per live tab. A discarded snapshot does not retain its payload.
+public final class AccessibilitySnapshotDelivery: @unchecked Sendable {
+    private let lock = NSLock()
+    private var needsRefresh = false
+
+    public init() {}
+
+    public func takeRefreshRequest() -> Bool {
+        lock.withLock {
+            defer { needsRefresh = false }
+            return needsRefresh
+        }
+    }
+
+    fileprivate func setNeedsRefresh(_ needed: Bool) {
+        lock.withLock { needsRefresh = needed }
+    }
+}
+
+enum IPCWritePolicy: Sendable {
+    case required
+    case request
+    case accessibilitySnapshot(String, AccessibilitySnapshotDelivery?)
+
+    var isRequired: Bool {
+        if case .required = self { return true }
+        return false
+    }
+
+    var snapshotTabId: String? {
+        if case .accessibilitySnapshot(let tabId, _) = self { return tabId }
+        return nil
+    }
+}
+
+/// Serializes the renderer's writes without retaining unbounded Dispatch work.
+/// The lock protects queue state only. The drain never holds it during I/O.
+private final class IPCWriteBacklog: @unchecked Sendable {
+    private struct Write {
+        let bytes: Int
+        let policy: IPCWritePolicy
+        let perform: @Sendable () -> Error?
+        let completion: @Sendable (Error?) -> Void
+    }
+
+    private enum Refresh {
+        case none, pending, scheduled
+    }
+
+    // Allow two full frames and reserve another for required messages.
+    private static let frameBytes = IPCFrameLimits.maxFrameBytes + MemoryLayout<UInt32>.size
+    private let lock = NSLock()
+    private var pending: [Write] = []
+    private var occupiedBytes = 0
+    private var occupiedFrames = 0
+    private var draining = false
+    private var refresh = Refresh.none
+
+    func enqueue(
+        bytes: Int, policy: IPCWritePolicy, on queue: DispatchQueue,
+        perform: @escaping @Sendable () -> Error?, completion: @escaping @Sendable (Error?) -> Void,
+        onAccessibilityRefresh: @escaping @Sendable () -> Void
+    ) throws {
+        let write = Write(bytes: bytes, policy: policy, perform: perform, completion: completion)
+        let startDrain = try lock.withLock {
+            guard try admit(write) else { return false }
+            occupiedBytes += write.bytes
+            occupiedFrames += 1
+            pending.append(write)
+            guard !draining else { return false }
+            draining = true
+            return true
+        }
+        if startDrain { queue.async { self.drain(onAccessibilityRefresh: onAccessibilityRefresh) } }
+    }
+
+    private func admit(_ write: Write) throws -> Bool {
+        switch write.policy {
+        case .accessibilitySnapshot(let tabId, let delivery):
+            if let previous = pending.firstIndex(where: { $0.policy.snapshotTabId == tabId }) {
+                release(pending.remove(at: previous))
+            }
+            guard hasRoom(for: write) else {
+                markDroppedSnapshot(write)
+                return false
+            }
+            delivery?.setNeedsRefresh(false)
+            return true
+        case .required:
+            while !hasRoom(for: write), let snapshot = pending.firstIndex(where: { $0.policy.snapshotTabId != nil }) {
+                let dropped = pending.remove(at: snapshot)
+                release(dropped)
+                markDroppedSnapshot(dropped)
+            }
+        case .request:
+            break
+        }
+        guard hasRoom(for: write) else { throw IPCError.sendQueueFull }
+        return true
+    }
+
+    private func hasRoom(for write: Write) -> Bool {
+        let required = write.policy.isRequired
+        let byteLimit = Self.frameBytes * (required ? 3 : 2)
+        let frameLimit = required ? IPCFrameLimits.maxQueuedRendererFrames : IPCFrameLimits.maxQueuedNonRequiredFrames
+        return write.bytes <= byteLimit - occupiedBytes && occupiedFrames < frameLimit
+    }
+
+    private func drain(onAccessibilityRefresh: () -> Void) {
+        while let write = next() {
+            let error = write.perform()
+            let shouldRefresh = lock.withLock {
+                release(write)
+                guard refresh == .pending, canRefreshSnapshot else { return false }
+                refresh = .scheduled
+                return true
+            }
+            write.completion(error)
+            if shouldRefresh { onAccessibilityRefresh() }
+        }
+    }
+
+    private var canRefreshSnapshot: Bool {
+        // Leave room for any permitted snapshot before asking the renderer to rebuild it.
+        occupiedBytes <= Self.frameBytes && occupiedFrames < IPCFrameLimits.maxQueuedNonRequiredFrames
+    }
+
+    private func markDroppedSnapshot(_ write: Write) {
+        guard case .accessibilitySnapshot(_, let delivery?) = write.policy else { return }
+        delivery.setNeedsRefresh(true)
+        if refresh == .none { refresh = .pending }
+    }
+
+    func takeAccessibilityRefresh() -> Bool {
+        lock.withLock {
+            guard refresh == .scheduled else { return false }
+            // A refill before the main actor runs defers the refresh until room returns.
+            guard canRefreshSnapshot else {
+                refresh = .pending
+                return false
+            }
+            refresh = .none
+            return true
+        }
+    }
+
+    private func next() -> Write? {
+        lock.withLock {
+            if !pending.isEmpty { return pending.removeFirst() }
+            draining = false
+            return nil
+        }
+    }
+
+    private func release(_ write: Write) {
+        occupiedBytes -= write.bytes
+        occupiedFrames -= 1
+    }
+}
+
 /// Bridges synchronous sends from any thread to the main-actor lifecycle.
 /// Every access to the current socket is protected by the lock. I/O keeps a
 /// strong snapshot so replacement cannot close a descriptor in use.
@@ -131,8 +292,12 @@ private final class IPCSocketSlot: @unchecked Sendable {
     }
 
     func send(_ data: Data) throws {
+        try connectedSocket().send(data)
+    }
+
+    func connectedSocket() throws -> IPCSocket {
         guard let current = lock.withLock({ socket }) else { throw IPCError.notConnected }
-        try current.send(data)
+        return current
     }
 }
 
@@ -266,9 +431,11 @@ final class IPCClient {
     private var connection: IPCSocket?
     private nonisolated let outgoing = IPCSocketSlot()
     private let queue = DispatchQueue(label: "io.actrium.actro.ipc.client")
+    private nonisolated let writer = DispatchQueue(label: "io.actrium.ipc.client.writer")
 
     var onMessage: ((Data) -> Void)?
     var onDisconnected: (() -> Void)?
+    var onAccessibilityRefresh: (() -> Void)?
 
     init(socketPath: String) { self.socketPath = socketPath }
 
@@ -330,6 +497,39 @@ final class IPCClient {
     }
 
     nonisolated func send(_ data: Data) throws { try outgoing.send(data) }
+
+    nonisolated func enqueueSend(
+        bytes: Int, policy: IPCWritePolicy,
+        _ prepare: @escaping @Sendable () throws -> Data?,
+        beginSend: @escaping @Sendable () -> Bool = { true },
+        completion: @escaping @Sendable (Error?) -> Void
+    ) throws {
+        let socket = try outgoing.connectedSocket()
+        guard !socket.isStopped else { throw IPCError.notConnected }
+        do {
+            try socket.writeBacklog.enqueue(bytes: bytes, policy: policy, on: writer, perform: {
+                do {
+                    guard !socket.isStopped else { throw IPCError.notConnected }
+                    if let data = try prepare(), beginSend() { try socket.send(data) }
+                    return nil
+                } catch {
+                    // A partial frame cannot be followed by another frame on this connection.
+                    if case IPCError.writeFailed = error { socket.stop() }
+                    return error
+                }
+            }, completion: completion, onAccessibilityRefresh: { [weak self] in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.connection === socket, !socket.isStopped,
+                          socket.writeBacklog.takeAccessibilityRefresh() else { return }
+                    self.onAccessibilityRefresh?()
+                }
+            })
+        } catch IPCError.sendQueueFull {
+            // Notify the Host of a connection failure rather than losing a required reply.
+            if policy.isRequired { socket.stop() }
+            throw IPCError.sendQueueFull
+        }
+    }
 }
 
 private func socketAddress(_ path: String) throws -> sockaddr_un {
@@ -352,6 +552,8 @@ private func socketAddress(_ path: String) throws -> sockaddr_un {
 enum IPCFrameLimits {
     /// Exclusive payload bound shared by the writer and both readers.
     static let maxFrameBytes = 10_000_000
+    static let maxQueuedRendererFrames = 256
+    static let maxQueuedNonRequiredFrames = maxQueuedRendererFrames - 32
 }
 
 /// Send a length-prefixed frame
@@ -453,6 +655,7 @@ public enum IPCError: Error, LocalizedError {
     case connectionClosed
     case invalidFrameLength
     case frameTooLarge
+    case sendQueueFull
 
     public var errorDescription: String? {
         switch self {
@@ -476,6 +679,8 @@ public enum IPCError: Error, LocalizedError {
             return "Invalid frame length"
         case .frameTooLarge:
             return "IPC frame exceeds the payload limit"
+        case .sendQueueFull:
+            return "IPC send queue is full"
         }
     }
 }

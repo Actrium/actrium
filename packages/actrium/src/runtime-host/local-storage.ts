@@ -1,10 +1,10 @@
-import type { LocalStorageKeyInput, LocalStorageSetInput } from './contract';
+import type { LocalStorageKeyInput, LocalStorageReplaceInput, LocalStorageSetInput } from './contract';
 
-type LocalStorageOperation = 'getItem' | 'setItem' | 'removeItem';
+type LocalStorageOperation = 'getItem' | 'setItem' | 'removeItem' | 'replaceItems';
 
 export type LocalStorageCall = (
   operation: LocalStorageOperation,
-  input: LocalStorageKeyInput | LocalStorageSetInput
+  input: LocalStorageKeyInput | LocalStorageSetInput | LocalStorageReplaceInput
 ) => Promise<string | null>;
 
 type NativeLocalStorage = {
