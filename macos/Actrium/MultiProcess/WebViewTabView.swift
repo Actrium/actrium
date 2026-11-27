@@ -925,11 +925,22 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                 onUserInitiatedMainFrameNavigation?()
             } else {
                 switch navigationAction.navigationType {
-                case .backForward, .formSubmitted, .formResubmitted:
-                    // Native history navigation (trackpad gestures, toolbar
-                    // buttons) and form submissions are user-initiated too; a
-                    // pending Realm load must yield to them. Reload is handled
-                    // by BrowserViewModel.reloadCurrentTab because .reload
+                case .backForward:
+                    // WebKit reports a scripted history.back()/forward() with
+                    // the same type as a trackpad swipe, so the type alone is
+                    // not a user gesture. Require native gesture evidence: the
+                    // swipe arrives as a trackpad scroll stream right before
+                    // the traversal. Toolbar buttons and keyboard shortcuts
+                    // cancel the pending load explicitly in
+                    // BrowserViewModel.goBack()/goForward().
+                    if let scrolledAt = (webView as? DownloadableWebView)?.lastTrackpadScrollAt,
+                       scrolledAt.duration(to: .now) < .seconds(1) {
+                        onUserInitiatedMainFrameNavigation?()
+                    }
+                case .formSubmitted, .formResubmitted:
+                    // Form submissions are user-initiated too; a pending
+                    // Realm load must yield to them. Reload is handled by
+                    // BrowserViewModel.reloadCurrentTab because .reload
                     // cannot distinguish the toolbar from location.reload().
                     onUserInitiatedMainFrameNavigation?()
                 default:
@@ -1289,9 +1300,21 @@ private class ClosureMenuItem: NSMenuItem {
 /// Custom WKWebView subclass that adds download options to context menu
 class DownloadableWebView: WKWebView {
     var onPrimaryMouseDown: (() -> Void)?
+    /// Most recent trackpad scroll-stream timestamp. WebKit's back/forward
+    /// swipe arrives as a trackpad scroll stream (a non-empty `phase`), while
+    /// a scripted history traversal has no such native gesture evidence, so
+    /// the navigation delegate can tell the two apart.
+    private(set) var lastTrackpadScrollAt: ContinuousClock.Instant?
     /// Store the detected element info for context menu
     private var contextMenuImageURL: URL?
     private var contextMenuLinkURL: URL?
+
+    override func scrollWheel(with event: NSEvent) {
+        if event.phase != [] {
+            lastTrackpadScrollAt = .now
+        }
+        super.scrollWheel(with: event)
+    }
 
     override func mouseDown(with event: NSEvent) {
         onPrimaryMouseDown?()
